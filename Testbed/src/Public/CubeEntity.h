@@ -7,11 +7,11 @@
 #include "SchemaReflector.h"
 #include "FieldProxy.h"
 
-template <typename T, bool MASK = false>
+template < template <bool> class T, bool MASK = false>
 class BaseCube : public EntityView<T, MASK>
 {
-    using BaseCubeSuper = EntityView<T, MASK>;
-public:
+    STRIGID_REGISTER_SUPER_SCHEMA(BaseCube, EntityView, transform, color)
+
     // We may still want a base class for these, just so it's less easy to use a non-SoA compliant component
     Transform<MASK> transform;
     //Velocity<MASK> velocity;
@@ -37,43 +37,33 @@ public:
         transform.RotationZ += static_cast<float>(dt) * 0.6f;
         //if (transform.RotationZ > TWO_PI)[[unlikely]] transform.RotationZ -= TWO_PI;
     }
-
-    STRIGID_REGISTER_SCHEMA(BaseCube, BaseCubeSuper, transform, color)
 };
 
 template<bool MASK = false>
-class CubeEntity : public BaseCube<CubeEntity<MASK>, MASK>
+class CubeEntity : public BaseCube<CubeEntity, MASK>
 {
-    using CubeEntitySuper = BaseCube<CubeEntity<MASK>, MASK>;
-
-public:
-    using MaskedType = CubeEntity<true>;
-
-    STRIGID_REGISTER_SCHEMA(CubeEntity, CubeEntitySuper)
+    STRIGID_REGISTER_SCHEMA(CubeEntity, BaseCube)
 };
-STRIGID_REGISTER_ENTITY(CubeEntity)
 
 template<bool MASK = false>
-class SuperCube : public BaseCube<SuperCube<MASK>, MASK>
+class SuperCube : public BaseCube<SuperCube, MASK>
 {
-    using SuperCubeSuper = BaseCube<SuperCube<MASK>, MASK>;
+    STRIGID_REGISTER_SCHEMA(SuperCube, BaseCube)
+    using Base::transform;
+    
 public:
-    using MaskedType = CubeEntity<true>;
     // Logic
     __forceinline void PrePhysics([[maybe_unused]] double dt)
     {
         constexpr float TWO_PI = 6.283185307179586f;
 
-        this->transform.RotationX += static_cast<float>(dt);
-        if (this->transform.RotationX > TWO_PI)[[unlikely]] this->transform.RotationX -= TWO_PI;
+        transform.RotationX += static_cast<float>(dt);
+        if (transform.RotationX > TWO_PI)[[unlikely]] transform.RotationX -= TWO_PI;
 
-        this->transform.RotationY += static_cast<float>(dt) * 0.7f;
-        if (this->transform.RotationY > TWO_PI)[[unlikely]] this->transform.RotationY -= TWO_PI;
+        transform.RotationY += static_cast<float>(dt) * 0.7f;
+        if (transform.RotationY > TWO_PI)[[unlikely]] transform.RotationY -= TWO_PI;
 
-        this->transform.RotationZ += static_cast<float>(dt) * 0.5f;
-        if (this->transform.RotationZ > TWO_PI)[[unlikely]] this->transform.RotationZ -= TWO_PI;
+        transform.RotationZ += static_cast<float>(dt) * 0.5f;
+        if (transform.RotationZ > TWO_PI)[[unlikely]] transform.RotationZ -= TWO_PI;
     }
-
-    STRIGID_REGISTER_SCHEMA(SuperCube, SuperCubeSuper)
 };
-STRIGID_REGISTER_ENTITY(SuperCube)

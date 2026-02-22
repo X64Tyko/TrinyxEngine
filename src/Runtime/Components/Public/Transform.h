@@ -6,23 +6,21 @@
 // Transform Component - Position, Rotation, Scale
 // Aligned to 16 bytes for SIMD/GPU upload
 template <bool MASK = false>
-struct Transform : public ComponentView<Transform<MASK>, MASK>
+struct Transform : ComponentView<Transform, MASK>
 {
-    STRIGID_HOT_COMPONENT()
+    STRIGID_REGISTER_HOT_FIELDS(Transform, PositionX, PositionY, PositionZ, RotationX, RotationY, RotationZ, ScaleX, ScaleY, ScaleZ)
     
-    Transform::FloatProxy PositionX;
-    Transform::FloatProxy PositionY;
-    Transform::FloatProxy PositionZ;
+    FloatProxy<MASK> PositionX;
+    FloatProxy<MASK> PositionY;
+    FloatProxy<MASK> PositionZ;
 
-    Transform::FloatProxy RotationX; // Euler angles for now
-    Transform::FloatProxy RotationY;
-    Transform::FloatProxy RotationZ;
+    FloatProxy<MASK> RotationX; // Euler angles for now
+    FloatProxy<MASK> RotationY;
+    FloatProxy<MASK> RotationZ;
 
-    Transform::FloatProxy ScaleX;
-    Transform::FloatProxy ScaleY;
-    Transform::FloatProxy ScaleZ;
-
-    STRIGID_REGISTER_FIELDS(Transform, PositionX, PositionY, PositionZ, RotationX, RotationY, RotationZ, ScaleX, ScaleY, ScaleZ)
+    FloatProxy<MASK> ScaleX;
+    FloatProxy<MASK> ScaleY;
+    FloatProxy<MASK> ScaleZ;
 };
 
 STRIGID_REGISTER_COMPONENT(Transform)

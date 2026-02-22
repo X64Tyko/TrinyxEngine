@@ -3,6 +3,8 @@
 #include <type_traits>
 #include <immintrin.h>
 
+#include "Logger.h"
+
 namespace FieldProxyConsts
 {
     static const __m256i element_indices = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7); // Indices of elements
@@ -85,9 +87,7 @@ struct FieldProxy
     uint32_t index;
     __m256i mask = _mm256_set1_epi64x(-1);  // Only used when UseMask = true
 
-    FieldProxy() 
-    {
-    }
+    FieldProxy(){}
 
     operator FieldType() const { return array[index]; }
 

@@ -4,7 +4,7 @@
 
 #include "StrigidEngine.h"
 #include "TestEntity.h"
-#include "CubeEntity.h"
+#include "Public/CubeEntity.h"
 #include "Archetype.h"
 #include "Logger.h"
 #include "TestFramework.h"

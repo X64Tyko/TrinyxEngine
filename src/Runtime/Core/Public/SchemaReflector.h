@@ -152,8 +152,6 @@ __forceinline void ForEachField(Func&& func)
 
 // --- MACRO ---
 #define STRIGID_REGISTER_ENTITY(CLASS) \
-    template <bool MASK> \
-    class CLASS; \
     namespace { \
         static const bool g_Reflect_##CLASS = []() { \
             PrefabReflector<CLASS<>>::Register(); \
@@ -162,16 +160,39 @@ __forceinline void ForEachField(Func&& func)
     } \
 
 #define STRIGID_REGISTER_SCHEMA(CLASS, SUPER, ...) \
+    public: \
     static constexpr auto DefineSchema() \
     { \
-        return SUPER::DefineSchema().Extend(__VA_OPT__(STRIGID_MAP_LIST(STRIGID_GET_PTR, CLASS, __VA_ARGS__))); \
+        return SUPER<CLASS, MASK>::DefineSchema().Extend(__VA_OPT__(STRIGID_MAP_LIST(STRIGID_GET_PTR, CLASS, __VA_ARGS__))); \
     } \
     \
     __forceinline void Advance(uint32_t step) \
     { \
-        SUPER::Advance(step); \
+        SUPER<CLASS, MASK>::Advance(step); \
         __VA_OPT__(STRIGID_MAPF_LIST(STRIGID_BIND_ADVANCE, CLASS, __VA_ARGS__)) \
-    }
+    } \
+    \
+    using Base = SUPER<CLASS, MASK>; \
+    using MaskedType = CLASS<true>; \
+    \
+    private: \
+    static inline const bool g_Registered = []() { \
+        PrefabReflector<CLASS<>>::Register(); \
+        return true; \
+    }();
+
+#define STRIGID_REGISTER_SUPER_SCHEMA(CLASS, SUPER, ...) \
+    public: \
+    static constexpr auto DefineSchema() \
+    { \
+        return SUPER<T>::DefineSchema().Extend(__VA_OPT__(STRIGID_MAP_LIST(STRIGID_GET_PTR, CLASS, __VA_ARGS__))); \
+    } \
+    \
+    __forceinline void Advance(uint32_t step) \
+    { \
+        SUPER<T>::Advance(step); \
+        __VA_OPT__(STRIGID_MAPF_LIST(STRIGID_BIND_ADVANCE, CLASS, __VA_ARGS__)) \
+    } \
 
 #define STRIGID_EXPAND(x) x
 #define STRIGID_GET_ARG_COUNT(...) STRIGID_EXPAND(STRIGID_INTERNAL_ARG_COUNT(__VA_ARGS__, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1))
@@ -255,12 +276,13 @@ __forceinline void ForEachField(Func&& func)
     { \
         int32_t arrayIndex = 0; \
         __VA_OPT__(STRIGID_MAPF_LIST(STRIGID_BIND_BIND, ComponentType, __VA_ARGS__)) \
-    }
+    } \
 
 #define STRIGID_REGISTER_COMPONENT(ComponentType) \
     namespace { \
         static bool _##ComponentType##_FieldsRegistered = RegisterFieldsStatic<ComponentType<>>(); \
-    }
+    } \
 
-#define STRIGID_HOT_COMPONENT() \
-    alignas(4) static inline bool bHotComp = true;
+#define STRIGID_REGISTER_HOT_FIELDS(ComponentType, ...) \
+    static inline bool bHotComp = true; \
+    STRIGID_REGISTER_FIELDS(ComponentType, __VA_ARGS__)

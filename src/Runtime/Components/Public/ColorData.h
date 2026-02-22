@@ -6,14 +6,14 @@
 // ColorData Component - RGBA color for rendering
 // Aligned to 32 bytes for GPU upload
 template<bool MASK = false>
-struct ColorData : public ComponentView<ColorData<MASK>, MASK>
+struct ColorData : ComponentView<ColorData>
 {
-    ColorData::FloatProxy R;
-    ColorData::FloatProxy G;
-    ColorData::FloatProxy B;
-    ColorData::FloatProxy A;
-
-    // Register Proxy values and Component struct
     STRIGID_REGISTER_FIELDS(ColorData, R, G, B, A)
+    
+    FloatProxy<MASK> R;
+    FloatProxy<MASK> G;
+    FloatProxy<MASK> B;
+    FloatProxy<MASK> A;
 };
+
 STRIGID_REGISTER_COMPONENT(ColorData)

@@ -10,6 +10,9 @@
 #pragma warning(disable: 4201) // nonstandard extension used: nameless struct/union
 #endif
 
+template < template <bool> class Derived, bool MASK = false>
+using MaskTemplate = Derived<MASK>;
+
 // Math types
 struct Vector3
 {
