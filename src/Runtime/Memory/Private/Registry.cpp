@@ -1,6 +1,7 @@
 #include "Registry.h"
 #include "Profiler.h"
 #include <cassert>
+#include <ranges>
 
 #include "SchemaReflector.h"
 
@@ -8,25 +9,26 @@ Registry::Registry()
     : NextEntityIndex(1) // Start at 1 (0 is reserved for Invalid)
 {
     STRIGID_ZONE_N("Registry::Constructor");
-    // Reserve space for entity index
-    EntityIndex.reserve(1024);
-    InitializeArchetypes();
 }
 
 Registry::Registry(const EngineConfig* Config)
     : Registry()
 {
     HistorySlab.Initialize(Config);
-    Registry();
+    // Reserve space for entity index
+    EntityIndex.reserve(1024);
+    InitializeArchetypes();
 }
 
 Registry::~Registry()
 {
-    STRIGID_ZONE_N("Registry::Destructor");
-    // Clean up all archetypes
+    LOG_INFO_F("Destroying Registry with %zu archetypes", Archetypes.size());
+    
     for (auto& Pair : Archetypes)
     {
+        LOG_INFO_F("Deleting archetype with %zu chunks", Pair.second->Chunks.size());
         delete Pair.second;
+        LOG_INFO("Archetype deleted successfully");
     }
     Archetypes.clear();
 }
@@ -49,7 +51,7 @@ Archetype* Registry::GetOrCreateArchetype(const Signature& Sig, const ClassID& I
     // TODO: In Week 5, we'll build component layout from signature
     // For now, create empty archetype
     std::vector<ComponentMetaEx> Components;
-    NewArchetype->BuildLayout(Components);
+    NewArchetype->BuildLayout(Components, &HistorySlab);
 
     Archetypes[key] = NewArchetype;
     return NewArchetype;
@@ -113,6 +115,64 @@ void Registry::Destroy(EntityID Id)
     PendingDestructions.push_back(Id);
 }
 
+bool Registry::DestroyRecord(EntityRecord& Record)
+{
+    // Find chunk index in archetype's chunk list
+    Archetype* arch = Record.Arch;
+    Chunk* targetChunk = Record.TargetChunk;
+
+    size_t chunkIndex = 0;
+    bool foundChunk = false;
+    for (size_t i = 0; i < arch->Chunks.size(); ++i)
+    {
+        if (arch->Chunks[i] == targetChunk)
+        {
+            chunkIndex = i;
+            foundChunk = true;
+            break;
+        }
+    }
+
+    if (!foundChunk)
+    {
+        LOG_ERROR_F("Failed to find chunk for entity %u during destruction", Record.Index);
+        return true;
+    }
+
+    // Calculate where the last entity is BEFORE removal
+    uint32_t lastEntityGlobalIndex = arch->TotalEntityCount - 1;
+    uint32_t lastChunkIndex = lastEntityGlobalIndex / arch->EntitiesPerChunk;
+    uint32_t lastLocalIndex = lastEntityGlobalIndex % arch->EntitiesPerChunk;
+
+    // Check if we're actually swapping (not removing the last entity)
+    bool willSwap = (chunkIndex != lastChunkIndex || Record.Index != lastLocalIndex);
+
+    // Remove from archetype (swap-and-pop with last entity)
+    arch->RemoveEntity(chunkIndex, Record.Index);
+
+    // IMPORTANT: If we swapped with the last entity, update that entity's record
+    if (willSwap)
+    {
+        // Find the entity that was swapped
+        // We need to update EntityIndex for the swapped entity
+        Chunk* lastChunk = arch->Chunks[lastChunkIndex];
+
+        for (auto& entry : EntityIndex)
+        {
+            if (entry.Arch == arch &&
+                entry.TargetChunk == lastChunk &&
+                entry.Index == lastLocalIndex)
+            {
+                // Update this entity's record to point to the new location
+                entry.TargetChunk = targetChunk;
+                entry.Index = Record.Index;
+                break;
+            }
+        }
+    }
+    return true;
+}
+
 void Registry::ProcessDeferredDestructions()
 {
     STRIGID_ZONE_C(STRIGID_COLOR_MEMORY);
@@ -135,19 +195,18 @@ void Registry::ProcessDeferredDestructions()
         if (!Record.IsValid())
             continue;
 
-        // TODO: Week 12 - Mark entity as inactive in chunk's ActiveMask
-        // For now, just invalidate the record
-
-        // Remove from archetype (will be implemented with swap-and-pop in Week 12)
-        // Record.Arch->RemoveEntity(chunkIndex, Record.Index);
-
-        // Free the entity ID
-        FreeEntityID(Id);
+        if (DestroyRecord(Record))
+        {
+            // Free the entity ID
+            FreeEntityID(Id);
+        }
     }
 
     PendingDestructions.clear();
 
     STRIGID_PLOT("PendingDestructions", static_cast<double>(PendingDestructions.size()));
+    
+    LOG_INFO_F("Processed %zu deferred destructions. Existing Entities %u", PendingDestructions.size(), GetTotalEntityCount());
 }
 
 void Registry::InitializeArchetypes()
@@ -168,16 +227,18 @@ void Registry::InitializeArchetypes()
             {
                 Components.push_back(CFR.GetComponentMeta(CompID));
             }
-            NewArch->BuildLayout(Components);
+            NewArch->BuildLayout(Components, &HistorySlab);
         }
     }
 }
 
 void Registry::ResetRegistry()
 {
-    for (auto& Entity : EntityIndex)
+    // Index 0 is invalid, so drop first and then iterate backward.
+    for (auto& Entity : EntityIndex | std::views::drop(1) | std::views::reverse)
     {
-        Entity.Arch = nullptr;
+        if (!Entity.IsValid()) continue;
+        DestroyRecord(Entity);
     }
     EntityIndex.clear();
     while (!FreeIndices.empty())

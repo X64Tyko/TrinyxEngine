@@ -27,6 +27,7 @@ public:
 
     // Destroy an entity (deferred until end of frame)
     void Destroy(EntityID Id);
+    bool DestroyRecord(EntityRecord& Record);
 
     // Get component from entity
     template <typename T>
@@ -46,9 +47,13 @@ public:
     std::vector<Archetype*> ComponentQuery();
 
     // Invoke all lifecycle functions of a specific type
-    void InvokeUpdate(double dt = 0.0);
-    void InvokePrePhys(double dt = 0.0);
-    void InvokePostPhys(double dt = 0.0);
+    // currentFrame: frame T (read from T, write to T+1)
+    void InvokeUpdate(double dt, uint32_t currentFrame);
+    void InvokePrePhys(double dt, uint32_t currentFrame);
+    void InvokePostPhys(double dt, uint32_t currentFrame);
+
+    // Access temporal cache
+    TemporalComponentCache* GetTemporalCache() { return &HistorySlab; }
 
     // Memory diagnostics
     uint32_t GetTotalChunkCount() const;
@@ -214,12 +219,29 @@ std::vector<Archetype*> Registry::ComponentQuery()
     return Results;
 }
 
-inline void Registry::InvokeUpdate(double dt)
+inline void Registry::InvokeUpdate(double dt, uint32_t currentFrame)
 {
     STRIGID_ZONE_C(STRIGID_COLOR_LOGIC);
 
+    // Lock frame T+1 for writing (with wrapping)
+    uint32_t writeFrame = HistorySlab.GetNextFrame(currentFrame);
+    uint32_t readFrameIdx = HistorySlab.GetFrameIndex(currentFrame);
+    if (!HistorySlab.TryLockFrameForWrite(writeFrame))
+    {
+        LOG_ERROR_F("Failed to acquire write lock on frame %u", writeFrame);
+        return;
+    }
+
+    // Verify frame T is readable
+    if (!HistorySlab.VerifyFrameReadable(currentFrame))
+    {
+        LOG_ERROR_F("Frame %u is not readable (locked by another thread)", currentFrame);
+        HistorySlab.UnlockFrameWrite(writeFrame);
+        return;
+    }
+
     constexpr size_t MAX_FIELD_ARRAYS = 64; // Max total fields across all components in archetype
-    void* fieldArrayTable[MAX_FIELD_ARRAYS];
+    void* dualArrayTable[MAX_FIELD_ARRAYS * 2]; // Interleaved read/write for FieldProxy::Bind()
 
     for (auto& [sig, arch] : Archetypes)
     {
@@ -236,22 +258,41 @@ inline void Registry::InvokeUpdate(double dt)
             if (entityCount == 0)
                 continue;
 
-            // Build field array table on stack (fast!)
-            // For CubeEntity (Transform + Velocity): 12 + 4 = 16 entries
-            arch->BuildFieldArrayTable(chunk, fieldArrayTable);
+            // Build interleaved dual array table (read T, write T+1)
+            arch->BuildFieldArrayTable(chunk, dualArrayTable, readFrameIdx, writeFrame);
 
-            // Invoke batch processor with field array table
-            Update(dt, fieldArrayTable, entityCount);
+            // Invoke batch processor with dual array table
+            Update(dt, dualArrayTable, entityCount);
         }
     }
+
+    // Release locks at end of update
+    HistorySlab.UnlockFrameWrite(writeFrame);
 }
 
-inline void Registry::InvokePrePhys(double dt)
+inline void Registry::InvokePrePhys(double dt, uint32_t currentFrame)
 {
     STRIGID_ZONE_C(STRIGID_COLOR_LOGIC);
 
+    // Lock frame T+1 for writing (with wrapping)
+    uint32_t writeFrame = HistorySlab.GetNextFrame(currentFrame);
+    uint32_t readFrameIdx = HistorySlab.GetFrameIndex(currentFrame);
+    if (!HistorySlab.TryLockFrameForWrite(writeFrame))
+    {
+        LOG_ERROR_F("Failed to acquire write lock on frame %u", writeFrame);
+        return;
+    }
+
+    // Verify frame T is readable
+    if (!HistorySlab.VerifyFrameReadable(currentFrame))
+    {
+        LOG_ERROR_F("Frame %u is not readable (locked by another thread)", currentFrame);
+        HistorySlab.UnlockFrameWrite(writeFrame);
+        return;
+    }
+
     constexpr size_t MAX_FIELD_ARRAYS = 64; // Max total fields across all components in archetype
-    void* fieldArrayTable[MAX_FIELD_ARRAYS];
+    void* dualArrayTable[MAX_FIELD_ARRAYS * 2]; // Interleaved read/write for FieldProxy::Bind()
 
     for (auto& [sig, arch] : Archetypes)
     {
@@ -268,22 +309,41 @@ inline void Registry::InvokePrePhys(double dt)
             if (entityCount == 0)
                 continue;
 
-            // Build field array table on stack (fast!)
-            // For CubeEntity (Transform + Velocity): 12 + 4 = 16 entries
-            arch->BuildFieldArrayTable(chunk, fieldArrayTable);
+            // Build interleaved dual array table (read T, write T+1)
+            arch->BuildFieldArrayTable(chunk, dualArrayTable, readFrameIdx, writeFrame);
 
-            // Invoke batch processor with field array table
-            prePhys(dt, fieldArrayTable, entityCount);
+            // Invoke batch processor with dual array table
+            prePhys(dt, dualArrayTable, entityCount);
         }
     }
+    
+    // Release locks at end of update
+    HistorySlab.UnlockFrameWrite(writeFrame);
 }
 
-inline void Registry::InvokePostPhys(double dt)
+inline void Registry::InvokePostPhys(double dt, uint32_t currentFrame)
 {
     STRIGID_ZONE_C(STRIGID_COLOR_LOGIC);
 
+    // Lock frame T+1 for writing (with wrapping)
+    uint32_t writeFrame = HistorySlab.GetNextFrame(currentFrame);
+    uint32_t readFrameIdx = HistorySlab.GetFrameIndex(currentFrame);
+    if (!HistorySlab.TryLockFrameForWrite(writeFrame))
+    {
+        LOG_ERROR_F("Failed to acquire write lock on frame %u", writeFrame);
+        return;
+    }
+
+    // Verify frame T is readable
+    if (!HistorySlab.VerifyFrameReadable(currentFrame))
+    {
+        LOG_ERROR_F("Frame %u is not readable (locked by another thread)", currentFrame);
+        HistorySlab.UnlockFrameWrite(writeFrame);
+        return;
+    }
+    
     constexpr size_t MAX_FIELD_ARRAYS = 64; // Max total fields across all components in archetype
-    void* fieldArrayTable[MAX_FIELD_ARRAYS];
+    void* dualArrayTable[MAX_FIELD_ARRAYS * 2]; // Interleaved read/write for FieldProxy::Bind()
 
     for (auto& [sig, arch] : Archetypes)
     {
@@ -300,12 +360,14 @@ inline void Registry::InvokePostPhys(double dt)
             if (entityCount == 0)
                 continue;
 
-            // Build field array table on stack (fast!)
-            // For CubeEntity (Transform + Velocity): 12 + 4 = 16 entries
-            arch->BuildFieldArrayTable(chunk, fieldArrayTable);
+            // Build interleaved dual array table (read T, write T+1)
+            arch->BuildFieldArrayTable(chunk, dualArrayTable, readFrameIdx, writeFrame);
 
-            // Invoke batch processor with field array table
-            PostPhys(dt, fieldArrayTable, entityCount);
+            // Invoke batch processor with dual array table
+            PostPhys(dt, dualArrayTable, entityCount);
         }
     }
+    
+    // Release locks at end of update
+    HistorySlab.UnlockFrameWrite(writeFrame);
 }

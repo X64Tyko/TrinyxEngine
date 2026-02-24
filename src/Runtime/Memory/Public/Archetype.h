@@ -97,7 +97,7 @@ public:
     std::vector<void*> GetFieldArrays(Chunk* TargetChunk, ComponentTypeID TypeID);
 
     // Build the internal SoA layout from component list
-    void BuildLayout(const std::vector<ComponentMetaEx>& Components);
+    void BuildLayout(const std::vector<ComponentMetaEx>& Components, class TemporalComponentCache* temporalCache = nullptr);
 
     // Edge graph for archetype transitions (future optimization)
     std::unordered_map<ComponentTypeID, Archetype*> AddEdges; // Add component X -> go to archetype Y
@@ -150,27 +150,73 @@ public:
 
     size_t TotalChunkDataSize = 0;
 
-    // Get pointer to a specific field array within a chunk
+    // Track which fields are temporal with array index mapping
+    // Key: (ComponentTypeID, fieldIndex) → chunk header array index
+    std::unordered_map<FieldKey, uint8_t, FieldKeyHash> TemporalFieldIndices;
+
+    // Temporal cache pointer (needed during chunk allocation)
+    class TemporalComponentCache* TemporalCache = nullptr;
+
+    // Cached frame stride (0 if no temporal fields)
+    size_t TemporalFrameStride = 0;
+
+    // Get pointer to a specific field array within a chunk (always returns frame 0 for temporal)
     void* GetFieldArray(Chunk* chunk, ComponentTypeID typeID, uint32_t fieldIndex)
     {
         FieldKey key{typeID, fieldIndex};
+
+        // Check if this is a temporal field
+        auto temporalIt = TemporalFieldIndices.find(key);
+        if (temporalIt != TemporalFieldIndices.end())
+        {
+            // Return frame 0 pointer from chunk header
+            return chunk->GetTemporalFieldPointer(temporalIt->second);
+        }
+
+        // Regular chunk field
         auto it = FieldOffsets.find(key);
         if (it == FieldOffsets.end()) return nullptr;
 
         return chunk->GetBuffer(static_cast<uint32_t>(it->second));
     }
 
-    // Build field array table using pre-computed template
-    // TODO: Just return the offsets Once, that way we can do the math instead of rebuilding the array per chunk
-    void BuildFieldArrayTable(Chunk* chunk, void** outFieldArrayTable)
+    // Build interleaved dual field array table (read T, write T+1) for FieldProxy::Bind()
+    // Output layout: [read0, write0, read1, write1, read2, write2, ...]
+    // currentFrame: frame T (read from T, write to T+1)
+    // writeFrame: frame T+1 (with wrapping handled by caller)
+    void BuildFieldArrayTable(Chunk* chunk, void** outDualArrayTable, uint32_t currentFrame, uint32_t writeFrame)
     {
         auto chunkBase = chunk->Data;
 
-        size_t size = FieldArrayTemplateCache.size();
-#pragma loop(ivdep)
+        size_t frameOffset_T = currentFrame * TemporalFrameStride;
+        size_t frameOffset_T1 = writeFrame * TemporalFrameStride;
+
+        size_t size = CachedFieldArrayLayout.size();
         for (size_t i = 0; i < size; ++i)
         {
-            outFieldArrayTable[i] = chunkBase + FieldArrayTemplateCache[i].offsetInChunk;
+            const auto& desc = CachedFieldArrayLayout[i];
+            FieldKey key{desc.componentID, desc.fieldIndex};
+
+            // Check if this is a temporal field
+            auto temporalIt = TemporalFieldIndices.find(key);
+            if (temporalIt != TemporalFieldIndices.end())
+            {
+                // Get frame 0 pointer from chunk header
+                uint8_t* frame0Ptr = static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(temporalIt->second));
+                uint8_t* f1Ptr = frame0Ptr + frameOffset_T;
+                uint8_t* f2Ptr = frame0Ptr + frameOffset_T1;
+
+                // Interleave read T and write T+1 pointers
+                outDualArrayTable[i * 2] = f1Ptr;      // Read from T
+                outDualArrayTable[i * 2 + 1] = f2Ptr; // Write to T+1
+            }
+            else
+            {
+                // Regular chunk field - same pointer for read and write
+                void* ptr = chunkBase + FieldArrayTemplateCache[i].offsetInChunk;
+                outDualArrayTable[i * 2] = ptr;
+                outDualArrayTable[i * 2 + 1] = ptr;
+            }
         }
     }
 

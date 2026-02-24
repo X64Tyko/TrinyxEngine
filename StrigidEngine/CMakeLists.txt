@@ -30,18 +30,18 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 
 if(MSVC)
     # Remove default Debug flags that conflict with optimization
-    string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
-    string(REPLACE "/Od" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+    #string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+    #string(REPLACE "/Od" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+    #set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
 
     # Apply optimized flags to Debug builds
-    target_compile_options(${PROJECT_NAME} PRIVATE
-        $<$<CONFIG:Debug>:/O2 /Ob2 /Zi>
-    )
+    #target_compile_options(${PROJECT_NAME} PRIVATE
+    #    $<$<CONFIG:Debug>:/O2 /Ob2 /Zi>
+    #)
 
-    target_link_options(${PROJECT_NAME} PRIVATE
-        $<$<CONFIG:Debug>:/DEBUG:FULL /OPT:REF /OPT:ICF>
-    )
+    #target_link_options(${PROJECT_NAME} PRIVATE
+    #    $<$<CONFIG:Debug>:/DEBUG:FULL /OPT:REF /OPT:ICF>
+    #)
 endif()
 
 # -----------------------------------------------------------------------------

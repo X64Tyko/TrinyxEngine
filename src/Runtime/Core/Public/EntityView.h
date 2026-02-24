@@ -73,7 +73,7 @@ public:
 
                         // Advance by number of fields for this component
                         constexpr size_t fieldCount = MemberType::FieldNames.size();
-                        fieldArrayBaseIndex += fieldCount;
+                        fieldArrayBaseIndex += fieldCount * 2;
                     }
                     else
                     {

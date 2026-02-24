@@ -8,7 +8,7 @@
 template<bool MASK = false>
 struct ColorData : ComponentView<ColorData>
 {
-    STRIGID_REGISTER_FIELDS(ColorData, R, G, B, A)
+    STRIGID_TEMPORAL_FIELDS(ColorData, R, G, B, A)
     
     FloatProxy<MASK> R;
     FloatProxy<MASK> G;

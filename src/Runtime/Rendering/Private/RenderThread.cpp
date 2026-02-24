@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
 
+#include "Archetype.h"
 #include "ColorData.h"
 #include "CompiledShaders.h"
 #include "CubeMesh.h"
@@ -12,6 +13,7 @@
 #include "LogicThread.h"
 #include "Profiler.h"
 #include "Registry.h"
+#include "TemporalComponentCache.h"
 #include "Transform.h"
 
 void RenderThread::Initialize(Registry* registry, LogicThread* logic, const EngineConfig* config, SDL_GPUDevice* device,
@@ -20,10 +22,19 @@ void RenderThread::Initialize(Registry* registry, LogicThread* logic, const Engi
     RegistryPtr = registry;
     LogicPtr = logic;
     ConfigPtr = config;
+    TemporalCache = registry->GetTemporalCache();
     GpuDevice = device;
     EngineWindow = window;
 
-    LOG_INFO("[RenderThread] Initialized");
+    // Allocate interp buffer (fixed size based on config)
+    InterpBufferCapacity = config->MaxDynamicEntities;
+#ifdef _MSC_VER
+    InterpBuffer = static_cast<SnapshotEntry*>(_aligned_malloc(InterpBufferCapacity * sizeof(SnapshotEntry), 64));
+#else
+    InterpBuffer = static_cast<SnapshotEntry*>(aligned_alloc(64, InterpBufferCapacity * sizeof(SnapshotEntry)));
+#endif
+
+    LOG_INFO_F("[RenderThread] Initialized with interp buffer: %zu entities", InterpBufferCapacity);
 }
 
 void RenderThread::Start()
@@ -56,6 +67,17 @@ void RenderThread::Join()
         SDL_ReleaseGPUTransferBuffer(GpuDevice, TransferBuffer);
         TransferBuffer = nullptr;
     }
+
+    // Cleanup interp buffer
+    if (InterpBuffer)
+    {
+#ifdef _MSC_VER
+        _aligned_free(InterpBuffer);
+#else
+        free(InterpBuffer);
+#endif
+        InterpBuffer = nullptr;
+    }
 }
 
 void RenderThread::ProvideGPUResources(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* swapchain)
@@ -78,13 +100,6 @@ SDL_GPUCommandBuffer* RenderThread::TakeCommandBuffer()
 
 void RenderThread::ThreadMain()
 {
-    // Allocate our own VisualPacket (third packet in triple buffer)
-    auto visualPacket = std::make_shared<FramePacket>();
-
-    // TODO: Cache sparse array pointers (once they exist)
-    // TransformArrayPtr = RegistryPtr->GetSparseArray<Transform>();
-    // ColorArrayPtr = RegistryPtr->GetSparseArray<ColorData>();
-    
     while (bIsRunning.load(std::memory_order_acquire))
     {
         STRIGID_ZONE_C(STRIGID_COLOR_RENDERING);
@@ -119,35 +134,31 @@ void RenderThread::ThreadMain()
         {
             std::this_thread::yield();
         }
-        GPUSync.bFrameSubmitted.store(false, std::memory_order_release);
 
-        // Poll mailbox for new frame - exchange our visualPacket with LogicThread's mailbox
-        std::shared_ptr<FramePacket> newPacket = LogicPtr->ExchangeMailbox(visualPacket);
-        if (newPacket->FrameNumber > LastFrameNumber)
+        // Get latest completed frame from LogicThread
+        uint32_t latestFrame = LogicPtr->GetLastCompletedFrame();
+        if (latestFrame > LastFrameNumber)
         {
-            visualPacket = newPacket;
-            CurrentFramePacket = visualPacket;
             STRIGID_ZONE_N("Render_NewFrame");
-            LastFrameNumber = visualPacket->FrameNumber;
+            LastFrameNumber = latestFrame;
 
-            // Snapshot sparse arrays using cached pointers
-            SnapshotSparseArrays(visualPacket);
+            // Get frame header for camera/view data
+            CurrentFrameHeader = TemporalCache->GetFrameHeader(latestFrame);
         }
 
-        // TODO: temp safety until snapshot interp is a bit smarter.
-        if (SnapshotCurrent.size() == 0)
+        // Interpolate every frame (even if no new frame from Logic)
+        // RenderThread can safely read T-1 and T while LogicThread writes T+1
+        if (LastFrameNumber <= 0)
         {
-            GPUSync.bFrameSubmitted.store(true, std::memory_order_release);
             continue;
         }
 
-        // Request GPU resources early (before interpolation work)
+        GPUSync.bFrameSubmitted.store(false, std::memory_order_release);
+
+        // Request GPU resources early (before copy work)
         RequestGPUResources();
 
-        // Calculate our own interpolation alpha (RenderThread may be faster than LogicThread)
-        float alpha = CalculateInterpolationAlpha();
-
-        if (!InterpolateToTransferBuffer(alpha))
+        if (!InterpolateTemporalFrames(LastFrameNumber))
         {
             WaitForCommandBuffer(); // Still need to wait for resources
             WaitForSwapchainTexture();
@@ -170,8 +181,6 @@ void RenderThread::ThreadMain()
 
         SignalReadyToSubmit();
     }
-
-    visualPacket = nullptr;
 }
 
 void RenderThread::ResizeTransferBuffer(size_t NewSize)
@@ -227,7 +236,7 @@ void RenderThread::ResizeInstanceBuffer(size_t NewSize)
     InstanceBufferCapacity = allocCount;
     LOG_INFO_F("[RenderThread] Instance buffer resized to %zu instances", InstanceBufferCapacity);
 }
-
+/*
 void RenderThread::SnapshotSparseArrays(std::shared_ptr<FramePacket> packet)
 {
     STRIGID_ZONE_N("Render_Snapshot");
@@ -274,7 +283,7 @@ void RenderThread::SnapshotSparseArrays(std::shared_ptr<FramePacket> packet)
             auto gArray = static_cast<float*>(fieldArrayTable[13]);
             auto bArray = static_cast<float*>(fieldArrayTable[14]);
             auto aArray = static_cast<float*>(fieldArrayTable[15]);
-            */
+            
             auto rArray = static_cast<float*>(fieldArrayTable[9]);
             auto gArray = static_cast<float*>(fieldArrayTable[10]);
             auto bArray = static_cast<float*>(fieldArrayTable[11]);
@@ -305,6 +314,7 @@ void RenderThread::SnapshotSparseArrays(std::shared_ptr<FramePacket> packet)
         }
     }
 }
+*/
 
 void RenderThread::RequestGPUResources()
 {
@@ -339,6 +349,7 @@ float RenderThread::CalculateInterpolationAlpha()
     return alpha;
 }
 
+/*
 bool RenderThread::InterpolateToTransferBuffer(float alpha)
 {
     STRIGID_ZONE_N("Render_Interpolate");
@@ -398,6 +409,151 @@ bool RenderThread::InterpolateToTransferBuffer(float alpha)
 
     return true;
 }
+*/
+
+bool RenderThread::InterpolateTemporalFrames(uint32_t frameNumber)
+{
+    STRIGID_ZONE_N("Render_Interpolate");
+
+    // Get T and T-1 frame numbers
+    uint32_t framePrev = TemporalCache->GetPrevFrame(frameNumber);
+    
+    if (!TemporalCache->TryLockFrameForRead(frameNumber) || !TemporalCache->TryLockFrameForRead(framePrev))
+    {
+        return false;
+    }
+
+    // Calculate interpolation alpha
+    float alpha = CalculateInterpolationAlpha();
+    //LOG_INFO_F("[RenderThread] Interpolating temporal frames %u -> %u (alpha=%.3f)", framePrev, TemporalCache->GetFrameIndex(frameNumber), alpha);
+
+    // Get entity count from current frame header
+    if (!CurrentFrameHeader)
+    {
+        InterpBufferCount = 0;
+        return false;
+    }
+
+    uint32_t entityCount = CurrentFrameHeader->ActiveEntityCount;
+    if (entityCount > InterpBufferCapacity)
+    {
+        LOG_ERROR_F("[RenderThread] Entity count %u exceeds interp buffer capacity %zu", entityCount, InterpBufferCapacity);
+        entityCount = static_cast<uint32_t>(InterpBufferCapacity);
+    }
+    InterpBufferCount = 0;
+
+    constexpr size_t MAX_FIELD_ARRAYS = 256;
+    void* fieldArrayTable[MAX_FIELD_ARRAYS * 2];
+    
+    // Calculate required size
+    size_t requiredSize = sizeof(InstanceData) * entityCount;
+    if (requiredSize > TransferBufferCapacity)
+    {
+        ResizeTransferBuffer(requiredSize);
+    }
+
+    // Map transfer buffer
+    void* mapped = SDL_MapGPUTransferBuffer(GpuDevice, TransferBuffer, true); // true = cycle
+    if (!mapped)
+    {
+        LOG_ERROR("[RenderThread] Failed to map transfer buffer");
+        return false;
+    }
+
+    auto instances = static_cast<InstanceData*>(mapped);
+
+    // TODO: Read the temporal arrays directly
+    std::vector<Archetype*> archetypes = RegistryPtr->ComponentQuery<Transform<>, ColorData<>>();
+
+    size_t writeIdx = 0;
+    for (Archetype* arch : archetypes)
+    {
+        if (!arch) [[unlikely]]
+            break;
+
+        for (size_t chunkIdx = 0; chunkIdx < arch->Chunks.size(); ++chunkIdx)
+        {
+            Chunk* chunk = arch->Chunks[chunkIdx];
+            uint32_t chunkEntityCount = arch->GetChunkCount(chunkIdx);
+
+            if (chunkEntityCount == 0)
+                continue;
+
+            // Build field array tables for T-1 and T
+            arch->BuildFieldArrayTable(chunk, fieldArrayTable, framePrev, TemporalCache->GetFrameIndex(frameNumber));
+
+            // Get Transform field arrays (indices 0-8 for position, rotation, scale)
+            auto posXPrev = static_cast<float*>(fieldArrayTable[0]);
+            auto posYPrev = static_cast<float*>(fieldArrayTable[2]);
+            auto posZPrev = static_cast<float*>(fieldArrayTable[4]);
+            auto rotXPrev = static_cast<float*>(fieldArrayTable[6]);
+            auto rotYPrev = static_cast<float*>(fieldArrayTable[8]);
+            auto rotZPrev = static_cast<float*>(fieldArrayTable[10]);
+            auto scaleXPrev = static_cast<float*>(fieldArrayTable[12]);
+            auto scaleYPrev = static_cast<float*>(fieldArrayTable[14]);
+            auto scaleZPrev = static_cast<float*>(fieldArrayTable[16]);
+
+            auto posXCurr = static_cast<float*>(fieldArrayTable[1]);
+            auto posYCurr = static_cast<float*>(fieldArrayTable[3]);
+            auto posZCurr = static_cast<float*>(fieldArrayTable[5]);
+            auto rotXCurr = static_cast<float*>(fieldArrayTable[7]);
+            auto rotYCurr = static_cast<float*>(fieldArrayTable[9]);
+            auto rotZCurr = static_cast<float*>(fieldArrayTable[11]);
+            auto scaleXCurr = static_cast<float*>(fieldArrayTable[13]);
+            auto scaleYCurr = static_cast<float*>(fieldArrayTable[15]);
+            auto scaleZCurr = static_cast<float*>(fieldArrayTable[17]);
+
+            // Get ColorData field arrays (indices 9-12)
+            auto colorRCurr = static_cast<float*>(fieldArrayTable[25]);
+            auto colorGCurr = static_cast<float*>(fieldArrayTable[27]);
+            auto colorBCurr = static_cast<float*>(fieldArrayTable[29]);
+            auto colorACurr = static_cast<float*>(fieldArrayTable[31]);
+
+            // Interpolate and write to InterpBuffer
+            for (uint32_t i = 0; i < chunkEntityCount; ++i)
+            {
+                if (InterpBufferCount >= entityCount)
+                    break;
+
+                auto Lerp = [&](float prev, float curr)
+                {
+                    return prev + (curr - prev) * alpha;
+                };
+
+                // Lerp position
+                instances[InterpBufferCount].PositionX = Lerp(posXPrev[i], posXCurr[i]);
+                //LOG_INFO_F("[RenderThread] Interpolated entity %u from %f to %f", i, prevInterp.PositionX, posXCurr[i]);
+                instances[InterpBufferCount].PositionY = Lerp(posYPrev[i], posYCurr[i]);
+                instances[InterpBufferCount].PositionZ = Lerp(posZPrev[i], posZCurr[i]);
+
+                // Lerp rotation
+                instances[InterpBufferCount].RotationX = Lerp(rotXPrev[i], rotXCurr[i]);
+                instances[InterpBufferCount].RotationY = Lerp(rotYPrev[i], rotYCurr[i]);
+                instances[InterpBufferCount].RotationZ = Lerp(rotZPrev[i], rotZCurr[i]);
+
+                // Lerp scale
+                instances[InterpBufferCount].ScaleX = Lerp(scaleXPrev[i], scaleXCurr[i]);
+                instances[InterpBufferCount].ScaleY = Lerp(scaleYPrev[i], scaleYCurr[i]);
+                instances[InterpBufferCount].ScaleZ = Lerp(scaleZPrev[i], scaleZCurr[i]);
+
+                // Copy color (no interpolation)
+                instances[InterpBufferCount].ColorR = colorRCurr[i];
+                instances[InterpBufferCount].ColorG = colorGCurr[i];
+                instances[InterpBufferCount].ColorB = colorBCurr[i];
+                instances[InterpBufferCount].ColorA = colorACurr[i];
+                
+                ++InterpBufferCount;
+                //LOG_INFO_F("[RenderThread] Interpolated entity %u (frame %u)", i, TemporalCache->GetFrameIndex(frameNumber));
+            }
+        }
+    }
+    SDL_UnmapGPUTransferBuffer(GpuDevice, TransferBuffer);
+    
+    TemporalCache->UnlockFrameRead(framePrev);
+    TemporalCache->UnlockFrameRead(frameNumber);
+    
+    return true;
+}
 
 void RenderThread::WaitForCommandBuffer()
 {
@@ -413,7 +569,7 @@ void RenderThread::WaitForCommandBuffer()
 bool RenderThread::BuildCopyPassAndUniforms()
 {
     SDL_GPUCommandBuffer* cmdBuf = CmdBufferAtomic.load(std::memory_order_acquire);
-    size_t entityCount = SnapshotCurrent.size();
+    size_t entityCount = InterpBufferCount;
 
     if (entityCount == 0 || !Pipeline)
     {
@@ -444,11 +600,11 @@ bool RenderThread::BuildCopyPassAndUniforms()
     SDL_UploadToGPUBuffer(copyPass, &src, &dst, true);
     SDL_EndGPUCopyPass(copyPass);
 
-    // 2. Push vertex uniforms (view/projection matrix from FramePacket)
-    if (CurrentFramePacket)
+    // 2. Push vertex uniforms (view/projection matrix from FrameHeader)
+    if (CurrentFrameHeader)
     {
-        SDL_PushGPUVertexUniformData(cmdBuf, 0, CurrentFramePacket->View.ProjectionMatrix.m,
-                                     sizeof(CurrentFramePacket->View.ProjectionMatrix.m));
+        SDL_PushGPUVertexUniformData(cmdBuf, 0, CurrentFrameHeader->ProjectionMatrix.m,
+                                     sizeof(CurrentFrameHeader->ProjectionMatrix.m));
     }
     else
     {
@@ -481,7 +637,7 @@ void RenderThread::WaitForSwapchainTexture()
 
 void RenderThread::BuildRenderPass()
 {
-    size_t entityCount = SnapshotCurrent.size();
+    size_t entityCount = InterpBufferCount;
 
     SDL_GPUCommandBuffer* cmdBuf = CmdBufferAtomic.load(std::memory_order_acquire);
     SDL_GPUTexture* swapchainTex = SwapchainTextureAtomic.load(std::memory_order_acquire);

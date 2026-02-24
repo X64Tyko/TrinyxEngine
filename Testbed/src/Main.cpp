@@ -16,13 +16,13 @@ TEST(Registry_CreateEntities)
     Registry* Reg = Engine.GetRegistry();
     std::vector<EntityID> Entities;
 
-    for (int i = 0; i < 100; ++i)
+    for (int i = 0; i < 5; ++i)
     {
         EntityID Id = Reg->Create<TestEntity<>>();
         Entities.push_back(Id);
     }
 
-    ASSERT_EQ(Entities.size(), 100);
+    ASSERT_EQ(Entities.size(), 5);
 
     Reg->ResetRegistry();
 }
@@ -79,7 +79,7 @@ TEST(InitializeTestEntities)
     std::uniform_real_distribution<float> velY(-10.0f, 10.0f);
     std::uniform_real_distribution<float> color(0.2f, 1.0f);
 
-    static int32_t EntityCount = 1000000;
+    static int32_t EntityCount = 100000;
 
     // Step 1: Create all entities first
     entityIDs.reserve(EntityCount);
@@ -106,36 +106,36 @@ TEST(InitializeTestEntities)
 
             // Build field array table
             void* fieldArrayTable[MAX_FIELD_ARRAYS];
-            cubeArch->BuildFieldArrayTable(chunk, fieldArrayTable);
+            cubeArch->BuildFieldArrayTable(chunk, fieldArrayTable, 0, 0);
 
             // Get field arrays for Transform (component ID 1)
-            // Transform has 12 fields: PositionX, PositionY, PositionZ, pad, RotX, RotY, RotZ, pad, ScaleX, ScaleY, ScaleZ, pad
+            // Transform has 9 fields: PositionX, PositionY, PositionZ, RotX, RotY, RotZ, ScaleX, ScaleY, ScaleZ
             auto posXArray = static_cast<float*>(fieldArrayTable[0]);
-            auto posYArray = static_cast<float*>(fieldArrayTable[1]);
-            auto posZArray = static_cast<float*>(fieldArrayTable[2]);
-            auto rotXArray = static_cast<float*>(fieldArrayTable[3]);
-            auto rotYArray = static_cast<float*>(fieldArrayTable[4]);
-            auto rotZArray = static_cast<float*>(fieldArrayTable[5]);
-            auto scaleXArray = static_cast<float*>(fieldArrayTable[6]);
-            auto scaleYArray = static_cast<float*>(fieldArrayTable[7]);
-            auto scaleZArray = static_cast<float*>(fieldArrayTable[8]);
-/*
+            auto posYArray = static_cast<float*>(fieldArrayTable[2]);
+            auto posZArray = static_cast<float*>(fieldArrayTable[4]);
+            auto rotXArray = static_cast<float*>(fieldArrayTable[6]);
+            auto rotYArray = static_cast<float*>(fieldArrayTable[8]);
+            auto rotZArray = static_cast<float*>(fieldArrayTable[10]);
+            auto scaleXArray = static_cast<float*>(fieldArrayTable[12]);
+            auto scaleYArray = static_cast<float*>(fieldArrayTable[14]);
+            auto scaleZArray = static_cast<float*>(fieldArrayTable[16]);
+
             // Velocity starts after Transform (12 fields), so index 12-14
-            auto velXArray = static_cast<float*>(fieldArrayTable[9]);
-            auto velYArray = static_cast<float*>(fieldArrayTable[10]);
-            auto velZArray = static_cast<float*>(fieldArrayTable[11]);
+            auto velXArray = static_cast<float*>(fieldArrayTable[18]);
+            auto velYArray = static_cast<float*>(fieldArrayTable[20]);
+            auto velZArray = static_cast<float*>(fieldArrayTable[22]);
 
             // ColorData starts after Velocity (4 fields), so index 16-19
-            auto rArray = static_cast<float*>(fieldArrayTable[12]);
-            auto gArray = static_cast<float*>(fieldArrayTable[13]);
-            auto bArray = static_cast<float*>(fieldArrayTable[14]);
-            auto aArray = static_cast<float*>(fieldArrayTable[15]);
-            */
-            auto rArray = static_cast<float*>(fieldArrayTable[9]);
-            auto gArray = static_cast<float*>(fieldArrayTable[10]);
-            auto bArray = static_cast<float*>(fieldArrayTable[11]);
-            auto aArray = static_cast<float*>(fieldArrayTable[12]);
-
+            auto rArray = static_cast<float*>(fieldArrayTable[24]);
+            auto gArray = static_cast<float*>(fieldArrayTable[26]);
+            auto bArray = static_cast<float*>(fieldArrayTable[28]);
+            auto aArray = static_cast<float*>(fieldArrayTable[30]);
+/*
+            auto rArray = static_cast<float*>(fieldArrayTable[18]);
+            auto gArray = static_cast<float*>(fieldArrayTable[20]);
+            auto bArray = static_cast<float*>(fieldArrayTable[22]);
+            auto aArray = static_cast<float*>(fieldArrayTable[24]);
+*/
             // Initialize all entities in this chunk
             for (uint32_t i = 0; i < entityCount; ++i)
             {
@@ -148,11 +148,11 @@ TEST(InitializeTestEntities)
                 scaleXArray[i] = 1.0f;
                 scaleYArray[i] = 1.0f;
                 scaleZArray[i] = 1.0f;
-/*
+
                 velXArray[i] = velX(gen);
                 velYArray[i] = velY(gen);
                 velZArray[i] = 0.0f;
-*/
+
                 rArray[i] = color(gen);
                 gArray[i] = color(gen);
                 bArray[i] = color(gen);

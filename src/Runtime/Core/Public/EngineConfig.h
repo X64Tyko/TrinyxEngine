@@ -6,7 +6,7 @@ struct EngineConfig
     int TargetFPS = 0; // 0 = Uncapped
 
     // Physics/Simulation (Fixed High) - e.g., 60Hz or 128Hz
-    int FixedUpdateHz = 60;
+    int FixedUpdateHz = 128;
 
     // Networking (Fixed Low/Med) - e.g., 20Hz or 30Hz
     // This is your "Tick Rate". Lower = Less Bandwidth, Higher = More Precision.
@@ -19,8 +19,10 @@ struct EngineConfig
     // The max number of Dynamic entities in the world at one time.
     int MaxDynamicEntities = 100000;
 
-    // Number of History buffer pages, min 8. Must be power of 2.
-    int HistoryBufferPages = 128; // 128 at 128 FixedHz 1 second history.
+    // Number of temporal frames stored in history. Min 4, must be power of 2.
+    // At 128Hz: 128 frames = 1 second of history
+    // At 512Hz: 128 frames = 0.25 seconds of history
+    int TemporalFrameCount = 8;
 
     // --- Helpers ---
     double GetTargetFrameTime() const

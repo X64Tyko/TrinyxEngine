@@ -8,7 +8,7 @@
 template<bool MASK = false>
 struct Velocity : ComponentView<Velocity>
 {
-    STRIGID_REGISTER_FIELDS(Velocity, vX, vY, vZ)
+    STRIGID_TEMPORAL_FIELDS(Velocity, vX, vY, vZ)
     
     FloatProxy<MASK> vX;
     FloatProxy<MASK> vY;

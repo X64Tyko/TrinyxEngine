@@ -65,11 +65,10 @@ private:
     void ResizeInstanceBuffer(size_t NewSize);
 
     // Lifecycle Methods
-    void SnapshotSparseArrays(std::shared_ptr<FramePacket> packet); // Copy Transform/Render data on new FrameNumber
+    bool InterpolateTemporalFrames(uint32_t frameNumber); // Interpolate between T-1 and T to interp buffer
     void RequestGPUResources(); // Signal main thread early
     void WaitForGPUResources(); // Spin-wait for atomics to be filled
     float CalculateInterpolationAlpha(); // Calculate alpha from LogicThread's accumulator
-    bool InterpolateToTransferBuffer(float alpha); // Interpolate directly to GPU transfer buffer
     void WaitForCommandBuffer();
     bool BuildCopyPassAndUniforms();
     void WaitForSwapchainTexture();
@@ -80,21 +79,17 @@ private:
     void CreateRenderPipeline();
 
     // References (non-owning)
-    Registry* RegistryPtr = nullptr; // READ-ONLY access to sparse arrays
-    LogicThread* LogicPtr = nullptr; // For mailbox access
+    Registry* RegistryPtr = nullptr; // For accessing temporal cache
+    LogicThread* LogicPtr = nullptr; // For frame number access
     const EngineConfig* ConfigPtr = nullptr;
+    class TemporalComponentCache* TemporalCache = nullptr;
 
-    // Double-buffered snapshots for interpolation
-    std::vector<SnapshotEntry> SnapshotPrevious;
-    std::vector<SnapshotEntry> SnapshotCurrent;
+    size_t InterpBufferCapacity = 0;
+    size_t InterpBufferCount = 0; // Actual number of entities interpolated
     uint32_t LastFrameNumber = 0;
 
-    // Current frame packet (for accessing camera matrices)
-    std::shared_ptr<FramePacket> CurrentFramePacket = nullptr;
-
-    // Cached pointers to sparse arrays (set once, avoid ECS queries)
-    void* TransformArrayPtr = nullptr;
-    void* ColorArrayPtr = nullptr;
+    // Current frame header (for accessing camera/view data)
+    class TemporalFrameHeader* CurrentFrameHeader = nullptr;
 
     // GPU Resources (provided by main thread via atomics)
     std::atomic<SDL_GPUCommandBuffer*> CmdBufferAtomic{nullptr};

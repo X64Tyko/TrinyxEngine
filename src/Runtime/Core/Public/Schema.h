@@ -172,6 +172,11 @@ public:
         ComponentSignature& Def = ClassToArchetype[ID];
         Def |= 1 << (TypeID - 1);
         
+        for (auto& component : ClassToComponentList[ID])
+        {
+            if (component == TypeID) return;
+        }
+        
         ClassToComponentList[ID].push_back(TypeID);
     }
 };

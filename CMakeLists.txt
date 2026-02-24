@@ -18,6 +18,7 @@ option(ENABLE_TRACY "Enable Tracy profiler" ON)
 option(GENERATE_ASSEMBLY "Generate assembly listings (.cod files)" OFF)
 option(VECTORIZATION_REPORTS "Enable compiler vectorization reports" OFF)
 option(ENABLE_AVX2 "Enable AVX2 instruction set" ON)
+option(STRIGID_ALIGN_64 "Use 64-byte alignment for field arrays (zero cache line splits, more memory)" OFF)
 
 # -----------------------------------------------------------------------------
 # 3. GLOBAL PATHS
@@ -76,6 +77,14 @@ if(MSVC)
     if(ENABLE_AVX2)
         add_compile_options(/arch:AVX2)
         message(STATUS "AVX2 instructions enabled")
+    endif()
+
+    # Field array alignment
+    if(STRIGID_ALIGN_64)
+        add_compile_definitions(STRIGID_ALIGN_64)
+        message(STATUS "Field array alignment: 64 bytes (zero cache line splits)")
+    else()
+        message(STATUS "Field array alignment: 32 bytes (half memory overhead)")
     endif()
 
     # Enable the C++20-compliant preprocessor

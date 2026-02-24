@@ -4,23 +4,21 @@
 #include "EngineConfig.h"
 #include "Profiler.h"
 #include "Logger.h"
+#include "TemporalComponentCache.h"
 #include <SDL3/SDL.h>
+#include <cmath>
 
 void LogicThread::Initialize(Registry* registry, const EngineConfig* config, int windowWidth, int windowHeight)
 {
     RegistryPtr = registry;
     ConfigPtr = config;
+    TemporalCache = registry->GetTemporalCache();
     WindowWidth = windowWidth;
     WindowHeight = windowHeight;
 
-    // Allocate 3 FramePackets for triple buffering
-    StagingPacket = std::make_shared<FramePacket>();
-    auto mailboxPacket = std::make_shared<FramePacket>();
-    // Third packet will be allocated by RenderThread as its VisualPacket
+    LastCompletedFrame.store(0, std::memory_order_release);
 
-    Mailbox.store(mailboxPacket, std::memory_order_release);
-
-    LOG_INFO("[LogicThread] Initialized with triple-buffer mailbox");
+    LOG_INFO("[LogicThread] Initialized");
 }
 
 void LogicThread::Start()
@@ -44,17 +42,6 @@ void LogicThread::Join()
         Thread.join();
         LOG_INFO("[LogicThread] Joined");
     }
-
-    // Cleanup mailbox
-    StagingPacket = nullptr;
-    Mailbox.store(nullptr, std::memory_order_release);
-}
-
-std::shared_ptr<FramePacket> LogicThread::ExchangeMailbox(std::shared_ptr<FramePacket> visualPacket)
-{
-    // RenderThread calls this to swap its visualPacket with Mailbox
-    // Returns the mailbox packet (which has new data from LogicThread)
-    return Mailbox.exchange(visualPacket, std::memory_order_acq_rel);
 }
 
 void LogicThread::ThreadMain()
@@ -131,9 +118,11 @@ void LogicThread::ThreadMain()
                 PostPhysics(fixedStepTime);
                 Accumulator -= fixedStepTime;
                 ++steps;
+                SimulationTime += dt;
+                
+                // Publish completed frame to RenderThread
+                PublishCompletedFrame();
             }
-
-            ProduceFramePacket();
         }
 
         // Variable update
@@ -153,31 +142,17 @@ void LogicThread::ProcessInput()
     // CurrentInput = InputMailbox.exchange(&InputFrontBuffer, std::memory_order_acq_rel);
 }
 
-void LogicThread::Update(double dt)
+void LogicThread::PublishCompletedFrame()
 {
-    STRIGID_ZONE_N("Logic_Update");
+    STRIGID_ZONE_N("Logic_PublishFrame");
 
-    // Invoke Update() lifecycle on all entities
-    RegistryPtr->InvokeUpdate(dt);
-}
+    // Get the frame header we just wrote to
+    TemporalFrameHeader* header = TemporalCache->GetFrameHeader(++FrameNumber);
 
-void LogicThread::PostPhysics(double dt)
-{
-    STRIGID_ZONE_N("Logic_FixedUpdate");
-
-    RegistryPtr->InvokePostPhys(dt);
-
-    SimulationTime += dt;
-}
-
-void LogicThread::ProduceFramePacket()
-{
-    STRIGID_ZONE_N("Logic_ProduceFramePacket");
-
-    // Fill staging packet
-    StagingPacket->SimulationTime = SimulationTime;
-    StagingPacket->ActiveEntityCount = static_cast<uint32_t>(RegistryPtr->GetTotalEntityCount());
-    StagingPacket->FrameNumber = ++FrameNumber;
+    // Fill frame metadata
+    header->FrameNumber = FrameNumber;
+    header->ActiveEntityCount = static_cast<uint32_t>(RegistryPtr->GetTotalEntityCount());
+    header->TotalAllocatedEntities = static_cast<uint32_t>(RegistryPtr->GetTotalEntityCount());
 
     // Fill ViewState (basic perspective camera)
     float AspectRatio = static_cast<float>(WindowWidth) / static_cast<float>(WindowHeight);
@@ -187,46 +162,41 @@ void LogicThread::ProduceFramePacket()
 
     // Perspective projection matrix (column-major for GLSL)
     float F = 1.0f / std::tan(Fov / 2.0f);
-    StagingPacket->View.ProjectionMatrix.m[0] = F / AspectRatio;
-    StagingPacket->View.ProjectionMatrix.m[1] = 0.0f;
-    StagingPacket->View.ProjectionMatrix.m[2] = 0.0f;
-    StagingPacket->View.ProjectionMatrix.m[3] = 0.0f;
+    header->ProjectionMatrix.m[0] = F / AspectRatio;
+    header->ProjectionMatrix.m[1] = 0.0f;
+    header->ProjectionMatrix.m[2] = 0.0f;
+    header->ProjectionMatrix.m[3] = 0.0f;
 
-    StagingPacket->View.ProjectionMatrix.m[4] = 0.0f;
-    StagingPacket->View.ProjectionMatrix.m[5] = F;
-    StagingPacket->View.ProjectionMatrix.m[6] = 0.0f;
-    StagingPacket->View.ProjectionMatrix.m[7] = 0.0f;
+    header->ProjectionMatrix.m[4] = 0.0f;
+    header->ProjectionMatrix.m[5] = F;
+    header->ProjectionMatrix.m[6] = 0.0f;
+    header->ProjectionMatrix.m[7] = 0.0f;
 
-    StagingPacket->View.ProjectionMatrix.m[8] = 0.0f;
-    StagingPacket->View.ProjectionMatrix.m[9] = 0.0f;
-    StagingPacket->View.ProjectionMatrix.m[10] = ZFar / (ZFar - ZNear);
-    StagingPacket->View.ProjectionMatrix.m[11] = -(ZFar * ZNear) / (ZFar - ZNear);
+    header->ProjectionMatrix.m[8] = 0.0f;
+    header->ProjectionMatrix.m[9] = 0.0f;
+    header->ProjectionMatrix.m[10] = ZFar / (ZFar - ZNear);
+    header->ProjectionMatrix.m[11] = -(ZFar * ZNear) / (ZFar - ZNear);
 
-    StagingPacket->View.ProjectionMatrix.m[12] = 0.0f;
-    StagingPacket->View.ProjectionMatrix.m[13] = 0.0f;
-    StagingPacket->View.ProjectionMatrix.m[14] = 1;
-    StagingPacket->View.ProjectionMatrix.m[15] = 0.0f;
+    header->ProjectionMatrix.m[12] = 0.0f;
+    header->ProjectionMatrix.m[13] = 0.0f;
+    header->ProjectionMatrix.m[14] = 1;
+    header->ProjectionMatrix.m[15] = 0.0f;
 
     // View matrix = identity for now (camera at origin)
     // ViewMatrix is already initialized to identity in Matrix4 constructor
 
     // Camera position at origin
-    StagingPacket->View.CameraPosition.x = 0.0f;
-    StagingPacket->View.CameraPosition.y = 0.0f;
-    StagingPacket->View.CameraPosition.z = 0.0f;
+    header->CameraPosition.x = 0.0f;
+    header->CameraPosition.y = 0.0f;
+    header->CameraPosition.z = 0.0f;
 
     // TODO: Fill SceneState (sun direction, color)
+    header->SunDirection = Vector3{0.0f, -1.0f, 0.0f};
+    header->SunColor = Vector3{1.0f, 1.0f, 1.0f};
+    header->AmbientIntensity = 0.2f;
 
-    // Publish to mailbox
-    PublishFramePacket();
-}
-
-void LogicThread::PublishFramePacket()
-{
-    // Atomic swap: Staging ↔ Mailbox
-    // After this, RenderThread can see the new packet
-    std::shared_ptr<FramePacket> old = Mailbox.exchange(StagingPacket, std::memory_order_acq_rel);
-    StagingPacket = old; // Reuse the old mailbox packet for next frame
+    // Publish frame number atomically - RenderThread can now read this frame
+    LastCompletedFrame.store(FrameNumber, std::memory_order_release);
 }
 
 void LogicThread::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)

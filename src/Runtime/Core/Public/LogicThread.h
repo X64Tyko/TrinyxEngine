@@ -28,9 +28,8 @@ public:
     void Stop();
     void Join();
 
-    // Mailbox access for RenderThread
-    std::shared_ptr<FramePacket> ExchangeMailbox(std::shared_ptr<FramePacket> visualPacket);
-    // CAS swap: give visualPacket, get mailbox packet
+    // Mailbox access for RenderThread - returns the last completed frame number
+    uint32_t GetLastCompletedFrame() const { return LastCompletedFrame.load(std::memory_order_acquire); }
 
     // Allow RenderThread to peek at accumulator for interpolation alpha calculation
     double GetAccumulator() const { return Accumulator; }
@@ -43,26 +42,20 @@ private:
     void Update(double dt); // Variable update (runs every frame)
     void PrePhysics(double dt); // Fixed update at FixedUpdateHz
     void PostPhysics(double dt); // Fixed update at FixedUpdateHz
-    void ProduceFramePacket(); // Fill staging packet and publish to mailbox
 
-    void PublishFramePacket(); // CAS swap staging → mailbox
+    void PublishCompletedFrame(); // Publish last written frame number to mailbox
     void WaitForTiming(uint64_t frameStart, uint64_t perfFrequency);
 
     // References (non-owning)
     Registry* RegistryPtr = nullptr;
     const EngineConfig* ConfigPtr = nullptr;
+    TemporalComponentCache* TemporalCache = nullptr;
 
     // Input (future)
     InputState* CurrentInput = nullptr;
 
-    // Triple Buffer Mailbox (LogicThread owns allocation)
-    // Logic writes → StagingPacket
-    // CAS swap → Mailbox
-    // Render reads → VisualPacket (Render owns this pointer)
-    std::shared_ptr<FramePacket> StagingPacket = nullptr;
-    std::atomic<std::shared_ptr<FramePacket>> Mailbox{nullptr};
-
-    // Note: RenderThread will manage its own VisualPacket pointer
+    // Frame mailbox - last completed frame number that RenderThread can read
+    std::atomic<uint32_t> LastCompletedFrame{0};
 
     // Threading
     std::thread Thread;
@@ -88,7 +81,19 @@ inline void LogicThread::PrePhysics(double dt)
 {
     STRIGID_ZONE_N("Logic_FixedUpdate");
 
-    RegistryPtr->InvokePrePhys(dt);
+    RegistryPtr->InvokePrePhys(dt, FrameNumber);
+}
 
-    SimulationTime += dt;
+inline void LogicThread::Update(double dt)
+{
+    STRIGID_ZONE_N("Logic_Update");
+
+    RegistryPtr->InvokeUpdate(dt, FrameNumber);
+}
+
+inline void LogicThread::PostPhysics(double dt)
+{
+    STRIGID_ZONE_N("Logic_FixedUpdate");
+
+    RegistryPtr->InvokePostPhys(dt, FrameNumber);
 }

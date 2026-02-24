@@ -20,7 +20,7 @@ struct ComponentMetaEx
     size_t Alignment; // alignof(Component)
     size_t OffsetInChunk; // Where this component's data starts in the chunk
     bool IsFieldDecomposed; // True if stored as field arrays (SoA)
-    bool IsHot; // True if this component should live in Sparse Data
+    bool IsTemporal; // True if this component should live in TemporalComponentCache
     std::vector<FieldMeta> Fields; // Field layout if decomposed
 };
 
@@ -37,15 +37,15 @@ public:
     }
 
     // Register field decomposition for a component type
-    void RegisterFields(ComponentTypeID typeID, std::vector<FieldMeta>&& fields, bool bIsHot)
+    void RegisterFields(ComponentTypeID typeID, std::vector<FieldMeta>&& fields, bool bIsTemporal)
     {
         ComponentMetaEx& meta = ComponentData[typeID];
         if (meta.Fields.size() != 0)
             return;
-        
+
         meta.TypeID = typeID;
         meta.IsFieldDecomposed = true;
-        meta.IsHot = bIsHot;
+        meta.IsTemporal = bIsTemporal;
         meta.Fields = std::move(fields);
         for (const auto& field : meta.Fields) meta.Size += field.Size;
     }

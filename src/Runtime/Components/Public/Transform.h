@@ -4,11 +4,11 @@
 #include "SchemaReflector.h"
 
 // Transform Component - Position, Rotation, Scale
-// Aligned to 16 bytes for SIMD/GPU upload
+// Temporal component: stored in TemporalComponentCache for history/rollback
 template <bool MASK = false>
 struct Transform : ComponentView<Transform, MASK>
 {
-    STRIGID_REGISTER_HOT_FIELDS(Transform, PositionX, PositionY, PositionZ, RotationX, RotationY, RotationZ, ScaleX, ScaleY, ScaleZ)
+    STRIGID_TEMPORAL_FIELDS(Transform, PositionX, PositionY, PositionZ, RotationX, RotationY, RotationZ, ScaleX, ScaleY, ScaleZ)
     
     FloatProxy<MASK> PositionX;
     FloatProxy<MASK> PositionY;

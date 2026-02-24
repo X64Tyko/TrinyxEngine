@@ -4,6 +4,7 @@
 #include <type_traits>
 
 #include "FieldMeta.h"
+#include "MemoryDefines.h"
 #include "Schema.h"
 #include "SchemaValidation.h"
 
@@ -71,12 +72,12 @@ static void RegisterFieldsImpl(std::index_sequence<Is...>)
 
     // Register with global registry
     ComponentTypeID typeID = GetComponentTypeID<Derived>();
-    bool bIsHot = false;
-    if constexpr (requires { Derived::bHotComp; })
+    bool bIsTemporal = false;
+    if constexpr (requires { Derived::bTemporalComp; })
     {
-        bIsHot = Derived::bHotComp;
+        bIsTemporal = Derived::bTemporalComp;
     }
-    ComponentFieldRegistry::Get().RegisterFields(typeID, std::move(fieldMetas), bIsHot);
+    ComponentFieldRegistry::Get().RegisterFields(typeID, std::move(fieldMetas), bIsTemporal);
 }
 
 // Extract metadata from a member pointer
@@ -91,7 +92,7 @@ static FieldMeta ExtractFieldMeta(FieldType<Type, MASK> Derived::* member)
 
     return FieldMeta{
         sizeof(Type),
-        alignof(Type),
+        FIELD_ARRAY_ALIGNMENT,  // 32 or 64 bytes depending on CMake option
         offset,
         0, // OffsetInChunk computed later by Archetype::BuildLayout
         name
@@ -132,7 +133,7 @@ static FieldMeta ExtractFieldMeta(FieldType Derived::* member)
 
     return FieldMeta{
         sizeof(FieldType),
-        alignof(FieldType),
+        FIELD_ARRAY_ALIGNMENT,  // 32 or 64 bytes depending on CMake option
         offset,
         0, // OffsetInChunk computed later by Archetype::BuildLayout
         name
@@ -254,7 +255,7 @@ __forceinline void ForEachField(Func&& func)
 
 #define STRIGID_BIND_FINAL(ComponentType, Member, ...) Member.MaskFinal(count);
 
-#define STRIGID_BIND_BIND(ComponentType, Member, ...) Member.Bind(arrays[arrayIndex++], startIndex, count);
+#define STRIGID_BIND_BIND(ComponentType, Member, ...) Member.Bind(arrays[arrayIndex], arrays[arrayIndex + 1], startIndex, count); arrayIndex += 2;
 
 // Handles creating the field definition, debug field names, Bind function, and Registering the struct component
 #define STRIGID_REGISTER_FIELDS(ComponentType, ...) \
@@ -283,6 +284,6 @@ __forceinline void ForEachField(Func&& func)
         static bool _##ComponentType##_FieldsRegistered = RegisterFieldsStatic<ComponentType<>>(); \
     } \
 
-#define STRIGID_REGISTER_HOT_FIELDS(ComponentType, ...) \
-    static inline bool bHotComp = true; \
+#define STRIGID_TEMPORAL_FIELDS(ComponentType, ...) \
+    static inline bool bTemporalComp = true; \
     STRIGID_REGISTER_FIELDS(ComponentType, __VA_ARGS__)

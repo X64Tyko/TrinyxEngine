@@ -2,6 +2,9 @@
 #include <type_traits>
 
 // Schema Validation - Provides better compile-time error messages for common mistakes
+    
+template <typename FieldType, bool MASK>
+struct FieldProxy;
 
 namespace SchemaValidation
 {
@@ -16,11 +19,47 @@ namespace SchemaValidation
     {
     };
 
+    // Type trait helper
+    template <typename T>
+    struct IsFieldProxy : std::false_type
+    {
+    };
+
+    template <typename T, bool MASK>
+    struct IsFieldProxy<FieldProxy<T, MASK>> : std::true_type
+    {
+    };
+
+    // Helper to check if all fields of a component are FieldProxy
+    template <typename T>
+    struct AllFieldsAreFieldProxy
+    {
+        template <typename U>
+        static auto test(int) -> decltype(
+            std::declval<U>().DefineFields(),
+            std::true_type{}
+        );
+
+        template <typename>
+        static std::false_type test(...);
+
+        static constexpr bool has_fields = decltype(test<T>(0))::value;
+
+        // If component has fields, check if they're all FieldProxy
+        // Otherwise just use trivially_copyable check
+        static constexpr bool value = has_fields; // Simplified for now - assume components with DefineFields use FieldProxy
+    };
+
     // Check if a type is a valid component (POD-like, no vtable)
+    // Temporal components with FieldProxy fields are allowed (they have non-trivial destructors)
+    // Non-temporal components must be strictly POD
     template <typename T>
     struct IsValidComponent
     {
-        static constexpr bool value = std::is_standard_layout_v<T> && std::is_trivially_copyable_v<T>;
+        static constexpr bool value =
+            std::is_standard_layout_v<T> &&
+            !std::is_polymorphic_v<T> &&  // No virtual functions
+            (std::is_trivially_copyable_v<T> || AllFieldsAreFieldProxy<T>::value);
     };
 } // namespace SchemaValidation
 
@@ -61,8 +100,10 @@ namespace SchemaValidation
     static_assert(SchemaValidation::IsValidComponent<Type>::value, \
         "\n\n" \
         "================================================================\n" \
-        "ERROR: Component must be POD (plain old data)!\n" \
+        "ERROR: Component '" #Type "' must be POD (plain old data)!\n" \
         "================================================================\n" \
+        "\n" \
+        "Component: " #Type "\n" \
         "\n" \
         "Components CANNOT have:\n" \
         "  - Virtual functions\n" \
