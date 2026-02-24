@@ -28,11 +28,6 @@ void RenderThread::Initialize(Registry* registry, LogicThread* logic, const Engi
 
     // Allocate interp buffer (fixed size based on config)
     InterpBufferCapacity = config->MaxDynamicEntities;
-#ifdef _MSC_VER
-    InterpBuffer = static_cast<SnapshotEntry*>(_aligned_malloc(InterpBufferCapacity * sizeof(SnapshotEntry), 64));
-#else
-    InterpBuffer = static_cast<SnapshotEntry*>(aligned_alloc(64, InterpBufferCapacity * sizeof(SnapshotEntry)));
-#endif
 
     LOG_INFO_F("[RenderThread] Initialized with interp buffer: %zu entities", InterpBufferCapacity);
 }
@@ -66,17 +61,6 @@ void RenderThread::Join()
     {
         SDL_ReleaseGPUTransferBuffer(GpuDevice, TransferBuffer);
         TransferBuffer = nullptr;
-    }
-
-    // Cleanup interp buffer
-    if (InterpBuffer)
-    {
-#ifdef _MSC_VER
-        _aligned_free(InterpBuffer);
-#else
-        free(InterpBuffer);
-#endif
-        InterpBuffer = nullptr;
     }
 }
 
