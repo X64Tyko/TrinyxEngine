@@ -6,6 +6,7 @@
 #include "EntityRecord.h"
 #include "FieldMeta.h"
 #include "Schema.h"
+#include "SchemaReflector.h"
 #include "Signature.h"
 #include "TemporalComponentCache.h"
 #include "Types.h"
@@ -45,10 +46,13 @@ public:
 
     template <typename... Components>
     std::vector<Archetype*> ComponentQuery();
+    
+    template <typename... Classes>
+    std::vector<Archetype*> ClassQuery();
 
     // Invoke all lifecycle functions of a specific type
     // currentFrame: frame T (read from T, write to T+1)
-    void InvokeUpdate(double dt, uint32_t currentFrame);
+    void InvokeScalarUpdate(double dt, uint32_t currentFrame);
     void InvokePrePhys(double dt, uint32_t currentFrame);
     void InvokePostPhys(double dt, uint32_t currentFrame);
 
@@ -206,20 +210,39 @@ template <typename... Components>
 std::vector<Archetype*> Registry::ComponentQuery()
 {
     std::vector<Archetype*> Results(Archetypes.size());
-    Archetype** ArchPtr = &Results[0];
+    uint8_t ArchIdx = 0;
     bool Valid = false;
     Signature Sig = BuildSignature<Components...>();
     for (auto Arch : Archetypes)
     {
         Valid = Arch.first.Sig.Contains(Sig);
-        *ArchPtr = Arch.second;
-        ArchPtr += !!Valid;
+        Results[ArchIdx] = Arch.second;
+        ArchIdx += !!Valid;
     }
 
+    Results.erase(Results.begin() + ArchIdx, Results.end());
     return Results;
 }
 
-inline void Registry::InvokeUpdate(double dt, uint32_t currentFrame)
+template <typename... Classes>
+std::vector<Archetype*> Registry::ClassQuery()
+{
+    std::vector<Archetype*> Results(Archetypes.size());
+    std::unordered_set<ClassID> ClassIDs{Classes::StaticClassID()...};
+    uint8_t ArchIdx = 0;
+    bool Valid = false;
+    for (auto Arch : Archetypes)
+    {
+        Valid = ClassIDs.contains(Arch.first.ID);
+        Results[ArchIdx] = Arch.second;
+        ArchIdx += !!Valid;
+    }
+
+    Results.erase(Results.begin() + ArchIdx, Results.end());
+    return Results;
+}
+
+inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
 {
     STRIGID_ZONE_C(STRIGID_COLOR_LOGIC);
 
@@ -245,8 +268,8 @@ inline void Registry::InvokeUpdate(double dt, uint32_t currentFrame)
 
     for (auto& [sig, arch] : Archetypes)
     {
-        UpdateFunc Update = MetaRegistry::Get().EntityGetters[sig.ID].Update;
-        if (!Update)
+        UpdateFunc ScalarUpdate = MetaRegistry::Get().EntityGetters[sig.ID].ScalarUpdate;
+        if (!ScalarUpdate)
             continue;
 
         size_t size = arch->Chunks.size();
@@ -262,7 +285,7 @@ inline void Registry::InvokeUpdate(double dt, uint32_t currentFrame)
             arch->BuildFieldArrayTable(chunk, dualArrayTable, readFrameIdx, writeFrame);
 
             // Invoke batch processor with dual array table
-            Update(dt, dualArrayTable, entityCount);
+            ScalarUpdate(dt, dualArrayTable, entityCount);
         }
     }
 

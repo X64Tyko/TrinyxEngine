@@ -10,8 +10,16 @@
 #pragma warning(disable: 4201) // nonstandard extension used: nameless struct/union
 #endif
 
-template < template <bool> class Derived, bool MASK = false>
-using MaskTemplate = Derived<MASK>;
+// allows changing the behavior of the FieldProxy
+enum class FieldWidth : uint8_t
+{
+    Scalar,
+    Wide,
+    WideMask
+};
+
+template < template <FieldWidth> class Derived, FieldWidth WIDTH = FieldWidth::Scalar>
+using MaskTemplate = Derived<WIDTH>;
 
 // Math types
 struct Vector3

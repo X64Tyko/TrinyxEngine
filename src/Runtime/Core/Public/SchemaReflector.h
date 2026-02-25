@@ -81,8 +81,8 @@ static void RegisterFieldsImpl(std::index_sequence<Is...>)
 }
 
 // Extract metadata from a member pointer
-template <typename Derived, size_t Index, template <typename, bool> class FieldType, typename Type, bool MASK>
-static FieldMeta ExtractFieldMeta(FieldType<Type, MASK> Derived::* member)
+template <typename Derived, size_t Index, template <typename, FieldWidth> class FieldType, typename Type, FieldWidth WIDTH>
+static FieldMeta ExtractFieldMeta(FieldType<Type, WIDTH> Derived::* member)
 {
     // Create temporary to get offset
     Derived temp{};
@@ -164,17 +164,18 @@ __forceinline void ForEachField(Func&& func)
     public: \
     static constexpr auto DefineSchema() \
     { \
-        return SUPER<CLASS, MASK>::DefineSchema().Extend(__VA_OPT__(STRIGID_MAP_LIST(STRIGID_GET_PTR, CLASS, __VA_ARGS__))); \
+        return SUPER<CLASS, WIDTH>::DefineSchema().Extend(__VA_OPT__(STRIGID_MAP_LIST(STRIGID_GET_PTR, CLASS, __VA_ARGS__))); \
     } \
     \
     __forceinline void Advance(uint32_t step) \
     { \
-        SUPER<CLASS, MASK>::Advance(step); \
+        SUPER<CLASS, WIDTH>::Advance(step); \
         __VA_OPT__(STRIGID_MAPF_LIST(STRIGID_BIND_ADVANCE, CLASS, __VA_ARGS__)) \
     } \
     \
-    using Base = SUPER<CLASS, MASK>; \
-    using MaskedType = CLASS<true>; \
+    using Base = SUPER<CLASS, WIDTH>; \
+    using WideType = CLASS<FieldWidth::Wide>; \
+    using MaskedType = CLASS<FieldWidth::WideMask>; \
     \
     private: \
     static inline const bool g_Registered = []() { \
@@ -186,12 +187,12 @@ __forceinline void ForEachField(Func&& func)
     public: \
     static constexpr auto DefineSchema() \
     { \
-        return SUPER<T>::DefineSchema().Extend(__VA_OPT__(STRIGID_MAP_LIST(STRIGID_GET_PTR, CLASS, __VA_ARGS__))); \
+        return SUPER<T, WIDTH>::DefineSchema().Extend(__VA_OPT__(STRIGID_MAP_LIST(STRIGID_GET_PTR, CLASS, __VA_ARGS__))); \
     } \
     \
     __forceinline void Advance(uint32_t step) \
     { \
-        SUPER<T>::Advance(step); \
+        SUPER<T, WIDTH>::Advance(step); \
         __VA_OPT__(STRIGID_MAPF_LIST(STRIGID_BIND_ADVANCE, CLASS, __VA_ARGS__)) \
     } \
 
@@ -223,6 +224,7 @@ __forceinline void ForEachField(Func&& func)
 #define STRIGID_MAP_15(m, c, x, ...) m(c, x), STRIGID_MAP_14(m, c, __VA_ARGS__)
 #define STRIGID_MAP_16(m, c, x, ...) m(c, x), STRIGID_MAP_15(m, c, __VA_ARGS__)
 
+#define STRIGID_MAPF_1(m, c, x)      m(c, x)
 #define STRIGID_MAPF_2(m, c, x, ...) m(c, x) STRIGID_MAP_1(m, c, __VA_ARGS__)
 #define STRIGID_MAPF_3(m, c, x, ...) m(c, x) STRIGID_MAPF_2(m, c, __VA_ARGS__)
 #define STRIGID_MAPF_4(m, c, x, ...) m(c, x) STRIGID_MAPF_3(m, c, __VA_ARGS__)

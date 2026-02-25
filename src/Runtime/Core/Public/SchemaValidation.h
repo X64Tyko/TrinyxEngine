@@ -3,7 +3,7 @@
 
 // Schema Validation - Provides better compile-time error messages for common mistakes
     
-template <typename FieldType, bool MASK>
+template <typename FieldType, FieldWidth WIDTH>
 struct FieldProxy;
 
 namespace SchemaValidation
@@ -25,8 +25,8 @@ namespace SchemaValidation
     {
     };
 
-    template <typename T, bool MASK>
-    struct IsFieldProxy<FieldProxy<T, MASK>> : std::true_type
+    template <typename T, FieldWidth WIDTH>
+    struct IsFieldProxy<FieldProxy<T, WIDTH>> : std::true_type
     {
     };
 

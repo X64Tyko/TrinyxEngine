@@ -39,7 +39,7 @@ private:
 
     // Lifecycle Methods
     void ProcessInput(); // Swap input mailbox (TODO: future feature)
-    void Update(double dt); // Variable update (runs every frame)
+    void ScalarUpdate(double dt); // Variable update (runs every frame)
     void PrePhysics(double dt); // Fixed update at FixedUpdateHz
     void PostPhysics(double dt); // Fixed update at FixedUpdateHz
 
@@ -84,11 +84,11 @@ inline void LogicThread::PrePhysics(double dt)
     RegistryPtr->InvokePrePhys(dt, FrameNumber);
 }
 
-inline void LogicThread::Update(double dt)
+inline void LogicThread::ScalarUpdate(double dt)
 {
     STRIGID_ZONE_N("Logic_Update");
 
-    RegistryPtr->InvokeUpdate(dt, FrameNumber);
+    RegistryPtr->InvokeScalarUpdate(dt, FrameNumber);
 }
 
 inline void LogicThread::PostPhysics(double dt)

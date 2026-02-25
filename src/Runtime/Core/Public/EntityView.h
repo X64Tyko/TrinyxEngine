@@ -1,7 +1,9 @@
 ﻿#pragma once
 
 #include "Registry.h"
-#include "FieldMeta.h"
+#include "TemporalFlags.h"
+
+//#define SFlags this->Flags.Flags
 
 // Global counter (hidden in cpp)
 namespace Internal
@@ -11,7 +13,7 @@ namespace Internal
     // TODO: if the user changes the "Generation" bits for the Entity ID and has more than... 2B classes... nvm
 }
 
-template < template <bool> class Derived, bool MASK = false>
+template < template <FieldWidth> class Derived, FieldWidth WIDTH = FieldWidth::Scalar>
 class EntityView
 {
 
@@ -19,6 +21,8 @@ public:
     Registry* Reg = nullptr;
     EntityID ID = {};
     uint32_t ViewIndex = 0;
+    
+    TemporalFlags<WIDTH> Flags;
 
     static ClassID StaticClassID()
     {
@@ -28,7 +32,7 @@ public:
 
     static constexpr auto DefineSchema()
     {
-        return Schema::Create();
+        return Schema::Create(&EntityView::Flags);
     }
 
 protected:
@@ -39,9 +43,9 @@ public:
     EntityView(const EntityView&) = delete;
     EntityView& operator=(const EntityView&) = delete;
 
-    static Derived<MASK> Get(Registry& reg, EntityID id)
+    static Derived<WIDTH> Get(Registry& reg, EntityID id)
     {
-        Derived<MASK> view;
+        Derived<WIDTH> view;
         view.Reg = &reg;
         view.ID = id;
 
@@ -55,7 +59,7 @@ public:
 
     __forceinline void Hydrate(void** fieldArrayTable, uint32_t index = 0, int32_t count = -1)
     {
-        constexpr auto schema = Derived<MASK>::DefineSchema();
+        constexpr auto schema = Derived<WIDTH>::DefineSchema();
 
         size_t fieldArrayBaseIndex = 0;
 
@@ -65,11 +69,11 @@ public:
             {
                 if constexpr (std::is_member_object_pointer_v<decltype(member)>)
                 {
-                    using MemberType = std::remove_reference_t<decltype(static_cast<Derived<MASK>*>(this)->*member)>;
+                    using MemberType = std::remove_reference_t<decltype(static_cast<Derived<WIDTH>*>(this)->*member)>;
                     // Check if this is a FieldProxy<T>
                     if constexpr (HasDefineFields<MemberType>)
                     {
-                        (static_cast<Derived<MASK>*>(this)->*member).Bind(&fieldArrayTable[fieldArrayBaseIndex], index, count);
+                        (static_cast<Derived<WIDTH>*>(this)->*member).Bind(&fieldArrayTable[fieldArrayBaseIndex], index, count);
 
                         // Advance by number of fields for this component
                         constexpr size_t fieldCount = MemberType::FieldNames.size();
@@ -85,8 +89,8 @@ public:
     }
 };
 
-template< template <bool> class CLASS, template <typename, bool> class SUPER = EntityView, bool MASK = false>
-using InheritableBase = SUPER<CLASS<MASK>, MASK>;
+template< template <FieldWidth> class CLASS, template <typename, FieldWidth> class SUPER = EntityView, FieldWidth WIDTH = FieldWidth::Scalar>
+using InheritableBase = SUPER<CLASS<WIDTH>, WIDTH>;
 
-template< typename CLASS, template <typename, bool> class SUPER = EntityView, bool MASK = false>
-using FinalBase = SUPER<CLASS, MASK>;
+template< typename CLASS, template <typename, FieldWidth> class SUPER = EntityView, FieldWidth WIDTH = FieldWidth::Scalar>
+using FinalBase = SUPER<CLASS, WIDTH>;

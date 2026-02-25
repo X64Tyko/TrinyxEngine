@@ -467,31 +467,30 @@ bool RenderThread::InterpolateTemporalFrames(uint32_t frameNumber)
             arch->BuildFieldArrayTable(chunk, fieldArrayTable, framePrev, TemporalCache->GetFrameIndex(frameNumber));
 
             // Get Transform field arrays (indices 0-8 for position, rotation, scale)
-            auto posXPrev = static_cast<float*>(fieldArrayTable[0]);
-            auto posYPrev = static_cast<float*>(fieldArrayTable[2]);
-            auto posZPrev = static_cast<float*>(fieldArrayTable[4]);
-            auto rotXPrev = static_cast<float*>(fieldArrayTable[6]);
-            auto rotYPrev = static_cast<float*>(fieldArrayTable[8]);
-            auto rotZPrev = static_cast<float*>(fieldArrayTable[10]);
-            auto scaleXPrev = static_cast<float*>(fieldArrayTable[12]);
-            auto scaleYPrev = static_cast<float*>(fieldArrayTable[14]);
-            auto scaleZPrev = static_cast<float*>(fieldArrayTable[16]);
+            auto posXPrev = static_cast<float*>(fieldArrayTable[2]);
+            auto posYPrev = static_cast<float*>(fieldArrayTable[4]);
+            auto posZPrev = static_cast<float*>(fieldArrayTable[6]);
+            auto rotXPrev = static_cast<float*>(fieldArrayTable[8]);
+            auto rotYPrev = static_cast<float*>(fieldArrayTable[10]);
+            auto rotZPrev = static_cast<float*>(fieldArrayTable[12]);
+            auto scaleXPrev = static_cast<float*>(fieldArrayTable[14]);
+            auto scaleYPrev = static_cast<float*>(fieldArrayTable[16]);
+            auto scaleZPrev = static_cast<float*>(fieldArrayTable[18]);
 
-            auto posXCurr = static_cast<float*>(fieldArrayTable[1]);
-            auto posYCurr = static_cast<float*>(fieldArrayTable[3]);
-            auto posZCurr = static_cast<float*>(fieldArrayTable[5]);
-            auto rotXCurr = static_cast<float*>(fieldArrayTable[7]);
-            auto rotYCurr = static_cast<float*>(fieldArrayTable[9]);
-            auto rotZCurr = static_cast<float*>(fieldArrayTable[11]);
-            auto scaleXCurr = static_cast<float*>(fieldArrayTable[13]);
-            auto scaleYCurr = static_cast<float*>(fieldArrayTable[15]);
-            auto scaleZCurr = static_cast<float*>(fieldArrayTable[17]);
+            auto posXCurr = static_cast<float*>(fieldArrayTable[3]);
+            auto posYCurr = static_cast<float*>(fieldArrayTable[5]);
+            auto posZCurr = static_cast<float*>(fieldArrayTable[7]);
+            auto rotXCurr = static_cast<float*>(fieldArrayTable[9]);
+            auto rotYCurr = static_cast<float*>(fieldArrayTable[11]);
+            auto rotZCurr = static_cast<float*>(fieldArrayTable[13]);
+            auto scaleXCurr = static_cast<float*>(fieldArrayTable[15]);
+            auto scaleYCurr = static_cast<float*>(fieldArrayTable[17]);
+            auto scaleZCurr = static_cast<float*>(fieldArrayTable[19]);
 
-            // Get ColorData field arrays (indices 9-12)
-            auto colorRCurr = static_cast<float*>(fieldArrayTable[25]);
-            auto colorGCurr = static_cast<float*>(fieldArrayTable[27]);
-            auto colorBCurr = static_cast<float*>(fieldArrayTable[29]);
-            auto colorACurr = static_cast<float*>(fieldArrayTable[31]);
+            auto colorRCurr = static_cast<float*>(fieldArrayTable[27]);
+            auto colorGCurr = static_cast<float*>(fieldArrayTable[29]);
+            auto colorBCurr = static_cast<float*>(fieldArrayTable[31]);
+            auto colorACurr = static_cast<float*>(fieldArrayTable[33]);
 
             // Interpolate and write to InterpBuffer
             for (uint32_t i = 0; i < chunkEntityCount; ++i)

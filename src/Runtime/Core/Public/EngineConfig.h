@@ -2,7 +2,7 @@
 
 struct EngineConfig
 {
-    // Variadic Update, let the Logic thread run uncapped or limit its updates
+    // Variadic Update, let the Logic thread run uncapped or limit its updates, cannot be lower than Fixed update if capped.
     int TargetFPS = 0; // 0 = Uncapped
 
     // Physics/Simulation (Fixed High) - e.g., 60Hz or 128Hz
@@ -27,7 +27,7 @@ struct EngineConfig
     // --- Helpers ---
     double GetTargetFrameTime() const
     {
-        return (TargetFPS > 0) ? 1.0 / TargetFPS : 0.0;
+        return (TargetFPS > 0) ? 1.0 / std::min(TargetFPS, FixedUpdateHz) : 0.0;
     }
 
     double GetFixedStepTime() const

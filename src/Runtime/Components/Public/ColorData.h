@@ -5,15 +5,15 @@
 
 // ColorData Component - RGBA color for rendering
 // Aligned to 32 bytes for GPU upload
-template<bool MASK = false>
-struct ColorData : ComponentView<ColorData>
+template<FieldWidth WIDTH = FieldWidth::Scalar>
+struct ColorData : ComponentView<ColorData, WIDTH>
 {
     STRIGID_TEMPORAL_FIELDS(ColorData, R, G, B, A)
     
-    FloatProxy<MASK> R;
-    FloatProxy<MASK> G;
-    FloatProxy<MASK> B;
-    FloatProxy<MASK> A;
+    FloatProxy<WIDTH> R;
+    FloatProxy<WIDTH> G;
+    FloatProxy<WIDTH> B;
+    FloatProxy<WIDTH> A;
 };
 
 STRIGID_REGISTER_COMPONENT(ColorData)

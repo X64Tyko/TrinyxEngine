@@ -2,7 +2,6 @@
 #include <functional>
 #include <Logger.h>
 #include <tuple>
-#include <unordered_set>
 
 #include "Profiler.h"
 #include "Signature.h"
@@ -12,7 +11,7 @@
 // Helper concept to detect if T has a specific method
 template <typename T> concept HasOnCreate = requires(T t) { t.OnCreate(); };
 template <typename T> concept HasOnDestroy = requires(T t) { t.OnDestroy(); };
-template <typename T> concept HasUpdate = requires(T t, double dt) { t.Update(dt); };
+template <typename T> concept HasScalarUpdate = requires(T t, double dt) { t.ScalarUpdate(dt); };
 template <typename T> concept HasPrePhysics = requires(T t, double dt) { t.PrePhysics(dt); };
 template <typename T> concept HasPostPhysics = requires(T t, double dt) { t.PostPhysics(dt); };
 template <typename T> concept HasOnActivate = requires(T t) { t.OnActivate(); };
@@ -32,28 +31,28 @@ struct EntityMeta
 
     UpdateFunc PrePhys = nullptr;
     UpdateFunc PostPhys = nullptr;
-    UpdateFunc Update = nullptr;
+    UpdateFunc ScalarUpdate = nullptr;
 
     EntityMeta(){}
-    EntityMeta(const size_t inViewSize, const UpdateFunc prePhys, const UpdateFunc postPhys, const UpdateFunc update)
+    EntityMeta(const size_t inViewSize, const UpdateFunc prePhys, const UpdateFunc postPhys, const UpdateFunc scalarUpdate)
         : ViewSize(inViewSize)
         , PrePhys(prePhys)
         , PostPhys(postPhys)
-        , Update(update)
+        , ScalarUpdate(scalarUpdate)
     {}
 
     EntityMeta(const EntityMeta& rhs)
         : ViewSize(rhs.ViewSize)
         , PrePhys(rhs.PrePhys)
         , PostPhys(rhs.PostPhys)
-        , Update(rhs.Update)
+        , ScalarUpdate(rhs.ScalarUpdate)
     {}
 };
 
 template <typename T>
 __forceinline void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, uint32_t componentCount)
 {
-    alignas(32) T viewBatch;
+    alignas(32) typename T::WideType viewBatch;
 
     constexpr uint32_t SIMD_BATCH = 8;
     const uint32_t batchCount = componentCount / SIMD_BATCH;
@@ -76,34 +75,25 @@ __forceinline void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, uint3
 }
 
 template <typename T>
-__forceinline void InvokeUpdateImpl(double dt, void** fieldArrayTable, uint32_t componentCount)
+__forceinline void InvokeScalarUpdateImpl(double dt, void** fieldArrayTable, uint32_t componentCount)
 {
+    // Use Scalar for the update, this is where users can cross-reference entities and do non-SIMD things.
     alignas(32) T viewBatch;
-
-    constexpr uint32_t SIMD_BATCH = 8;
-    const uint32_t batchCount = componentCount / SIMD_BATCH;
 
     viewBatch.Hydrate(fieldArrayTable);
 
     // Process batches
-    for (uint32_t i = 0; i < batchCount; i++)
+    for (uint32_t i = 0; i < componentCount; i++)
     {
-        viewBatch.Update(dt);
-        viewBatch.Advance(SIMD_BATCH);
+        viewBatch.ScalarUpdate(dt);
+        viewBatch.Advance(1);
     }
-
-    STRIGID_ZONE_FINE_N("Tail Batch")
-    // perform the last batch with a mask.
-    alignas(32) typename T::MaskedType tailBatch;
-    // Handle the tail with a mask
-    tailBatch.Hydrate(fieldArrayTable, SIMD_BATCH * batchCount, componentCount % SIMD_BATCH);
-    tailBatch.Update(dt);
 }
 
 template <typename T>
 __forceinline void InvokePostPhysicsImpl(double dt, void** fieldArrayTable, uint32_t componentCount)
 {
-    alignas(32) T viewBatch;
+    alignas(32) typename T::WideType viewBatch;
 
     constexpr uint32_t SIMD_BATCH = 8;
     const uint32_t batchCount = componentCount / SIMD_BATCH;
@@ -145,10 +135,10 @@ public:
         const ClassID ID = T::StaticClassID();
         EntityGetters[ID].ViewSize = sizeof(T);
 
-        if constexpr (HasUpdate<T>)
+        if constexpr (HasScalarUpdate<T>)
         {
             // Then in RegisterEntity:
-            EntityGetters[ID].Update = InvokeUpdateImpl<T>;
+            EntityGetters[ID].ScalarUpdate = InvokeScalarUpdateImpl<T>;
         }
 
         if constexpr (HasPrePhysics<T>)

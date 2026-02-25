@@ -125,8 +125,9 @@ void LogicThread::ThreadMain()
             }
         }
 
-        // Variable update
-        Update(dt);
+        // Scalar update only if we're pretty sure we have time.
+        if (fixedStepTime - dt > Accumulator) [[likely]]
+            ScalarUpdate(dt);
 
         // Frame limiter (if MaxFPS is set in config)
         if (ConfigPtr->TargetFPS > 0)

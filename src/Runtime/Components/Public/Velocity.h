@@ -5,14 +5,14 @@
 
 // Velocity Component - Linear velocity for movement
 // Aligned to 16 bytes for SIMD operations
-template<bool MASK = false>
-struct Velocity : ComponentView<Velocity>
+template<FieldWidth WIDTH = FieldWidth::Scalar>
+struct Velocity : ComponentView<Velocity, WIDTH>
 {
     STRIGID_TEMPORAL_FIELDS(Velocity, vX, vY, vZ)
     
-    FloatProxy<MASK> vX;
-    FloatProxy<MASK> vY;
-    FloatProxy<MASK> vZ;
+    FloatProxy<WIDTH> vX;
+    FloatProxy<WIDTH> vY;
+    FloatProxy<WIDTH> vZ;
 };
 
 STRIGID_REGISTER_COMPONENT(Velocity)

@@ -1,24 +1,24 @@
 #pragma once
 #include "FieldProxy.h"
 
-template< template <bool> class Derived, bool MASK = false>
+template< template <FieldWidth> class Derived, FieldWidth WIDTH = FieldWidth::Scalar>
 struct ComponentView
 {
 };
 
-template< template <bool> class CLASS, template <typename, bool> class SUPER = ComponentView, bool MASK = false>
-using InheritableComp = SUPER<CLASS<MASK>, MASK>;
+template< template <FieldWidth> class CLASS, template <typename, FieldWidth> class SUPER = ComponentView, FieldWidth WIDTH = FieldWidth::Scalar>
+using InheritableComp = SUPER<CLASS<WIDTH>, WIDTH>;
 
-template< typename CLASS, template <typename, bool> class SUPER = ComponentView, bool MASK = false>
-using FinalComp = SUPER<CLASS, MASK>;
+template< typename CLASS, template <typename, FieldWidth> class SUPER = ComponentView, FieldWidth WIDTH = FieldWidth::Scalar>
+using FinalComp = SUPER<CLASS, WIDTH>;
 
-template <bool MASK = false>
-using FloatProxy = FieldProxy<float, MASK>;
-template <bool MASK = false>
-using IntProxy = FieldProxy<int32_t, MASK>;
-template <bool MASK = false>
-using UIntProxy = FieldProxy<uint32_t, MASK>;
-template <bool MASK = false>
-using Int64Proxy = FieldProxy<int64_t, MASK>;
-template <bool MASK = false>
-using UInt64Proxy = FieldProxy<uint64_t, MASK>;
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+using FloatProxy = FieldProxy<float, WIDTH>;
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+using IntProxy = FieldProxy<int32_t, WIDTH>;
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+using UIntProxy = FieldProxy<uint32_t, WIDTH>;
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+using Int64Proxy = FieldProxy<int64_t, WIDTH>;
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+using UInt64Proxy = FieldProxy<uint64_t, WIDTH>;

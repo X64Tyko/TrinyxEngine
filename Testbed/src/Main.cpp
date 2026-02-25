@@ -79,26 +79,31 @@ TEST(InitializeTestEntities)
     std::uniform_real_distribution<float> velY(-10.0f, 10.0f);
     std::uniform_real_distribution<float> color(0.2f, 1.0f);
 
-    static int32_t EntityCount = 100000;
+    static int32_t CubeCount = 10000;
+    static int32_t SuperCount = 90000;
 
     // Step 1: Create all entities first
-    entityIDs.reserve(EntityCount);
-    for (int i = 0; i < EntityCount; ++i)
+    entityIDs.reserve(CubeCount + SuperCount);
+    for (int i = 0; i < CubeCount; ++i)
     {
         EntityID id = Reg->Create<CubeEntity<>>();
         entityIDs.push_back(id);
     }
+    for (int i = 0; i < SuperCount; ++i)
+    {
+        EntityID id = Reg->Create<SuperCube<>>();
+        entityIDs.push_back(id);
+    }
 
-    LOG_ALWAYS_F("Created %i test entities", EntityCount);
+    LOG_ALWAYS_F("Created %i test entities", CubeCount + SuperCount);
 
     // Step 2: Initialize by iterating through archetypes/chunks
-    Archetype* cubeArch = Reg->GetOrCreateArchetype(
-        MetaRegistry::Get().ClassToArchetype[CubeEntity<>::StaticClassID()],
-        CubeEntity<>::StaticClassID());
-    if (cubeArch)
+    std::vector<Archetype*> Arches = Reg->ClassQuery<CubeEntity<>, SuperCube<>>();
+    for (Archetype* cubeArch : Arches)
     {
         constexpr size_t MAX_FIELD_ARRAYS = 256;
 
+        CubeEntity<> Cube;
         for (size_t chunkIdx = 0; chunkIdx < cubeArch->Chunks.size(); ++chunkIdx)
         {
             Chunk* chunk = cubeArch->Chunks[chunkIdx];
@@ -107,56 +112,30 @@ TEST(InitializeTestEntities)
             // Build field array table
             void* fieldArrayTable[MAX_FIELD_ARRAYS];
             cubeArch->BuildFieldArrayTable(chunk, fieldArrayTable, 0, 0);
-
-            // Get field arrays for Transform (component ID 1)
-            // Transform has 9 fields: PositionX, PositionY, PositionZ, RotX, RotY, RotZ, ScaleX, ScaleY, ScaleZ
-            auto posXArray = static_cast<float*>(fieldArrayTable[0]);
-            auto posYArray = static_cast<float*>(fieldArrayTable[2]);
-            auto posZArray = static_cast<float*>(fieldArrayTable[4]);
-            auto rotXArray = static_cast<float*>(fieldArrayTable[6]);
-            auto rotYArray = static_cast<float*>(fieldArrayTable[8]);
-            auto rotZArray = static_cast<float*>(fieldArrayTable[10]);
-            auto scaleXArray = static_cast<float*>(fieldArrayTable[12]);
-            auto scaleYArray = static_cast<float*>(fieldArrayTable[14]);
-            auto scaleZArray = static_cast<float*>(fieldArrayTable[16]);
-
-            // Velocity starts after Transform (12 fields), so index 12-14
-            auto velXArray = static_cast<float*>(fieldArrayTable[18]);
-            auto velYArray = static_cast<float*>(fieldArrayTable[20]);
-            auto velZArray = static_cast<float*>(fieldArrayTable[22]);
-
-            // ColorData starts after Velocity (4 fields), so index 16-19
-            auto rArray = static_cast<float*>(fieldArrayTable[24]);
-            auto gArray = static_cast<float*>(fieldArrayTable[26]);
-            auto bArray = static_cast<float*>(fieldArrayTable[28]);
-            auto aArray = static_cast<float*>(fieldArrayTable[30]);
-/*
-            auto rArray = static_cast<float*>(fieldArrayTable[18]);
-            auto gArray = static_cast<float*>(fieldArrayTable[20]);
-            auto bArray = static_cast<float*>(fieldArrayTable[22]);
-            auto aArray = static_cast<float*>(fieldArrayTable[24]);
-*/
+            Cube.Hydrate(fieldArrayTable);
+            
             // Initialize all entities in this chunk
-            for (uint32_t i = 0; i < entityCount; ++i)
+            for (uint32_t i = 0; i < entityCount; ++i, Cube.Advance(1))
             {
-                posXArray[i] = posX(gen);
-                posYArray[i] = posY(gen);
-                posZArray[i] = posZ(gen);
-                rotXArray[i] = 0.0f;
-                rotYArray[i] = 0.0f;
-                rotZArray[i] = 0.0f;
-                scaleXArray[i] = 1.0f;
-                scaleYArray[i] = 1.0f;
-                scaleZArray[i] = 1.0f;
+                Cube.Flags.Flags = static_cast<int32_t>(TemporalFlagBits::Active);
+                Cube.transform.PositionX = posX(gen);
+                Cube.transform.PositionY = posY(gen);
+                Cube.transform.PositionZ = posZ(gen);
+                Cube.transform.RotationX = 0.0f;
+                Cube.transform.RotationY = 0.0f;
+                Cube.transform.RotationZ = 0.0f;
+                Cube.transform.ScaleX = 1.0f;
+                Cube.transform.ScaleY = 1.0f;
+                Cube.transform.ScaleZ = 1.0f;
 
-                velXArray[i] = velX(gen);
-                velYArray[i] = velY(gen);
-                velZArray[i] = 0.0f;
+                Cube.velocity.vX = velX(gen);
+                Cube.velocity.vY = velY(gen);
+                Cube.velocity.vZ = 0.0f;
 
-                rArray[i] = color(gen);
-                gArray[i] = color(gen);
-                bArray[i] = color(gen);
-                aArray[i] = 1.0f;
+                Cube.color.R = color(gen);
+                Cube.color.G = color(gen);
+                Cube.color.B = color(gen);
+                Cube.color.A = 1.0f;
             }
         }
     }
