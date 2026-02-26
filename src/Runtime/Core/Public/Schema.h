@@ -50,7 +50,7 @@ struct EntityMeta
 };
 
 template <typename T>
-__forceinline void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, uint32_t componentCount)
+FORCE_INLINE void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, uint32_t componentCount)
 {
     alignas(32) typename T::WideType viewBatch;
 
@@ -75,7 +75,7 @@ __forceinline void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, uint3
 }
 
 template <typename T>
-__forceinline void InvokeScalarUpdateImpl(double dt, void** fieldArrayTable, uint32_t componentCount)
+FORCE_INLINE void InvokeScalarUpdateImpl(double dt, void** fieldArrayTable, uint32_t componentCount)
 {
     // Use Scalar for the update, this is where users can cross-reference entities and do non-SIMD things.
     alignas(32) T viewBatch;
@@ -91,7 +91,7 @@ __forceinline void InvokeScalarUpdateImpl(double dt, void** fieldArrayTable, uin
 }
 
 template <typename T>
-__forceinline void InvokePostPhysicsImpl(double dt, void** fieldArrayTable, uint32_t componentCount)
+FORCE_INLINE void InvokePostPhysicsImpl(double dt, void** fieldArrayTable, uint32_t componentCount)
 {
     alignas(32) typename T::WideType viewBatch;
 

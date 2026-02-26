@@ -48,9 +48,47 @@ Archetype* Registry::GetOrCreateArchetype(const Signature& Sig, const ClassID& I
     // Create new archetype
     auto NewArchetype = new Archetype(Sig, ID);
 
-    // TODO: In Week 5, we'll build component layout from signature
-    // For now, create empty archetype
+    // Build component layout from class ID
     std::vector<ComponentMetaEx> Components;
+    MetaRegistry& MR = MetaRegistry::Get();
+
+    auto compListIt = MR.ClassToComponentList.find(ID);
+    if (compListIt != MR.ClassToComponentList.end())
+    {
+        ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
+
+        for (ComponentTypeID compTypeID : compListIt->second)
+        {
+            const std::vector<FieldMeta>* fields = CFR.GetFields(compTypeID);
+            bool isDecomposed = (fields && !fields->empty());
+            bool isTemporal = CFR.GetComponentMeta(compTypeID).IsTemporal;
+
+            size_t componentSize = 0;
+            if (isDecomposed && !fields->empty())
+            {
+                // Sum up field sizes for decomposed component
+                for (const auto& field : *fields)
+                    componentSize += field.Size;
+            }
+            else
+            {
+                // For non-decomposed, we'd need the actual component size
+                // For now, use a default
+                componentSize = 64; // TODO: Get actual component size
+            }
+
+            Components.push_back(ComponentMetaEx{
+                compTypeID,
+                componentSize,
+                FIELD_ARRAY_ALIGNMENT,
+                0,  // OffsetInChunk computed by BuildLayout
+                isDecomposed,
+                isTemporal,
+                isDecomposed ? *fields : std::vector<FieldMeta>()
+            });
+        }
+    }
+
     NewArchetype->BuildLayout(Components, &HistorySlab);
 
     Archetypes[key] = NewArchetype;

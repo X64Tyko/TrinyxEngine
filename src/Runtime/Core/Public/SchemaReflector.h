@@ -42,8 +42,8 @@ struct PrefabReflector
         return true;
     }
 
-    template <typename T>
-    static void ProcessSchemaItem(T Class::* memberPtr)
+    template <typename T, typename BaseClass>
+    static void ProcessSchemaItem(T BaseClass::* memberPtr)
     {
         // Register component members (T)
         if constexpr (std::is_member_object_pointer_v<decltype(memberPtr)>)
@@ -54,6 +54,7 @@ struct PrefabReflector
             // Compile-time validation of component type
             VALIDATE_COMPONENT_IS_POD(CompType);
 
+            // Register with the derived class (Class), not the base class
             MetaRegistry::Get().RegisterPrefabComponent<Class, CompType>();
         }
     }
@@ -142,7 +143,7 @@ static FieldMeta ExtractFieldMeta(FieldType Derived::* member)
 
 // Helper: Apply function to each field
 template <typename T, typename Func>
-__forceinline void ForEachField(Func&& func)
+FORCE_INLINE void ForEachField(Func&& func)
 {
     constexpr auto fields = T::DefineFields();
     [&]<size_t... Is>(std::index_sequence<Is...>)
@@ -167,7 +168,7 @@ __forceinline void ForEachField(Func&& func)
         return SUPER<CLASS, WIDTH>::DefineSchema().Extend(__VA_OPT__(STRIGID_MAP_LIST(STRIGID_GET_PTR, CLASS, __VA_ARGS__))); \
     } \
     \
-    __forceinline void Advance(uint32_t step) \
+    FORCE_INLINE void Advance(uint32_t step) \
     { \
         SUPER<CLASS, WIDTH>::Advance(step); \
         __VA_OPT__(STRIGID_MAPF_LIST(STRIGID_BIND_ADVANCE, CLASS, __VA_ARGS__)) \
@@ -190,7 +191,7 @@ __forceinline void ForEachField(Func&& func)
         return SUPER<T, WIDTH>::DefineSchema().Extend(__VA_OPT__(STRIGID_MAP_LIST(STRIGID_GET_PTR, CLASS, __VA_ARGS__))); \
     } \
     \
-    __forceinline void Advance(uint32_t step) \
+    FORCE_INLINE void Advance(uint32_t step) \
     { \
         SUPER<T, WIDTH>::Advance(step); \
         __VA_OPT__(STRIGID_MAPF_LIST(STRIGID_BIND_ADVANCE, CLASS, __VA_ARGS__)) \
@@ -270,12 +271,12 @@ __forceinline void ForEachField(Func&& func)
         __VA_OPT__(STRIGID_MAP_LIST(STRIGID_GET_NAME, ComponentType, __VA_ARGS__)) \
     }; \
 \
-    __forceinline void Advance(uint32_t step) \
+    FORCE_INLINE void Advance(uint32_t step) \
     { \
         __VA_OPT__(STRIGID_MAPF_LIST(STRIGID_BIND_ADVANCE, ComponentType, __VA_ARGS__)) \
     } \
 \
-    __forceinline void Bind(void** arrays, uint32_t startIndex = 0, int32_t count = -1) \
+    FORCE_INLINE void Bind(void** arrays, uint32_t startIndex = 0, int32_t count = -1) \
     { \
         int32_t arrayIndex = 0; \
         __VA_OPT__(STRIGID_MAPF_LIST(STRIGID_BIND_BIND, ComponentType, __VA_ARGS__)) \
@@ -283,7 +284,12 @@ __forceinline void ForEachField(Func&& func)
 
 #define STRIGID_REGISTER_COMPONENT(ComponentType) \
     namespace { \
-        static bool _##ComponentType##_FieldsRegistered = RegisterFieldsStatic<ComponentType<>>(); \
+        struct _##ComponentType##_Registrar { \
+            _##ComponentType##_Registrar() { \
+                RegisterFieldsStatic<ComponentType<>>(); \
+            } \
+        }; \
+        [[maybe_unused]] static _##ComponentType##_Registrar _##ComponentType##_FieldsRegistered; \
     } \
 
 #define STRIGID_TEMPORAL_FIELDS(ComponentType, ...) \

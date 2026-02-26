@@ -17,11 +17,11 @@ struct TemporalFlags : ComponentView<TemporalFlags, WIDTH>
     IntProxy<WIDTH> Flags;
     
     /*
-    __forceinline TemporalFlags& operator&=(TemporalFlagBits flag)
+    FORCE_INLINE TemporalFlags& operator&=(TemporalFlagBits flag)
     {
         if constexpr (WIDTH == FieldWidth::Scalar)
             Flags &= static_cast<int32_t>(flag);
-        
+
         return *this;
     }
     */

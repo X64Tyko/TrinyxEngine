@@ -157,7 +157,10 @@ void Archetype::BuildLayout(const std::vector<ComponentMetaEx>& Components, Temp
                 typeID,
                 comp.Size,
                 comp.Alignment,
-                currentOffset
+                currentOffset,
+                false,
+                false,
+                std::vector<FieldMeta>()
             };
 
             // Add to cached layout as single array
@@ -426,7 +429,7 @@ Chunk* Archetype::AllocateChunk()
         if (gap > 100 * 1024)
         {
             char buffer[256];
-            snprintf(buffer, sizeof(buffer), "Large gap detected: %lld KB between chunk %u and %u",
+            snprintf(buffer, sizeof(buffer), "Large gap detected: %li KB between chunk %u and %u",
                      gap / 1024, chunkCount - 1, chunkCount);
             STRIGID_ZONE_TEXT(buffer, strlen(buffer));
         }

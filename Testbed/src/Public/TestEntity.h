@@ -9,12 +9,12 @@
 template<FieldWidth WIDTH = FieldWidth::Scalar>
 class TestEntity : public EntityView<TestEntity>
 {
-    STRIGID_REGISTER_SCHEMA(TestEntity, EntityView, Transform, Velocity)
-    
-    Transform<WIDTH> Transform;
-    Velocity<WIDTH> Velocity;
+    STRIGID_REGISTER_SCHEMA(TestEntity, EntityView, transform, velocity)
 
-    __forceinline void Update([[maybe_unused]] double dt)
+    Transform<WIDTH> transform;
+    Velocity<WIDTH> velocity;
+
+    FORCE_INLINE void Update([[maybe_unused]] double dt)
     {
         //LOG_INFO_F("Entity flags: %ui", Flags.Flags);
     }

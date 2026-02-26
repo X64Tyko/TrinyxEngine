@@ -89,7 +89,7 @@ private:
     uint32_t LastFrameNumber = 0;
 
     // Current frame header (for accessing camera/view data)
-    class TemporalFrameHeader* CurrentFrameHeader = nullptr;
+    struct TemporalFrameHeader* CurrentFrameHeader = nullptr;
 
     // GPU Resources (provided by main thread via atomics)
     std::atomic<SDL_GPUCommandBuffer*> CmdBufferAtomic{nullptr};

@@ -52,12 +52,12 @@ public:
         return view;
     }
 
-    __forceinline void Advance(uint32_t step)
+    FORCE_INLINE void Advance(uint32_t step)
     {
         ViewIndex += step;
     }
 
-    __forceinline void Hydrate(void** fieldArrayTable, uint32_t index = 0, int32_t count = -1)
+    FORCE_INLINE void Hydrate(void** fieldArrayTable, uint32_t index = 0, int32_t count = -1)
     {
         constexpr auto schema = Derived<WIDTH>::DefineSchema();
 

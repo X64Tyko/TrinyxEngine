@@ -26,7 +26,7 @@ struct FieldMask {
     
     // The "Choose" method for your syntax
     template <ProxyType<FieldType, VecType> TVAL, ProxyType<FieldType, VecType> FVAL>
-    __forceinline decltype(auto) Choose(TVAL&& TrueVal,FVAL&& FalseVal) const
+    FORCE_INLINE decltype(auto) Choose(TVAL&& TrueVal,FVAL&& FalseVal) const
     {
         VecType falseV;
         if constexpr (std::is_same_v<FVAL, VecType>)
@@ -56,49 +56,49 @@ template<FieldWidth WIDTH>
 struct SIMDTraits<float, WIDTH>
 {
     using VecType = __m256;
-    static __forceinline VecType load(const float* ptr) { return _mm256_loadu_ps(ptr); }
-    static __forceinline void store(float* ptr, [[maybe_unused]] __m256i mask, VecType val)
+    static FORCE_INLINE VecType load(const float* ptr) { return _mm256_loadu_ps(ptr); }
+    static FORCE_INLINE void store(float* ptr, [[maybe_unused]] __m256i mask, VecType val)
     {
         if constexpr (WIDTH == FieldWidth::WideMask) { _mm256_maskstore_ps(ptr, mask, val); }
         else { _mm256_storeu_ps(ptr, val); }
     }
     // Non-temporal store (bypasses cache, for write-only temporal data)
-    static __forceinline void stream(float* ptr, [[maybe_unused]] __m256i mask, VecType val)
+    static FORCE_INLINE void stream(float* ptr, [[maybe_unused]] __m256i mask, VecType val)
     {
         if constexpr (WIDTH == FieldWidth::WideMask) { _mm256_maskstore_ps(ptr, mask, val); }  // No masked stream, fall back
         else { _mm256_stream_ps(ptr, val); }
     }
-    static __forceinline VecType set1(float val) { return _mm256_set1_ps(val); }
-    static __forceinline VecType add(VecType a, VecType b) { return _mm256_add_ps(a, b); }
-    static __forceinline VecType sub(VecType a, VecType b) { return _mm256_sub_ps(a, b); }
-    static __forceinline VecType mul(VecType a, VecType b) { return _mm256_mul_ps(a, b); }
-    static __forceinline VecType div(VecType a, VecType b) { return _mm256_div_ps(a, b); }
-    static __forceinline FieldMask<float, VecType, WIDTH> GT(VecType a, VecType b) { return { _mm256_cmp_ps(a, b, _CMP_GT_OQ) }; }
-    static __forceinline FieldMask<float, VecType, WIDTH> LT(VecType a, VecType b) { return { _mm256_cmp_ps(a, b, _CMP_LT_OQ) }; }
-    static __forceinline VecType Blend(VecType a, VecType b) { return _mm256_blendv_ps(a, b, _mm256_cmp_ps(a, b, _CMP_GT_OQ)); }
+    static FORCE_INLINE VecType set1(float val) { return _mm256_set1_ps(val); }
+    static FORCE_INLINE VecType add(VecType a, VecType b) { return _mm256_add_ps(a, b); }
+    static FORCE_INLINE VecType sub(VecType a, VecType b) { return _mm256_sub_ps(a, b); }
+    static FORCE_INLINE VecType mul(VecType a, VecType b) { return _mm256_mul_ps(a, b); }
+    static FORCE_INLINE VecType div(VecType a, VecType b) { return _mm256_div_ps(a, b); }
+    static FORCE_INLINE FieldMask<float, VecType, WIDTH> GT(VecType a, VecType b) { return { _mm256_cmp_ps(a, b, _CMP_GT_OQ) }; }
+    static FORCE_INLINE FieldMask<float, VecType, WIDTH> LT(VecType a, VecType b) { return { _mm256_cmp_ps(a, b, _CMP_LT_OQ) }; }
+    static FORCE_INLINE VecType Blend(VecType a, VecType b) { return _mm256_blendv_ps(a, b, _mm256_cmp_ps(a, b, _CMP_GT_OQ)); }
 };
 
 template<FieldWidth WIDTH>
 struct SIMDTraits<int32_t, WIDTH>
 {
     using VecType = __m256i;
-    static __forceinline VecType load(const int32_t* ptr) { return _mm256_loadu_si256((const __m256i*)ptr); }
-    static __forceinline void store(int32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
+    static FORCE_INLINE VecType load(const int32_t* ptr) { return _mm256_loadu_si256((const __m256i*)ptr); }
+    static FORCE_INLINE void store(int32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
     {
         if constexpr (WIDTH == FieldWidth::WideMask) { _mm256_maskstore_epi32(ptr, mask, val); }
         else { _mm256_storeu_si256((__m256i*)ptr, val); }
     }
     // Non-temporal store (bypasses cache, for write-only temporal data)
-    static __forceinline void stream(int32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
+    static FORCE_INLINE void stream(int32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
     {
         if constexpr (WIDTH == FieldWidth::WideMask) { _mm256_maskstore_epi32(ptr, mask, val); }  // No masked stream, fall back
         else { _mm256_stream_si256((__m256i*)ptr, val); }
     }
-    static __forceinline VecType set1(int32_t val) { return _mm256_set1_epi32(val); }
-    static __forceinline VecType add(VecType a, VecType b) { return _mm256_add_epi32(a, b); }
-    static __forceinline VecType sub(VecType a, VecType b) { return _mm256_sub_epi32(a, b); }
-    static __forceinline VecType mul(VecType a, VecType b) { return _mm256_mullo_epi32(a, b); }
-    static __forceinline VecType div(VecType a, VecType b) {
+    static FORCE_INLINE VecType set1(int32_t val) { return _mm256_set1_epi32(val); }
+    static FORCE_INLINE VecType add(VecType a, VecType b) { return _mm256_add_epi32(a, b); }
+    static FORCE_INLINE VecType sub(VecType a, VecType b) { return _mm256_sub_epi32(a, b); }
+    static FORCE_INLINE VecType mul(VecType a, VecType b) { return _mm256_mullo_epi32(a, b); }
+    static FORCE_INLINE VecType div(VecType a, VecType b) {
         // Integer division has no SIMD intrinsic - fall back to scalar
         alignas(32) int32_t aData[8], bData[8], result[8];
         _mm256_store_si256((__m256i*)aData, a);
@@ -106,39 +106,39 @@ struct SIMDTraits<int32_t, WIDTH>
         for (int i = 0; i < 8; ++i) result[i] = aData[i] / bData[i];
         return _mm256_load_si256((__m256i*)result);
     }
-    static __forceinline FieldMask<int32_t, VecType, WIDTH> GT(VecType a, VecType b) { return _mm256_cmpgt_epi32(a, b); }
-    static __forceinline FieldMask<int32_t, VecType, WIDTH> LT(VecType a, VecType b) { return _mm256_cmpgt_epi32(b, a); }
+    static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> GT(VecType a, VecType b) { return _mm256_cmpgt_epi32(a, b); }
+    static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> LT(VecType a, VecType b) { return _mm256_cmpgt_epi32(b, a); }
 };
 
 template<FieldWidth WIDTH>
 struct SIMDTraits<uint32_t, WIDTH>
 {
     using VecType = __m256i;
-    static __forceinline VecType load(const uint32_t* ptr) { return _mm256_loadu_si256((const __m256i*)ptr); }
-    static __forceinline void store(uint32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
+    static FORCE_INLINE VecType load(const uint32_t* ptr) { return _mm256_loadu_si256((const __m256i*)ptr); }
+    static FORCE_INLINE void store(uint32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
     {
         if constexpr (WIDTH == FieldWidth::WideMask) { _mm256_maskstore_epi32((int32_t*)ptr, mask, val); }
         else { _mm256_storeu_si256((__m256i*)ptr, val); }
     }
     // Non-temporal store (bypasses cache, for write-only temporal data)
-    static __forceinline void stream(uint32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
+    static FORCE_INLINE void stream(uint32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
     {
         if constexpr (WIDTH == FieldWidth::WideMask) { _mm256_maskstore_epi32((int32_t*)ptr, mask, val); }  // No masked stream, fall back
         else { _mm256_stream_si256((__m256i*)ptr, val); }
     }
-    static __forceinline VecType set1(uint32_t val) { return _mm256_set1_epi32(val); }
-    static __forceinline VecType add(VecType a, VecType b) { return _mm256_add_epi32(a, b); }
-    static __forceinline VecType sub(VecType a, VecType b) { return _mm256_sub_epi32(a, b); }
-    static __forceinline VecType mul(VecType a, VecType b) { return _mm256_mullo_epi32(a, b); }
-    static __forceinline VecType div(VecType a, VecType b) {
+    static FORCE_INLINE VecType set1(uint32_t val) { return _mm256_set1_epi32(val); }
+    static FORCE_INLINE VecType add(VecType a, VecType b) { return _mm256_add_epi32(a, b); }
+    static FORCE_INLINE VecType sub(VecType a, VecType b) { return _mm256_sub_epi32(a, b); }
+    static FORCE_INLINE VecType mul(VecType a, VecType b) { return _mm256_mullo_epi32(a, b); }
+    static FORCE_INLINE VecType div(VecType a, VecType b) {
         alignas(32) uint32_t aData[8], bData[8], result[8];
         _mm256_store_si256((__m256i*)aData, a);
         _mm256_store_si256((__m256i*)bData, b);
         for (int i = 0; i < 8; ++i) result[i] = aData[i] / bData[i];
         return _mm256_load_si256((__m256i*)result);
     }
-    static __forceinline FieldMask<uint32_t, VecType, WIDTH> GT(VecType a, VecType b) { return _mm256_cmpgt_epi32(a, b); }
-    static __forceinline FieldMask<uint32_t, VecType, WIDTH> LT(VecType a, VecType b) { return _mm256_cmpgt_epi32(b, a); }
+    static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> GT(VecType a, VecType b) { return _mm256_cmpgt_epi32(a, b); }
+    static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> LT(VecType a, VecType b) { return _mm256_cmpgt_epi32(b, a); }
 };
 
 // Helper: Proxy for individual field access with SIMD
@@ -153,7 +153,7 @@ struct FieldProxy
     uint32_t index;
     __m256i mask = _mm256_set1_epi64x(-1);  // Only used when MASK = true
 
-    explicit operator FieldProxy() const
+    explicit operator typename Traits::VecType() const
     {
         if constexpr (WIDTH == FieldWidth::Scalar)
         {
@@ -166,7 +166,7 @@ struct FieldProxy
     }
     
     template <ProxyType<FieldType, typename Traits::VecType> T>
-    __forceinline FieldMask<FieldType, typename Traits::VecType, WIDTH> operator>(T threshold) const
+    FORCE_INLINE FieldMask<FieldType, typename Traits::VecType, WIDTH> operator>(T threshold) const
     {
         typename Traits::VecType cmp;
         if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value)
@@ -181,7 +181,7 @@ struct FieldProxy
     }
      
     template <ProxyType<FieldType, typename Traits::VecType> T>
-    __forceinline FieldMask<FieldType, typename Traits::VecType, WIDTH> operator<(T threshold) const
+    FORCE_INLINE FieldMask<FieldType, typename Traits::VecType, WIDTH> operator<(T threshold) const
     {
         typename Traits::VecType cmp;
         if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value)
@@ -196,7 +196,7 @@ struct FieldProxy
     }
 
     template <ProxyType<FieldType, typename Traits::VecType> T>
-    __forceinline decltype(auto) operator=(T&& value)
+    FORCE_INLINE decltype(auto) operator=(T&& value)
     {
         if constexpr (WIDTH == FieldWidth::Scalar)
         {
@@ -218,7 +218,7 @@ struct FieldProxy
     }
 
     template <ProxyType<FieldType, typename Traits::VecType> T>
-    __forceinline decltype(auto) operator+=(T&& value)
+    FORCE_INLINE decltype(auto) operator+=(T&& value)
     {
         if constexpr (WIDTH == FieldWidth::Scalar)
         {
@@ -240,7 +240,7 @@ struct FieldProxy
     }
 
     template <ProxyType<FieldType, typename Traits::VecType> T>
-    __forceinline decltype(auto) operator-=(T&& value)
+    FORCE_INLINE decltype(auto) operator-=(T&& value)
     {
         if constexpr (WIDTH == FieldWidth::Scalar)
         {
@@ -262,7 +262,7 @@ struct FieldProxy
     }
 
     template <ProxyType<FieldType, typename Traits::VecType> T>
-    __forceinline decltype(auto) operator*=(T&& value)
+    FORCE_INLINE decltype(auto) operator*=(T&& value)
     {
         if constexpr (WIDTH == FieldWidth::Scalar)
         {
@@ -284,7 +284,7 @@ struct FieldProxy
     }
 
     template <ProxyType<FieldType, typename Traits::VecType> T>
-    __forceinline decltype(auto) operator/=(T&& value)
+    FORCE_INLINE decltype(auto) operator/=(T&& value)
     {
         if constexpr (WIDTH == FieldWidth::Scalar)
         {
@@ -306,7 +306,7 @@ struct FieldProxy
     }
 
     // Bind: load from read frame T, immediately stream to frame T+1 (non-temporal), cache T+1 for modifications
-    __forceinline void Bind(void* readArray, void* writeArray, uint32_t startIndex = 0, int32_t startCount = -1)
+    FORCE_INLINE void Bind(void* readArray, void* writeArray, uint32_t startIndex = 0, int32_t startCount = -1)
     {
         ReadArray = (FieldType*)readArray;
         WriteArray = (FieldType*)writeArray;
@@ -323,7 +323,7 @@ struct FieldProxy
     }
 
     // Advance: stream cached vector back, advance index, load from T and stream to T+1
-    __forceinline void Advance(uint32_t step)
+    FORCE_INLINE void Advance(uint32_t step)
     {
         index += step;
         
@@ -335,7 +335,7 @@ struct FieldProxy
     
     // FRIEND OPERATORS
     template <ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
-    __forceinline friend decltype(auto) operator*(L&& LHS, R&& RHS)
+    FORCE_INLINE friend decltype(auto) operator*(L&& LHS, R&& RHS)
     {
         if constexpr (WIDTH == FieldWidth::Scalar)
         {
@@ -377,7 +377,7 @@ struct FieldProxy
     
     // FRIEND OPERATORS
     template <ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
-    __forceinline friend decltype(auto) operator+(L&& LHS, R&& RHS)
+    FORCE_INLINE friend decltype(auto) operator+(L&& LHS, R&& RHS)
     {
         if constexpr (WIDTH == FieldWidth::Scalar)
         {

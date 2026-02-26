@@ -18,9 +18,9 @@ class BaseCube : public EntityView<T, WIDTH>
     ColorData<WIDTH> color;
 
     // Lifecycle hooks
-    __forceinline void PrePhysics([[maybe_unused]] double dt)
+    FORCE_INLINE void PrePhysics([[maybe_unused]] double dt)
     {
-        constexpr float TWO_PI = 6.283185307179586f;
+        //constexpr float TWO_PI = 6.283185307179586f;
 
         // Now we emulate less than ideal assignment and operations in a fixed update.
         transform.PositionX += static_cast<float>(dt) * velocity.vX;
@@ -51,7 +51,7 @@ class SuperCube : public BaseCube<SuperCube, WIDTH>
     
 public:
     // Logic
-    __forceinline void ScalarUpdate([[maybe_unused]] double dt)
+    FORCE_INLINE void ScalarUpdate([[maybe_unused]] double dt)
     {
         color.R = (color.R + (static_cast<float>(dt) * 0.5f) > 1.f) ? 0.f : color.R + (static_cast<float>(dt) * 0.5f);
         color.G = (color.G + (static_cast<float>(dt) * 0.3f) > 1.f) ? 0.f : color.G + (static_cast<float>(dt) * 0.3f);

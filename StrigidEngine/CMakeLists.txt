@@ -20,6 +20,13 @@ add_library(${PROJECT_NAME} STATIC
         ../src/Runtime/Core/Public/ComponentView.h
 )
 
+# Disable strict warnings for Tracy sources
+if(TRACY_SOURCES AND NOT MSVC)
+    set_source_files_properties(${TRACY_SOURCES} PROPERTIES
+        COMPILE_FLAGS "-Wno-error"
+    )
+endif()
+
 # -----------------------------------------------------------------------------
 # FORCE RELWITHDEBINFO FOR ENGINE
 # -----------------------------------------------------------------------------
@@ -58,15 +65,20 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     "${CMAKE_SOURCE_DIR}/src/Runtime/Input/Public"
 )
 
-# B. SDL3 Headers (Public - needed by public headers like StrigidEngine.h)
-target_include_directories(${PROJECT_NAME} PUBLIC
-    "${SDL3_PATH}/include"
-)
-
-# C. Link Libraries
-target_link_libraries(${PROJECT_NAME} PUBLIC
-    "${SDL3_PATH}/lib/x64/SDL3.lib"
-)
+# B. SDL3 - Platform specific
+if(WIN32)
+    # Windows: Use bundled SDL3
+    target_include_directories(${PROJECT_NAME} PUBLIC
+        "${SDL3_PATH}/include"
+    )
+    target_link_libraries(${PROJECT_NAME} PUBLIC
+        "${SDL3_PATH}/lib/x64/SDL3.lib"
+    )
+elseif(UNIX)
+    # Linux: Use system SDL3
+    find_package(SDL3 REQUIRED CONFIG)
+    target_link_libraries(${PROJECT_NAME} PUBLIC SDL3::SDL3)
+endif()
 
 # D. Tracy platform-specific libraries
 if(ENABLE_TRACY)

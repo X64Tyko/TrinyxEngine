@@ -57,18 +57,18 @@ public:
         return FrameHeaders[frameNum % TemporalFrameCount];
     }
     
-    __forceinline uint32_t GetFrameIndex(uint32_t frameNum) const
+    FORCE_INLINE uint32_t GetFrameIndex(uint32_t frameNum) const
     {
         return frameNum % TemporalFrameCount;
     }
 
     // Get next frame with wrapping
-    __forceinline uint32_t GetNextFrame(uint32_t currentFrame) const
+    FORCE_INLINE uint32_t GetNextFrame(uint32_t currentFrame) const
     {
         return (currentFrame + 1) % TemporalFrameCount;
     }
-    
-    __forceinline uint32_t GetPrevFrame(uint32_t currentFrame) const
+
+    FORCE_INLINE uint32_t GetPrevFrame(uint32_t currentFrame) const
     {
         return (currentFrame + TemporalFrameCount - 1) % TemporalFrameCount;
     }
@@ -89,11 +89,11 @@ public:
 
     // Allocate field array for a chunk across all frames, returns absolute pointer to frame 0 data
     // Archetype calls this for each temporal field when allocating a new chunk
-    void* AllocateFieldArray(Archetype* owner, class Chunk* chunk, ComponentTypeID compType,
+    void* AllocateFieldArray(Archetype* owner, struct Chunk* chunk, ComponentTypeID compType,
                             size_t fieldIndex, const char* fieldName, size_t entityCount, size_t fieldSize);
 
     // Get the stride between frames (for calculating frame N from frame 0 pointer)
-    __forceinline size_t GetFrameStride() const { return sizeof(TemporalFrameHeader) + FrameDataCapacity; }
+    FORCE_INLINE size_t GetFrameStride() const { return sizeof(TemporalFrameHeader) + FrameDataCapacity; }
 
     // Get component field data from specific frame
     void* GetFieldData(TemporalFrameHeader* header, ComponentTypeID compType, size_t fieldIndex) const;
@@ -118,7 +118,7 @@ private:
     struct TemporalAllocation
     {
         Archetype* Owner;
-        class Chunk* OwnerChunk;
+        struct Chunk* OwnerChunk;
         size_t FieldAllocationIndex;  // Which FieldAllocationInfo this belongs to
         size_t OffsetInFieldZone;     // Offset within that field's zone
         size_t Size;                  // entityCount * fieldSize (aligned)

@@ -1,4 +1,6 @@
 ﻿#include "RenderThread.h"
+
+#include <cstring>
 #include <iostream>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
@@ -49,7 +51,6 @@ void RenderThread::Stop()
 
 void RenderThread::Join()
 {
-    auto threadID = Thread.get_id();
     if (Thread.joinable())
     {
         Thread.join();
@@ -261,7 +262,7 @@ void RenderThread::SnapshotSparseArrays(std::shared_ptr<FramePacket> packet)
             auto scaleXArray = static_cast<float*>(fieldArrayTable[6]);
             auto scaleYArray = static_cast<float*>(fieldArrayTable[7]);
             auto scaleZArray = static_cast<float*>(fieldArrayTable[8]);
-/*
+
             // Get ColorData field arrays (starts at index 12 for CubeEntity)
             auto rArray = static_cast<float*>(fieldArrayTable[12]);
             auto gArray = static_cast<float*>(fieldArrayTable[13]);
@@ -449,7 +450,6 @@ bool RenderThread::InterpolateTemporalFrames(uint32_t frameNumber)
     // TODO: Read the temporal arrays directly
     std::vector<Archetype*> archetypes = RegistryPtr->ComponentQuery<Transform<>, ColorData<>>();
 
-    size_t writeIdx = 0;
     for (Archetype* arch : archetypes)
     {
         if (!arch) [[unlikely]]

@@ -36,7 +36,6 @@ void LogicThread::Stop()
 
 void LogicThread::Join()
 {
-    auto threadID = Thread.get_id();
     if (Thread.joinable())
     {
         Thread.join();

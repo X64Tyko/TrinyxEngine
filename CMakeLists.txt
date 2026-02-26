@@ -42,8 +42,8 @@ if(ENABLE_TRACY)
         "${TRACY_PATH}/public/TracyClient.cpp"
     )
 
-    # Add Tracy include directory globally
-    include_directories("${TRACY_PATH}/public")
+    # Add Tracy include directory globally as SYSTEM (silences warnings)
+    include_directories(SYSTEM "${TRACY_PATH}/public")
 
     # Enable Tracy profiling and disable ROCm support
     add_compile_definitions(TRACY_ENABLE)
@@ -94,7 +94,7 @@ if(MSVC)
     add_compile_options(/Zc:__cplusplus)
 
 else()
-    add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+    add_compile_options(-Wall -Wextra -Wpedantic -Werror -Wno-ignored-attributes)
 
     # Assembly listing generation (GCC/Clang)
     if(GENERATE_ASSEMBLY)
