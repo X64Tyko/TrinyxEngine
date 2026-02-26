@@ -8,6 +8,13 @@
 #include "Schema.h"
 #include "SchemaValidation.h"
 
+// Platform-specific attribute to prevent linker from stripping unused symbols
+#if defined(__GNUC__) || defined(__clang__)
+    #define STRIGID_USED_ATTR __attribute__((used))
+#else
+    #define STRIGID_USED_ATTR
+#endif
+
 // --- TYPE TRAITS ---
 template <typename T>
 struct StripClass;
@@ -179,10 +186,10 @@ FORCE_INLINE void ForEachField(Func&& func)
     using MaskedType = CLASS<FieldWidth::WideMask>; \
     \
     private: \
-    static inline const bool g_Registered = []() { \
-        PrefabReflector<CLASS<>>::Register(); \
-        return true; \
-    }();
+    struct _EntityRegistrar { \
+        _EntityRegistrar() { PrefabReflector<CLASS<>>::Register(); } \
+    }; \
+    [[maybe_unused]] STRIGID_USED_ATTR static inline _EntityRegistrar _entity_registered;
 
 #define STRIGID_REGISTER_SUPER_SCHEMA(CLASS, SUPER, ...) \
     public: \
@@ -289,7 +296,7 @@ FORCE_INLINE void ForEachField(Func&& func)
                 RegisterFieldsStatic<ComponentType<>>(); \
             } \
         }; \
-        [[maybe_unused]] static _##ComponentType##_Registrar _##ComponentType##_FieldsRegistered; \
+        [[maybe_unused]] STRIGID_USED_ATTR static _##ComponentType##_Registrar _##ComponentType##_FieldsRegistered; \
     } \
 
 #define STRIGID_TEMPORAL_FIELDS(ComponentType, ...) \

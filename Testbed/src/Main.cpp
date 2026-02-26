@@ -145,17 +145,6 @@ TEST(InitializeTestEntities)
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 {
-    // Force component registration on Linux/GCC (static init workaround)
-    RegisterFieldsStatic<TemporalFlags<>>();
-    RegisterFieldsStatic<Transform<>>();
-    RegisterFieldsStatic<Velocity<>>();
-    RegisterFieldsStatic<ColorData<>>();
-
-    // Force entity registration on Linux/GCC
-    PrefabReflector<TestEntity<>>::Register();
-    PrefabReflector<CubeEntity<>>::Register();
-    PrefabReflector<SuperCube<>>::Register();
-
     // Stack allocation is fine for the main engine object
     StrigidEngine& Engine = StrigidEngine::Get();
 
