@@ -78,6 +78,8 @@ using ComponentTypeID = uint32_t;
 
 // Component Signature definition as a bitset - tracks which components are present
 static constexpr size_t MAX_COMPONENTS = 256;
+static constexpr size_t MAX_TEMPORAL_FIELDS_PER_COMPONENT = 64; // Max decomposed temporal fields per component
+static constexpr size_t MAX_FIELD_ARRAYS = MAX_COMPONENTS * MAX_TEMPORAL_FIELDS_PER_COMPONENT; // Max total field arrays across all components
 using ComponentSignature = std::bitset<MAX_COMPONENTS>;
 using ClassID = uint16_t;
 
@@ -153,6 +155,8 @@ static_assert(sizeof(InstanceData) == 64, "InstanceData must be 64 bytes for opt
 
 #ifdef _MSC_VER
 #pragma warning(pop)
+#elif defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
 #endif
 
 // Hash specialization for std::unordered_map

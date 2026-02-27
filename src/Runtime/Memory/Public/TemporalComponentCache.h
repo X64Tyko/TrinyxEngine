@@ -95,24 +95,33 @@ public:
     // Get the stride between frames (for calculating frame N from frame 0 pointer)
     FORCE_INLINE size_t GetFrameStride() const { return sizeof(TemporalFrameHeader) + FrameDataCapacity; }
 
-    // Get component field data from specific frame
-    void* GetFieldData(TemporalFrameHeader* header, ComponentTypeID compType, size_t fieldIndex) const;
-    
+    // Get component field data from specific frame.
+    // Also returns how many entities are allocated/valid for this field so render can clamp scans safely.
+    void* GetFieldData(TemporalFrameHeader* header, ComponentTypeID compType, size_t fieldIndex,
+                       size_t& outAllocatedEntities) const;
+
     uint32_t GetTotalFrameCount() const { return TemporalFrameCount; }
 
 private:
     // Pre-computed field allocation zones (field-major ordering across all archetypes)
     struct FieldAllocationInfo
     {
-        ComponentTypeID CompType;
-        size_t FieldIndex;
-        const char* FieldName;
-        size_t OffsetInFrame;      // Start of this field's allocation zone in each frame
-        size_t TotalCapacity;      // Max size this field can allocate (sum across all archetypes)
-        size_t CurrentUsed;        // How much is currently allocated
+        ComponentTypeID CompType = 0;
+        size_t FieldIndex = 0;
+        const char* FieldName = nullptr;
+
+        size_t OffsetInFrame = 0;      // Start of this field's allocation zone in each frame
+        size_t TotalCapacity = 0;      // Max size this field can allocate (sum across all archetypes)
+        size_t CurrentUsed = 0;        // How much is currently allocated (bytes)
+
+        size_t FieldSize = 0;          // Size of each element for this field (bytes)
+        bool bValid = false;
     };
 
-    std::vector<FieldAllocationInfo> FieldAllocations;
+    static constexpr size_t FIELD_ALLOCATION_COUNT = MAX_COMPONENTS * MAX_TEMPORAL_FIELDS_PER_COMPONENT;
+
+    // Flat table: index = compType * MAX_TEMPORAL_FIELDS_PER_COMPONENT + fieldIndex
+    FieldAllocationInfo FieldAllocations[FIELD_ALLOCATION_COUNT]{};
 
     // Active allocations with back-refs to chunks for defrag
     struct TemporalAllocation
@@ -134,9 +143,6 @@ private:
 
     // O(1) frame access array
     std::vector<TemporalFrameHeader*> FrameHeaders;
-
-    // Helper: Find or create FieldAllocationInfo for a component field
-    size_t GetOrCreateFieldAllocationIndex(ComponentTypeID compType, size_t fieldIndex, const char* fieldName);
 
     // Helper: Align size to FIELD_ARRAY_ALIGNMENT
     static size_t AlignSize(size_t size);

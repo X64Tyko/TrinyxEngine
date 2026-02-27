@@ -263,7 +263,6 @@ inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
         return;
     }
 
-    constexpr size_t MAX_FIELD_ARRAYS = 64; // Max total fields across all components in archetype
     void* dualArrayTable[MAX_FIELD_ARRAYS * 2]; // Interleaved read/write for FieldProxy::Bind()
 
     for (auto& [sig, arch] : Archetypes)
@@ -314,7 +313,6 @@ inline void Registry::InvokePrePhys(double dt, uint32_t currentFrame)
         return;
     }
 
-    constexpr size_t MAX_FIELD_ARRAYS = 64; // Max total fields across all components in archetype
     void* dualArrayTable[MAX_FIELD_ARRAYS * 2]; // Interleaved read/write for FieldProxy::Bind()
 
     for (auto& [sig, arch] : Archetypes)
@@ -365,7 +363,6 @@ inline void Registry::InvokePostPhys(double dt, uint32_t currentFrame)
         return;
     }
     
-    constexpr size_t MAX_FIELD_ARRAYS = 64; // Max total fields across all components in archetype
     void* dualArrayTable[MAX_FIELD_ARRAYS * 2]; // Interleaved read/write for FieldProxy::Bind()
 
     for (auto& [sig, arch] : Archetypes)

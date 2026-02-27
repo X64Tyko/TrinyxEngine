@@ -101,8 +101,6 @@ TEST(InitializeTestEntities)
     std::vector<Archetype*> Arches = Reg->ClassQuery<CubeEntity<>, SuperCube<>>();
     for (Archetype* cubeArch : Arches)
     {
-        constexpr size_t MAX_FIELD_ARRAYS = 256;
-
         CubeEntity<> Cube;
         for (size_t chunkIdx = 0; chunkIdx < cubeArch->Chunks.size(); ++chunkIdx)
         {

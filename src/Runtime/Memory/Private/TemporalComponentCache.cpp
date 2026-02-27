@@ -50,16 +50,23 @@ void TemporalComponentCache::Initialize(const EngineConfig* Config)
             size_t maxPadding = maxChunks * (FIELD_ARRAY_ALIGNMENT - 1);
             size_t maxFieldSize = baseSize + maxPadding;
 
-            FieldAllocations.push_back({
-                typeID,
-                fieldIdx,
-                field.Name,
-                totalFrameSize,
-                maxFieldSize,
-                0  // CurrentUsed starts at 0
-            });
+            // Use flat O(1) table instead of vector
+            if (typeID < MAX_COMPONENTS && fieldIdx < MAX_TEMPORAL_FIELDS_PER_COMPONENT)
+            {
+                const size_t tableIndex = static_cast<size_t>(typeID) * MAX_TEMPORAL_FIELDS_PER_COMPONENT + fieldIdx;
+                FieldAllocations[tableIndex] = {
+                    typeID,
+                    fieldIdx,
+                    field.Name,
+                    totalFrameSize,
+                    maxFieldSize,
+                    0,  // CurrentUsed starts at 0
+                    field.Size,
+                    true  // bValid
+                };
 
-            totalFrameSize += maxFieldSize;
+                totalFrameSize += maxFieldSize;
+            }
         }
     }
 
@@ -81,6 +88,9 @@ void TemporalComponentCache::Initialize(const EngineConfig* Config)
         return;
     }
 
+    // Zero-initialize entire slab (critical for Release builds where uninitialized memory isn't zeroed)
+    std::memset(SlabPtr, 0, TotalSlabSize);
+
     // Build frame header pointer array for O(1) access
     FrameHeaders.reserve(TemporalFrameCount);
     uint8_t* currentFramePtr = static_cast<uint8_t*>(SlabPtr);
@@ -100,17 +110,38 @@ void TemporalComponentCache::Initialize(const EngineConfig* Config)
         currentFramePtr += frameStride;
     }
 
+    // Count valid fields
+    size_t validFieldCount = 0;
+    for (const auto& info : FieldAllocations)
+    {
+        if (info.bValid)
+            ++validFieldCount;
+    }
+
     LOG_INFO_F("Initialized TemporalComponentCache: %zu fields, %zu frames × %zu bytes = %zu total bytes",
-               FieldAllocations.size(), TemporalFrameCount, frameStride, TotalSlabSize);
+               validFieldCount, TemporalFrameCount, frameStride, TotalSlabSize);
 }
 
 void* TemporalComponentCache::AllocateFieldArray(Archetype* owner, Chunk* chunk,
                                                   ComponentTypeID compType, size_t fieldIndex,
                                                   const char* fieldName, size_t entityCount, size_t fieldSize)
 {
-    // Find the FieldAllocationInfo for this component+field
-    size_t allocIndex = GetOrCreateFieldAllocationIndex(compType, fieldIndex, fieldName);
-    FieldAllocationInfo& info = FieldAllocations[allocIndex];
+    // Direct O(1) lookup into flat table
+    if (compType >= MAX_COMPONENTS || fieldIndex >= MAX_TEMPORAL_FIELDS_PER_COMPONENT)
+    {
+        LOG_ERROR_F("TemporalComponentCache: Invalid component type %u or field index %zu", compType, fieldIndex);
+        return nullptr;
+    }
+
+    const size_t tableIndex = static_cast<size_t>(compType) * MAX_TEMPORAL_FIELDS_PER_COMPONENT + fieldIndex;
+    FieldAllocationInfo& info = FieldAllocations[tableIndex];
+
+    if (!info.bValid)
+    {
+        LOG_ERROR_F("TemporalComponentCache: Field %s (component %u, field %zu) not initialized",
+                    fieldName, compType, fieldIndex);
+        return nullptr;
+    }
 
     // Calculate aligned size for this chunk's allocation
     size_t allocSize = AlignSize(entityCount * fieldSize);
@@ -131,7 +162,7 @@ void* TemporalComponentCache::AllocateFieldArray(Archetype* owner, Chunk* chunk,
     ActiveAllocations.push_back({
         owner,
         chunk,
-        allocIndex,
+        tableIndex,
         offsetInFieldZone,
         allocSize
     });
@@ -142,40 +173,31 @@ void* TemporalComponentCache::AllocateFieldArray(Archetype* owner, Chunk* chunk,
 }
 
 void* TemporalComponentCache::GetFieldData(TemporalFrameHeader* header, ComponentTypeID compType,
-                                           size_t fieldIndex) const
+                                          size_t fieldIndex, size_t& outAllocatedEntities) const
 {
-    // Find the FieldAllocationInfo
-    for (const auto& info : FieldAllocations)
+    outAllocatedEntities = 0;
+
+    if (!header)
+        return nullptr;
+
+    if (compType >= MAX_COMPONENTS || fieldIndex >= MAX_TEMPORAL_FIELDS_PER_COMPONENT)
+        return nullptr;
+
+    const size_t tableIndex = static_cast<size_t>(compType) * MAX_TEMPORAL_FIELDS_PER_COMPONENT + fieldIndex;
+    const FieldAllocationInfo& info = FieldAllocations[tableIndex];
+
+    if (!info.bValid)
+        return nullptr;
+
+    if (info.FieldSize != 0)
     {
-        if (info.CompType == compType && info.FieldIndex == fieldIndex)
-        {
-            // Get frame data start (header + HeaderSize)
-            uint8_t* frameData = reinterpret_cast<uint8_t*>(header) + sizeof(TemporalFrameHeader);
-            return frameData + info.OffsetInFrame;
-        }
+        outAllocatedEntities = info.CurrentUsed / info.FieldSize;
     }
 
-    return nullptr;
+    uint8_t* frameData = reinterpret_cast<uint8_t*>(header) + sizeof(TemporalFrameHeader);
+    return frameData + info.OffsetInFrame;
 }
 
-size_t TemporalComponentCache::GetOrCreateFieldAllocationIndex(ComponentTypeID compType,
-                                                                size_t fieldIndex,
-                                                                const char* fieldName)
-{
-    // Find existing allocation info
-    for (size_t i = 0; i < FieldAllocations.size(); ++i)
-    {
-        if (FieldAllocations[i].CompType == compType && FieldAllocations[i].FieldIndex == fieldIndex)
-        {
-            return i;
-        }
-    }
-
-    // Should never happen - all fields are pre-allocated during Initialize
-    LOG_ERROR_F("TemporalComponentCache: Field %s (component %u, field %zu) not found in pre-computed layout",
-                fieldName, compType, fieldIndex);
-    return 0;
-}
 
 bool TemporalComponentCache::TryLockFrameForWrite(uint32_t frameNum)
 {

@@ -55,6 +55,7 @@ public:
     FORCE_INLINE void Advance(uint32_t step)
     {
         ViewIndex += step;
+        Flags.Advance(step);
     }
 
     FORCE_INLINE void Hydrate(void** fieldArrayTable, uint32_t index = 0, int32_t count = -1)
