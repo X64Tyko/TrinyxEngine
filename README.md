@@ -15,163 +15,162 @@ while maintaining as close to existing OOP style and structure on the user end a
 **Primary Target:** 100,000+ dynamic entities at 512Hz fixed update (1.95ms per frame budget)
 
 **Philosophy:** White-box architecture - users can understand, debug, and modify the engine without black-box
-abstractions. "Build it to break it." I use this project to stress-test architectural theories (like the History Slab
-and lock-free communication) that are too risky to implement directly into a live commercial product.
+abstractions. "Build it to break it." This project stress-tests architectural theories (tiered temporal storage,
+GPU-driven rendering, lock-free communication) that are too risky to implement directly into a live commercial product.
 
 ---
 
-## Quick Stats (Week 3)
+## Current Status (2026-02)
 
 **Performance:**
 - **Sentinel (Main):** 1.0ms per frame (1000 Hz) ✅
 - **Brain (Logic):** ~1.7ms per frame (target: 1.95ms @ 512Hz)
-- **Encoder (Render):** ~3.1ms per frame (321 FPS)
-- **1M entities:** ~1.7ms PrePhysics (stress test only)
+- **Encoder (Render):** Raw Vulkan pipeline active, GPU-driven path in progress
+- **100k entities:** ~0.3ms PrePhysics, ~1.7ms full logic frame
 
 **Architecture:**
 - ✅ Three-thread architecture (Sentinel/Brain/Encoder)
-- ✅ Lock-free communication (triple-buffer mailbox)
-- ✅ SoA component decomposition (FieldProxy system)
+- ✅ Raw Vulkan (volk 1.4.304 + VMA 3.3.0) — no SDL3 GPU
+- ✅ SoA component decomposition (FieldProxy with Scalar/Wide/WideMask)
 - ✅ EntityView hydration (zero virtual calls)
-- ✅ SIMD-friendly batch processing
-- 🔄 History Slab (design complete, implementation pending)
+- ✅ SIMD-friendly batch processing (AVX2)
+- ✅ Dirty bit delta tracking (TemporalFlagBits::Dirty in universal strip)
+- ✅ GPU-driven compute pipeline (predicate → prefix_sum → scatter, Slang shaders)
+- ✅ Temporal component dual-buffer (TemporalComponentCache, proto-slab)
+- 🔄 Tiered storage redesign (Cold/Static/Volatile/Temporal + partition layout — design complete)
+- 🔄 VulkRender ThreadMain (skeleton exists, GPU loop in progress)
 - ⏳ Physics integration (Jolt, not started)
-- ⏳ State-sorted rendering (not started)
+- ⏳ Job system (infrastructure planned)
 
 ---
 
 ## Core Features
 
-### The Strigid Trinity (Three-Thread Architecture + Job System)
+### The Strigid Trinity (Three-Thread Architecture)
 
-- **Sentinel (Main Thread):** 1000Hz input polling, GPU resource management, frame pacing
-- **Brain (Logic Thread):** 512Hz fixed timestep coordinator + job distribution
-- **Encoder (Render Thread):** Variable-rate render coordinator + job distribution
-- **Worker Threads:** Shared pool for parallel entity updates, physics, rendering (5 cores on 8-core CPU)
+- **Sentinel (Main Thread):** 1000Hz input polling, window + Vulkan lifetime management, frame pacing
+- **Brain (Logic Thread):** 512Hz fixed-timestep coordinator. Submits LogicQueue jobs, then acts as a worker.
+- **Encoder (Render Thread):** Variable-rate render coordinator. Submits RenderQueue jobs, then acts as a worker.
+- **Worker Threads:** Shared pool pulling from both queues (work-stealing). ~4× speedup on 8-core.
 
-Brain and Encoder act as coordinators that distribute work across the job system, then act as workers themselves. On an 8-core system, this enables ~4x speedup (80% efficiency) for both logic and render passes.
+Brain and Encoder are coordinators, not dedicated workers. On an 8-core CPU this gives ~4× speedup for both logic
+and render passes.
 
-### Memory Model: History Slab
+### Memory Model: Tiered Storage
 
-A custom arena allocator that stores multiple frames of simulation history for:
-- **Zero-copy rendering:** Direct page access eliminates snapshot overhead
-- **Rollback netcode:** GGPO-style prediction and correction
-- **Lag compensation:** Server-side rewind for hit detection
-- **Replay system:** Read historical frames for playback
+Entity data lives in one of four storage tiers based on access pattern and rollback requirements:
 
-See [Architecture Documentation](docs/ARCHITECTURE.md) for details.
+| Tier | Structure | Frames | Rollback | Use Case |
+|------|-----------|--------|----------|----------|
+| Cold | Archetype chunks (AoS) | 0 | No | Rarely-updated, non-iterable data |
+| Static | Separate read-only array | 0 | No | Geometry, never changes |
+| Volatile | SoA ring buffer | 5 | No | Cosmetic entities, ambient AI, particles |
+| Temporal | SoA ring buffer | max(8, X) | Yes | Networked, simulation-authoritative entities |
+
+Entities are automatically classified into **Temporal** (has `SimulationBody` component) or **Volatile** (does not).
+Within each tier, entities are placed into partitions — **Dual** (physics+render), **Phys**, **Render**, **Logic** —
+derived automatically from the SystemGroup tags on their components. No manual annotation required.
+
+See [Architecture Documentation](docs/ARCHITECTURE.md) for full details.
+
+### GPU-Driven Rendering Pipeline
+
+A 3-pass compute pipeline processes entity data on the GPU each frame:
+
+1. **Predicate** — mark active + visible entities (writes `scan[i] = 0 or 1`)
+2. **Prefix Sum** — Option-B scan (subgroup lanes + one `atomicAdd` per workgroup)
+3. **Scatter** — lerp fields for GPU interpolation, write to InstanceBuffer SoA, set `DrawArgs.instanceCount`
+
+The render thread uploads only **dirty entities** each frame (delta upload via cumulative dirty bit array).
+GPU interpolation uses its own persistent previous-frame InstanceBuffer — render thread only uploads current
+frame T; the GPU keeps T-1 itself. Five GPU InstanceBuffers decouple the VSync clock from the logic thread.
 
 ### Data-Oriented Components
 
-Components decompose into Structure-of-Arrays via `FieldProxy<T>`:
+Components decompose into Structure-of-Arrays via `FieldProxy<T, FieldWidth>`:
 
 ```cpp
+template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct Transform {
-    FieldProxy<float> PositionX, PositionY, PositionZ;
-    FieldProxy<float> RotationX, RotationY, RotationZ;
-    FieldProxy<float> ScaleX, ScaleY, ScaleZ;
+    FieldProxy<float, WIDTH> PositionX, PositionY, PositionZ;
+    FieldProxy<float, WIDTH> RotationX, RotationY, RotationZ;
+    FieldProxy<float, WIDTH> ScaleX,    ScaleY,    ScaleZ;
+
+    STRIGID_TEMPORAL_FIELDS(Transform, SystemGroup::None,
+        PositionX, PositionY, PositionZ,
+        RotationX, RotationY, RotationZ,
+        ScaleX, ScaleY, ScaleZ)
 };
+STRIGID_REGISTER_COMPONENT(Transform)
 
-class CubeEntity : public EntityView<CubeEntity> {
-    Transform transform;
-    Velocity velocity;
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+struct CubeEntity : EntityView<CubeEntity, WIDTH> {
+    Transform<WIDTH> transform;
+    Velocity<WIDTH>  velocity;
 
-    void PrePhysics(double dt) {
-        // OOP-style syntax, SoA performance
-        transform.PositionX += velocity.VelocityX * dt;
+    FORCE_INLINE void PrePhysics(double dt) {
+        transform.PositionX += velocity.VelocityX * static_cast<float>(dt);
     }
+
+    STRIGID_REGISTER_SCHEMA(CubeEntity, EntityView, transform, velocity)
 };
+STRIGID_REGISTER_ENTITY(CubeEntity)
 ```
 
-Users write natural OOP code while the engine handles SoA layout automatically.
+Users write natural OOP code while the engine handles SoA layout, double-buffering, and SIMD automatically.
+
+`FieldProxy` has three width modes: `Scalar` (one entity/iteration), `Wide` (8 entities/AVX2 instruction),
+and `WideMask` (tail-masked partial lanes for non-multiples of 8).
 
 ---
 
 ## Architectural Constraints
 
-These rules drive all design decisions:
-
 ### Hard Constraints
-1. **Macro-First Registration** - Components and entities must register with reflection system
-2. **PoD Components Only** - No `std::vector` or `std::string` in components
-3. **FieldProxy Hot Components** - Hot-path data lives in History Slab
-4. **Zero Frame Allocations** - No memory allocation in PrePhysics/Update/PostPhysics/Render
-5. **Lock-Free Communication** - Atomics and wait-free data structures only
-6. **No Logic in Physics** - Physics solver never calls virtual functions
-7. **No Rendering in Logic** - GPU calls only on Encoder thread
+1. **No virtual functions** in entities or components — compile-time enforced by `STRIGID_REGISTER_ENTITY`
+2. **PoD Components only** — no `std::vector` or `std::string` (enforced by `VALIDATE_COMPONENT_IS_POD`)
+3. **Zero frame allocations** — no heap allocation in PrePhysics/PostPhysics/Render
+4. **Lock-free inter-thread communication** — atomics and lock-free structures only
+5. **GPU calls only on the Encoder thread**
 
 ### Design Goals
-8. **White Box Philosophy** - Understand and debug everything
-9. **OOP Facade** - Natural syntax despite SoA layout
-10. **Cache Locality First** - Sequential access patterns
-11. **SIMD-Friendly** - Vectorizable loops with compiler hints
-12. **Deterministic Option** - Configurable determinism for netcode
+6. **White Box Philosophy** — understand and debug everything
+7. **OOP Facade** — natural syntax despite SoA layout
+8. **Cache Locality First** — sequential access patterns, partition-aligned entity groups
+9. **SIMD-Friendly** — vectorizable loops (AVX2), AVX-512 ready
+10. **Deterministic Option** — configurable for rollback netcode
 
 ---
 
 ## Documentation
 
-### Core Documentation
-- **[Architecture Overview](docs/ARCHITECTURE.md)** - History Slab, threading model, memory layout
-- **[Performance Targets](docs/PERFORMANCE_TARGETS.md)** - Benchmarks, budgets, scalability analysis
-- **[Data Structures](docs/DATA_STRUCTURES.md)** - Component patterns, FieldProxy, EntityView
-- **[Configuration Guide](docs/CONFIGURATION.md)** - EngineConfig presets and tuning
-- **[Current Status](docs/STATUS.md)** - Week 3 progress, roadmap, next milestones
-- **[Build Options](docs/BUILD_OPTIONS.md)** - CMake configuration, Tracy profiling, vectorization
-- **[Schema Error Examples](docs/SCHEMA_ERROR_EXAMPLES.md)** - Common reflection system mistakes and fixes
-
-### Key Concepts
-- **History Slab:** Multi-frame arena allocator for zero-copy rendering and netcode
-- **Job System:** Work-stealing scheduler for parallel entity updates and rendering
-- **FieldProxy:** Zero-overhead indirection for SoA component access
-- **EntityView:** CRTP-style entity base with compile-time hydration
-- **Triple-Buffer Mailbox:** Lock-free communication between Logic and Render threads
+- **[Architecture Overview](docs/ARCHITECTURE.md)** — Tiered storage, partition design, threading model, GPU upload
+- **[Performance Targets](docs/PERFORMANCE_TARGETS.md)** — Benchmarks, budgets, scalability analysis
+- **[Data Structures](docs/DATA_STRUCTURES.md)** — FieldProxy, EntityView, InstanceData, component patterns
+- **[Configuration Guide](docs/CONFIGURATION.md)** — EngineConfig presets and tuning
+- **[Current Status](docs/STATUS.md)** — Progress log, roadmap, next milestones
+- **[Build Options](docs/BUILD_OPTIONS.md)** — CMake configuration, Tracy profiling, vectorization
+- **[Schema Error Examples](docs/SCHEMA_ERROR_EXAMPLES.md)** — Reflection system mistakes and fixes
+- **[GPU-Driven Rendering Design](docs/GPU_Driven_Rendering_Design.md)** — GPU pipeline design doc
 
 ---
 
 ## Building
 
-**Requirements:**
-- C++20 compiler (MSVC, Clang, or GCC)
+**Requirements (Linux):**
+- C++20 compiler (GCC or Clang)
 - CMake 3.20+
-- SDL3 (included as submodule)
-- Tracy Profiler (included as submodule)
-
-**Quick Start:**
+- SDL3 system package (`sudo apt install libsdl3-dev` or distro equivalent)
+- Tracy submodule (`libs/tracy`)
+- Slang compiler binary (`libs/slang/bin/slangc`) — vendored
 
 ```bash
-git clone --recursive https://github.com/YourUsername/StrigidEngine.git
-cd StrigidEngine
-cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build build
-./build/Testbed/Testbed
+cmake -B cmake-build-relwithdebinfo -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build cmake-build-relwithdebinfo
+./cmake-build-relwithdebinfo/Testbed/Testbed
 ```
 
 See [docs/BUILD_OPTIONS.md](docs/BUILD_OPTIONS.md) for advanced configuration.
-
----
-
-## Project Status
-
-**Current Phase:** Week 3 - SoA Architecture Complete, History Slab Design
-
-**Completed:**
-- Three-thread architecture with lock-free communication
-- Component decomposition via FieldProxy
-- EntityView hydration with zero virtual calls
-- Tracy profiler integration
-- SDL3 GPU rendering (Vulkan/Metal/D3D12)
-
-**In Progress:**
-- History Slab implementation
-- State-sorted rendering (64-bit sort keys)
-
-**Next Up:**
-- Frustum culling integration
-- Jolt Physics integration
-- Input system (1000Hz sampling)
-
-See [docs/STATUS.md](docs/STATUS.md) for detailed weekly progress.
 
 ---
 
@@ -179,15 +178,15 @@ See [docs/STATUS.md](docs/STATUS.md) for detailed weekly progress.
 
 **Target:** 100,000 dynamic entities at 512Hz fixed update (1.95ms per frame)
 
-We measure performance in **milliseconds per frame**, not FPS:
-- **Sentinel:** 1.0ms (1000 Hz) ✅
-- **Logic:** 1.95ms (512 Hz) - target
-- **Render:** 8-16ms (60-120 FPS) - target
+| Thread | Target | Current |
+|--------|--------|---------|
+| Sentinel | 1.0ms (1000 Hz) | ✅ Achieved |
+| Brain (Logic) | 1.95ms (512 Hz) | ~1.7ms |
+| Encoder (Render) | 8-16ms (60-120 FPS) | In progress |
 
-Memory footprint with 128 pages of history:
-- **100k mixed entities:** ~1.89 GB (includes hot history + cold components)
-- **100k simple entities:** ~1.61 GB
-- **Configurable:** 4-128 pages for different use cases (rendering only → full GGPO)
+The tiered partition design eliminates the cross-archetype co-indexing problem: physics iterates
+DUAL→PHYS→STATIC as three dense SIMD passes; render iterates DUAL→RENDER→STATIC. No pointer chasing,
+no per-chunk header lookups, no data duplication.
 
 See [docs/PERFORMANCE_TARGETS.md](docs/PERFORMANCE_TARGETS.md) for detailed analysis.
 
@@ -195,14 +194,11 @@ See [docs/PERFORMANCE_TARGETS.md](docs/PERFORMANCE_TARGETS.md) for detailed anal
 
 ## Design Inspiration
 
-This project explores ideas from:
-- **Data-Oriented Design** - Naughty Dog
-- **Overwatch Netcode** - GDC talks on lag compensation
-- **GGPO** - Tony Cannon's rollback netcode
-- **Jolt Physics** - Zero-copy simulation integration
-- **Tracy Profiler** - Frame-accurate performance analysis
-
-The goal is to validate that strict DOD can coexist with comfortable OOP-style user code.
+- **Data-Oriented Design** — Naughty Dog
+- **Overwatch Netcode** — GDC talks on lag compensation
+- **GGPO** — Tony Cannon's rollback netcode
+- **Jolt Physics** — zero-copy simulation integration
+- **Tracy Profiler** — frame-accurate performance analysis
 
 ---
 
@@ -214,8 +210,8 @@ The goal is to validate that strict DOD can coexist with comfortable OOP-style u
 
 - **Author:** Cody "Tyko" Pederson
 - **Issues:** [GitHub Issues](https://github.com/YourUsername/StrigidEngine/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/YourUsername/StrigidEngine/discussions)
 
 ---
 
-**Note:** This is a personal R&D project for experimenting with engine architecture. Production use is not recommended. The primary goal is learning and stress-testing architectural theories.
+**Note:** This is a personal R&D project for experimenting with engine architecture. Production use is not recommended.
+The primary goal is stress-testing architectural theories that would be too risky to implement in a live product.

@@ -10,53 +10,53 @@
 // Log severity levels
 enum class LogLevel
 {
-    Trace = 0,
-    Debug = 1,
-    Info = 2,
-    Warning = 3,
-    Error = 4,
-    Fatal = 5,
+	Trace   = 0,
+	Debug   = 1,
+	Info    = 2,
+	Warning = 3,
+	Error   = 4,
+	Fatal   = 5,
 
-    Always = 0xFF
+	Always = 0xFF
 };
 
 // Singleton logger with thread-safe file writing
 class Logger
 {
 public:
-    static Logger& Get()
-    {
-        static Logger Instance;
-        return Instance;
-    }
+	static Logger& Get()
+	{
+		static Logger Instance;
+		return Instance;
+	}
 
-    // Initialize logger with file output
-    void Init(const std::string& LogFilePath = "StrigidEngine.log", LogLevel inMinLevel = LogLevel::Debug);
+	// Initialize logger with file output
+	void Init(const std::string& LogFilePath = "StrigidEngine.log", LogLevel inMinLevel = LogLevel::Debug);
 
-    // Shut down and flush file
-    void Shutdown();
+	// Shut down and flush file
+	void Shutdown();
 
-    // Set minimum log level filter
-    void SetMinLevel(LogLevel Level) { MinLevel = Level; }
+	// Set minimum log level filter
+	void SetMinLevel(LogLevel Level) { MinLevel = Level; }
 
-    // Core logging function
-    void Log(LogLevel Level, const char* File, int Line, const std::string& Message);
-
-private:
-    Logger() = default;
-    ~Logger() { Shutdown(); }
-    Logger(const Logger&) = delete;
-    Logger& operator=(const Logger&) = delete;
-
-    std::string GetTimestamp();
-    std::string LevelToString(LogLevel Level);
-    std::string LevelToColor(LogLevel Level);
+	// Core logging function
+	void Log(LogLevel Level, const char* File, int Line, const std::string& Message);
 
 private:
-    std::ofstream LogFile;
-    std::mutex Mutex;
-    LogLevel MinLevel = LogLevel::Debug;
-    bool bInitialized = false;
+	Logger() = default;
+	~Logger() { Shutdown(); }
+	Logger(const Logger&)            = delete;
+	Logger& operator=(const Logger&) = delete;
+
+	std::string GetTimestamp();
+	std::string LevelToString(LogLevel Level);
+	std::string LevelToColor(LogLevel Level);
+
+private:
+	std::ofstream LogFile;
+	std::mutex Mutex;
+	LogLevel MinLevel = LogLevel::Debug;
+	bool bInitialized = false;
 };
 
 // Convenience macros for logging

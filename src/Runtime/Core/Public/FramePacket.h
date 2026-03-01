@@ -6,9 +6,9 @@
  */
 struct ViewState
 {
-    Matrix4 ViewMatrix;
-    Matrix4 ProjectionMatrix;
-    Vector3 CameraPosition;
+	Matrix4 ViewMatrix;
+	Matrix4 ProjectionMatrix;
+	Vector3 CameraPosition;
 };
 
 /**
@@ -16,8 +16,8 @@ struct ViewState
  */
 struct SceneState
 {
-    Vector3 SunDirection;
-    Vector3 SunColor;
+	Vector3 SunDirection;
+	Vector3 SunColor;
 };
 
 /**
@@ -28,19 +28,19 @@ struct SceneState
  */
 struct alignas(64) FramePacket
 {
-    ViewState View;
-    SceneState Scene;
+	ViewState View;
+	SceneState Scene;
 
-    // Timing
-    double SimulationTime; // Current simulation time
+	// Timing
+	double SimulationTime; // Current simulation time
 
-    // Snapshot Metadata
-    uint32_t ActiveEntityCount; // How many entities in the sparse arrays
-    uint32_t FrameNumber; // Increments each FixedUpdate, signals new data available
+	// Snapshot Metadata
+	uint32_t ActiveEntityCount; // How many entities in the sparse arrays
+	uint32_t FrameNumber;       // Increments each FixedUpdate, signals new data available
 
-    void Clear()
-    {
-        ActiveEntityCount = 0;
-        FrameNumber = 0;
-    }
+	void Clear()
+	{
+		ActiveEntityCount = 0;
+		FrameNumber       = 0;
+	}
 };

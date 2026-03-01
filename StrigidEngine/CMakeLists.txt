@@ -4,11 +4,19 @@
 project(StrigidEngine VERSION 0.1 LANGUAGES CXX)
 
 # -----------------------------------------------------------------------------
+# VULKAN
+# -----------------------------------------------------------------------------
+find_package(Vulkan REQUIRED)
+
+# -----------------------------------------------------------------------------
 # SOURCE MANAGEMENT
 # -----------------------------------------------------------------------------
 # Gather all engine source files
 file(GLOB_RECURSE ENGINE_SOURCES "${CMAKE_SOURCE_DIR}/src/*.cpp")
 file(GLOB_RECURSE ENGINE_HEADERS "${CMAKE_SOURCE_DIR}/src/*.h")
+
+# volk.c provides the Vulkan function loader implementation (compiled once here).
+set(VOLK_SOURCES "${VOLK_PATH}/volk.c")
 
 # -----------------------------------------------------------------------------
 # LIBRARY DEFINITION
@@ -17,13 +25,14 @@ add_library(${PROJECT_NAME} STATIC
     ${ENGINE_SOURCES}
     ${ENGINE_HEADERS}
     ${TRACY_SOURCES}
+    ${VOLK_SOURCES}
         ../src/Runtime/Core/Public/ComponentView.h
 )
 
-# Disable strict warnings for Tracy sources
+# Suppress all warnings from Tracy (third-party, not our code)
 if(TRACY_SOURCES AND NOT MSVC)
     set_source_files_properties(${TRACY_SOURCES} PROPERTIES
-        COMPILE_FLAGS "-Wno-error"
+        COMPILE_FLAGS "-w"
     )
 endif()
 
@@ -79,6 +88,84 @@ elseif(UNIX)
     find_package(SDL3 REQUIRED CONFIG)
     target_link_libraries(${PROJECT_NAME} PUBLIC SDL3::SDL3)
 endif()
+
+# C. Vulkan + volk + VMA
+target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
+    "${VOLK_PATH}"
+    "${VMA_PATH}"
+    "${Vulkan_INCLUDE_DIRS}"
+)
+target_link_libraries(${PROJECT_NAME} PUBLIC Vulkan::Vulkan)
+
+# volk.c must not be compiled with -Werror (upstream code, not ours)
+if(NOT MSVC)
+    set_source_files_properties("${VOLK_PATH}/volk.c" PROPERTIES
+        COMPILE_FLAGS "-Wno-error"
+    )
+endif()
+
+# Shader output directory baked into the binary as a compile-time constant.
+target_compile_definitions(${PROJECT_NAME} PUBLIC
+    STRIGID_SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders"
+)
+
+# ---------------------------------------------------------------------------
+# Slang shader compilation
+# ---------------------------------------------------------------------------
+set(SLANGC "${CMAKE_SOURCE_DIR}/libs/slang/bin/slangc")
+
+# List every .slang shader source here.  Each entry produces a .spv in
+# ${CMAKE_SOURCE_DIR}/shaders/ using the same base name.
+set(SLANG_SHADER_SOURCES
+    "${CMAKE_SOURCE_DIR}/shaders/predicate.slang"
+    "${CMAKE_SOURCE_DIR}/shaders/prefix_sum.slang"
+    "${CMAKE_SOURCE_DIR}/shaders/scatter.slang"
+    "${CMAKE_SOURCE_DIR}/shaders/cube.vert.slang"
+    "${CMAKE_SOURCE_DIR}/shaders/cube.frag.slang"
+)
+
+# Shared header that all shaders include — listed in DEPENDS so any shader
+# rebuilds automatically when GpuFrameData.slang changes.
+set(SLANG_COMMON_HEADERS "${CMAKE_SOURCE_DIR}/shaders/GpuFrameData.slang")
+
+set(SLANG_SPIRV_OUTPUTS "")
+foreach(SLANG_SRC ${SLANG_SHADER_SOURCES})
+    get_filename_component(SHADER_NAME "${SLANG_SRC}" NAME_WE)
+    get_filename_component(SHADER_EXT  "${SLANG_SRC}" EXT)       # e.g. .slang or .vert.slang
+    # Strip the .slang suffix to get the real extension (e.g. .vert, .frag, empty for compute)
+    string(REGEX REPLACE "\\.slang$" "" SHADER_STEM "${SLANG_SRC}")
+    get_filename_component(FINAL_NAME "${SHADER_STEM}" NAME)     # e.g. cube.vert, predicate
+    set(SPV_OUT "${CMAKE_SOURCE_DIR}/shaders/${FINAL_NAME}.spv")
+
+    # Determine the Slang stage from the file name suffix.
+    if("${FINAL_NAME}" MATCHES "\\.vert$")
+        set(SLANG_STAGE "-stage vertex")
+    elseif("${FINAL_NAME}" MATCHES "\\.frag$")
+        set(SLANG_STAGE "-stage fragment")
+    else()
+        set(SLANG_STAGE "-stage compute")
+    endif()
+
+    separate_arguments(SLANG_STAGE_ARGS UNIX_COMMAND "${SLANG_STAGE}")
+
+    add_custom_command(
+        OUTPUT  "${SPV_OUT}"
+        COMMAND "${SLANGC}"
+                ${SLANG_STAGE_ARGS}
+                -target spirv
+                -emit-spirv-directly
+                -I "${CMAKE_SOURCE_DIR}/shaders"
+                -o "${SPV_OUT}"
+                "${SLANG_SRC}"
+        DEPENDS "${SLANG_SRC}" ${SLANG_COMMON_HEADERS}
+        COMMENT "slangc ${FINAL_NAME}.slang → ${FINAL_NAME}.spv"
+        VERBATIM
+    )
+    list(APPEND SLANG_SPIRV_OUTPUTS "${SPV_OUT}")
+endforeach()
+
+add_custom_target(StrigidShaders ALL DEPENDS ${SLANG_SPIRV_OUTPUTS})
+add_dependencies(${PROJECT_NAME} StrigidShaders)
 
 # D. Tracy platform-specific libraries
 if(ENABLE_TRACY)

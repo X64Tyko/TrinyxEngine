@@ -74,7 +74,7 @@ TEST(InitializeTestEntities)
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> posX(-30.0f, 30.0f);
     std::uniform_real_distribution<float> posY(-30.0f, 30.0f);
-    std::uniform_real_distribution<float> posZ(-500.0f, -200.0f);
+    std::uniform_real_distribution<float> posZ(-100.0f, -50.0f);
     std::uniform_real_distribution<float> velX(-10.0f, 10.0f);
     std::uniform_real_distribution<float> velY(-10.0f, 10.0f);
     std::uniform_real_distribution<float> color(0.2f, 1.0f);

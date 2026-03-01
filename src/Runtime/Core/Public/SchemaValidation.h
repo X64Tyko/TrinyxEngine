@@ -2,65 +2,65 @@
 #include <type_traits>
 
 // Schema Validation - Provides better compile-time error messages for common mistakes
-    
+
 template <typename FieldType, FieldWidth WIDTH>
 struct FieldProxy;
 
 namespace SchemaValidation
 {
-    // Check if a type has a DefineSchema() method
-    template <typename T, typename = void>
-    struct HasDefineSchema : std::false_type
-    {
-    };
+	// Check if a type has a DefineSchema() method
+	template <typename T, typename = void>
+	struct HasDefineSchema : std::false_type
+	{
+	};
 
-    template <typename T>
-    struct HasDefineSchema<T, std::void_t<decltype(T::DefineSchema())>> : std::true_type
-    {
-    };
+	template <typename T>
+	struct HasDefineSchema<T, std::void_t<decltype(T::DefineSchema())>> : std::true_type
+	{
+	};
 
-    // Type trait helper
-    template <typename T>
-    struct IsFieldProxy : std::false_type
-    {
-    };
+	// Type trait helper
+	template <typename T>
+	struct IsFieldProxy : std::false_type
+	{
+	};
 
-    template <typename T, FieldWidth WIDTH>
-    struct IsFieldProxy<FieldProxy<T, WIDTH>> : std::true_type
-    {
-    };
+	template <typename T, FieldWidth WIDTH>
+	struct IsFieldProxy<FieldProxy<T, WIDTH>> : std::true_type
+	{
+	};
 
-    // Helper to check if all fields of a component are FieldProxy
-    template <typename T>
-    struct AllFieldsAreFieldProxy
-    {
-        template <typename U>
-        static auto test(int) -> decltype(
-            std::declval<U>().DefineFields(),
-            std::true_type{}
-        );
+	// Helper to check if all fields of a component are FieldProxy
+	template <typename T>
+	struct AllFieldsAreFieldProxy
+	{
+		template <typename U>
+		static auto test(int) -> decltype(
+			std::declval<U>().DefineFields(),
+			std::true_type{}
+		);
 
-        template <typename>
-        static std::false_type test(...);
+		template <typename>
+		static std::false_type test(...);
 
-        static constexpr bool has_fields = decltype(test<T>(0))::value;
+		static constexpr bool has_fields = decltype(test<T>(0))::value;
 
-        // If component has fields, check if they're all FieldProxy
-        // Otherwise just use trivially_copyable check
-        static constexpr bool value = has_fields; // Simplified for now - assume components with DefineFields use FieldProxy
-    };
+		// If component has fields, check if they're all FieldProxy
+		// Otherwise just use trivially_copyable check
+		static constexpr bool value = has_fields; // Simplified for now - assume components with DefineFields use FieldProxy
+	};
 
-    // Check if a type is a valid component (POD-like, no vtable)
-    // Temporal components with FieldProxy fields are allowed (they have non-trivial destructors)
-    // Non-temporal components must be strictly POD
-    template <typename T>
-    struct IsValidComponent
-    {
-        static constexpr bool value =
-            std::is_standard_layout_v<T> &&
-            !std::is_polymorphic_v<T> &&  // No virtual functions
-            (std::is_trivially_copyable_v<T> || AllFieldsAreFieldProxy<T>::value);
-    };
+	// Check if a type is a valid component (POD-like, no vtable)
+	// Temporal components with FieldProxy fields are allowed (they have non-trivial destructors)
+	// Non-temporal components must be strictly POD
+	template <typename T>
+	struct IsValidComponent
+	{
+		static constexpr bool value =
+			std::is_standard_layout_v<T> &&
+			!std::is_polymorphic_v<T> && // No virtual functions
+			(std::is_trivially_copyable_v<T> || AllFieldsAreFieldProxy<T>::value);
+	};
 } // namespace SchemaValidation
 
 // Helpful error message macros with better formatting

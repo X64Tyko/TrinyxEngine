@@ -9,6 +9,7 @@
 #include "SchemaReflector.h"
 #include "Signature.h"
 #include "TemporalComponentCache.h"
+#include "TemporalFlags.h"
 #include "Types.h"
 
 struct EngineConfig;
@@ -17,86 +18,92 @@ struct EngineConfig;
 class Registry
 {
 public:
-    Registry();
-    Registry(const EngineConfig* Config);
-    ~Registry();
+	Registry();
+	Registry(const EngineConfig* Config);
+	~Registry();
 
-    // Entity creation, Reflection allows this to be extremely quick
-    // Usage: EntityID player = Registry::Get().Create<PlayerController>();
-    template <typename T>
-    EntityID Create();
+	// Entity creation, Reflection allows this to be extremely quick
+	// Usage: EntityID player = Registry::Get().Create<PlayerController>();
+	template <typename T>
+	EntityID Create();
 
-    // Destroy an entity (deferred until end of frame)
-    void Destroy(EntityID Id);
-    bool DestroyRecord(EntityRecord& Record);
+	// Destroy an entity (deferred until end of frame)
+	void Destroy(EntityID Id);
+	bool DestroyRecord(EntityRecord& Record);
 
-    // Get component from entity
-    template <typename T>
-    T* GetComponent(EntityID Id);
+	// Get component from entity
+	template <typename T>
+	T* GetComponent(EntityID Id);
 
-    // Check if entity has component
-    template <typename T>
-    bool HasComponent(EntityID Id);
+	// Check if entity has component
+	template <typename T>
+	bool HasComponent(EntityID Id);
 
-    // Get or create archetype for a given signature
-    Archetype* GetOrCreateArchetype(const Signature& Sig, const ClassID& ID);
+	// Get or create archetype for a given signature
+	Archetype* GetOrCreateArchetype(const Signature& Sig, const ClassID& ID);
 
-    // Apply all pending destructions (called at end of frame)
-    void ProcessDeferredDestructions();
+	// Apply all pending destructions (called at end of frame)
+	void ProcessDeferredDestructions();
 
-    template <typename... Components>
-    std::vector<Archetype*> ComponentQuery();
-    
-    template <typename... Classes>
-    std::vector<Archetype*> ClassQuery();
+	template <typename... Components>
+	std::vector<Archetype*> ComponentQuery();
 
-    // Invoke all lifecycle functions of a specific type
-    // currentFrame: frame T (read from T, write to T+1)
-    void InvokeScalarUpdate(double dt, uint32_t currentFrame);
-    void InvokePrePhys(double dt, uint32_t currentFrame);
-    void InvokePostPhys(double dt, uint32_t currentFrame);
+	template <typename... Classes>
+	std::vector<Archetype*> ClassQuery();
 
-    // Access temporal cache
-    TemporalComponentCache* GetTemporalCache() { return &HistorySlab; }
+	// Invoke all lifecycle functions of a specific type
+	// currentFrame: frame T (read from T, write to T+1)
+	void InvokeScalarUpdate(double dt, uint32_t currentFrame);
+	void InvokePrePhys(double dt, uint32_t currentFrame);
+	void InvokePostPhys(double dt, uint32_t currentFrame);
 
-    // Memory diagnostics
-    uint32_t GetTotalChunkCount() const;
-    uint32_t GetTotalEntityCount() const;
+	// Access temporal cache
+	TemporalComponentCache* GetTemporalCache() { return &HistorySlab; }
 
-    // Resets the registry to default, useful after tests.
-    // TODO: this needs to not be public.
-    void ResetRegistry();
+	// Memory diagnostics
+	uint32_t GetTotalChunkCount() const;
+	uint32_t GetTotalEntityCount() const;
+
+	// Resets the registry to default, useful after tests.
+	// TODO: this needs to not be public.
+	void ResetRegistry();
 
 private:
-    // Initialize archetypes with data from MetaRegistry
-    void InitializeArchetypes();
+	// Initialize archetypes with data from MetaRegistry
+	void InitializeArchetypes();
 
-    // Global entity lookup table (indexed by EntityID.GetIndex())
-    std::vector<EntityRecord> EntityIndex;
+	// Global entity lookup table (indexed by EntityID.GetIndex())
+	std::vector<EntityRecord> EntityIndex;
 
-    // Free list for recycled entity indices
-    std::queue<uint32_t> FreeIndices;
+	// Free list for recycled entity indices
+	std::queue<uint32_t> FreeIndices;
 
-    // Next entity index to allocate (if free list is empty)
-    uint32_t NextEntityIndex = 0;
+	// Next entity index to allocate (if free list is empty)
+	uint32_t NextEntityIndex = 0;
 
-    // Archetype storage (pair<signature, classID> → archetype)
-    std::unordered_map<Archetype::ArchetypeKey, Archetype*, ArchetypeKeyHash> Archetypes;
+	// Archetype storage (pair<signature, classID> → archetype)
+	std::unordered_map<Archetype::ArchetypeKey, Archetype*, ArchetypeKeyHash> Archetypes;
 
-    // Pending destructions (processed at end of frame)
-    std::vector<EntityID> PendingDestructions;
+	// Pending destructions (processed at end of frame)
+	std::vector<EntityID> PendingDestructions;
 
-    TemporalComponentCache HistorySlab;
+	TemporalComponentCache HistorySlab;
 
-    // Allocate a new EntityID
-    EntityID AllocateEntityID(uint16_t TypeID);
+	// Pre-allocated dual array table used by all Invoke* methods.
+	// Avoids a large VLA on the stack each call.  Sized by MAX_FIELDS_PER_ARCHETYPE
+	// (not the global MAX_FIELD_ARRAYS) because only one archetype is processed at a time.
+	// Safe to share because all three Invoke methods run serially on the Brain thread.
+	void* DualArrayTableBuffer[MAX_FIELDS_PER_ARCHETYPE * 2]{};
 
-    // Free an EntityID (returns index to free list)
-    void FreeEntityID(EntityID Id);
+	// Allocate a new EntityID
+	EntityID AllocateEntityID(uint16_t TypeID);
 
-    // Helper: Build signature from component list
-    template <typename... Components>
-    Signature BuildSignature();
+	// Free an EntityID (returns index to free list)
+	void FreeEntityID(EntityID Id);
+
+	// Helper: Build signature from component list
+	template <typename... Components>
+	Signature BuildSignature();
 };
 
 // Template implementations must be in header
@@ -104,290 +111,297 @@ private:
 template <typename T>
 EntityID Registry::Create()
 {
-    // Static local caching - archetype is calculated once per type T
-    static Archetype* CachedArchetype = nullptr;
-    static bool Initialized = false;
+	// Static local caching - archetype is calculated once per type T
+	static Archetype* CachedArchetype = nullptr;
+	static bool Initialized           = false;
 
-    if (!Initialized)
-    {
-        ClassID classID = T::StaticClassID();
-        MetaRegistry& MR = MetaRegistry::Get();
+	if (!Initialized)
+	{
+		ClassID classID  = T::StaticClassID();
+		MetaRegistry& MR = MetaRegistry::Get();
 
 #ifdef _DEBUG // || _WITH_EDITOR
-        // Runtime guard: Check if entity type was registered with STRIGID_REGISTER_ENTITY
-        if (MR.ClassToArchetype.find(classID) == MR.ClassToArchetype.end())
-        {
-            // FATAL: Entity type not registered
-            const char* typeName = typeid(T).name();
-            LOG_ERROR_F("FATAL: Entity type '%s' not registered! Did you forget STRIGID_REGISTER_ENTITY(%s)?",
-                        typeName, typeName);
+		// Runtime guard: Check if entity type was registered with STRIGID_REGISTER_ENTITY
+		if (MR.ClassToArchetype.find(classID) == MR.ClassToArchetype.end())
+		{
+			// FATAL: Entity type not registered
+			const char* typeName = typeid(T).name();
+			LOG_ERROR_F("FATAL: Entity type '%s' not registered! Did you forget STRIGID_REGISTER_ENTITY(%s)?",
+						typeName, typeName);
 
-        // In debug builds, assert. In release, fail gracefully
+		// In debug builds, assert. In release, fail gracefully
 #ifdef _DEBUG
-        assert(false && "Entity type not registered - add STRIGID_REGISTER_ENTITY macro");
+		assert(false && "Entity type not registered - add STRIGID_REGISTER_ENTITY macro");
 #endif
 
-        // Return invalid entity ID
-        return EntityID{};
+		// Return invalid entity ID
+		return EntityID{};
         }
 #endif
 
-        Signature Sig = MR.ClassToArchetype[classID];
+		Signature Sig = MR.ClassToArchetype[classID];
 
-        CachedArchetype = GetOrCreateArchetype(Sig, classID);
-        Initialized = true;
-    }
+		CachedArchetype = GetOrCreateArchetype(Sig, classID);
+		Initialized     = true;
+	}
 
-    // Allocate entity ID
-    EntityID Id = AllocateEntityID(T::StaticClassID());
+	// Allocate entity ID
+	EntityID Id = AllocateEntityID(T::StaticClassID());
 
-    // Allocate slot in archetype
-    Archetype::EntitySlot Slot = CachedArchetype->PushEntity();
+	// Allocate slot in archetype
+	Archetype::EntitySlot Slot = CachedArchetype->PushEntity();
 
-    // Update EntityIndex
-    uint32_t Index = Id.GetIndex();
-    if (Index >= EntityIndex.size())
-    {
-        EntityIndex.resize(Index * 2);
-    }
+	// Update EntityIndex
+	uint32_t Index = Id.GetIndex();
+	if (Index >= EntityIndex.size())
+	{
+		EntityIndex.resize(Index * 2);
+	}
 
-    EntityRecord& Record = EntityIndex[Index];
-    Record.Arch = CachedArchetype;
-    Record.TargetChunk = Slot.TargetChunk;
-    Record.Index = static_cast<uint16_t>(Slot.LocalIndex);
-    Record.Generation = Id.GetGeneration();
+	EntityRecord& Record = EntityIndex[Index];
+	Record.Arch          = CachedArchetype;
+	Record.TargetChunk   = Slot.TargetChunk;
+	Record.Index         = static_cast<uint16_t>(Slot.LocalIndex);
+	Record.Generation    = Id.GetGeneration();
 
-    return Id;
+	return Id;
 }
 
 template <typename T>
 T* Registry::GetComponent(EntityID Id)
 {
-    if (!Id.IsValid())
-        return nullptr;
+	if (!Id.IsValid()) return nullptr;
 
-    uint32_t Index = Id.GetIndex();
-    if (Index >= EntityIndex.size())
-        return nullptr;
+	uint32_t Index = Id.GetIndex();
+	if (Index >= EntityIndex.size()) return nullptr;
 
-    EntityRecord& Record = EntityIndex[Index];
+	EntityRecord& Record = EntityIndex[Index];
 
-    // Validate generation (detect use-after-free)
-    if (Record.Generation != Id.GetGeneration())
-        return nullptr;
+	// Validate generation (detect use-after-free)
+	if (Record.Generation != Id.GetGeneration()) return nullptr;
 
-    if (!Record.IsValid())
-        return nullptr;
+	if (!Record.IsValid()) return nullptr;
 
-    // TODO: Get ComponentTypeID from reflection (Week 5)
-    ComponentTypeID TypeID = GetComponentTypeID<T>();
+	// TODO: Get ComponentTypeID from reflection (Week 5)
+	ComponentTypeID TypeID = GetComponentTypeID<T>();
 
-    // Get component array from archetype
-    T* ComponentArray = Record.Arch->GetComponentArray<T>(Record.TargetChunk, TypeID);
-    if (!ComponentArray)
-        return nullptr;
+	// Get component array from archetype
+	T* ComponentArray = Record.Arch->GetComponentArray<T>(Record.TargetChunk, TypeID);
+	if (!ComponentArray) return nullptr;
 
-    // Return pointer to this entity's component
-    return &ComponentArray[Record.Index];
+	// Return pointer to this entity's component
+	return &ComponentArray[Record.Index];
 }
 
 template <typename T>
 bool Registry::HasComponent(EntityID Id)
 {
-    return GetComponent<T>(Id) != nullptr;
+	return GetComponent<T>(Id) != nullptr;
 }
 
 template <typename... Components>
 Signature Registry::BuildSignature()
 {
-    Signature Sig;
-    // Fold expression to set all component bits
-    ((Sig.Set(GetComponentTypeID<Components>() - 1)), ...);
-    return Sig;
+	Signature Sig;
+	// Fold expression to set all component bits
+	((Sig.Set(GetComponentTypeID<Components>() - 1)), ...);
+	return Sig;
 }
 
 template <typename... Components>
 std::vector<Archetype*> Registry::ComponentQuery()
 {
-    std::vector<Archetype*> Results(Archetypes.size());
-    uint8_t ArchIdx = 0;
-    bool Valid = false;
-    Signature Sig = BuildSignature<Components...>();
-    for (auto Arch : Archetypes)
-    {
-        Valid = Arch.first.Sig.Contains(Sig);
-        Results[ArchIdx] = Arch.second;
-        ArchIdx += !!Valid;
-    }
+	std::vector<Archetype*> Results(Archetypes.size());
+	uint8_t ArchIdx = 0;
+	bool Valid      = false;
+	Signature Sig   = BuildSignature<Components...>();
+	for (auto Arch : Archetypes)
+	{
+		Valid            = Arch.first.Sig.Contains(Sig);
+		Results[ArchIdx] = Arch.second;
+		ArchIdx          += !!Valid;
+	}
 
-    Results.erase(Results.begin() + ArchIdx, Results.end());
-    return Results;
+	Results.erase(Results.begin() + ArchIdx, Results.end());
+	return Results;
 }
 
 template <typename... Classes>
 std::vector<Archetype*> Registry::ClassQuery()
 {
-    std::vector<Archetype*> Results(Archetypes.size());
-    std::unordered_set<ClassID> ClassIDs{Classes::StaticClassID()...};
-    uint8_t ArchIdx = 0;
-    bool Valid = false;
-    for (auto Arch : Archetypes)
-    {
-        Valid = ClassIDs.contains(Arch.first.ID);
-        Results[ArchIdx] = Arch.second;
-        ArchIdx += !!Valid;
-    }
+	std::vector<Archetype*> Results(Archetypes.size());
+	std::unordered_set<ClassID> ClassIDs{Classes::StaticClassID()...};
+	uint8_t ArchIdx = 0;
+	bool Valid      = false;
+	for (auto Arch : Archetypes)
+	{
+		Valid            = ClassIDs.contains(Arch.first.ID);
+		Results[ArchIdx] = Arch.second;
+		ArchIdx          += !!Valid;
+	}
 
-    Results.erase(Results.begin() + ArchIdx, Results.end());
-    return Results;
+	Results.erase(Results.begin() + ArchIdx, Results.end());
+	return Results;
 }
 
 inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
 {
-    STRIGID_ZONE_C(STRIGID_COLOR_LOGIC);
+	STRIGID_ZONE_C(STRIGID_COLOR_LOGIC);
 
-    // Lock frame T+1 for writing (with wrapping)
-    uint32_t writeFrame = HistorySlab.GetNextFrame(currentFrame);
-    uint32_t readFrameIdx = HistorySlab.GetFrameIndex(currentFrame);
-    if (!HistorySlab.TryLockFrameForWrite(writeFrame))
-    {
-        LOG_ERROR_F("Failed to acquire write lock on frame %u", writeFrame);
-        return;
-    }
+	// Lock frame T+1 for writing (with wrapping)
+	uint32_t writeFrame   = HistorySlab.GetNextFrame(currentFrame);
+	uint32_t readFrameIdx = HistorySlab.GetFrameIndex(currentFrame);
+	if (!HistorySlab.TryLockFrameForWrite(writeFrame))
+	{
+		LOG_ERROR_F("Failed to acquire write lock on frame %u", writeFrame);
+		return;
+	}
 
-    // Verify frame T is readable
-    if (!HistorySlab.VerifyFrameReadable(currentFrame))
-    {
-        LOG_ERROR_F("Frame %u is not readable (locked by another thread)", currentFrame);
-        HistorySlab.UnlockFrameWrite(writeFrame);
-        return;
-    }
+	// Verify frame T is readable
+	if (!HistorySlab.VerifyFrameReadable(currentFrame))
+	{
+		LOG_ERROR_F("Frame %u is not readable (locked by another thread)", currentFrame);
+		HistorySlab.UnlockFrameWrite(writeFrame);
+		return;
+	}
 
-    void* dualArrayTable[MAX_FIELD_ARRAYS * 2]; // Interleaved read/write for FieldProxy::Bind()
+	for (auto& [sig, arch] : Archetypes)
+	{
+		UpdateFunc ScalarUpdate = MetaRegistry::Get().EntityGetters[sig.ID].ScalarUpdate;
+		if (!ScalarUpdate) continue;
 
-    for (auto& [sig, arch] : Archetypes)
-    {
-        UpdateFunc ScalarUpdate = MetaRegistry::Get().EntityGetters[sig.ID].ScalarUpdate;
-        if (!ScalarUpdate)
-            continue;
+		size_t size = arch->Chunks.size();
+		for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
+		{
+			Chunk* chunk         = arch->Chunks[chunkIdx];
+			uint32_t entityCount = arch->GetChunkCount(chunkIdx);
 
-        size_t size = arch->Chunks.size();
-        for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
-        {
-            Chunk* chunk = arch->Chunks[chunkIdx];
-            uint32_t entityCount = arch->GetChunkCount(chunkIdx);
+			if (entityCount == 0) continue;
 
-            if (entityCount == 0)
-                continue;
+			// Build interleaved dual array table (read T, write T+1)
+			arch->BuildFieldArrayTable(chunk, DualArrayTableBuffer, readFrameIdx, writeFrame);
 
-            // Build interleaved dual array table (read T, write T+1)
-            arch->BuildFieldArrayTable(chunk, dualArrayTable, readFrameIdx, writeFrame);
+			// Invoke batch processor with dual array table
+			ScalarUpdate(dt, DualArrayTableBuffer, entityCount);
 
-            // Invoke batch processor with dual array table
-            ScalarUpdate(dt, dualArrayTable, entityCount);
-        }
-    }
+			// Mark every processed entity dirty (bit 30) so RenderThread uploads their data.
+			static const ComponentTypeID kFlagsTypeID = GetComponentTypeID<TemporalFlags<>>();
+			if (int32_t* flagsWrite = arch->GetTemporalFieldWritePtr(chunk, kFlagsTypeID, 0, writeFrame))
+			{
+				constexpr int32_t kDirty = static_cast<int32_t>(1u << 30);
+				for (uint32_t e = 0; e < entityCount; ++e) flagsWrite[e] |= kDirty;
+			}
+		}
+	}
 
-    // Release locks at end of update
-    HistorySlab.UnlockFrameWrite(writeFrame);
+	// Release locks at end of update
+	HistorySlab.UnlockFrameWrite(writeFrame);
 }
 
 inline void Registry::InvokePrePhys(double dt, uint32_t currentFrame)
 {
-    STRIGID_ZONE_C(STRIGID_COLOR_LOGIC);
+	STRIGID_ZONE_C(STRIGID_COLOR_LOGIC);
 
-    // Lock frame T+1 for writing (with wrapping)
-    uint32_t writeFrame = HistorySlab.GetNextFrame(currentFrame);
-    uint32_t readFrameIdx = HistorySlab.GetFrameIndex(currentFrame);
-    if (!HistorySlab.TryLockFrameForWrite(writeFrame))
-    {
-        LOG_ERROR_F("Failed to acquire write lock on frame %u", writeFrame);
-        return;
-    }
+	// Lock frame T+1 for writing (with wrapping)
+	uint32_t writeFrame   = HistorySlab.GetNextFrame(currentFrame);
+	uint32_t readFrameIdx = HistorySlab.GetFrameIndex(currentFrame);
+	if (!HistorySlab.TryLockFrameForWrite(writeFrame))
+	{
+		LOG_ERROR_F("Failed to acquire write lock on frame %u", writeFrame);
+		return;
+	}
 
-    // Verify frame T is readable
-    if (!HistorySlab.VerifyFrameReadable(currentFrame))
-    {
-        LOG_ERROR_F("Frame %u is not readable (locked by another thread)", currentFrame);
-        HistorySlab.UnlockFrameWrite(writeFrame);
-        return;
-    }
+	// Verify frame T is readable
+	if (!HistorySlab.VerifyFrameReadable(currentFrame))
+	{
+		LOG_ERROR_F("Frame %u is not readable (locked by another thread)", currentFrame);
+		HistorySlab.UnlockFrameWrite(writeFrame);
+		return;
+	}
 
-    void* dualArrayTable[MAX_FIELD_ARRAYS * 2]; // Interleaved read/write for FieldProxy::Bind()
+	for (auto& [sig, arch] : Archetypes)
+	{
+		UpdateFunc prePhys = MetaRegistry::Get().EntityGetters[sig.ID].PrePhys;
+		if (!prePhys) continue;
 
-    for (auto& [sig, arch] : Archetypes)
-    {
-        UpdateFunc prePhys = MetaRegistry::Get().EntityGetters[sig.ID].PrePhys;
-        if (!prePhys)
-            continue;
+		size_t size = arch->Chunks.size();
+		for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
+		{
+			Chunk* chunk         = arch->Chunks[chunkIdx];
+			uint32_t entityCount = arch->GetChunkCount(chunkIdx);
 
-        size_t size = arch->Chunks.size();
-        for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
-        {
-            Chunk* chunk = arch->Chunks[chunkIdx];
-            uint32_t entityCount = arch->GetChunkCount(chunkIdx);
+			if (entityCount == 0) continue;
 
-            if (entityCount == 0)
-                continue;
+			// Build interleaved dual array table (read T, write T+1)
+			arch->BuildFieldArrayTable(chunk, DualArrayTableBuffer, readFrameIdx, writeFrame);
 
-            // Build interleaved dual array table (read T, write T+1)
-            arch->BuildFieldArrayTable(chunk, dualArrayTable, readFrameIdx, writeFrame);
+			// Invoke batch processor with dual array table
+			prePhys(dt, DualArrayTableBuffer, entityCount);
 
-            // Invoke batch processor with dual array table
-            prePhys(dt, dualArrayTable, entityCount);
-        }
-    }
-    
-    // Release locks at end of update
-    HistorySlab.UnlockFrameWrite(writeFrame);
+			// Mark every processed entity dirty (bit 30) so RenderThread uploads their data.
+			static const ComponentTypeID kFlagsTypeID = GetComponentTypeID<TemporalFlags<>>();
+			if (int32_t* flagsWrite = arch->GetTemporalFieldWritePtr(chunk, kFlagsTypeID, 0, writeFrame))
+			{
+				constexpr int32_t kDirty = static_cast<int32_t>(1u << 30);
+				for (uint32_t e = 0; e < entityCount; ++e) flagsWrite[e] |= kDirty;
+			}
+		}
+	}
+
+	// Release locks at end of update
+	HistorySlab.UnlockFrameWrite(writeFrame);
 }
 
 inline void Registry::InvokePostPhys(double dt, uint32_t currentFrame)
 {
-    STRIGID_ZONE_C(STRIGID_COLOR_LOGIC);
+	STRIGID_ZONE_C(STRIGID_COLOR_LOGIC);
 
-    // Lock frame T+1 for writing (with wrapping)
-    uint32_t writeFrame = HistorySlab.GetNextFrame(currentFrame);
-    uint32_t readFrameIdx = HistorySlab.GetFrameIndex(currentFrame);
-    if (!HistorySlab.TryLockFrameForWrite(writeFrame))
-    {
-        LOG_ERROR_F("Failed to acquire write lock on frame %u", writeFrame);
-        return;
-    }
+	// Lock frame T+1 for writing (with wrapping)
+	uint32_t writeFrame   = HistorySlab.GetNextFrame(currentFrame);
+	uint32_t readFrameIdx = HistorySlab.GetFrameIndex(currentFrame);
+	if (!HistorySlab.TryLockFrameForWrite(writeFrame))
+	{
+		LOG_ERROR_F("Failed to acquire write lock on frame %u", writeFrame);
+		return;
+	}
 
-    // Verify frame T is readable
-    if (!HistorySlab.VerifyFrameReadable(currentFrame))
-    {
-        LOG_ERROR_F("Frame %u is not readable (locked by another thread)", currentFrame);
-        HistorySlab.UnlockFrameWrite(writeFrame);
-        return;
-    }
-    
-    void* dualArrayTable[MAX_FIELD_ARRAYS * 2]; // Interleaved read/write for FieldProxy::Bind()
+	// Verify frame T is readable
+	if (!HistorySlab.VerifyFrameReadable(currentFrame))
+	{
+		LOG_ERROR_F("Frame %u is not readable (locked by another thread)", currentFrame);
+		HistorySlab.UnlockFrameWrite(writeFrame);
+		return;
+	}
 
-    for (auto& [sig, arch] : Archetypes)
-    {
-        UpdateFunc PostPhys = MetaRegistry::Get().EntityGetters[sig.ID].PostPhys;
-        if (!PostPhys)
-            continue;
+	for (auto& [sig, arch] : Archetypes)
+	{
+		UpdateFunc PostPhys = MetaRegistry::Get().EntityGetters[sig.ID].PostPhys;
+		if (!PostPhys) continue;
 
-        size_t size = arch->Chunks.size();
-        for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
-        {
-            Chunk* chunk = arch->Chunks[chunkIdx];
-            uint32_t entityCount = arch->GetChunkCount(chunkIdx);
+		size_t size = arch->Chunks.size();
+		for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
+		{
+			Chunk* chunk         = arch->Chunks[chunkIdx];
+			uint32_t entityCount = arch->GetChunkCount(chunkIdx);
 
-            if (entityCount == 0)
-                continue;
+			if (entityCount == 0) continue;
 
-            // Build interleaved dual array table (read T, write T+1)
-            arch->BuildFieldArrayTable(chunk, dualArrayTable, readFrameIdx, writeFrame);
+			// Build interleaved dual array table (read T, write T+1)
+			arch->BuildFieldArrayTable(chunk, DualArrayTableBuffer, readFrameIdx, writeFrame);
 
-            // Invoke batch processor with dual array table
-            PostPhys(dt, dualArrayTable, entityCount);
-        }
-    }
-    
-    // Release locks at end of update
-    HistorySlab.UnlockFrameWrite(writeFrame);
+			// Invoke batch processor with dual array table
+			PostPhys(dt, DualArrayTableBuffer, entityCount);
+
+			// Mark every processed entity dirty (bit 30) so RenderThread uploads their data.
+			static const ComponentTypeID kFlagsTypeID = GetComponentTypeID<TemporalFlags<>>();
+			if (int32_t* flagsWrite = arch->GetTemporalFieldWritePtr(chunk, kFlagsTypeID, 0, writeFrame))
+			{
+				constexpr int32_t kDirty = static_cast<int32_t>(1u << 30);
+				for (uint32_t e = 0; e < entityCount; ++e) flagsWrite[e] |= kDirty;
+			}
+		}
+	}
+
+	// Release locks at end of update
+	HistorySlab.UnlockFrameWrite(writeFrame);
 }

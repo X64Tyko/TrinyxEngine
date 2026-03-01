@@ -4,438 +4,440 @@
 
 ---
 
-## HistorySectionHeader (Replaces FramePacket)
+## FieldProxy — SoA with OOP Syntax
 
-Each section of the History Slab begins with this header:
+`FieldProxy<T, FieldWidth>` is the core component abstraction. Each proxy holds:
+- `ReadArray` — frame T (current simulation state, read-only during update)
+- `WriteArray` — frame T+1 (next state, written during update)
+- `index` — current entity offset within the SoA arrays
+- `mask` — AVX2 mask for `WideMask` partial-lane writes (zero-size base for `Scalar` mode)
 
-```cpp
-struct HistorySectionHeader
-{
-    // Ownership tracking (atomic bitfield for multiple readers)
-    std::atomic<uint8_t> OwnershipFlags;
-    /*
-        Bitfield values:
-        0x01 = LOGIC_WRITING   (exclusive)
-        0x02 = RENDER_READING  (can coexist with other readers)
-        0x04 = NETWORK_READING (can coexist with other readers)
-        0x08 = DEFRAG_LOCKED   (exclusive, blocks all access)
-    */
+`FieldWidth` has three modes:
 
-    // Frame identification
-    uint32_t FrameNumber;
-    double SimulationTime;  // Accumulated time since engine start
+| Mode | Entities/iteration | Use case |
+|------|-------------------|----------|
+| `Scalar` | 1 | Simple, safe, default |
+| `Wide` | 8 (AVX2 lane) | Maximum throughput, count must be multiple of 8 |
+| `WideMask` | 8 with tail mask | Non-multiple-of-8 tail chunks |
 
-    // Camera/View data (replaces FramePacket)
-    alignas(16) Matrix4 ViewMatrix;
-    alignas(16) Matrix4 ProjectionMatrix;
-    Vector3 CameraPosition;
-    float _pad0;
-
-    // Scene/Lighting data
-    Vector3 SunDirection;
-    float _pad1;
-    Vector3 SunColor;
-    float AmbientIntensity;
-
-    // Entity metadata
-    uint32_t ActiveEntityCount;
-    uint32_t TotalAllocatedEntities;
-
-    // Padding to cache line (64 bytes)
-    char _padding[/* calculated to align to 64 */];
-};
-
-static_assert(sizeof(HistorySectionHeader) % 64 == 0, "Header must be cache-aligned");
-```
-
-**Usage:**
+`FieldProxyMask<WIDTH>` is a zero-size base for `Scalar` mode (saves 32 bytes per field vs. always
+storing `__m256i mask`). Wide and WideMask access the mask via `this->mask`.
 
 ```cpp
-// Logic Thread writes header when committing frame
-void LogicThread::CommitFrame()
+// Simplified structure (see FieldProxy.h for full implementation)
+template <typename T, FieldWidth WIDTH = FieldWidth::Scalar>
+struct FieldProxy : FieldProxyMask<WIDTH>
 {
-    HistorySection* section = slab.GetSection((FrameNumber + 1) % SectionCount);
+    T* ReadArray  = nullptr;
+    T* WriteArray = nullptr;
+    uint32_t index = 0;
 
-    section->Header.FrameNumber = FrameNumber + 1;
-    section->Header.SimulationTime = SimTime;
-    section->Header.ViewMatrix = camera.GetViewMatrix();
-    section->Header.ProjectionMatrix = camera.GetProjection();
-    section->Header.CameraPosition = camera.GetPosition();
-    section->Header.SunDirection = scene.GetSunDirection();
-    section->Header.ActiveEntityCount = registry->GetEntityCount();
+    // OOP-style read (reads WriteArray for accumulate path)
+    operator T() const { return WriteArray[index]; }
 
-    LastFrameWritten.store(FrameNumber + 1, std::memory_order_release);
-}
+    // Compound assignment (reads and writes WriteArray)
+    FieldProxy& operator+=(T value) { WriteArray[index] += value; return *this; }
+    FieldProxy& operator-=(T value) { WriteArray[index] -= value; return *this; }
+    FieldProxy& operator*=(T value) { WriteArray[index] *= value; return *this; }
 
-// Render Thread reads header for interpolation
-void RenderThread::ProcessFrame()
-{
-    uint32_t latestFrame = LastFrameWritten.load(std::memory_order_acquire);
-    HistorySection* currSection = slab.GetSection(latestFrame % SectionCount);
+    // Bind: copy ReadArray → WriteArray and cache index
+    void Bind(T* read, T* write, uint32_t idx);
 
-    Matrix4 viewProj = currSection->Header.ProjectionMatrix * currSection->Header.ViewMatrix;
-    uint32_t entityCount = currSection->Header.ActiveEntityCount;
-
-    // Use for culling, rendering, etc.
-}
-```
-
----
-
-## FieldProxy (SoA Indirection)
-
-The core of the component decomposition system:
-
-```cpp
-template <typename FieldType>
-struct FieldProxy
-{
-    FieldType* _restrict array;  // Points to field's SoA array in History Slab
-    uint32_t* _restrict index;   // Points to shared entity index in EntityView
-
-    // Implicit conversion for reads
-    operator FieldType() const { return array[*index]; }
-
-    // Assignment operator for writes
-    FieldProxy& operator=(FieldType value) {
-        array[*index] = value;
-        return *this;
-    }
-
-    // Compound assignment operators
-    FieldProxy& operator+=(FieldType value) { array[*index] += value; return *this; }
-    FieldProxy& operator-=(FieldType value) { array[*index] -= value; return *this; }
-    FieldProxy& operator*=(FieldType value) { array[*index] *= value; return *this; }
-    FieldProxy& operator/=(FieldType value) { array[*index] /= value; return *this; }
-
-    // Bind to field array during hydration
-    __forceinline void Bind(void* bindArray, uint32_t* idx) {
-        array = (FieldType*)bindArray;
-        index = idx;
-    }
+    // Advance: increment index, propagate copy (or SIMD step for Wide/WideMask)
+    void Advance(uint32_t step);
 };
 ```
 
 **Key Properties:**
-- Zero overhead: All operations inline to direct array access
-- Maintains OOP syntax: `transform.PositionX += velocity.VelocityX`
-- Compiler optimizes away the proxy layer entirely
-- SIMD-friendly: Arrays are contiguous, vectorizable
+- All operators inline to direct array access — zero overhead
+- `Bind()` copies frame T to frame T+1 at hydration; entity starts from its last known state
+- `Advance()` increments the shared index (or 8 for Wide mode)
+- Users write `transform.PositionX += velocity.VelocityX * dt` — looks like OOP, runs as SoA
 
 ---
 
-## Component Definition Pattern
+## Component Definition Patterns
 
-**Hot Component (Lives in History Slab):**
+### Temporal (SoA) Component
+
+Components with `STRIGID_TEMPORAL_FIELDS` decompose into SoA field arrays in the temporal/volatile slab.
+The `SystemGroup` tag drives automatic entity partition placement.
 
 ```cpp
-struct alignas(16) Transform
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+struct Transform
 {
-    // Mark as hot component (lives in History Slab)
-    STRIGID_HOT_COMPONENT()
+    FieldProxy<float, WIDTH> PositionX, PositionY, PositionZ;
+    FieldProxy<float, WIDTH> RotationX, RotationY, RotationZ;
+    FieldProxy<float, WIDTH> ScaleX,    ScaleY,    ScaleZ;
 
-    // Position fields
-    FieldProxy<float> PositionX;
-    FieldProxy<float> PositionY;
-    FieldProxy<float> PositionZ;
-
-    // Rotation fields (Euler angles)
-    FieldProxy<float> RotationX;
-    FieldProxy<float> RotationY;
-    FieldProxy<float> RotationZ;
-
-    // Scale fields
-    FieldProxy<float> ScaleX;
-    FieldProxy<float> ScaleY;
-    FieldProxy<float> ScaleZ;
-
-    // Define fields for reflection system
-    STRIGID_REGISTER_FIELDS(Transform,
+    // SystemGroup::None = partition-agnostic; entity's group comes from other components
+    STRIGID_TEMPORAL_FIELDS(Transform, SystemGroup::None,
         PositionX, PositionY, PositionZ,
         RotationX, RotationY, RotationZ,
         ScaleX, ScaleY, ScaleZ)
 };
-
-// Register component type for type ID generation
 STRIGID_REGISTER_COMPONENT(Transform)
 
-static_assert(alignof(Transform) == 16, "Transform must be 16-byte aligned");
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+struct RigidBody
+{
+    FieldProxy<float, WIDTH> VelX, VelY, VelZ;
+    FieldProxy<float, WIDTH> AngVelX, AngVelY, AngVelZ;
+
+    // SystemGroup::Phys = entities with this component go into the Phys or Dual partition
+    STRIGID_TEMPORAL_FIELDS(RigidBody, SystemGroup::Phys,
+        VelX, VelY, VelZ, AngVelX, AngVelY, AngVelZ)
+};
+STRIGID_REGISTER_COMPONENT(RigidBody)
+
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+struct Material
+{
+    FieldProxy<float, WIDTH> ColorR, ColorG, ColorB, ColorA;
+
+    // SystemGroup::Render = entities with this component go into the Render or Dual partition
+    STRIGID_TEMPORAL_FIELDS(Material, SystemGroup::Render,
+        ColorR, ColorG, ColorB, ColorA)
+};
+STRIGID_REGISTER_COMPONENT(Material)
 ```
 
-**Cold Component (Lives in Archetype Chunks):**
+### Cold (Chunk) Component
+
+Components without `STRIGID_TEMPORAL_FIELDS` live in archetype chunk memory (AoS layout).
+No FieldProxy — plain POD members.
 
 ```cpp
 struct HealthComponent
 {
-    // No STRIGID_HOT_COMPONENT() marker - lives in chunks
-
     float CurrentHealth;
     float MaxHealth;
     float Armor;
-    float RegenRate;
 
-    // No FieldProxy needed - cold components don't need SoA decomposition
-    // Accessed infrequently, doesn't need History Slab
+    STRIGID_REGISTER_FIELDS(HealthComponent, CurrentHealth, MaxHealth, Armor)
 };
-
 STRIGID_REGISTER_COMPONENT(HealthComponent)
+```
+
+### Universal Strip Component
+
+Flags that need to be iterable across ALL entities in a single SIMD pass live in the universal strip,
+outside the partition field zones. Declared with `STRIGID_UNIVERSAL_COMPONENT` (planned macro):
+
+```cpp
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+struct TemporalFlags
+{
+    FieldProxy<int32_t, WIDTH> Flags;
+
+    // TemporalFlagBits:
+    //   Active = 1<<31  — entity exists and is in the simulation
+    //   Dirty  = 1<<30  — modified this frame (drives GPU upload AND rollback resimulation blast radius)
+    STRIGID_UNIVERSAL_COMPONENT(TemporalFlags, Flags)
+};
 ```
 
 ---
 
 ## Entity Definition Pattern
 
-**Entity Class with Lifecycle:**
+Entities are CRTP structs templated on `FieldWidth`. The partition group is automatically derived from
+the `SystemGroup` tags of the entity's components — **no manual group annotation on the entity itself**.
 
 ```cpp
-// Forward declare for registration macro
-STRIGID_REGISTER_ENTITY(CubeEntity);
-
-class CubeEntity : public EntityView<CubeEntity>
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+struct CubeEntity : EntityView<CubeEntity, WIDTH>
 {
-public:
-    // Component members (hot components use FieldProxy internally)
-    Transform transform;
-    Velocity velocity;
-    ColorData color;
+    Transform<WIDTH> transform;
+    RigidBody<WIDTH> body;
+    Material<WIDTH>  material;
 
-    // Lifecycle: PrePhysics (runs at FixedUpdateHz)
-    __forceinline void PrePhysics(double dt)
+    // Partition group = Dual (has both Phys and Render components)
+
+    FORCE_INLINE void PrePhysics(double dt)
     {
-        // OOP-style syntax, SoA performance
-        transform.PositionX += velocity.VelocityX * static_cast<float>(dt);
-        transform.PositionY += velocity.VelocityY * static_cast<float>(dt);
-        transform.PositionZ += velocity.VelocityZ * static_cast<float>(dt);
-
-        transform.RotationY += static_cast<float>(dt) * 0.7f;
-
-        // Damping
-        velocity.VelocityX *= 0.99f;
-        velocity.VelocityY *= 0.99f;
+        transform.PositionX += body.VelX * static_cast<float>(dt);
+        transform.PositionY += body.VelY * static_cast<float>(dt);
+        transform.PositionZ += body.VelZ * static_cast<float>(dt);
     }
 
-    // Optional: PostPhysics (runs after physics solver)
-    __forceinline void PostPhysics(double dt)
-    {
-        // Collision response, state updates, etc.
-    }
-
-    // Define schema for reflection (MUST be at end of class)
-    STRIGID_REGISTER_SCHEMA(CubeEntity, EntityView<CubeEntity>,
-        transform, velocity, color)
+    STRIGID_REGISTER_SCHEMA(CubeEntity, EntityView, transform, body, material)
 };
+STRIGID_REGISTER_ENTITY(CubeEntity)
 ```
 
-**Inheritance Pattern:**
+To opt into full rollback (Temporal tier vs Volatile tier), add `SimulationBody`:
 
 ```cpp
-// Base class for shared logic
-template <typename T>
-class BaseCube : public EntityView<T>
-{
-public:
-    Transform transform;
-    ColorData color;
+struct SimulationBody { /* empty marker, no fields */ };
 
-    __forceinline void PrePhysics(double dt)
+// CubeEntity with SimulationBody → Temporal tier (N-frame rollback ring)
+// CubeEntity without SimulationBody → Volatile tier (5-frame ring, no rollback)
+```
+
+### Inheritance Pattern
+
+```cpp
+template <typename Derived, FieldWidth WIDTH = FieldWidth::Scalar>
+struct BaseCube : EntityView<Derived, WIDTH>
+{
+    Transform<WIDTH> transform;
+    Material<WIDTH>  material;
+
+    FORCE_INLINE void PrePhysics(double dt)
     {
         transform.RotationY += static_cast<float>(dt) * 0.7f;
     }
 
-    STRIGID_REGISTER_SCHEMA(BaseCube, EntityView<T>, transform, color)
+    STRIGID_REGISTER_SUPER_SCHEMA(BaseCube, EntityView, transform, material)
 };
 
-// Derived entity type
-STRIGID_REGISTER_ENTITY(SuperCube);
-class SuperCube : public BaseCube<SuperCube>
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+struct SuperCube : BaseCube<SuperCube, WIDTH>
 {
-public:
-    Velocity velocity;  // Add extra component
+    RigidBody<WIDTH> body;
 
-    __forceinline void PrePhysics(double dt)
+    FORCE_INLINE void PrePhysics(double dt)
     {
-        // Override base behavior
-        BaseCube<SuperCube>::PrePhysics(dt);
-
-        // Add velocity logic
-        transform.PositionX += velocity.VelocityX * static_cast<float>(dt);
+        BaseCube<SuperCube, WIDTH>::PrePhysics(dt);
+        this->transform.PositionX += body.VelX * static_cast<float>(dt);
     }
 
-    STRIGID_REGISTER_SCHEMA(SuperCube, BaseCube<SuperCube>, velocity)
+    STRIGID_REGISTER_SCHEMA(SuperCube, BaseCube, body)
 };
+STRIGID_REGISTER_ENTITY(SuperCube)
 ```
 
 ---
 
 ## EntityView Pattern
 
-The base class for all entity types:
+CRTP base for all entity types. Provides hydration (binding FieldProxies to SoA arrays) and Advance:
 
 ```cpp
-template <typename T>
+template <template <FieldWidth> class T, FieldWidth WIDTH = FieldWidth::Scalar>
 class EntityView
 {
 public:
-    uint32_t ViewIndex = 0;  // Shared index for all FieldProxies
+    uint32_t ViewIndex = 0;
 
-    // Generate unique ClassID per entity type
-    static ClassID StaticClassID()
-    {
-        static ClassID id = Internal::g_GlobalClassCounter++;
-        return id;
-    }
+    // Hydrate: bind all component FieldProxies to read/write arrays at index
+    FORCE_INLINE void Hydrate(void** readArrays, void** writeArrays, uint32_t index);
 
-    // Hydrate: Bind all component FieldProxies to field arrays
-    __forceinline void Hydrate(void** fieldArrayTable, uint32_t index)
-    {
-        ViewIndex = index;
-        constexpr auto schema = T::DefineSchema();
-
-        size_t fieldArrayBaseIndex = 0;
-
-        // For each component in schema
-        std::apply([&](auto&&... members)
-        {
-            (..., [&](auto member)
-            {
-                if constexpr (std::is_member_object_pointer_v<decltype(member)>)
-                {
-                    using MemberType = std::remove_reference_t<decltype(static_cast<T*>(this)->*member)>;
-
-                    // Check if this is a FieldProxy component
-                    if constexpr (HasDefineFields<MemberType>)
-                    {
-                        // Bind component's FieldProxies to field array table
-                        (static_cast<T*>(this)->*member).Bind(
-                            &fieldArrayTable[fieldArrayBaseIndex],
-                            &ViewIndex
-                        );
-
-                        // Advance by number of fields in this component
-                        fieldArrayBaseIndex += ComponentFieldRegistry::Get()
-                            .GetFieldCount(GetComponentTypeID<MemberType>());
-                    }
-                }
-            }(members));
-        }, schema.members);
-    }
-
-    // Advance to next entity (just increment shared index)
-    __forceinline void Advance(uint32_t stepSize)
-    {
-        ViewIndex += stepSize;
-    }
+    // Advance: increment ViewIndex (+ 8 for Wide, with mask for WideMask)
+    FORCE_INLINE void Advance(uint32_t step = 1);
 };
 ```
 
-**Iteration Pattern (Internal):**
+Iteration pattern (internal, generated by reflection system):
 
 ```cpp
-// Generated by reflection system for each entity type
 template <typename T>
-__forceinline void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, uint32_t count)
+FORCE_INLINE void InvokePrePhysicsImpl(double dt, void** read, void** write, uint32_t count)
 {
-    alignas(16) T entityView;
-    entityView.Hydrate(fieldArrayTable, 0);  // Bind all FieldProxies
+    T entityView;
+    entityView.Hydrate(read, write, 0);
 
-    #pragma loop(ivdep)  // Hint for auto-vectorization
-    for (uint32_t i = 0; i < count; ++i)
+    uint32_t i = 0;
+    // Wide pass (groups of 8)
+    for (; i + 8 <= count; i += 8)
+    {
+        // WideMask setup not needed for full groups
+        entityView.PrePhysics(dt);
+        entityView.Advance(8);
+    }
+    // Scalar tail
+    for (; i < count; ++i)
     {
         entityView.PrePhysics(dt);
-        entityView.Advance(1);  // Just increments ViewIndex
+        entityView.Advance(1);
     }
 }
 ```
 
 ---
 
-## InterpEntry (Render-Ready Data)
+## SimFloat / FloatProxy — Determinism Alias
 
-The output of the interpolation + culling pass:
+The determinism mode switch lives in one place. Entity authors never touch it:
 
 ```cpp
-struct InterpEntry
-{
-    uint64_t sortKey;       // 64-bit composite key for state sorting
-    Vector3 position;       // Interpolated position
-    Quaternion rotation;    // Interpolated rotation (or Euler)
-    Vector3 scale;          // Interpolated scale
-    Color color;            // From ColorData component
-    uint32_t meshID;        // Mesh to render
-    uint32_t materialID;    // Material to apply
-};
+// SimFloat.h — the only file that changes between deterministic and float builds
 
-// Ephemeral buffer (cleared each frame)
-std::vector<InterpEntry> InterpBuffer;
+#if STRIGID_DETERMINISTIC
+    using SimFloat = Fixed32;
+#else
+    using SimFloat = float;
+#endif
+
+// FloatProxy resolves to the correct FieldProxy backing type automatically
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+using FloatProxy = FieldProxy<SimFloat, WIDTH>;
 ```
 
-**Usage:**
+Entity and component authors always write `FloatProxy<WIDTH>` — identical in both builds:
 
 ```cpp
-void RenderThread::ProcessFrame()
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+struct Transform {
+    FloatProxy<WIDTH> PosX, PosY, PosZ;  // Fixed32 or float, decided at compile time
+    // ...
+    STRIGID_TEMPORAL_FIELDS(Transform, SystemGroup::None, PosX, PosY, PosZ, ...)
+};
+
+// PrePhysics receives SimFloat dt — same syntax in both builds
+FORCE_INLINE void PrePhysics(SimFloat dt) {
+    transform.PosX += body.VelX * dt;   // unchanged regardless of backing type
+}
+```
+
+**Where source changes are required when switching modes:**
+Fixed32 needs an implicit constructor from float to cover literal assignment transparently:
+```cpp
+Fixed32(float f) : raw(static_cast<int32_t>(f * FIXED_UNITS_PER_METER)) {}
+```
+The compiler surfaces the remaining incompatibilities — trig functions, explicit float casts, logging
+of raw values — as errors. These are the exact places "where the swap changes the outcome of what
+float would have returned" and are found mechanically, not by audit.
+
+---
+
+## Fixed32 — Fixed-Point Value Type
+
+Wraps `int32_t` with arithmetic operators that use `int64_t` intermediates to prevent overflow.
+Entity authors write the same syntax as float — the multiply-shift is invisible.
+
+```cpp
+// Unit definition: 1 unit = 0.1mm
+static constexpr int32_t FIXED_UNITS_PER_METER = 10000;
+static constexpr int32_t FIXED_SCALE_SHIFT     = 14;    // 2^14 = 16384 ≈ scaling denominator
+
+struct Fixed32
 {
-    InterpBuffer.clear();
-    InterpBuffer.reserve(currSection->Header.ActiveEntityCount);
+    int32_t raw = 0;
 
-    // Read directly from History Slab sections
-    Transform* prevTransforms = prevSection->GetComponentArray<Transform>();
-    Transform* currTransforms = currSection->GetComponentArray<Transform>();
-    ColorData* currColors = currSection->GetComponentArray<ColorData>();
+    // Construct from meters (at authoring time / spawn)
+    static Fixed32 FromMeters(float m) { return { static_cast<int32_t>(m * FIXED_UNITS_PER_METER) }; }
+    float ToMeters() const { return static_cast<float>(raw) / FIXED_UNITS_PER_METER; }
 
-    for (uint32_t i = 0; i < entityCount; ++i)
-    {
-        // Dead entity check
-        if (IsInactive(currTransforms[i])) continue;
+    Fixed32 operator+(Fixed32 b) const { return { raw + b.raw }; }
+    Fixed32 operator-(Fixed32 b) const { return { raw - b.raw }; }
+    Fixed32& operator+=(Fixed32 b)    { raw += b.raw; return *this; }
+    Fixed32& operator-=(Fixed32 b)    { raw -= b.raw; return *this; }
 
-        // Interpolate
-        Vector3 interpPos = Lerp(
-            Vector3(prevTransforms[i].PositionX, prevTransforms[i].PositionY, prevTransforms[i].PositionZ),
-            Vector3(currTransforms[i].PositionX, currTransforms[i].PositionY, currTransforms[i].PositionZ),
-            alpha
-        );
-
-        // Frustum cull
-        if (!camera.IsVisible(interpPos)) continue;
-
-        // Only visible entities reach InterpBuffer
-        InterpBuffer.push_back({
-            sortKey: ComputeSortKey(interpPos, meshID, materialID),
-            position: interpPos,
-            rotation: ...,
-            scale: ...,
-            color: Color(currColors[i].R, currColors[i].G, currColors[i].B, currColors[i].A),
-            meshID: GetMeshID(i),
-            materialID: GetMaterialID(i)
-        });
+    // Multiply: must use int64 intermediate
+    Fixed32 operator*(Fixed32 b) const {
+        return { static_cast<int32_t>((static_cast<int64_t>(raw) * b.raw) >> FIXED_SCALE_SHIFT) };
     }
-
-    // Job system sorts and batches InterpBuffer
-    // Then uploads to GPU via Transfer Buffer
-}
-```
-
-**Future: Job-Based Rendering:**
-
-```cpp
-struct RenderJob
-{
-    uint32_t startIndex;  // Index into sorted InterpBuffer
-    uint32_t count;       // Number of entities to draw
-    uint64_t sortKeyMin;  // Min sort key in this job
-    uint64_t sortKeyMax;  // Max sort key in this job
 };
 
-// After sorting InterpBuffer, split into jobs
-std::vector<RenderJob> jobs = SplitIntoJobs(InterpBuffer);
-
-// Jobs can run in parallel (different GPU command buffers)
-// Then submitted in order based on sort key ranges
-for (auto& job : jobs)
-{
-    job.WaitForDependencies();  // Previous job if sort key overlap
-    job.Execute();
-}
+// FieldProxy<Fixed32, WIDTH> — used for all position, velocity, force fields
 ```
+
+**Platform determinism:** Integer arithmetic produces identical bits on x86, ARM, any compiler,
+any optimization level. This is required for rollback netcode and makes Fixed32 the mandatory type
+for all physics-authoritative simulation data.
+
+**When not needed:** Single-player and non-networked games can opt out per `EngineConfig` and receive
+a `float`-backed `FieldProxy<float, WIDTH>` instead (see Configuration — Determinism Mode).
+
+---
+
+## ConstraintEntity
+
+Constraints are independent entities in the LOGIC partition. They define relationships between two
+bodies and are the foundation for both transform attachment and physics joints.
+
+```cpp
+struct ConstraintEntity
+{
+    uint32_t       BodyA;       // entity partition index (UINT32_MAX = static world anchor)
+    uint32_t       BodyB;       // entity partition index (UINT32_MAX = static world anchor)
+    ConstraintType Type;        // see enum below
+    uint16_t       BoneA;       // bone on BodyA (UINT16_MAX = entity root pivot)
+    uint16_t       BoneB;       // bone on BodyB (UINT16_MAX = entity root pivot)
+    Fixed32        AnchorA[3];  // local-space anchor point on BodyA
+    Fixed32        AnchorB[3];  // local-space anchor point on BodyB
+    Fixed32        LimitMin[3]; // lower DOF limits (translation mm or angle units)
+    Fixed32        LimitMax[3]; // upper DOF limits
+    Fixed32        Stiffness;   // spring/soft constraints
+    Fixed32        Damping;     // spring/soft constraints
+};
+
+enum class ConstraintType : uint8_t
+{
+    Rigid,          // all 6 DOF locked — rigid transform inheritance (weapon to hand, etc.)
+    RigidWithScale, // rigid + inherit scale
+    PositionOnly,   // translation locked, rotation free
+    Hinge,          // 1 rotational DOF free (door, axle)
+    BallSocket,     // 3 rotational DOF free, translation locked (shoulder, hip)
+    Prismatic,      // 1 translational DOF free, rotation locked (piston, slider)
+    Distance,       // fixed distance, all rotation free (chain link)
+    Spring,         // distance constraint with stiffness/damping
+};
+```
+
+**Rigid attachment is a degenerate constraint** — `Type=Rigid` with zero limits. The render thread
+resolves these before GPU upload (world transform inheritance). All other types are resolved by the
+physics solver.
+
+**Entities with a `Type=Rigid` ConstraintEntity as BodyA do not get independent physics bodies.**
+For physics-simulated attachment (ragdoll, rope, soft body), use non-Rigid types — the solver
+resolves them via impulses.
+
+---
+
+## TemporalFlags
+
+Live in the universal strip (one contiguous `int32` array per frame, covering ALL dynamic entities):
+
+```cpp
+enum class TemporalFlagBits : int32_t
+{
+    Active = 1 << 31,   // Entity exists and is in the simulation
+    Dirty  = 1 << 30,   // Modified this frame; drives GPU upload + rollback resimulation
+};
+```
+
+Logic sets `Dirty` (bit 30) via `fetch_or(relaxed)` after updating each chunk.
+Render reads `Dirty` bits to build the GPU upload set, then clears them after upload.
+
+During rollback, the dirty set from a correction expands naturally through update logic —
+the exact set of entities affected by the correction is computed automatically.
+
+---
+
+## GPU InstanceBuffer Layout (SoA)
+
+The GPU InstanceBuffer is Structure-of-Arrays, indexed by semantic:
+
+```
+InstancesAddr[ (semantic - 1) * OutFieldStride + outIdx ]
+```
+
+Where `outIdx` is the compacted index from the scatter pass, and `semantic` maps to:
+- 1: PositionX, 2: PositionY, 3: PositionZ
+- 4: RotationX, 5: RotationY, 6: RotationZ
+- 7: ScaleX, 8: ScaleY, 9: ScaleZ
+- 10: ColorR, 11: ColorG, 12: ColorB, 13: ColorA
+
+The vertex shader reads all 13 fields per instance, reconstructs the TRS matrix inline.
+
+**Five GPU InstanceBuffers** are maintained in flight. Render thread always finds a free buffer
+without blocking on presentation — decouples the VSync clock from the logic thread's slab locks.
+
+---
+
+## GpuFrameData.slang
+
+Shared header included by all Slang shaders (`#include "GpuFrameData.slang"`). Contains:
+- `ViewProj` — `float4x4`, column-major from C++ → row-major in Slang via `M[r][c] = ViewProj[c*4+r]`
+- `VerticesAddr` — Buffer Device Address for cube vertex data
+- `InstancesAddr` — Buffer Device Address for the InstanceBuffer SoA
+- `ScanAddr` / `PrefixAddr` — BDAs for the predicate and prefix sum buffers
+- `OutFieldStride` — stride between field planes in the InstanceBuffer SoA
+- `EntityCount`, `DrawArgs` — entity count and indirect draw arguments buffer
 
 ---
 
@@ -447,91 +449,18 @@ for (auto& job : jobs)
 union SortKey
 {
     uint64_t value;
-
     struct
     {
         uint64_t mesh     : 16;  // 65536 unique meshes
         uint64_t material : 16;  // 65536 unique materials
-        uint64_t pipeline : 12;  // 4096 unique pipelines (shader/blend states)
+        uint64_t pipeline : 12;  // 4096 pipelines (shader/blend state)
         uint64_t depth    : 16;  // Distance from camera (quantized)
         uint64_t layer    : 4;   // 0=Background, 1=Opaque, 2=Transparent, 3=UI
     };
 };
-
-uint64_t ComputeSortKey(Vector3 pos, uint32_t meshID, uint32_t materialID)
-{
-    SortKey key;
-    key.layer = 1;  // Opaque
-    key.depth = QuantizeDepth(camera.DistanceTo(pos));
-    key.pipeline = GetPipelineID(materialID);
-    key.material = materialID;
-    key.mesh = meshID;
-    return key.value;
-}
 ```
 
-**Radix Sort:**
-
-```cpp
-void RadixSort(std::vector<InterpEntry>& buffer)
-{
-    // O(N) integer sort, cache-friendly
-    // Sort by full 64-bit key
-    // Automatically groups by Layer → Depth → Pipeline → Material → Mesh
-}
-```
-
----
-
-## SnapshotEntry (Legacy - Being Removed)
-
-**Current implementation** (will be replaced by direct History Slab access):
-
-```cpp
-struct alignas(16) SnapshotEntry
-{
-    float PositionX, PositionY, PositionZ;
-    float RotationX, RotationY, RotationZ;
-    float ScaleX, ScaleY, ScaleZ;
-    float _pad0, _pad1, _pad2;
-    float ColorR, ColorG, ColorB, ColorA;
-};
-// Total: 64 bytes (matches GPU InstanceData layout)
-
-// Double-buffered
-std::vector<SnapshotEntry> SnapshotPrevious;
-std::vector<SnapshotEntry> SnapshotCurrent;
-```
-
-**Problem:** Requires expensive memcpy (5-8ms for 100k entities)
-
-**Solution:** History Slab eliminates this by allowing direct pointer access
-
----
-
-## InstanceData (GPU Upload Format)
-
-Final format uploaded to GPU:
-
-```cpp
-struct alignas(16) InstanceData
-{
-    float PositionX, PositionY, PositionZ, _pad0;  // 16 bytes
-    float RotationX, RotationY, RotationZ, _pad1;  // 16 bytes
-    float ScaleX, ScaleY, ScaleZ, _pad2;           // 16 bytes
-    float ColorR, ColorG, ColorB, ColorA;          // 16 bytes
-};
-// Total: 64 bytes (optimal for GPU vectorization)
-
-static_assert(sizeof(InstanceData) == 64, "Must match GPU layout");
-static_assert(alignof(InstanceData) == 16, "Must be 16-byte aligned");
-```
-
-**Upload Path:**
-
-```
-InterpBuffer → Transfer Buffer → Instance Buffer → GPU
-     CPU            CPU/GPU         GPU              GPU
-```
+Radix sort on the GPU after the scatter pass groups draw calls by Layer → Depth → Pipeline → Material → Mesh,
+minimizing GPU state changes.
 
 ---

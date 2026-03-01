@@ -1,4 +1,4 @@
-# Current Status (Week 3)
+# Current Status (2026-02)
 
 > **Navigation:** [← Back to README](../README.md) | [← Configuration](CONFIGURATION.md)
 
@@ -6,356 +6,163 @@
 
 ## Timeline Context
 
-**Project Start:** February 2, 2025 (Week 1)
-**Current Date:** February 20, 2025 (End of Week 3)
-**This Document:** Planning and architecture documentation for weeks ahead
+**Project Start:** ~2026-02-01 (Week 1)
+**Current Date:** 2026-03-01
+**Phase:** GPU-Driven Pipeline + Tiered Storage Design
 
 ---
 
-## Completed Work (Weeks 1-3)
+## Completed Work
 
-### ✅ Week 1-2: Foundation & Trinity Architecture
+### Foundation & Trinity Architecture
 
 **Threading Model:**
 - Strigid Trinity (Sentinel/Brain/Encoder) fully operational
-- Lock-free FramePacket mailbox (CAS-based triple buffer)
-- Frame synchronization handshake (Encoder ↔ Sentinel)
-- GPU resource atomics (command buffer, swapchain handoff)
-- FramePacer with 3 frames in flight
+- Sentinel runs 1000Hz SDL event loop, owns VulkanContext + VulkanMemory
+- Brain runs 512Hz fixed-timestep loop via accumulator (std::atomic<double>)
+- Encoder (VulkRender) skeleton wired in — ThreadMain logs and exits (GPU loop in progress)
 
-**Rendering Pipeline:**
-- SDL3 GPU backend (Vulkan/Metal/D3D12)
-- Instanced rendering with dynamic instance buffer
-- Transfer buffer resize-on-demand
-- Snapshot + interpolation system (double-buffered)
-- Zero stutters, zero Vulkan validation errors
+**Raw Vulkan Stack:**
+- Migrated from SDL3 GPU backend to raw Vulkan (volk 1.4.304 + VMA 3.3.0)
+- VulkanContext: instance, device, swapchain, queues, sync primitives
+- VulkanMemory: VMA allocator lifetime, buffer/image allocation helpers
+- VulkRender: Initialize/Start/Stop/Join wired into StrigidEngine
 
-**Performance Baseline:**
-- Main Thread: ~2.0ms per frame (~500 Hz)
-- Logic Thread: ~4.8ms per frame (~207 FPS @ 128Hz fixed)
-- Render Thread: ~3.1ms per frame (~321 FPS)
-- 100k entities: Stable rendering, smooth interpolation
+**GPU-Driven Compute Pipeline (Slang):**
+- 5 shaders in `shaders/`: predicate, prefix_sum, scatter, cube.vert, cube.frag
+- Shared struct header: `shaders/GpuFrameData.slang`
+- CMakeLists: slangc invocations with `-I shaders` + GpuFrameData.slang in DEPENDS
+- 3-pass: predicate → prefix_sum (Option-B subgroup scan) → scatter (GPU interpolation + InstanceBuffer)
+- Compute→graphics barrier: `dstStage = VERTEX_SHADER_BIT | DRAW_INDIRECT_BIT`
+- Camera wired: LogicThread::PublishCompletedFrame writes Vulkan RH perspective + identity view each frame
+- Testbed: 10k CubeEntity + 90k SuperCube at Z=-200..-500 (visible as colored specks at z=-200)
 
-### ✅ Week 3: Component Decomposition & SoA Architecture
+**ECS Architecture:**
+- Archetype-based ECS with 64 KB chunks
+- FieldProxy system: Scalar / Wide / WideMask modes
+- FieldProxyMask<WIDTH> zero-size base (Scalar mode saves 32 bytes/field)
+- TemporalComponentCache: dual-buffer SoA (ReadArray/WriteArray per field, per archetype)
+- EntityView hydration (zero virtual calls, schema-driven)
+- SIMD batch processing (AVX2), 3-level Tracy profiling (Coarse/Medium/Fine)
 
-**FieldProxy System:**
-- Full component decomposition into SoA field arrays
-- `FieldProxy<T>` zero-overhead indirection
-- Components maintain struct-like syntax
-- Perfect cache locality for individual fields
-
-**EntityView Hydration:**
-- `EntityView<T>::Hydrate()` binds all FieldProxies to chunk arrays
-- Direct component access (no `Ref<T>` wrappers needed)
-- Schema reflection drives automatic binding
-- OOP-style user code with SoA performance
-
-**Batch Processing:**
-- `Archetype::BuildFieldArrayTable()` - stack-allocated pointer tables
-- Per-archetype, per-chunk iteration
-- `InvokePrePhysicsImpl<T>()` with `#pragma loop(ivdep)` hints
-- Compiler can auto-vectorize field operations
-
-**Lifecycle Integration:**
-- PrePhysics, Update, PostPhysics all functional
-- Template-based dispatch (zero virtual calls)
-- Each entity class compiles to optimized kernel
+**Dirty Bit Tracking:**
+- `TemporalFlagBits::Active = 1<<31`, `Dirty = 1<<30`
+- Registry::InvokePrePhys/PostPhys/ScalarUpdate OR bit 30 into write-frame flags after each chunk update
 
 **Reflection System:**
-- `STRIGID_REGISTER_ENTITY(T)` - entity type registration
-- `STRIGID_REGISTER_COMPONENT(T)` - component type registration
-- `STRIGID_REGISTER_FIELDS(...)` - field decomposition
-- `STRIGID_REGISTER_SCHEMA(...)` - entity schema definition
-- Minimal boilerplate, compile-time generation
+- `STRIGID_REGISTER_COMPONENT(T)` — component type registration
+- `STRIGID_TEMPORAL_FIELDS(T, SystemGroup, ...)` — SoA temporal field decomposition
+- `STRIGID_REGISTER_FIELDS(T, ...)` — cold (chunk-only) field registration
+- `STRIGID_REGISTER_SCHEMA / STRIGID_REGISTER_SUPER_SCHEMA` — entity schema + Advance generation
 
-**Stress Testing:**
-- 1M entities: ~1.7ms PrePhysics (transform updates only)
-- 1M entities: ~19.6ms render frame (51 FPS, no culling)
-- 100k entities: ~0.3ms PrePhysics, ~3.1ms render
-- SoA benefits confirmed: cache-friendly, SIMD-ready
+**Architecture & Config Fixes:**
+- `MAX_FIELDS_PER_ARCHETYPE = 256` in Types.h
+- `DualArrayTableBuffer[MAX_FIELDS_PER_ARCHETYPE * 2]` moved from 256 KB stack to Registry member
+- `Archetype::BuildFieldArrayTable` with dual-pointer interleave
+- `Archetype::GetTemporalFieldWritePtr` (note: should eventually migrate to TemporalComponentCache)
+- VulkanContext::CreateInstance suppresses unused `window` param with `/*window*/`
+- Tracy TRACY_SOURCES compiled with `-w` (suppress all upstream warnings)
 
 ---
 
-## Current Performance Metrics (Week 3)
-
-All measurements on RelWithDebInfo build, Tracy profiler
+## Performance Metrics (RelWithDebInfo, Tracy)
 
 ### Logic Thread (128Hz Fixed Update)
 
-| Test                          | Entity Count | Time      | Notes                         |
-|-------------------------------|--------------|-----------|-------------------------------|
-| PrePhysics (Transform only)   | 10k          | 0.03ms    | Well under budget             |
-| PrePhysics (Transform only)   | 100k         | 0.30ms    | ✅ On track for 512Hz target  |
-| PrePhysics (Transform only)   | 1M           | 1.7ms     | Stress test (not target)      |
-| Full Frame (PrePhys+overhead) | 100k         | 1.7ms     | Includes ECS dispatch, Tracy  |
+| Test | Entity Count | Time | Notes |
+|------|-------------|------|-------|
+| PrePhysics (Transform only) | 10k | 0.03ms | Well under budget |
+| PrePhysics (Transform only) | 100k | 0.30ms | On track for 512Hz |
+| Full Frame (PrePhys + overhead) | 100k | 1.7ms | Includes ECS dispatch, Tracy |
 
-**Analysis:**
-- PrePhysics scales linearly with entity count
-- 100k @ 0.3ms leaves 1.65ms budget for physics solver
-- Already hitting 1.7ms full frame - on track for 512Hz target (1.95ms)
+### Main Thread
 
-### Render Thread (Variable Rate)
-
-| Test                          | Entity Count | Time      | FPS Equiv | Notes                     |
-|-------------------------------|--------------|-----------|-----------|---------------------------|
-| Full Frame (no culling)       | 100k         | 3.1ms     | 321 FPS   | ✅ Comfortable            |
-| Snapshot Copy (bottleneck)    | 100k         | 5-8ms     | N/A       | Will be eliminated        |
-| Full Frame (no culling)       | 1M           | 19.6ms    | 51 FPS    | Stress test               |
-
-**Bottlenecks:**
-- Snapshot copy: 5-8ms for 100k (60-70% of render time)
-- No frustum culling: rendering all entities
-- No state sorting: suboptimal GPU state changes
-
-**Post-History-Slab Projection:**
-- Eliminate 5-8ms snapshot copy
-- Add culling: 50-70% reduction in visible entities
-- Expected: 100k entities @ 2-4ms render (250-500 FPS)
-
-### Main Thread (1000Hz Target)
-
-| Task                | Time    | Notes                              |
-|---------------------|---------|------------------------------------|
-| Full Frame          | 1.0ms   | ✅ 1000 Hz - hitting target exactly |
-| Event Polling       | 0.1ms   | SDL3, input sampling               |
-| GPU Resource Handoff| 0.3ms   | Acquire cmd/swapchain              |
-| GPU Submit          | 0.2ms   | Submit, signal fence               |
-| Frame Pacing        | 0.3ms   | Proper timing to maintain 1000Hz   |
-| Overhead            | 0.1ms   | Thread coordination, atomics       |
-
-**Analysis:** Sentinel thread now has proper frame pacing and consistently hits 1000Hz target
+| Task | Time | Notes |
+|------|------|-------|
+| Full Frame | 1.0ms | ✅ 1000Hz target achieved |
+| Event Polling | 0.1ms | SDL3 |
+| Frame Pacing | ~0.8ms | Sleep + busy-wait tail |
 
 ---
 
 ## Architecture Status
 
-### ✅ Completed
+### Implemented
 
-- [x] Three-thread architecture (Sentinel/Brain/Encoder)
-- [x] Lock-free FramePacket mailbox
-- [x] Frame synchronization handshake
-- [x] GPU resource atomics
-- [x] FramePacer (3 frames in flight)
-- [x] SDL3 GPU rendering (Vulkan/Metal/D3D12)
-- [x] Instanced rendering
-- [x] Snapshot + interpolation
-- [x] Component decomposition (FieldProxy)
-- [x] EntityView hydration pattern
-- [x] Per-chunk field array iteration
-- [x] Batch processing with SIMD hints
-- [x] Three lifecycle phases (PrePhysics/Update/PostPhysics)
-- [x] Reflection system (minimal boilerplate)
-- [x] Tracy profiler integration (3-level zones)
+- [x] Three-thread architecture (Sentinel / Brain / Encoder)
+- [x] Raw Vulkan: VulkanContext, VulkanMemory (volk + VMA)
+- [x] FieldProxy (Scalar / Wide / WideMask, FieldProxyMask zero-size base)
+- [x] TemporalComponentCache dual-buffer SoA (proto-slab)
+- [x] Dirty bit tracking (Active = 1<<31, Dirty = 1<<30)
+- [x] Registry dirty bit marking after each chunk update
+- [x] LogicThread::PublishCompletedFrame (Vulkan RH perspective + identity view)
+- [x] GPU-driven compute pipeline (predicate → prefix_sum → scatter, Slang shaders)
+- [x] InstanceBuffer SoA + indirect draw (DrawArgs)
+- [x] VulkRender skeleton (Initialize/Start/Stop/Join)
+- [x] 3-level Tracy profiling (Coarse/Medium/Fine)
+- [x] `STRIGID_TEMPORAL_FIELDS` with SystemGroup tag (syntax implemented, partition routing pending)
+- [x] `TemporalFlags` with Active/Dirty bits
 
-### 🔄 In Progress
+### Designed, Not Yet Implemented
 
-- [ ] **History Slab** - Design phase, not implemented
-  - Custom arena allocator
-  - Section-based history buffering
-  - Ownership tracking (atomic bitfield)
-  - HistorySectionHeader replaces FramePacket
-  - Migration plan defined
+- [ ] **Tiered storage partition layout** — Cold/Static/Volatile/Temporal with DUAL/PHYS/RENDER/LOGIC partitions
+  (current: all temporal entities share one TemporalComponentCache, no partition isolation)
+- [ ] **SimulationBody marker component** — Temporal vs Volatile explicit opt-in
+- [ ] **Universal strip** — contiguous Flags array outside partition field zones
+- [ ] `STRIGID_UNIVERSAL_COMPONENT` macro
+- [ ] **Cumulative dirty bit array** — double-buffered dense bit array, lock-free Front/Back swap
+- [ ] **5 GPU InstanceBuffers** — VSync decoupling (currently fewer buffers in flight)
+- [ ] **Fixed-point coordinate system** — `Fixed32` value type (1 unit = 0.1mm), `FieldProxy<Fixed32, WIDTH>`, render thread conversion to camera-relative float32 at upload, Jolt bridge (int32↔float32 at cell boundary)
+- [ ] **ConstraintEntity system** — constraint entities in LOGIC partition, `ConstraintType` enum (Rigid/Hinge/BallSocket/Prismatic/Distance/Spring), render thread rigid attachment pass (2-pass depth ordering), physics root determination
+- [ ] **Space partition cell registry** — cell world origins as float64/int64, cell assignment at entity spawn, cross-cell reparenting
+- [ ] `GetTemporalFieldWritePtr` migration from Archetype to TemporalComponentCache
+- [ ] `TemporalFrameStride` removal from Archetype (duplicated from cache)
+- [ ] **VulkRender ThreadMain** — actual GPU loop (acquire → upload → compute → draw → present)
 
-### ⏳ Planned (Next 4-6 Weeks)
+### Known Issues / Technical Debt
 
-- [ ] **State-Sorted Rendering** - 64-bit sort keys, radix sort
-- [ ] **Frustum Culling** - Camera visibility, SIMD tests
-- [ ] **Physics Integration** - Jolt Physics, zero-copy mapping
-- [ ] **Input System** - 1000Hz sampling, action maps
-- [ ] **Networking Foundation** - Packet serialization, delta compression
-- [ ] **Job System** - Parallel rendering, async tasks
+1. **Cross-archetype co-indexing bug:** TemporalComponentCache allocates field zones sequentially
+   per-field-type across all chunks. Entity in Chunk C (TVC) may have PositionX at global index 200
+   but Color.R at global index 100. Per-chunk access is correct; global-index GPU access is not.
+   New partition design fixes this.
 
-### 🔬 Research Phase
+2. **TemporalFrameStride duplicated on Archetype:** Should call `cache->GetFrameStride()` instead.
+   Currently cached redundantly on every Archetype.
 
-- [ ] **Rollback Netcode** - GGPO-style, prediction binding
-- [ ] **Defragmentation** - Slab-level and entity-level
-- [ ] **Replay System** - Read historical frames from slab
-- [ ] **Lag Compensation** - Server-side rewind
+3. **VulkRender::ThreadMain is a stub:** Logs "not yet implemented" and exits. Engine runs with
+   the logic thread functional and render thread placeholder.
 
----
+### Planned (Next Phase)
 
-## Known Issues & Technical Debt
-
-### High Priority
-
-1. **Snapshot Copy Bottleneck**
-   - Issue: RenderThread copies 5-8ms of archetype data every frame
-   - Impact: 60-70% of render thread time wasted on memcpy
-   - Solution: History Slab eliminates this (direct pointer access)
-   - ETA: Week 4-5
-
-2. **No Frustum Culling**
-   - Issue: Rendering all entities regardless of camera view
-   - Impact: Wasted GPU time, lower FPS in large scenes
-   - Solution: Implement camera frustum tests during interpolation
-   - ETA: Week 5-6
-
-3. **No State Sorting**
-   - Issue: Naive draw order, suboptimal GPU state changes
-   - Impact: More draw calls, higher GPU overhead
-   - Solution: 64-bit sort keys, radix sort
-   - ETA: Week 6-7
-
-### Medium Priority
-
-4. **FramePacket Mailbox**
-   - Issue: Will be replaced by History Slab headers
-   - Impact: Extra 64 bytes per frame, triple-buffer overhead
-   - Solution: Remove when History Slab is implemented
-   - ETA: Week 5
-
-5. **Fixed 128Hz**
-   - Issue: Currently hardcoded to 128Hz, target is 512Hz
-   - Impact: Not testing full target performance yet
-   - Solution: Increase Hz once physics and History Slab are ready
-   - ETA: Week 7-8
-
-6. **No Physics**
-   - Issue: Only transform updates, no collision/response
-   - Impact: Can't test full simulation load
-   - Solution: Integrate Jolt Physics
-   - ETA: Week 8-10
-
-### Low Priority
-
-7. **Boilerplate Macros**
-   - Issue: Requires 4 macros per entity/component
-   - Impact: Slight user friction, easy to forget
-   - Solution: Investigate reducing to 2-3 macros
-   - ETA: Week 12+
-
-8. **Single Mesh/Material**
-   - Issue: All entities render with same cube mesh
-   - Impact: Can't test state sorting benefits
-   - Solution: Asset pipeline, multiple meshes
-   - ETA: Week 10-12
+- [ ] **VulkRender::ThreadMain** — GPU loop: acquire swapchain → upload dirty → compute dispatch → draw → present
+- [ ] **Tiered slab implementation** — allocate Volatile + Temporal slabs with partition layout
+- [ ] **Frustum culling** — SIMD 6-plane test, GPU-side predicate enhancement
+- [ ] **State-sorted rendering** — 64-bit sort keys, GPU radix sort after scatter
+- [ ] **Jolt Physics integration** — zero-copy RigidBody mapping
+- [ ] **Rollback netcode** — Temporal slab rollback + dirty resimulation
+- [ ] **Job system** — Brain/Encoder currently run update loops inline; job infrastructure planned
+- [ ] **Input system** — 1000Hz sampling, action maps
 
 ---
 
-## Next Milestones (Week 4-8)
+## Design Insights Log
 
-### Week 4-5: History Slab Implementation
+- **Volatile = 5 frames** (not 4): 5 frames gives Logic/4 headroom between thread tick rates.
+  4 frames = Logic/2, which is tighter margin for the render thread to find a safe read frame.
 
-**Goals:**
-- Implement `HistorySlab` allocator with section management
-- Implement `HistorySectionHeader` with atomic ownership
-- Migrate Transform to History Slab (first hot component)
-- Update `Archetype::BuildFieldArrayTable` to point into slab
-- Benchmark memory usage vs current system
+- **GPU interpolation is self-contained:** Render thread uploads frame T only. GPU keeps T-1 in its
+  own persistent previous-frame InstanceBuffer. Render thread does NOT need to read two CPU slab frames.
 
-**Success Criteria:**
-- Logic writes to Section[(Frame+1) % N]
-- Render reads from Section[Frame % N] and Section[(Frame-1) % N]
-- Zero snapshot copies (verify with profiler)
-- Memory usage matches calculations (685MB for 100k @ 128 pages)
+- **5 GPU InstanceBuffers break the VSync chain:** Without 5 buffers, VSync → GPU holds buffer →
+  CPU render thread blocks → holds slab read lock → Logic thread stalls. 5 buffers decouple this
+  entirely. If render falls below Logic/4, it's a renderer performance problem, not a sync problem.
 
-**Risks:**
-- Complex pointer arithmetic bugs
-- Ownership race conditions
-- Performance regression if implemented incorrectly
+- **Cumulative dirty bit array (SIMD OR path):** When render falls behind multiple logic frames,
+  it ORs dirty flags from all intermediate frames (SIMD, 12.5KB for 100K entities, fits in L1)
+  before building the GPU upload set. No full upload required unless lag exceeds ring buffer depth.
 
-### Week 6-7: Frustum Culling + State Sorting
-
-**Goals:**
-- Implement camera frustum tests (6-plane SIMD)
-- Integrate culling into interpolation loop
-- Implement 64-bit sort key generation
-- Radix sort InterpBuffer
-
-**Success Criteria:**
-- 50-70% reduction in InterpBuffer size (typical scenes)
-- Culling < 0.5ms for 100k entities
-- Sorting < 1.0ms for 100k entities
-- Measurable reduction in GPU state changes
-
-**Risks:**
-- Culling false positives (visible objects culled)
-- Sorting overhead negates benefits for small scenes
-
-### Week 8-10: Physics Integration
-
-**Goals:**
-- Integrate Jolt Physics library
-- Map Transform hot components to Jolt bodies
-- Zero-copy physics (Jolt writes to History Slab)
-- Implement collision callbacks in PostPhysics
-
-**Success Criteria:**
-- 100k dynamic rigid bodies simulated
-- Physics solver < 0.8ms per frame
-- PrePhysics + Physics + PostPhysics < 1.95ms (512Hz)
-- No memory allocations during simulation
-
-**Risks:**
-- Jolt may not support zero-copy (may need adapter layer)
-- 512Hz physics may be unrealistic (may need to scale back to 256Hz)
-- Collision callbacks may break frame budget
-
----
-
-## Lessons Learned (Weeks 1-3)
-
-### What Went Well
-
-1. **FieldProxy Design**
-   - Zero-overhead indirection works beautifully
-   - Compiler optimizes away proxy layer entirely
-   - User code looks like OOP, performs like SoA
-   - Easy to understand and debug
-
-2. **Lock-Free Communication**
-   - FramePacket mailbox has zero contention
-   - Atomics perform well (no measurable overhead)
-   - Thread handoffs are clean and predictable
-
-3. **Tracy Profiler**
-   - Invaluable for identifying bottlenecks
-   - Zone colors help distinguish thread work
-   - Confirmed snapshot copy is main problem
-
-4. **Reflection System**
-   - Macros are verbose but functional
-   - Compile-time generation avoids runtime overhead
-   - Schema system is flexible (inheritance works)
-
-### What Didn't Go Well
-
-1. **Snapshot Copy**
-   - Underestimated memcpy cost (5-8ms is huge)
-   - Should have started with History Slab earlier
-   - Now have to refactor working system
-
-2. **1M Entity Testing**
-   - Misleading metric (not representative of real games)
-   - Spent time optimizing for wrong target
-   - Should focus on 100k with physics instead
-
-3. **Documentation Lag**
-   - README fell behind implementation
-   - Design decisions not documented in real-time
-   - This update is catching up 2 weeks of work
-
-### Going Forward
-
-- **Document design before implementing** (this conversation is proof of value)
-- **Focus on 100k @ 512Hz** (stop chasing 1M)
-- **Profile early, profile often** (Tracy saves time)
-- **Iterate on working code** (History Slab is better than triple-buffer because we learned from FramePacket)
-
----
-
-## Summary
-
-**Week 3 Status: Solid Foundation, Ready for Next Phase**
-
-The engine has a working three-thread architecture with full SoA component decomposition. Performance is excellent - already hitting 1.7ms full frame with render thread enabled, very close to the 512Hz target (1.95ms).
-
-**Key Numbers:**
-- ✅ 100k entities: 0.3ms PrePhysics, 1.7ms full frame (including render overhead)
-- ✅ Main thread: 1.0ms (1000 Hz) - hitting target exactly
-- ✅ Render thread: 3.1ms render (321 FPS)
-- 🎯 Target: 100k entities @ 512Hz fixed update (1.95ms per frame) - nearly achieved!
-
-**Next Priority:** Implement History Slab to eliminate snapshot bottleneck and enable direct render access.
+- **Dirty bit = rollback blast radius:** The same bit 30 that drives GPU upload drives selective
+  resimulation during rollback. The dirty set from a correction expands naturally through update
+  logic to the exact set of entities that need recomputation — no manual dependency tracking.
 
 ---

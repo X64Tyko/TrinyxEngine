@@ -1,0 +1,15 @@
+CompileFlags:
+  # Fallback flags for files not covered by compile_commands.json (e.g. scratch files).
+  # Files that ARE in the build inherit their flags from compile_commands.json instead.
+  Add:
+    - -std=c++20
+    - -Isrc/Runtime/Core/Public
+    - -Isrc/Runtime/Memory/Public
+    - -Isrc/Runtime/Rendering/Public
+    - -Isrc/Runtime/Profiling/Public
+    - -Isrc/Runtime/Logging/Public
+    - -Isrc/Runtime/Components/Public
+    - -Isrc/Runtime/Input/Public
+    - -Ilibs/volk
+    - -Ilibs/vma
+    - -DSTRIGID_SHADER_DIR=""

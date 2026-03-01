@@ -10,519 +10,508 @@
 
 StrigidEngine uses a **three-thread architecture** with job-based parallelism:
 
-1. **Sentinel (Main Thread):** 1000Hz input polling, GPU resource management, frame pacing
+1. **Sentinel (Main Thread):** 1000Hz input polling, window + Vulkan object lifetime, frame pacing
 2. **Brain (Logic Thread):** 512Hz fixed timestep coordinator + job distribution
 3. **Encoder (Render Thread):** Variable-rate render coordinator + job distribution
 
-**Key Design:** Brain and Encoder are **coordinators**, not workers. They initialize frames, distribute work to the job system, and act as workers themselves while jobs are pending.
+**Key Design:** Brain and Encoder are **coordinators**, not workers. They initialize frames, distribute work to
+the job system, and act as workers themselves while jobs are pending.
 
 ## Job System Architecture
 
 ### Core Count Distribution (8-core example)
 
-- **Sentinel Thread:** 1 dedicated core (input + GPU resource management)
+- **Sentinel Thread:** 1 dedicated core (input + Vulkan lifetime)
 - **Encoder Thread:** 1 dedicated core (render coordination + render worker)
 - **Brain Thread:** 1 dedicated core (logic coordination + logic worker)
-- **Workers:** 5 cores (process tasks from all queues)
+- **Workers:** 5 cores (process tasks from both queues via work-stealing)
 
-### Worker Pool
+### Queue Affinity Rules
 
-The job system maintains a shared pool of worker threads with queue affinity rules:
-
-```cpp
-// Simplified job system structure
-struct JobSystem {
-    static constexpr int WorkerCount = 6;  // Hardware threads - 2 (Sentinel + Encoder)
-
-    // Separate queues for Logic and Render jobs
-    MPMCQueue<Job> LogicQueue;
-    MPMCQueue<Job> RenderQueue;
-
-    std::thread Workers[WorkerCount];
-    std::atomic<bool> IsRunning;
-};
-```
-
-**Queue Affinity Rules:**
 - **Brain Thread:** Only pulls from `LogicQueue` (when acting as worker)
 - **Encoder Thread:** Only pulls from `RenderQueue` (when acting as worker)
-- **Generic Workers (5 threads):** Pull from both `LogicQueue` and `RenderQueue` (work-stealing)
+- **Generic Workers:** Pull from both queues (work-stealing)
 
-This design prevents the Brain from accidentally processing render jobs and vice versa, while allowing generic workers to balance load across both queues.
+This prevents Brain from accidentally processing render jobs and vice versa, while generic workers balance load
+across both queues.
 
 ### Job Types
 
-**Logic Jobs:**
-- PrePhysics updates (per-archetype chunk)
-- Physics simulation (per-chunk or per-rigid-body-group)
-- PostPhysics updates (per-archetype chunk)
+**Logic Jobs:** PrePhysics updates (per-chunk), physics simulation, PostPhysics updates
 
-**Render Jobs:**
-- Interpolation (per-entity-range)
-- Frustum culling (per-chunk)
-- Sort key generation (per-visible-entity)
-- GPU command encoding (per-material/mesh batch)
-
-### Performance Impact
-
-**Example: 100k entities @ 128Hz on 8-core CPU**
-
-Single-threaded Brain: ~1.7ms per frame
-- PrePhysics: ~0.3ms
-- Physics: ~1.0ms (projected)
-- PostPhysics: ~0.4ms (projected)
-
-Multi-threaded (6 workers @ 80% efficiency):
-- PrePhysics: ~0.25ms (4x speedup)
-- Physics: ~0.37ms (4x speedup)
-- PostPhysics: ~0.13ms (4x speedup)
-- **Total: ~0.75ms** (well within 1.95ms budget)
-
-**Efficiency factors:**
-- Job submission overhead (~5%)
-- Cache coherency between cores (~10%)
-- Load balancing variance (~5%)
-- **Realistic efficiency: 75-85%**
+**Render Jobs:** GPU upload (dirty entity delta), compute dispatch (predicate/prefix_sum/scatter),
+frustum culling (planned), sort key generation (planned), command encoding
 
 ---
 
-# Memory Model: History Slab Architecture
+# Memory Model: Tiered Storage
 
-## Overview: The History Slab
+## Overview: Four Storage Tiers
 
-The History Slab is a custom arena allocator with integrated history buffering and defragmentation support. It replaces the previously planned "triple-buffered sparse sets" with a more flexible system that supports rendering, networking, rollback, prediction, lag compensation, and replay.
+Entity component data lives in one of four tiers based on access pattern and rollback requirements:
 
-### Core Concept
+| Tier | Structure | Frames | Rollback | Use Case |
+|------|-----------|--------|----------|----------|
+| Cold | Archetype chunks (AoS) | 0 | No | Rarely-updated, non-iterable data |
+| Static | Separate read-only array | 0 | No | Geometry/mesh data, never changes |
+| Volatile | SoA ring buffer | 5 | No | Cosmetic entities, ambient AI, particles |
+| Temporal | SoA ring buffer | max(8, X) | Yes | Networked, simulation-authoritative entities |
 
-**Single Contiguous Allocation** divided into X sections (user-configurable power-of-2, default 128 or 4):
-- Each section represents one frame's worth of hot component data
-- Sections are accessed via: `Section[FrameNumber % SectionCount]`
-- All hot components (Transform, Velocity, etc.) live ONLY in the History Slab
-- Cold components remain in Archetype chunks
+**Cold** components (no `STRIGID_TEMPORAL_FIELDS`) live only in Archetype chunks (AoS layout).
+They are rarely accessed by inner loops — inventory, quest state, AI decision trees.
 
-**Memory Layout:**
+**Static** entities get a dedicated read-only SoA array. No rollback overhead. Physics and render include
+static data as a third dense pass after their partition ranges.
 
-```
-┌───────────────────────────────────────────────────────────────────────┐
-│                    HISTORY SLAB (Arena Allocator)                     │
-│                   Total Size: SectionSize × SectionCount              │
-├───────────────────────────────────────────────────────────────────────┤
-│  Section 0 (Frame % 128 == 0)                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐ │
-│  │ HistorySectionHeader                                            │ │
-│  │   - OwnershipFlags (atomic bitfield)                            │ │
-│  │   - FrameNumber                                                 │ │
-│  │   - ViewMatrix, ProjectionMatrix, CameraPosition                │ │
-│  │   - SunDirection, SunColor                                      │ │
-│  │   - ActiveEntityCount                                           │ │
-│  ├─────────────────────────────────────────────────────────────────┤ │
-│  │ Transform Block A [entities 0..255]   ← Archetype requested     │ │
-│  │   - PositionX[256], PositionY[256], PositionZ[256]              │ │
-│  │   - RotationX[256], RotationY[256], RotationZ[256]              │ │
-│  │   - ScaleX[256], ScaleY[256], ScaleZ[256]                       │ │
-│  ├─────────────────────────────────────────────────────────────────┤ │
-│  │ Transform Block B [entities 256..511]                           │ │
-│  │   - (Same field layout as Block A)                              │ │
-│  ├─────────────────────────────────────────────────────────────────┤ │
-│  │ Velocity Block A [entities 0..255]                              │ │
-│  │   - VelocityX[256], VelocityY[256], VelocityZ[256]              │ │
-│  ├─────────────────────────────────────────────────────────────────┤ │
-│  │ [Inactive entity markers / gap metadata]                        │ │
-│  └─────────────────────────────────────────────────────────────────┘ │
-├───────────────────────────────────────────────────────────────────────┤
-│  Section 1 (Frame % 128 == 1)                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐ │
-│  │ HistorySectionHeader { ... }                                    │ │
-│  ├─────────────────────────────────────────────────────────────────┤ │
-│  │ Transform Block A [entities 0..255]  ← SAME OFFSET as Section 0 │ │
-│  │ Transform Block B [entities 256..511]                           │ │
-│  │ Velocity Block A [entities 0..255]                              │ │
-│  │ [Gaps...]                                                       │ │
-│  └─────────────────────────────────────────────────────────────────┘ │
-├───────────────────────────────────────────────────────────────────────┤
-│  Section 2, 3, 4... (up to 127 or configured max)                    │
-│    - All sections maintain identical layout/offsets                   │
-│    - Defragmentation must keep all sections in sync                   │
-└───────────────────────────────────────────────────────────────────────┘
-```
+**Volatile** entities use a 5-frame ring buffer per field. 5 frames gives Logic/4 headroom between
+thread tick rates (4 frames = Logic/2 — tighter). No rollback; these entities are not networked.
+
+**Temporal** entities use an N-frame ring buffer where N = `max(8, rollback_depth_at_FixedUpdateHz)`.
+Full history for rollback netcode, lag compensation, and replay.
 
 ---
 
-## Allocation Strategy
+## Volatile vs Temporal Auto-Classification
 
-### Archetype Requests Space
-
-When an Archetype is created with hot components:
+A single marker component selects the tier:
 
 ```cpp
-// Archetype determines it needs Transform (9 fields × 256 entities = 2304 floats)
-size_t bytesNeeded = 9 * 256 * sizeof(float);  // ~9 KB
-
-// Request allocation from History Slab
-void* basePtr = HistorySlab.AllocateForArchetype(bytesNeeded);
-// Returns pointer to offset X in Section 0
-
-// ALL future sections maintain this offset
-// Section 1 has Transform Block A at (Section1BasePtr + X)
-// Section 2 has Transform Block A at (Section2BasePtr + X)
-// etc.
+struct SimulationBody { /* empty marker, no fields */ };
 ```
 
-**Key Properties:**
-- Allocation happens once per Archetype (not per frame)
-- Same offset across all sections ensures consistent pointer arithmetic
-- Jumping to next frame is trivial: `ptr += sectionSize`
+- Entity **has** `SimulationBody` → **Temporal** tier (full rollback ring buffer)
+- Entity **does not have** `SimulationBody` → **Volatile** tier (5-frame ring buffer, no rollback)
 
-### Field Array Table Construction
+The same component types (Transform, Velocity, etc.) can live in either tier depending on the entity.
+A wandering ambient bird and a networked player both have a Transform, but only the player is Temporal.
 
-The Archetype knows where hot components live in the History Slab:
+---
+
+## Partition Design
+
+Within each tier's slab, entities are organized into fixed-size partitions by system access group:
+
+```
+DUAL    [0 .. MAX_DUAL)              ← physics + render access (players, AI, physics props)
+PHYS    [0 .. MAX_PHYS)              ← physics-only (trigger volumes, invisible movers)
+RENDER  [0 .. MAX_RENDER)            ← render-only (particles, decals, ambient props)
+LOGIC   [MAX_DUAL+MAX_PHYS+MAX_RENDER .. MAX_DYNAMIC)   ← remainder
+```
+
+Config constraint (validated at startup):
+```
+assert(MaxDualEntities + MaxPhysEntities + MaxRenderEntities <= MaxDynamicEntities)
+```
+
+**System iteration patterns (three dense passes each, no pointer chasing):**
+- Physics iterates: `DUAL[0..N_dual)` → `PHYS[0..N_phys)` → `STATIC[0..N_static)`
+- Render iterates:  `DUAL[0..N_dual)` → `RENDER[0..N_render)` → `STATIC[0..N_static)`
+
+The partition boundaries are fixed at engine startup from `EngineConfig`. No entity can push another
+into a different partition at runtime — the regions are pre-allocated.
+
+---
+
+## Entity Group Auto-Derivation
+
+The partition group (Dual/Phys/Render/Logic) is computed automatically at `STRIGID_REGISTER_ENTITY`
+time (static initialization), derived from the SystemGroup tags on each component:
 
 ```cpp
-void Archetype::BuildFieldArrayTable(uint32_t frameNum, void** fieldArrayTable)
-{
-    void* sectionBase = HistorySlab.GetSection(frameNum % SectionCount);
-    void* transformBlock = (char*)sectionBase + transformOffset;
+// Component system group annotations — no manual entity group annotation needed
+STRIGID_TEMPORAL_FIELDS(RigidBody, SystemGroup::Phys,   VelX, VelY, VelZ)
+STRIGID_TEMPORAL_FIELDS(Material,  SystemGroup::Render, ColorR, ColorG, ColorB)
+STRIGID_TEMPORAL_FIELDS(Transform, SystemGroup::None,   PosX, PosY, PosZ)  // partition-agnostic
+STRIGID_TEMPORAL_FIELDS(Stats,     SystemGroup::Logic,  Health, Ammo)
+```
 
-    // Build field array pointers into the History Slab
-    fieldArrayTable[0] = (char*)transformBlock + offsetof(TransformSoA, PositionX);
-    fieldArrayTable[1] = (char*)transformBlock + offsetof(TransformSoA, PositionY);
-    fieldArrayTable[2] = (char*)transformBlock + offsetof(TransformSoA, PositionZ);
-    // ... etc for all 9 Transform fields
+Derivation rule (applied once at static-init when `STRIGID_REGISTER_ENTITY(T)` fires):
 
-    // Cold components still come from Archetype chunk memory
-    fieldArrayTable[9] = chunk->GetComponentArray<HealthComponent>();
+| Components present | → Entity Group |
+|--------------------|----------------|
+| Phys AND Render | Dual |
+| Phys only | Phys |
+| Render only | Render |
+| Temporal but neither | Logic |
+| No temporal components at all | Non-temporal (flags live in chunk) |
+
+`STRIGID_REGISTER_ENTITY(T)` takes **no manual group annotation** — fully automatic. Giving users a
+manual override is giving them a gun to shoot gaps into their partition regions with.
+
+---
+
+## Universal Strip (Flags)
+
+Active/Dirty flags live **outside** the per-partition field zones in a dedicated universal strip:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Universal Strip (one contiguous int32 array = one SIMD pass)       │
+│  Flags[0..MAX_DYNAMIC_ENTITIES)   ← TemporalFlagBits::Active | Dirty│
+├─────────────────────────────────────────────────────────────────────┤
+│  DUAL Partition [0..MAX_DUAL)                                        │
+│    PosX[MAX_DUAL], PosY[MAX_DUAL], PosZ[MAX_DUAL], ...              │
+│    VelX[MAX_DUAL], VelY[MAX_DUAL], VelZ[MAX_DUAL], ...              │
+├─────────────────────────────────────────────────────────────────────┤
+│  PHYS Partition [0..MAX_PHYS)                                        │
+│    VelX[MAX_PHYS], ...                                              │
+├─────────────────────────────────────────────────────────────────────┤
+│  RENDER Partition [0..MAX_RENDER)                                    │
+│    ColorR[MAX_RENDER], ...                                           │
+├─────────────────────────────────────────────────────────────────────┤
+│  LOGIC Partition [remainder]                                         │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+Macro: `STRIGID_UNIVERSAL_COMPONENT(TemporalFlags, Flags)`
+
+- **Temporal/Volatile entities:** flags in universal strip of their slab (one contiguous array = one SIMD pass
+  for ALL entities regardless of partition)
+- **Non-temporal entities:** flags live in archetype chunk alongside cold data
+
+Current implementation uses `TemporalFlagBits::Active = 1<<31` and `TemporalFlagBits::Dirty = 1<<30`.
+The dirty bit doubles as the GPU upload trigger and (during rollback) as a selective resimulation marker —
+the dirty set from any correction expands naturally through update logic to the exact blast radius.
+
+---
+
+# Fixed-Point Coordinate System
+
+## Motivation
+
+Float32 within a 1km space partition cell has ≈8mm precision and is non-deterministic across platforms
+(different FPU rounding modes, compiler optimizations, FMA behavior). For rollback netcode — where two
+clients running the same inputs must produce bit-identical simulation state — this is unacceptable.
+
+Fixed-point int32 is perfectly deterministic on every platform, every compiler, every optimization level.
+Integer arithmetic produces identical bits on x86, ARM, any future target. This is the gold standard for
+deterministic simulation and the reason fighting game engines (which require frame-perfect rollback) have
+used it for decades.
+
+## Unit Definition
+
+```
+1 unit = 0.1mm (100 micrometers)
+1 meter   =     10,000 units
+1 km      = 10,000,000 units
+int32 max = 2,147,483,647 units = ±214 km
+
+Cell size (1km): max value = 5,000,000 units  →  430× headroom before overflow
+```
+
+This unit definition is baked into all component field definitions. Changing it later requires migrating
+all stored data — choose once, document clearly.
+
+## Fixed32 Value Type
+
+A `Fixed32` wrapper around `int32_t` with overloaded arithmetic handles the multiply-shift pattern
+transparently. Entity authors write natural syntax; the engine handles int64 intermediates:
+
+```cpp
+// Multiply: (a × b) needs 64-bit intermediate to avoid overflow
+inline Fixed32 operator*(Fixed32 a, Fixed32 b) {
+    return Fixed32(static_cast<int32_t>(
+        (static_cast<int64_t>(a.raw) * b.raw) >> FIXED_SCALE_SHIFT
+    ));
 }
+
+// Entity authors write exactly the same syntax as float:
+transform.PosX += body.VelX * dt;   // Fixed32 * Fixed32 → Fixed32, no overflow
 ```
+
+`FieldProxy<Fixed32, WIDTH>` — all position, velocity, and force fields use this type.
+
+## Quaternion Representation
+
+Quaternion components live in [-1, 1]. Store as int32 in 0.31 fixed-point format
+(1 sign bit, 31 fraction bits). Quaternion multiplication is pure integer math with int64
+intermediates — no trig in the inner loop. Trig only appears when creating a quaternion
+from Euler angles (rare: at spawn or explicit rotation assignment).
+
+## Coordinate Layers
+
+```
+Cell-relative fixed-point (int32):
+  Entity positions, velocities, forces — all logic and physics
+
+Cell world origin (float64 or int64):
+  Absolute world position of each cell's origin
+  Stored in Registry/World, never in entity SoA
+
+Camera world position (float64 or int64):
+  Maintained by logic thread, published each frame
+```
+
+## Render Thread Conversion (Upload Time)
+
+The only lossy step — done once per dirty entity per frame by the render thread:
+
+```cpp
+// Camera-relative float32 for GPU (precision loss is acceptable: ≈0.05mm at 1km)
+float32 gpu_x = float32(
+    double(cell_world_origin.x - camera_world_pos.x)   // float64 subtraction (CPU, free)
+    + double(entity.PosX.raw) * 0.0001                 // fixed-point units → meters
+);
+```
+
+GPU receives small float32 (camera-relative, ≤±1km). Full float32 precision applies. Full throughput.
+No doubles on the GPU.
+
+## Jolt Physics Bridge (Temporary)
+
+Jolt uses float32 internally. At the physics boundary:
+
+```
+Our fixed-point int32 → float32 cell-relative → Jolt body position
+Jolt result float32   → int32 fixed-point     → our slab
+```
+
+At cell-relative scale (≤±500m from cell center), float32 precision is ≈0.05mm — finer than our
+0.1mm unit definition. The bridge is lossless. When Jolt is replaced with a custom solver, the
+bridge goes away and the fixed-point data feeds the solver directly.
 
 ---
 
-## Thread Access Pattern
+# Constraint System
 
-### Logic Thread (Brain) - Job Coordinator
+## Design: Constraint Pool (Separate AoS, Not in Temporal Slab)
 
-The Brain thread acts as a **job coordinator** rather than doing all work itself. On an 8-core system:
-- **Sentinel Thread:** Input polling and GPU resource management (1 core)
-- **Encoder Thread:** Render job coordination (1 core)
-- **Brain Thread + Workers:** Logic coordination + work distribution (6 cores)
+Constraints are structural metadata — which body, which anchor, which type. They don't evolve
+frame-to-frame and don't need rollback history. The *resolved result* of constraints (world transforms
+of constrained entities) lives in the temporal SoA as normal entity data. The constraint relationships
+themselves live in a separate flat AoS pool.
 
-The Brain thread initializes the frame, distributes work to the job system, and acts as a worker itself while jobs are pending.
+AoS is correct here (vs SoA for entity fields) because the solver always reads all fields of one
+constraint together — it never needs "all BodyA values" in isolation. Cache access pattern matches AoS.
 
-```cpp
-void LogicThread::FixedUpdate()
-{
-    uint32_t currentFrame = FrameNumber;
-    uint32_t writeFrame = (currentFrame + 1) % SectionCount;
-    uint32_t readFrame = currentFrame % SectionCount;
+Developers who need temporal/dynamic constraints (constraints that change per-frame, need history,
+or need rollback) can author their own constraint components using the standard temporal SoA system.
+The engine doesn't pay for that complexity by default.
 
-    // Check if writeFrame is available
-    HistorySection* writeSection = slab.GetSection(writeFrame);
-    if (writeSection->IsLockedByRender() && Config.DeterministicFrames) {
-        // Wait for render thread to release
-        while (writeSection->IsLockedByRender()) { /* spin */ }
-    }
-    // else: Non-deterministic mode, skip to next available section
+```
+ConstraintPool (flat AoS, owned by Registry, separate from temporal slab):
 
-    // Mark as writing
-    writeSection->SetOwnership(LOGIC_WRITING);
+  ConstraintData[MAX_CONSTRAINTS]:
+    uint32_t       BodyA        — entity partition index (UINT32_MAX = static world anchor)
+    uint32_t       BodyB        — entity partition index (UINT32_MAX = static world anchor)
+    ConstraintType Type         — Rigid, Hinge, BallSocket, Prismatic, Distance, Spring, ...
+    uint16_t       BoneA        — bone on BodyA (UINT16_MAX = entity root pivot)
+    uint16_t       BoneB        — bone on BodyB (UINT16_MAX = entity root pivot)
+    Fixed32        AnchorA[3]   — local-space anchor on BodyA
+    Fixed32        AnchorB[3]   — local-space anchor on BodyB
+    Fixed32        LimitMin[3]  — lower DOF limits (translation or angle)
+    Fixed32        LimitMax[3]  — upper DOF limits
+    Fixed32        Stiffness    — spring/soft constraints
+    Fixed32        Damping      — spring/soft constraints
 
-    // Build field array tables for all archetypes
-    void* readFieldArrays[64];
-    void* writeFieldArrays[64];
-    archetype->BuildFieldArrayTable(readFrame, readFieldArrays);
-    archetype->BuildFieldArrayTable(writeFrame, writeFieldArrays);
-
-    // Distribute work across job system (Brain becomes a worker during this phase)
-    JobSystem::SubmitLogicJobs(
-        LogicJobType::PrePhysics,
-        archetypes,
-        writeFieldArrays,
-        dt
-    );
-
-    // Brain thread acts as worker while jobs pending
-    JobSystem::ProcessLogicQueueAsWorker();
-
-    // Wait for all PrePhysics jobs to complete
-    JobSystem::WaitForLogicJobs();
-
-    // Write frame-specific data to section header
-    writeSection->Header.FrameNumber = currentFrame + 1;
-    writeSection->Header.ViewMatrix = camera.GetViewMatrix();
-    writeSection->Header.ProjectionMatrix = camera.GetProjection();
-    // ... etc
-
-    // Publish to renderer
-    LastFrameWritten.store(currentFrame + 1, std::memory_order_release);
-
-    FrameNumber++;
-}
+  uint32_t Count
+  uint32_t ByBodyA[MAX_DYNAMIC_ENTITIES]  — O(1) lookup: "what constraint has entity X as BodyA?"
+                                            UINT32_MAX = entity is unconstrained (physics root)
 ```
 
-**Performance Impact (8-core example):**
-- Single-threaded Logic: ~1.7ms per frame
-- Multi-threaded (6 workers @ 80% efficiency): ~0.43ms per frame (projected)
-- **Scalability:** 4x speedup with 6 worker threads
+Why a separate AoS pool rather than a component on the child:
+- Rigid attachment (weapon to hand) is just `Type=Rigid, all 6 DOF locked` — a degenerate case of the
+  general form, not a special system
+- World-anchored constraints (spring to fixed point in space) are natural: `BodyA = world`
+- Multiple constraints between two bodies are possible (door: hinge + spring, no component slot conflict)
+- Every Jolt joint type maps directly to a `ConstraintType` enum value
+- Replacing the physics solver means replacing the solver loop, not the data layout
 
-**Ownership Rules:**
-- Logic reads from `Section[Frame % N]`
-- Logic writes to `Section[(Frame+1) % N]`
-- Logic NEVER touches `Section[(Frame-1) % N]` (owned by Render)
-
-### Render Thread (Encoder) - Job Coordinator
-
-The Encoder thread acts as a **job coordinator** for rendering work:
-- Initializes the frame and reads History Slab sections
-- Distributes interpolation, culling, and sorting work to the job system
-- Acts as a worker while jobs are pending
-- On an 8-core system, Encoder + workers can parallelize sorting, culling, and GPU command encoding
+## Constraint Types
 
 ```cpp
-void RenderThread::ProcessFrame()
-{
-    // Poll for new frame
-    uint32_t latestFrame = Logic->LastFrameWritten.load(std::memory_order_acquire);
-
-    // Interpolation needs T-1 and T
-    uint32_t frameCurr = latestFrame % SectionCount;
-    uint32_t framePrev = (latestFrame - 1) % SectionCount;
-
-    HistorySection* currSection = slab.GetSection(frameCurr);
-    HistorySection* prevSection = slab.GetSection(framePrev);
-
-    // Mark as reading (atomic bitfield)
-    currSection->SetOwnership(RENDER_READING);
-    prevSection->SetOwnership(RENDER_READING);
-
-    // Calculate interpolation alpha
-    float alpha = CalculateAlpha();
-
-    // Distribute work to job system (interpolation, culling, sort key generation)
-    JobSystem::SubmitRenderJobs(
-        RenderJobType::InterpolateAndCull,
-        currSection,
-        prevSection,
-        alpha,
-        camera
-    );
-
-    // Encoder thread acts as worker while jobs pending
-    JobSystem::ProcessRenderQueueAsWorker();
-
-    // Wait for all jobs to complete
-    JobSystem::WaitForRenderJobs();
-
-    // Release ownership
-    currSection->ClearOwnership(RENDER_READING);
-    prevSection->ClearOwnership(RENDER_READING);
-
-    // Submit final GPU commands
-    SubmitGPUCommands();
-
-    lastRenderedFrame = latestFrame;
-}
-```
-
-**Job System Benefits:**
-- **Parallel Interpolation:** Split entity ranges across workers
-- **Parallel Culling:** Frustum culling per chunk
-- **Parallel Sort:** Sort visible entities by 64-bit keys in parallel
-- **Scalability:** Multi-core systems see significant speedup
-
-**Ownership Rules:**
-- Render reads from `Section[(Frame-1) % N]` and `Section[Frame % N]`
-- Render NEVER writes to History Slab
-- Both Logic and Render can read from `Section[Frame % N]` simultaneously (no contention)
-
----
-
-## HistorySectionHeader
-
-Each section begins with metadata:
-
-```cpp
-struct HistorySectionHeader
-{
-    // Ownership tracking (atomic bitfield)
-    std::atomic<uint8_t> OwnershipFlags;
-    /*
-        0x01 = LOGIC_WRITING
-        0x02 = RENDER_READING
-        0x04 = NETWORK_READING
-        0x08 = DEFRAG_LOCKED
-        Multiple readers can coexist (bitwise OR)
-    */
-
-    // Frame identification
-    uint32_t FrameNumber;
-
-    // Camera/View data (replaces FramePacket)
-    Matrix4 ViewMatrix;
-    Matrix4 ProjectionMatrix;
-    Vector3 CameraPosition;
-
-    // Scene/Lighting data
-    Vector3 SunDirection;
-    Vector3 SunColor;
-    float AmbientIntensity;
-
-    // Entity metadata
-    uint32_t ActiveEntityCount;
-    uint32_t TotalAllocatedEntities;
-
-    // Padding to cache line
-    char _padding[/* calculated */];
+enum class ConstraintType : uint8_t {
+    Rigid,          // all 6 DOF locked — rigid attachment, transform inheritance
+    RigidWithScale, // rigid + scale inherited (careful: breaks physics proxy)
+    PositionOnly,   // 3 translation DOF locked, rotation free
+    Hinge,          // 1 rotational DOF free (door, wheel on axle)
+    BallSocket,     // 3 rotational DOF free, translation locked (shoulder joint)
+    Prismatic,      // 1 translational DOF free, rotation locked (piston, slider)
+    Distance,       // fixed distance between anchors, all rotation free (rope segment)
+    Spring,         // distance constraint with stiffness/damping (soft attach, cloth edge)
 };
 ```
 
-**Benefits:**
-- Replaces `FramePacket` entirely
-- Camera data travels with the frame in the History Slab
-- Enables client-side replay by reading old sections
-- Network can read historical frames for lag compensation
+## Naming: ConstraintEntity vs Jolt Constraints
 
----
+Jolt's internal "constraints" (its joint system) are a different concept. To avoid confusion:
+- **ConstraintEntity** (our system) = relationship between two ECS entities, drives transform and physics
+- **Jolt joints** = Jolt's internal constraint solver, used only while Jolt is the physics backend
 
-## Defragmentation
+When Jolt is replaced, Jolt joints disappear. ConstraintEntities remain — the custom solver reads them.
 
-### Slab-Level Defragmentation
+## Render Thread Rigid Attachment Pass
 
-**Problem:** Over time, Archetype allocations may become fragmented (gaps between blocks).
+Before uploading dirty entity deltas, the render thread resolves `Type=Rigid` constraints:
 
-**Solution:** Slab defrag moves entire Archetype blocks to compact memory.
-
-**Challenge:** Must keep ALL sections in sync.
-
-```cpp
-void HistorySlab::DefragArchetypeBlock(ArchetypeID id)
-{
-    // 1. Lock ALL sections
-    for (int i = 0; i < SectionCount; ++i) {
-        sections[i].SetOwnership(DEFRAG_LOCKED);
-    }
-
-    // 2. Find new contiguous location
-    size_t newOffset = FindContiguousSpace(archetypeSize);
-
-    // 3. Move block in EVERY section
-    for (int i = 0; i < SectionCount; ++i) {
-        void* oldPtr = (char*)sections[i].base + oldOffset;
-        void* newPtr = (char*)sections[i].base + newOffset;
-        memcpy(newPtr, oldPtr, archetypeSize);
-    }
-
-    // 4. Update Archetype's offset metadata
-    archetype->SetHistorySlabOffset(newOffset);
-
-    // 5. Release locks
-    for (int i = 0; i < SectionCount; ++i) {
-        sections[i].ClearOwnership(DEFRAG_LOCKED);
-    }
-}
+```
+For each ConstraintEntity where Type == Rigid:
+    WorldTransform[BodyA] = WorldTransform[BodyB]  (resolved via BoneB if BoneB != INVALID)
+                            ⊗ LocalOffset(AnchorB → AnchorA)
+    Mark BodyA dirty if BodyB was dirty this frame
 ```
 
-**Status:** Ideation phase, not yet implemented.
+Ordering: BodyB (parent) must be processed before BodyA (child). Two-pass iteration covers depth ≤ 2
+(the vast majority of real attachment hierarchies). Cap at 4 passes, assert if exceeded.
 
-### Entity-Level Defragmentation
+## Physics: Only Roots Are Simulated
 
-**Problem:** Within an Archetype's allocation, entities may have gaps (destroyed entities).
+Entities with a `Type=Rigid` ConstraintEntity pointing to them as BodyA are **not** given independent
+physics bodies. They inherit their transform from BodyB. The physics solver only creates bodies for
+root entities (no ConstraintEntity where they are BodyA with Type=Rigid).
 
-**Solution:** Archetype defrag compacts entities within its block.
-
-**Challenge:** Must update all 128 sections to maintain history consistency.
-
-**Status:** Design work needed. Low priority.
+Entities that need independent physics AND follow a parent (ragdoll limbs, physically-simulated rope
+segments) use non-Rigid constraint types — the solver resolves them via impulses/forces, not transform
+copy. This is the distinction between transform attachment (render thread, free) and physics constraints
+(solver, paid in simulation cost).
 
 ---
 
-## Configuration Options
+## Current Implementation vs Design
 
-### Section Count
+The full tiered partition design is **designed but not yet implemented**. The current code uses
+`TemporalComponentCache` as a dual-buffer SoA approximation (Read/Write arrays per field, one frame of
+history). It correctly tracks the Active and Dirty bits per entity and supports the delta-upload path.
 
-From `EngineConfig.h`:
+**Known issue in current TemporalComponentCache:** Cross-archetype co-indexing bug — field zones are
+allocated sequentially per-field-type across all chunks, so chunks from different archetypes allocate
+sequentially: if Chunk A (TVC) allocates PositionX[0..99] and Chunk B (TV) allocates PositionX[100..199],
+then Chunk C (TVC) allocates PositionX[200..299] and Color.R[100..199] — entity in Chunk C has PositionX
+at global index 200 but Color.R at global index 100. Per-chunk access (via chunk header pointers) is correct;
+global-index GPU access is not. The new partition design fixes this because partition regions are pre-allocated
+at fixed offsets, not allocated sequentially per archetype.
 
-```cpp
-int HistoryBufferPages = 128;  // Must be power of 2, min 8
+---
+
+# GPU Upload Architecture
+
+## Cumulative Dirty Bit Array
+
+A dense bit array external to the frame ring, double-buffered:
+
+```
+Front: Logic ORs bit atomically (fetch_or, relaxed) as each entity is modified
+Back:  Render reads to determine upload set
+       Render swaps Front/Back (nanosecond atomic pointer swap) once per frame
 ```
 
-**Memory Impact:**
+- Upload set = all entities where Back bit is set; upload their **current state** (not a delta)
+- Render holds the slab read lock only during entity state copy (~32µs at 10K dirty entities),
+  not during dirty bit coalescing
+- Fallback: if `(CurrentLogicFrame - LastGpuUploadFrame) > FrameCount` → full upload all active entities
 
-Assumes 100k entities with 90/10 split between simple and complex entities:
+**When render thread falls behind:** It ORs dirty flags from all intermediate frames before processing:
 
-**Hot Component Sizes (Physics-Enabled):**
-- **Simple Entity:** Transform (36B) + Velocity (24B) + Forces (24B) + Collider (32B) = **116 bytes**
-- **Complex Entity:** Transform (36B) + Velocity (24B) + Forces (24B) + Collider (32B) + BoneArray/Extra (200B) = **316 bytes**
-
-**Per-Frame Calculation (100k entities):**
-- Simple (90k): 116 bytes × 90,000 = 10.44 MB
-- Complex (10k): 316 bytes × 10,000 = 3.16 MB
-- **Base per-frame:** 13.6 MB
-
-| Config | @ 128Hz | History Duration | Memory (100k Mixed) | Simple Only (100k) | Complex Only (100k) |
-|--------|---------|------------------|---------------------|--------------------|--------------------|
-| 4      | 128Hz   | 0.03 seconds     | 54.4 MB             | 46.4 MB            | 126.4 MB           |
-| 16     | 128Hz   | 0.125 seconds    | 217.6 MB            | 185.6 MB           | 505.6 MB           |
-| 64     | 128Hz   | 0.5 seconds      | 870.4 MB            | 742.4 MB           | 2.02 GB            |
-| 128    | 128Hz   | 1.0 second       | 1.74 GB             | 1.48 GB            | 4.04 GB            |
-| 128    | 512Hz   | 0.25 seconds     | 1.74 GB             | 1.48 GB            | 4.04 GB            |
-
-**Use Cases:**
-- **4 sections:** Rendering only (T-2, T-1, T, T+1) - Minimum viable for interpolation
-- **16-32 sections:** Client prediction + rollback - Good balance for networked games
-- **64 sections:** Extended lag compensation, replay recording
-- **128 sections:** GGPO-style rollback, full replay system, 1s @ 128Hz or 0.25s @ 512Hz
-
-**Note:** These numbers reflect ONLY hot components (stored in History Slab with full history). Cold components (AI state, inventory, health, etc.) live in archetype chunks without history, adding ~20-50 MB regardless of page count. Total memory footprint = History Slab + Cold Components + ECS Metadata (~5-10%).
-
-### Deterministic vs Non-Deterministic
-
-```cpp
-bool DeterministicFrames = false;  // Default: skip frames if render falls behind
+```
+for f in [LastGpuUploadFrame+1 .. CurrentLogicFrame]:
+    SIMD OR combinedDirty |= dirtyBits[f % FrameCount]
+upload current state for all set bits in combinedDirty
 ```
 
-**Deterministic Mode (true):**
-- Logic waits if it loops around and Render still holds a section
-- Guarantees perfect history consistency
-- May stall Logic thread if Render is slow
+This is a SIMD operation on a 12.5KB bit array (100K entities), fits in L1 cache.
 
-**Non-Deterministic Mode (false):**
-- Logic grabs next available section and continues
-- If Render is slow, Logic may "lap" it (overwrite old data)
-- Render adapts by tracking `LastFrameWritten` and jumping to newest frame
-- Better for real-time performance, acceptable for single-player
+## GPU Buffer Design
+
+**5 InstanceBuffers** (for Volatile + Temporal combined entity data):
+- Enough depth that the CPU render thread always finds a free buffer without blocking on GPU presentation
+- Decouples Logic from VSync: the chain `VSync → GPU holds buffer → CPU render thread blocks →
+  holds slab read locks → Logic stalls` is broken by having 5 buffers
+- CPU render thread lock on logic slab = only entity state copy duration (~32µs at 10K dirty entities)
+
+GPU interpolation uses its own persistent previous-frame InstanceBuffer. Render thread uploads frame T only
+(not T-1). GPU has T-1 from its own last-frame buffer, interpolates in vertex shader.
+
+**Separate static GPU buffer** for static entity data (read-only, uploaded once at initialization).
+
+## Thread Access Summary
+
+| Thread | Reads | Writes |
+|--------|-------|--------|
+| Logic (Brain) | Frame T (ReadArray) | Frame T+1 (WriteArray) |
+| Render (Encoder) | Current logic frame (for GPU upload) | GPU InstanceBuffer |
+| GPU | Current InstanceBuffer | Previous InstanceBuffer (for interpolation) |
+| Network/Rollback | Historical frames from Temporal slab | Corrected frame (triggers dirty resim) |
 
 ---
 
-## Benefits of History Slab
+# Rendering Pipeline
 
-1. **Zero-Copy Rendering:** Render reads directly from committed sections (no memcpy)
-2. **Integrated Interpolation:** T-1 and T are adjacent in memory layout
-3. **Replay Support:** Read old sections to reconstruct past frames
-4. **Rollback/Prediction:** Network can rewind to frame N, resimulate forward
-5. **Lag Compensation:** Server reads client's historical position from History Slab
-6. **GGPO Integration:** Multiple frames of history enable rollback netcode
-7. **Frame-Specific Metadata:** Camera, lighting, entity counts travel with the frame
-8. **Flexible History Depth:** Users choose 4-128+ sections based on needs
+## Raw Vulkan Stack
+
+- **volk 1.4.304** — function loader, vendored at `libs/volk/`
+- **VMA 3.3.0** — memory allocator, vendored at `libs/vma/`
+- **VulkanContext** — instance, device, swapchain, queues, sync primitives
+- **VulkanMemory** — VMA allocator lifetime, buffer/image allocation helpers
+- **VulkRender** — Encoder thread: GPU upload, compute dispatch, graphics draw
+
+## GPU-Driven Compute Pipeline (Slang shaders in `shaders/`)
+
+Three-pass compute using shared struct header `GpuFrameData.slang`:
+
+1. **predicate.slang** — reads TemporalFlags (Active + custom predicates), writes `scan[i] = 0 or 1`
+2. **prefix_sum.slang** — Option-B scan: subgroup-level prefix, then one `atomicAdd` per workgroup for
+   cross-group compaction. No second dispatch.
+3. **scatter.slang** — GPU interpolation (lerp between current and previous InstanceBuffer),
+   writes compacted InstanceBuffer SoA + `DrawArgs.instanceCount`
+
+The InstanceBuffer is SoA: field `k` (semantic-1), entity `outIdx` →
+`InstancesAddr[k * OutFieldStride + outIdx]`.
+
+## cube.vert / cube.frag
+
+- `cube.vert` reads vertex data via Buffer Device Address (`VerticesAddr`), reads instance SoA via
+  `InstancesAddr`, reconstructs TRS matrix from Euler-XYZ angles
+- ViewProj: column-major `float[16]` from C++ → Slang row-major `float4x4` via `M[r][c] = ViewProj[c*4+r]`
+- Projection: right-handed, Y-flip (`m[5] = -F`), depth [0,1]
+- `cube.frag` reads interpolated color from SoA
+
+## Compute → Graphics Barrier
+
+```
+srcStage  = COMPUTE_SHADER_BIT
+dstStage  = VERTEX_SHADER_BIT | DRAW_INDIRECT_BIT
+srcAccess = SHADER_WRITE
+dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
+```
 
 ---
 
-## Migration Status
+# Migration Status
 
-**Current (Week 3):**
-- ✅ FieldProxy system operational
-- ✅ Components decompose into SoA field arrays
-- ✅ Archetype chunk iteration works
-- ❌ History Slab not yet implemented
-- ❌ Components still live in Archetype chunks
-- ❌ Render still uses FramePacket + snapshot copies
+## Implemented (2026-02)
 
-**Next Steps:**
-1. Implement `HistorySlab` allocator with section management
-2. Implement `HistorySectionHeader` with ownership atomics
-3. Migrate Transform to History Slab (first hot component)
-4. Update `Archetype::BuildFieldArrayTable` to point into slab
-5. Update Logic thread to write to `Section[(Frame+1) % N]`
-6. Update Render thread to read from `Section[Frame % N]` and `Section[(Frame-1) % N]`
-7. Remove FramePacket mailbox, use `LastFrameWritten` atomic instead
-8. Benchmark memory usage and performance vs current snapshot system
+- [x] Three-thread architecture (Sentinel/Brain/Encoder)
+- [x] Raw Vulkan: VulkanContext, VulkanMemory (volk + VMA)
+- [x] FieldProxy system (Scalar / Wide / WideMask, FieldProxyMask zero-size base)
+- [x] Component decomposition into SoA field arrays
+- [x] EntityView hydration with zero virtual calls
+- [x] TemporalComponentCache dual-buffer (proto-slab)
+- [x] Dirty bit tracking (TemporalFlagBits::Active, Dirty)
+- [x] Registry dirty bit marking after each chunk update
+- [x] LogicThread::PublishCompletedFrame (Vulkan perspective + identity view)
+- [x] GPU-driven compute pipeline (predicate → prefix_sum → scatter, Slang)
+- [x] VulkRender skeleton (Initialize/Start/Stop/Join wired in)
+- [x] Tracy profiler integration (3-level: Coarse/Medium/Fine)
+
+## Designed, Not Yet Implemented
+
+- [ ] **Tiered storage partition layout** (Cold/Static/Volatile/Temporal with DUAL/PHYS/RENDER/LOGIC partitions)
+- [ ] **SimulationBody marker component** (Temporal vs Volatile auto-classification)
+- [ ] **Universal strip** (contiguous Flags array outside partition field zones)
+- [ ] `STRIGID_UNIVERSAL_COMPONENT` macro
+- [ ] **SystemGroup tag on STRIGID_TEMPORAL_FIELDS** (drives entity group auto-derivation)
+- [ ] **Cumulative dirty bit array** (double-buffered, lock-free Front/Back swap)
+- [ ] **5 GPU InstanceBuffers** (VSync decoupling)
+- [ ] `GetTemporalFieldWritePtr` migrated from Archetype to TemporalComponentCache
+- [ ] `TemporalFrameStride` removed from Archetype (duplicated state — call cache->GetFrameStride())
+- [ ] **VulkRender ThreadMain** (GPU loop: upload → compute → draw → present)
+
+## Planned (Next Phase)
+
+- [ ] Jolt Physics integration
+- [ ] Frustum culling (SIMD 6-plane test)
+- [ ] State-sorted rendering (64-bit sort keys, GPU radix sort)
+- [ ] Rollback netcode (Temporal slab rollback + dirty resimulation)
+- [ ] Job system (Brain/Encoder currently run inline)
 
 ---

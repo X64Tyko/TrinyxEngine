@@ -24,8 +24,20 @@ option(STRIGID_ALIGN_64 "Use 64-byte alignment for field arrays (zero cache line
 # -----------------------------------------------------------------------------
 # 3. GLOBAL PATHS
 # -----------------------------------------------------------------------------
-set(SDL3_PATH "${CMAKE_SOURCE_DIR}/libs/SDL3")
+set(SDL3_PATH  "${CMAKE_SOURCE_DIR}/libs/SDL3")
 set(TRACY_PATH "${CMAKE_SOURCE_DIR}/libs/tracy")
+set(VOLK_PATH  "${CMAKE_SOURCE_DIR}/libs/volk")
+set(VMA_PATH   "${CMAKE_SOURCE_DIR}/libs/vma")
+set(SLANG_PATH "${CMAKE_SOURCE_DIR}/libs/slang")
+
+# Slang runtime API — headers + importable library target.
+# Nothing in the engine links it yet; the target exists so rendering code can
+# do: target_link_libraries(MyTarget PRIVATE Slang::Compiler)
+add_library(Slang::Compiler SHARED IMPORTED GLOBAL)
+set_target_properties(Slang::Compiler PROPERTIES
+    IMPORTED_LOCATION             "${SLANG_PATH}/lib/libslang-compiler.so"
+    INTERFACE_INCLUDE_DIRECTORIES "${SLANG_PATH}/include"
+)
 
 # -----------------------------------------------------------------------------
 # 4. GLOBAL TRACY CONFIGURATION
@@ -95,7 +107,7 @@ if(MSVC)
     add_compile_options(/Zc:__cplusplus)
 
 else()
-    add_compile_options(-Wall -Wextra -Wpedantic -Werror -Wno-ignored-attributes)
+    add_compile_options(-Wall -Wextra -Wpedantic -Werror -Wno-ignored-attributes -Wno-missing-field-initializers)
 
     # Assembly listing generation (GCC/Clang)
     if(GENERATE_ASSEMBLY)

@@ -9,14 +9,14 @@ struct Chunk;
 // Maps EntityID.Index to actual memory location
 struct EntityRecord
 {
-    Archetype* Arch = nullptr; // Which archetype this entity belongs to
-    Chunk* TargetChunk = nullptr; // Which chunk within that archetype
-    uint16_t Index = 0; // Index within the chunk
-    uint16_t Generation = 0; // For validation (matches EntityID.Generation)
+	Archetype* Arch     = nullptr; // Which archetype this entity belongs to
+	Chunk* TargetChunk  = nullptr; // Which chunk within that archetype
+	uint16_t Index      = 0;       // Index within the chunk
+	uint16_t Generation = 0;       // For validation (matches EntityID.Generation)
 
-    // Check if this record is valid
-    bool IsValid() const
-    {
-        return Arch != nullptr && TargetChunk != nullptr;
-    }
+	// Check if this record is valid
+	bool IsValid() const
+	{
+		return Arch != nullptr && TargetChunk != nullptr;
+	}
 };

@@ -100,7 +100,7 @@
 // Tracy color definitions (24-bit RGB)
 #define STRIGID_COLOR_MEMORY    0xFF6B6B  // Red
 #define STRIGID_COLOR_RENDERING 0x4ECDC4  // Cyan
-#define STRIGID_COLOR_PHYSICS   0xFFE66D  // Yellow
-#define STRIGID_COLOR_LOGIC     0x95E1D3  // Green
+#define STRIGID_COLOR_PHYSICS   0xFFC933  // Yellow
+#define STRIGID_COLOR_LOGIC     0x9527F5  // Purple
 #define STRIGID_COLOR_NETWORK   0xF38181  // Pink
-#define STRIGID_COLOR_AUDIO     0xAA96DA  // Purple
+#define STRIGID_COLOR_AUDIO     0x6600FF  // Purple
