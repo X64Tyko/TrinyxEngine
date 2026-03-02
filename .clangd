@@ -12,4 +12,4 @@ CompileFlags:
     - -Isrc/Runtime/Input/Public
     - -Ilibs/volk
     - -Ilibs/vma
-    - -DSTRIGID_SHADER_DIR=""
+    - -DTNX_SHADER_DIR=""

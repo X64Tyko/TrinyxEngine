@@ -17,7 +17,7 @@
 ### Foundation & Trinity Architecture
 
 **Threading Model:**
-- Strigid Trinity (Sentinel/Brain/Encoder) fully operational
+- Trinyx Trinity (Sentinel/Brain/Encoder) fully operational
 - Sentinel runs 1000Hz SDL event loop, owns VulkanContext + VulkanMemory
 - Brain runs 512Hz fixed-timestep loop via accumulator (std::atomic<double>)
 - Encoder (VulkRender) skeleton wired in — ThreadMain logs and exits (GPU loop in progress)
@@ -26,7 +26,7 @@
 - Migrated from SDL3 GPU backend to raw Vulkan (volk 1.4.304 + VMA 3.3.0)
 - VulkanContext: instance, device, swapchain, queues, sync primitives
 - VulkanMemory: VMA allocator lifetime, buffer/image allocation helpers
-- VulkRender: Initialize/Start/Stop/Join wired into StrigidEngine
+- VulkRender: Initialize/Start/Stop/Join wired into TrinyxEngine
 
 **GPU-Driven Compute Pipeline (Slang):**
 - 5 shaders in `shaders/`: predicate, prefix_sum, scatter, cube.vert, cube.frag
@@ -50,10 +50,10 @@
 - Registry::InvokePrePhys/PostPhys/ScalarUpdate OR bit 30 into write-frame flags after each chunk update
 
 **Reflection System:**
-- `STRIGID_REGISTER_COMPONENT(T)` — component type registration
-- `STRIGID_TEMPORAL_FIELDS(T, SystemGroup, ...)` — SoA temporal field decomposition
-- `STRIGID_REGISTER_FIELDS(T, ...)` — cold (chunk-only) field registration
-- `STRIGID_REGISTER_SCHEMA / STRIGID_REGISTER_SUPER_SCHEMA` — entity schema + Advance generation
+- `TNX_REGISTER_COMPONENT(T)` — component type registration
+- `TNX_TEMPORAL_FIELDS(T, SystemGroup, ...)` — SoA temporal field decomposition
+- `TNX_REGISTER_FIELDS(T, ...)` — cold (chunk-only) field registration
+- `TNX_REGISTER_SCHEMA / TNX_REGISTER_SUPER_SCHEMA` — entity schema + Advance generation
 
 **Architecture & Config Fixes:**
 - `MAX_FIELDS_PER_ARCHETYPE = 256` in Types.h
@@ -100,7 +100,7 @@
 - [x] InstanceBuffer SoA + indirect draw (DrawArgs)
 - [x] VulkRender skeleton (Initialize/Start/Stop/Join)
 - [x] 3-level Tracy profiling (Coarse/Medium/Fine)
-- [x] `STRIGID_TEMPORAL_FIELDS` with SystemGroup tag (syntax implemented, partition routing pending)
+- [x] `TNX_TEMPORAL_FIELDS` with SystemGroup tag (syntax implemented, partition routing pending)
 - [x] `TemporalFlags` with Active/Dirty bits
 
 ### Designed, Not Yet Implemented
@@ -109,7 +109,7 @@
   (current: all temporal entities share one TemporalComponentCache, no partition isolation)
 - [ ] **SimulationBody marker component** — Temporal vs Volatile explicit opt-in
 - [ ] **Universal strip** — contiguous Flags array outside partition field zones
-- [ ] `STRIGID_UNIVERSAL_COMPONENT` macro
+- [ ] `TNX_UNIVERSAL_COMPONENT` macro
 - [ ] **Cumulative dirty bit array** — double-buffered dense bit array, lock-free Front/Back swap
 - [ ] **5 GPU InstanceBuffers** — VSync decoupling (currently fewer buffers in flight)
 - [ ] **Fixed-point coordinate system** — `Fixed32` value type (1 unit = 0.1mm), `FieldProxy<Fixed32, WIDTH>`, render thread conversion to camera-relative float32 at upload, Jolt bridge (int32↔float32 at cell boundary)

@@ -12,9 +12,9 @@
 //   - Maximum performance (zero split penalty)
 //   - Higher memory overhead (~31 bytes avg padding per field array)
 //
-// Configure via CMake: -DSTRIGID_ALIGN_64=ON/OFF
+// Configure via CMake: -DTNX_ALIGN_64=ON/OFF
 
-#ifdef STRIGID_ALIGN_64
+#ifdef TNX_ALIGN_64
 constexpr size_t FIELD_ARRAY_ALIGNMENT = 64;
 #else
 constexpr size_t FIELD_ARRAY_ALIGNMENT = 32;

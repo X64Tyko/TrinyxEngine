@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**StrigidEngine** is a C++20, data-oriented game engine R&D project. The goal is to run 100,000+ dynamic entities at 512Hz fixed update (1.95ms/frame budget) while exposing an OOP-style API to entity authors. It is structured as two CMake targets: `StrigidEngine` (static library) and `Testbed` (executable).
+**TrinyxEngine** is a C++20, data-oriented game engine R&D project. The goal is to run 100,000+ dynamic entities at 512Hz fixed update (1.95ms/frame budget) while exposing an OOP-style API to entity authors. It is structured as two CMake targets: `TrinyxEngine` (static library) and `Testbed` (executable).
 
 ---
 
@@ -35,13 +35,13 @@ cmake --build cmake-build-debug
 | `ENABLE_AVX2=ON/OFF` | ON | `-march=native` on GCC/Clang |
 | `GENERATE_ASSEMBLY=ON/OFF` | OFF | Emit `.s` files for vectorization inspection |
 | `VECTORIZATION_REPORTS=ON/OFF` | OFF | Compiler loop-vectorization diagnostics |
-| `STRIGID_ALIGN_64=ON/OFF` | OFF | 64-byte vs 32-byte field array alignment |
+| `TNX_ALIGN_64=ON/OFF` | OFF | 64-byte vs 32-byte field array alignment |
 
 ---
 
 ## Architecture
 
-### Threading Model — The Strigid Trinity
+### Threading Model — The Trinyx Trinity
 
 Three dedicated threads + a shared worker pool:
 
@@ -56,9 +56,9 @@ Brain and Encoder are **coordinators, not dedicated workers**. On an 8-core CPU 
 
 The ECS is archetype-based. Entities of the same component signature share an **Archetype**, whose data lives in 64 KB **Chunks** (`src/Runtime/Memory/`).
 
-Hot components (those marked `STRIGID_TEMPORAL_FIELDS`) are decomposed into Structure-of-Arrays and placed in the **TemporalComponentCache** (`TemporalComponentCache.h/cpp`). This is the current implementation of the dual-buffer (ReadArray/WriteArray) system that will eventually migrate to the full History Slab.
+Hot components (those marked `TNX_TEMPORAL_FIELDS`) are decomposed into Structure-of-Arrays and placed in the **TemporalComponentCache** (`TemporalComponentCache.h/cpp`). This is the current implementation of the dual-buffer (ReadArray/WriteArray) system that will eventually migrate to the full History Slab.
 
-Cold components (no `STRIGID_TEMPORAL_FIELDS`) live only in Archetype chunks.
+Cold components (no `TNX_TEMPORAL_FIELDS`) live only in Archetype chunks.
 
 ### FieldProxy — SoA with OOP Syntax
 
@@ -91,9 +91,9 @@ struct CubeEntity : EntityView<CubeEntity, WIDTH> {
         // etc.
     }
 
-    STRIGID_REGISTER_SCHEMA(CubeEntity, EntityView, transform, velocity, color)
+    TNX_REGISTER_SCHEMA(CubeEntity, EntityView, transform, velocity, color)
 };
-STRIGID_REGISTER_ENTITY(CubeEntity)
+TNX_REGISTER_ENTITY(CubeEntity)
 ```
 
 Components with temporal (SoA) fields use:
@@ -102,12 +102,12 @@ template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct Transform {
     FieldProxy<float, WIDTH> PositionX, PositionY, PositionZ;
     // ...
-    STRIGID_TEMPORAL_FIELDS(Transform, PositionX, PositionY, PositionZ, ...)
+    TNX_TEMPORAL_FIELDS(Transform, PositionX, PositionY, PositionZ, ...)
 };
-STRIGID_REGISTER_COMPONENT(Transform)
+TNX_REGISTER_COMPONENT(Transform)
 ```
 
-Cold (non-temporal) components use plain POD structs with `STRIGID_REGISTER_FIELDS` (no `STRIGID_TEMPORAL_FIELDS`).
+Cold (non-temporal) components use plain POD structs with `TNX_REGISTER_FIELDS` (no `TNX_TEMPORAL_FIELDS`).
 
 ### Reflection / Registration Macros
 
@@ -115,12 +115,12 @@ All macros are defined in `SchemaReflector.h` and `SchemaValidation.h`:
 
 | Macro | Where used | Purpose |
 |-------|-----------|---------|
-| `STRIGID_REGISTER_ENTITY(T)` | After entity class | Triggers static registration via `PrefabReflector<T<>>::Register()` |
-| `STRIGID_REGISTER_SCHEMA(Class, Super, ...)` | Inside entity class body | Generates `DefineSchema()`, `Advance()`, type aliases |
-| `STRIGID_REGISTER_SUPER_SCHEMA(Class, Super, ...)` | Inside non-leaf base entity | Same as above but for intermediate template bases |
-| `STRIGID_REGISTER_COMPONENT(T)` | After component struct | Registers field metadata via static initializer |
-| `STRIGID_REGISTER_FIELDS(T, ...)` | Inside component | Generates `DefineFields()`, `FieldNames`, `Bind()`, `Advance()` |
-| `STRIGID_TEMPORAL_FIELDS(T, ...)` | Inside component | Like `STRIGID_REGISTER_FIELDS` but sets `bTemporalComp = true` |
+| `TNX_REGISTER_ENTITY(T)` | After entity class | Triggers static registration via `PrefabReflector<T<>>::Register()` |
+| `TNX_REGISTER_SCHEMA(Class, Super, ...)` | Inside entity class body | Generates `DefineSchema()`, `Advance()`, type aliases |
+| `TNX_REGISTER_SUPER_SCHEMA(Class, Super, ...)` | Inside non-leaf base entity | Same as above but for intermediate template bases |
+| `TNX_REGISTER_COMPONENT(T)` | After component struct | Registers field metadata via static initializer |
+| `TNX_REGISTER_FIELDS(T, ...)` | Inside component | Generates `DefineFields()`, `FieldNames`, `Bind()`, `Advance()` |
+| `TNX_TEMPORAL_FIELDS(T, ...)` | Inside component | Like `TNX_REGISTER_FIELDS` but sets `bTemporalComp = true` |
 
 
 ### Key Source Locations
@@ -137,7 +137,7 @@ All macros are defined in `SchemaReflector.h` and `SchemaValidation.h`:
 | `src/Runtime/Memory/Public/TemporalComponentCache.h` | Dual-buffer SoA storage (proto History Slab) |
 | `src/Runtime/Rendering/Public/RenderThread.h` | Encoder thread |
 | `src/Runtime/Core/Private/LogicThread.cpp` | Brain thread |
-| `Testbed/src/Main.cpp` | Test suite entry point (uses `Strigid::Testing`) |
+| `Testbed/src/Main.cpp` | Test suite entry point (uses `Trinyx::Testing`) |
 
 ### Planned but Not Yet Implemented
 
@@ -150,7 +150,7 @@ All macros are defined in `SchemaReflector.h` and `SchemaValidation.h`:
 
 ## Hard Constraints (by design)
 
-1. **No virtual functions** in entities or components — enforced at compile time by `STRIGID_REGISTER_ENTITY`.
+1. **No virtual functions** in entities or components — enforced at compile time by `TNX_REGISTER_ENTITY`.
 2. **No `std::string`/`std::vector`** in components — enforced by `VALIDATE_COMPONENT_IS_POD`.
 3. **No heap allocation in `PrePhysics`/`PostPhysics`/`Render`** — zero-frame-allocation budget.
 4. **All inter-thread communication** via atomics/lock-free structures only.

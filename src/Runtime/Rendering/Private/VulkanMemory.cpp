@@ -1,19 +1,18 @@
 #define VMA_STATIC_VULKAN_FUNCTIONS  0
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
 #define VMA_IMPLEMENTATION
+
 #include "VulkanMemory.h"
 
 #include "VulkanContext.h"
 #include "Logger.h"
 
-// -----------------------------------------------------------------------
-// Initialize
-// -----------------------------------------------------------------------
 bool VulkanMemory::Initialize(const VulkanContext& ctx)
 {
-	bHasReBAR   = ctx.HasReBAR();
-	bBDA        = ctx.SupportsBufferDeviceAddress();
-	DeviceCache = ctx.GetDevice();
+	bHasReBAR      = ctx.HasReBAR();
+	bBDA           = ctx.SupportsBufferDeviceAddress();
+	bHostImageCopy = ctx.SupportsHostImageCopy();
+	DeviceCache    = ctx.GetDevice();
 
 	// Wire VMA's dynamic dispatch through volk's already-loaded function pointers.
 	VmaVulkanFunctions vkFuncs{};
@@ -36,15 +35,13 @@ bool VulkanMemory::Initialize(const VulkanContext& ctx)
 		return false;
 	}
 
-	LOG_INFO_F("[VulkanMemory] Initialized (ReBAR: %s, BDA: %s)",
+	LOG_INFO_F("[VulkanMemory] Initialized (ReBAR: %s, BDA: %s, HostImageCopy: %s)",
 			   bHasReBAR ? "YES" : "NO",
-			   bBDA ? "YES" : "NO");
+			   bBDA ? "YES" : "NO",
+			   bHostImageCopy ? "YES" : "NO");
 	return true;
 }
 
-// -----------------------------------------------------------------------
-// Shutdown
-// -----------------------------------------------------------------------
 void VulkanMemory::Shutdown()
 {
 	if (Allocator != VK_NULL_HANDLE)
@@ -54,9 +51,6 @@ void VulkanMemory::Shutdown()
 	}
 }
 
-// -----------------------------------------------------------------------
-// AllocateBuffer
-// -----------------------------------------------------------------------
 VulkanBuffer VulkanMemory::AllocateBuffer(VkDeviceSize size,
 										  VkBufferUsageFlags usage,
 										  GpuMemoryDomain domain,
@@ -77,10 +71,12 @@ VulkanBuffer VulkanMemory::AllocateBuffer(VkDeviceSize size,
 	VmaAllocationCreateInfo vmaInfo{};
 	switch (domain)
 	{
-		case GpuMemoryDomain::DeviceLocal: vmaInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+		case GpuMemoryDomain::DeviceLocal:
+			vmaInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 			break;
 
-		case GpuMemoryDomain::PersistentMapped: if (bHasReBAR)
+		case GpuMemoryDomain::PersistentMapped:
+			if (bHasReBAR)
 			{
 				// Primary path: direct CPU→VRAM writes with no staging.
 				vmaInfo.usage         = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
@@ -97,14 +93,16 @@ VulkanBuffer VulkanMemory::AllocateBuffer(VkDeviceSize size,
 			}
 			break;
 
-		case GpuMemoryDomain::Staging: vmaInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+		case GpuMemoryDomain::Staging:
+			vmaInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
 			vmaInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
 			break;
 	}
 
+	VkBuffer      rawBuffer = VK_NULL_HANDLE;
 	VmaAllocationInfo allocResult{};
 	VkResult result = vmaCreateBuffer(Allocator, &bufInfo, &vmaInfo,
-									  &out.Buffer, &out.Allocation, &allocResult);
+									  &rawBuffer, &out.Allocation, &allocResult);
 	if (result != VK_SUCCESS)
 	{
 		LOG_ERROR_F("[VulkanMemory] vmaCreateBuffer failed (size=%llu domain=%d): %d",
@@ -115,22 +113,22 @@ VulkanBuffer VulkanMemory::AllocateBuffer(VkDeviceSize size,
 		return out;
 	}
 
-	if (domain == GpuMemoryDomain::PersistentMapped || domain == GpuMemoryDomain::Staging) out.MappedPtr = allocResult.pMappedData;
+	out.Buffer = vk::Buffer{rawBuffer};
+
+	if (domain == GpuMemoryDomain::PersistentMapped || domain == GpuMemoryDomain::Staging)
+		out.MappedPtr = allocResult.pMappedData;
 
 	if (requestDeviceAddress && bBDA)
 	{
 		VkBufferDeviceAddressInfo addrInfo{};
 		addrInfo.sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-		addrInfo.buffer = out.Buffer;
+		addrInfo.buffer = static_cast<VkBuffer>(out.Buffer);
 		out.DeviceAddr  = vkGetBufferDeviceAddress(DeviceCache, &addrInfo);
 	}
 
 	return out;
 }
 
-// -----------------------------------------------------------------------
-// AllocateImage
-// -----------------------------------------------------------------------
 VulkanImage VulkanMemory::AllocateImage(VkExtent2D extent,
 										VkFormat format,
 										VkImageUsageFlags usage,
@@ -158,8 +156,9 @@ VulkanImage VulkanMemory::AllocateImage(VkExtent2D extent,
 	VmaAllocationCreateInfo vmaInfo{};
 	vmaInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
+	VkImage   rawImage = VK_NULL_HANDLE;
 	VkResult result = vmaCreateImage(Allocator, &imgInfo, &vmaInfo,
-									 &out.Image, &out.Allocation, nullptr);
+									 &rawImage, &out.Allocation, nullptr);
 	if (result != VK_SUCCESS)
 	{
 		LOG_ERROR_F("[VulkanMemory] vmaCreateImage failed (format=%d): %d",
@@ -168,25 +167,77 @@ VulkanImage VulkanMemory::AllocateImage(VkExtent2D extent,
 		return out;
 	}
 
+	out.Image = vk::Image{rawImage};
+
 	VkImageViewCreateInfo viewInfo{};
 	viewInfo.sType                       = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-	viewInfo.image                       = out.Image;
+	viewInfo.image                       = rawImage;
 	viewInfo.viewType                    = VK_IMAGE_VIEW_TYPE_2D;
 	viewInfo.format                      = format;
 	viewInfo.subresourceRange.aspectMask = aspectMask;
 	viewInfo.subresourceRange.levelCount = 1;
 	viewInfo.subresourceRange.layerCount = 1;
 
-	result = vkCreateImageView(DeviceCache, &viewInfo, nullptr, &out.View);
+	VkImageView rawView = VK_NULL_HANDLE;
+	result = vkCreateImageView(DeviceCache, &viewInfo, nullptr, &rawView);
 	if (result != VK_SUCCESS)
 	{
 		LOG_ERROR_F("[VulkanMemory] vkCreateImageView failed: %d", result);
 		// Destroy the image we just made; destructor won't fire since
 		// we're about to clear Allocator to signal invalid state.
-		vmaDestroyImage(Allocator, out.Image, out.Allocation);
+		vmaDestroyImage(Allocator, rawImage, out.Allocation);
 		out.Allocator = VK_NULL_HANDLE;
 		return out;
 	}
 
+	out.View = vk::ImageView{rawView};
 	return out;
+}
+
+// -----------------------------------------------------------------------
+// UploadImage  (Vulkan 1.4 host image copy — no staging buffer needed)
+// -----------------------------------------------------------------------
+bool VulkanMemory::UploadImage(VulkanImage& image,
+							   const void* pixels,
+							   VkDeviceSize /*byteSize*/,
+							   uint32_t width,
+							   uint32_t height)
+{
+	if (!bHostImageCopy)
+	{
+		LOG_WARN("[VulkanMemory] UploadImage: host image copy not supported on this device");
+		return false;
+	}
+
+	// Image must be in GENERAL layout (or TRANSFER_DST_OPTIMAL on some implementations)
+	// for the host-image-copy destination.
+	// vkTransitionImageLayout (1.4 core) handles the layout change without a command buffer.
+	VkHostImageLayoutTransitionInfo transitionInfo{};
+	transitionInfo.sType            = VK_STRUCTURE_TYPE_HOST_IMAGE_LAYOUT_TRANSITION_INFO;
+	transitionInfo.image            = static_cast<VkImage>(image.Image);
+	transitionInfo.oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
+	transitionInfo.newLayout        = VK_IMAGE_LAYOUT_GENERAL;
+	transitionInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+	vkTransitionImageLayout(DeviceCache, 1, &transitionInfo);
+
+	VkMemoryToImageCopy region{};
+	region.sType             = VK_STRUCTURE_TYPE_MEMORY_TO_IMAGE_COPY;
+	region.pHostPointer      = pixels;
+	region.imageSubresource  = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+	region.imageExtent       = {width, height, 1};
+
+	VkCopyMemoryToImageInfo copyInfo{};
+	copyInfo.sType          = VK_STRUCTURE_TYPE_COPY_MEMORY_TO_IMAGE_INFO;
+	copyInfo.dstImage       = static_cast<VkImage>(image.Image);
+	copyInfo.dstImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	copyInfo.regionCount    = 1;
+	copyInfo.pRegions       = &region;
+
+	VkResult result = vkCopyMemoryToImage(DeviceCache, &copyInfo);
+	if (result != VK_SUCCESS)
+	{
+		LOG_ERROR_F("[VulkanMemory] vkCopyMemoryToImage failed: %d", result);
+		return false;
+	}
+	return true;
 }

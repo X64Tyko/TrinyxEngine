@@ -14,7 +14,7 @@ enum class TemporalFlagBits : int32_t
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct TemporalFlags : ComponentView<TemporalFlags, WIDTH>
 {
-	STRIGID_TEMPORAL_FIELDS(TemporalFlags, Flags)
+	TNX_TEMPORAL_FIELDS(TemporalFlags, Flags)
 
 	IntProxy<WIDTH> Flags;
 
@@ -29,4 +29,4 @@ struct TemporalFlags : ComponentView<TemporalFlags, WIDTH>
     */
 };
 
-STRIGID_REGISTER_COMPONENT(TemporalFlags)
+TNX_REGISTER_COMPONENT(TemporalFlags)

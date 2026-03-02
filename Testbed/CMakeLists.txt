@@ -20,8 +20,8 @@ add_executable(${PROJECT_NAME}
 # -----------------------------------------------------------------------------
 # INCLUDES & LINKS
 # -----------------------------------------------------------------------------
-# Link against the StrigidEngine library
-target_link_libraries(${PROJECT_NAME} PRIVATE StrigidEngine)
+# Link against the Trinyx library
+target_link_libraries(${PROJECT_NAME} PRIVATE Trinyx)
 
 # Testbed-specific includes (for TestEntity.h and similar)
 target_include_directories(${PROJECT_NAME} PRIVATE

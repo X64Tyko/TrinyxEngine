@@ -60,7 +60,7 @@ struct FieldProxy : FieldProxyMask<WIDTH>
 
 ### Temporal (SoA) Component
 
-Components with `STRIGID_TEMPORAL_FIELDS` decompose into SoA field arrays in the temporal/volatile slab.
+Components with `TNX_TEMPORAL_FIELDS` decompose into SoA field arrays in the temporal/volatile slab.
 The `SystemGroup` tag drives automatic entity partition placement.
 
 ```cpp
@@ -72,12 +72,12 @@ struct Transform
     FieldProxy<float, WIDTH> ScaleX,    ScaleY,    ScaleZ;
 
     // SystemGroup::None = partition-agnostic; entity's group comes from other components
-    STRIGID_TEMPORAL_FIELDS(Transform, SystemGroup::None,
+    TNX_TEMPORAL_FIELDS(Transform, SystemGroup::None,
         PositionX, PositionY, PositionZ,
         RotationX, RotationY, RotationZ,
         ScaleX, ScaleY, ScaleZ)
 };
-STRIGID_REGISTER_COMPONENT(Transform)
+TNX_REGISTER_COMPONENT(Transform)
 
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct RigidBody
@@ -86,10 +86,10 @@ struct RigidBody
     FieldProxy<float, WIDTH> AngVelX, AngVelY, AngVelZ;
 
     // SystemGroup::Phys = entities with this component go into the Phys or Dual partition
-    STRIGID_TEMPORAL_FIELDS(RigidBody, SystemGroup::Phys,
+    TNX_TEMPORAL_FIELDS(RigidBody, SystemGroup::Phys,
         VelX, VelY, VelZ, AngVelX, AngVelY, AngVelZ)
 };
-STRIGID_REGISTER_COMPONENT(RigidBody)
+TNX_REGISTER_COMPONENT(RigidBody)
 
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct Material
@@ -97,15 +97,15 @@ struct Material
     FieldProxy<float, WIDTH> ColorR, ColorG, ColorB, ColorA;
 
     // SystemGroup::Render = entities with this component go into the Render or Dual partition
-    STRIGID_TEMPORAL_FIELDS(Material, SystemGroup::Render,
+    TNX_TEMPORAL_FIELDS(Material, SystemGroup::Render,
         ColorR, ColorG, ColorB, ColorA)
 };
-STRIGID_REGISTER_COMPONENT(Material)
+TNX_REGISTER_COMPONENT(Material)
 ```
 
 ### Cold (Chunk) Component
 
-Components without `STRIGID_TEMPORAL_FIELDS` live in archetype chunk memory (AoS layout).
+Components without `TNX_TEMPORAL_FIELDS` live in archetype chunk memory (AoS layout).
 No FieldProxy — plain POD members.
 
 ```cpp
@@ -115,15 +115,15 @@ struct HealthComponent
     float MaxHealth;
     float Armor;
 
-    STRIGID_REGISTER_FIELDS(HealthComponent, CurrentHealth, MaxHealth, Armor)
+    TNX_REGISTER_FIELDS(HealthComponent, CurrentHealth, MaxHealth, Armor)
 };
-STRIGID_REGISTER_COMPONENT(HealthComponent)
+TNX_REGISTER_COMPONENT(HealthComponent)
 ```
 
 ### Universal Strip Component
 
 Flags that need to be iterable across ALL entities in a single SIMD pass live in the universal strip,
-outside the partition field zones. Declared with `STRIGID_UNIVERSAL_COMPONENT` (planned macro):
+outside the partition field zones. Declared with `TNX_UNIVERSAL_COMPONENT` (planned macro):
 
 ```cpp
 template <FieldWidth WIDTH = FieldWidth::Scalar>
@@ -134,7 +134,7 @@ struct TemporalFlags
     // TemporalFlagBits:
     //   Active = 1<<31  — entity exists and is in the simulation
     //   Dirty  = 1<<30  — modified this frame (drives GPU upload AND rollback resimulation blast radius)
-    STRIGID_UNIVERSAL_COMPONENT(TemporalFlags, Flags)
+    TNX_UNIVERSAL_COMPONENT(TemporalFlags, Flags)
 };
 ```
 
@@ -162,9 +162,9 @@ struct CubeEntity : EntityView<CubeEntity, WIDTH>
         transform.PositionZ += body.VelZ * static_cast<float>(dt);
     }
 
-    STRIGID_REGISTER_SCHEMA(CubeEntity, EntityView, transform, body, material)
+    TNX_REGISTER_SCHEMA(CubeEntity, EntityView, transform, body, material)
 };
-STRIGID_REGISTER_ENTITY(CubeEntity)
+TNX_REGISTER_ENTITY(CubeEntity)
 ```
 
 To opt into full rollback (Temporal tier vs Volatile tier), add `SimulationBody`:
@@ -190,7 +190,7 @@ struct BaseCube : EntityView<Derived, WIDTH>
         transform.RotationY += static_cast<float>(dt) * 0.7f;
     }
 
-    STRIGID_REGISTER_SUPER_SCHEMA(BaseCube, EntityView, transform, material)
+    TNX_REGISTER_SUPER_SCHEMA(BaseCube, EntityView, transform, material)
 };
 
 template <FieldWidth WIDTH = FieldWidth::Scalar>
@@ -204,9 +204,9 @@ struct SuperCube : BaseCube<SuperCube, WIDTH>
         this->transform.PositionX += body.VelX * static_cast<float>(dt);
     }
 
-    STRIGID_REGISTER_SCHEMA(SuperCube, BaseCube, body)
+    TNX_REGISTER_SCHEMA(SuperCube, BaseCube, body)
 };
-STRIGID_REGISTER_ENTITY(SuperCube)
+TNX_REGISTER_ENTITY(SuperCube)
 ```
 
 ---
@@ -265,7 +265,7 @@ The determinism mode switch lives in one place. Entity authors never touch it:
 ```cpp
 // SimFloat.h — the only file that changes between deterministic and float builds
 
-#if STRIGID_DETERMINISTIC
+#if TNX_DETERMINISTIC
     using SimFloat = Fixed32;
 #else
     using SimFloat = float;
@@ -283,7 +283,7 @@ template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct Transform {
     FloatProxy<WIDTH> PosX, PosY, PosZ;  // Fixed32 or float, decided at compile time
     // ...
-    STRIGID_TEMPORAL_FIELDS(Transform, SystemGroup::None, PosX, PosY, PosZ, ...)
+    TNX_TEMPORAL_FIELDS(Transform, SystemGroup::None, PosX, PosY, PosZ, ...)
 };
 
 // PrePhysics receives SimFloat dt — same syntax in both builds

@@ -8,7 +8,7 @@
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct ColorData : ComponentView<ColorData, WIDTH>
 {
-	STRIGID_TEMPORAL_FIELDS(ColorData, R, G, B, A)
+	TNX_TEMPORAL_FIELDS(ColorData, R, G, B, A)
 
 	FloatProxy<WIDTH> R;
 	FloatProxy<WIDTH> G;
@@ -16,4 +16,4 @@ struct ColorData : ComponentView<ColorData, WIDTH>
 	FloatProxy<WIDTH> A;
 };
 
-STRIGID_REGISTER_COMPONENT(ColorData)
+TNX_REGISTER_COMPONENT(ColorData)

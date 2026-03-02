@@ -31,7 +31,7 @@ public:
 	}
 
 	// Initialize logger with file output
-	void Init(const std::string& LogFilePath = "StrigidEngine.log", LogLevel inMinLevel = LogLevel::Debug);
+	void Init(const std::string& LogFilePath = "TrinyxEngine.log", LogLevel inMinLevel = LogLevel::Debug);
 
 	// Shut down and flush file
 	void Shutdown();

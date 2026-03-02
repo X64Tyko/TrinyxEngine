@@ -176,7 +176,7 @@ void main() {
 #### RenderThread Changes
 ```cpp
 void RenderThread::RenderFrame() {
-    STRIGID_ZONE_N("RenderFrame");
+    TNX_ZONE_N("RenderFrame");
 
     // 1. Get latest frame from logic
     uint32_t frame = LogicPtr->GetLastCompletedFrame();
@@ -471,7 +471,7 @@ struct alignas(16) InstanceData {
 
 ## Notes
 
-- **Philosophy:** GPU-driven is the right choice for Strigid's scale ambitions
+- **Philosophy:** GPU-driven is the right choice for Trinyx's scale ambitions
 - **Timeline:** Not urgent, but do it now while designing (no users to break)
 - **Learning:** This is an investment in becoming a "render guru" - modern baseline knowledge
 - **Reversibility:** Can keep CPU path as fallback initially

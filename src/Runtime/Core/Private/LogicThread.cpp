@@ -58,7 +58,7 @@ void LogicThread::ThreadMain()
 
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
-		STRIGID_ZONE_C(STRIGID_COLOR_LOGIC);
+		TNX_ZONE_C(TNX_COLOR_LOGIC);
 
 		// Measure delta time
 		const uint64_t frameStartCounter = SDL_GetPerformanceCounter();
@@ -102,7 +102,7 @@ void LogicThread::ThreadMain()
 		// Fixed update loop with substepping
 		if (fixedStepTime > 0.0)
 		{
-			STRIGID_ZONE_C(STRIGID_COLOR_LOGIC);
+			TNX_ZONE_C(TNX_COLOR_LOGIC);
 
 			int steps = 0;
 			while (Accumulator.load(std::memory_order_relaxed) >= fixedStepTime && steps < kMaxPhysSubSteps)
@@ -144,7 +144,7 @@ void LogicThread::ProcessInput()
 
 void LogicThread::PublishCompletedFrame()
 {
-	STRIGID_ZONE_N("Logic_PublishFrame");
+	TNX_ZONE_N("Logic_PublishFrame");
 
 	// Get the frame header we just wrote to
 	TemporalFrameHeader* header = TemporalCache->GetFrameHeader(++FrameNumber);
@@ -230,7 +230,7 @@ void LogicThread::PublishCompletedFrame()
 
 void LogicThread::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)
 {
-	STRIGID_ZONE_N("Logic_WaitTiming");
+	TNX_ZONE_N("Logic_WaitTiming");
 
 	const double targetFrameTimeSec = ConfigPtr->GetTargetFrameTime();
 	const uint64_t targetTicks      = static_cast<uint64_t>(targetFrameTimeSec * static_cast<double>(perfFrequency));

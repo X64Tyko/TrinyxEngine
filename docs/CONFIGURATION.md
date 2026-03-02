@@ -301,7 +301,7 @@ int main()
     config.MaxRenderEntities  = 30000;
     config.InputPollHz        = 1000;
 
-    StrigidEngine& engine = StrigidEngine::Get();
+    TrinyxEngine& engine = TrinyxEngine::Get();
     if (engine.Initialize("My Game", 1920, 1080))
     {
         engine.Run();

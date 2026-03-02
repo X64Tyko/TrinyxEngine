@@ -15,7 +15,7 @@ class LogicThread;
 class VulkRender;
 
 /**
- * StrigidEngine: The Sentinel (Main Thread)
+ * TrinyxEngine: The Sentinel (Main Thread)
  *
  * Responsibilities:
  * - SDL event pumping (SDL requires this on the main thread)
@@ -28,22 +28,22 @@ class VulkRender;
  * All command buffer acquisition, submission, and presentation happen
  * inside VulkRender::ThreadMain().
  */
-class StrigidEngine
+class TrinyxEngine
 {
 public:
-	StrigidEngine();
-	~StrigidEngine();
-	StrigidEngine(const StrigidEngine&)            = delete;
-	StrigidEngine& operator=(const StrigidEngine&) = delete;
+	TrinyxEngine();
+	~TrinyxEngine();
+	TrinyxEngine(const TrinyxEngine&)            = delete;
+	TrinyxEngine& operator=(const TrinyxEngine&) = delete;
 
 	bool Initialize(const char* title, int width, int height);
 	void Run();
 	void Shutdown();
 
 	// Singleton
-	static StrigidEngine& Get()
+	static TrinyxEngine& Get()
 	{
-		static StrigidEngine instance;
+		static TrinyxEngine instance;
 		return instance;
 	}
 
@@ -52,9 +52,9 @@ public:
 private:
 	// Sentinel Tasks (Main Thread)
 	void PumpEvents();                    // Handle OS events
-	void ServiceRenderThread();           // Check if RenderThread needs GPU resources or wants to submit
-	void AcquireAndProvideGPUResources(); // Acquire cmd + swapchain, provide to RenderThread
-	void SubmitRenderCommands();          // Take CmdBuffer from RenderThread and submit
+	//void ServiceRenderThread();           // Check if RenderThread needs GPU resources or wants to submit
+	//void AcquireAndProvideGPUResources(); // Acquire cmd + swapchain, provide to RenderThread
+	//void SubmitRenderCommands();          // Take CmdBuffer from RenderThread and submit
 	void WaitForTiming(uint64_t frameStart, uint64_t perfFrequency);
 
 	// FPS tracking
@@ -75,7 +75,7 @@ private:
 
 	// --- Thread Modules ---
 	std::unique_ptr<LogicThread> Logic;
-	std::unique_ptr<RenderThread> Render;
+	std::unique_ptr<VulkRender> Render;
 
 	// --- Lifecycle ---
 	std::atomic<bool> bIsRunning{false};

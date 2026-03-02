@@ -1,4 +1,4 @@
-# StrigidEngine Build Options
+# TrinyxEngine Build Options
 
 > **Navigation:** [← Back to README](../README.md) | [Schema Errors →](SCHEMA_ERROR_EXAMPLES.md)
 
@@ -21,7 +21,7 @@ cmake --build . --config Debug
 cmake-gui .
 
 # Or if not in build directory:
-cmake-gui path/to/StrigidEngine
+cmake-gui path/to/TrinyxEngine
 ```
 
 Then check/uncheck options in the GUI and click "Configure" → "Generate".
@@ -68,7 +68,7 @@ cmake -DENABLE_TRACY=ON ..
 **What it does:**
 - Adds `TRACY_ENABLE` define
 - Links Tracy client library
-- Enables profiling zones (STRIGID_ZONE macros work)
+- Enables profiling zones (TNX_ZONE macros work)
 
 **When to disable:**
 - Final release builds (removes ~1-10% overhead)
@@ -91,9 +91,9 @@ cmake -DTRACY_PROFILE_LEVEL=3 ..
 ```
 
 **What each level includes:**
-- Level 1: `STRIGID_ZONE_COARSE()` only
-- Level 2: + `STRIGID_ZONE_MEDIUM()`
-- Level 3: + `STRIGID_ZONE_FINE()`
+- Level 1: `TNX_ZONE_COARSE()` only
+- Level 2: + `TNX_ZONE_MEDIUM()`
+- Level 3: + `TNX_ZONE_FINE()`
 
 **Recommendation:**
 - Development: Level 1 or 2
@@ -110,7 +110,7 @@ cmake -DGENERATE_ASSEMBLY=ON ..
 ```
 
 **Output location:**
-- MSVC: `build/StrigidEngine.dir/Debug/StrigidEngine.cod`
+- MSVC: `build/TrinyxEngine.dir/Debug/TrinyxEngine.cod`
 - GCC/Clang: `build/*.s` files
 
 **What it does:**
@@ -136,8 +136,8 @@ cmake -DVECTORIZATION_REPORTS=ON ..
 
 **Output:** Build console will show messages like:
 ```
-StrigidEngine.cpp(230): info: loop vectorized
-StrigidEngine.cpp(245): info: loop not vectorized: complex loop body
+TrinyxEngine.cpp(230): info: loop vectorized
+TrinyxEngine.cpp(245): info: loop not vectorized: complex loop body
 ```
 
 **What it does:**
@@ -177,15 +177,15 @@ cmake -DENABLE_AVX2=ON ..
 
 ---
 
-### STRIGID_ALIGN_64 (default: OFF)
+### TNX_ALIGN_64 (default: OFF)
 Use 64-byte alignment for field arrays (cache line aligned).
 
 ```bash
 # Enable 64-byte alignment (zero cache line splits)
-cmake -DSTRIGID_ALIGN_64=ON ..
+cmake -DTNX_ALIGN_64=ON ..
 
 # Use 32-byte alignment (default, lower memory overhead)
-cmake -DSTRIGID_ALIGN_64=OFF ..
+cmake -DTNX_ALIGN_64=OFF ..
 ```
 
 **What it does:**
@@ -238,7 +238,7 @@ cmake --build . --config Debug
 
 ### Maximum Performance (Benchmark/Stress Test)
 ```bash
-cmake -DENABLE_AVX2=ON -DSTRIGID_ALIGN_64=ON ..
+cmake -DENABLE_AVX2=ON -DTNX_ALIGN_64=ON ..
 cmake --build . --config RelWithDebInfo
 ```
 Note: 64-byte alignment adds ~2MB per 100k entities
@@ -374,7 +374,7 @@ cmake --build . --config Debug
    ```bash
    cmake -DGENERATE_ASSEMBLY=ON ..
    cmake --build . --config Debug
-   # Look at build/StrigidEngine.dir/Debug/StrigidEngine.cod
+   # Look at build/TrinyxEngine.dir/Debug/TrinyxEngine.cod
    ```
 
 3. **Profit!** 🚀

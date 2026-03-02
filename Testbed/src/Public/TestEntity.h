@@ -9,7 +9,7 @@
 template<FieldWidth WIDTH = FieldWidth::Scalar>
 class TestEntity : public EntityView<TestEntity>
 {
-    STRIGID_REGISTER_SCHEMA(TestEntity, EntityView, transform, velocity)
+    TNX_REGISTER_SCHEMA(TestEntity, EntityView, transform, velocity)
 
     Transform<WIDTH> transform;
     Velocity<WIDTH> velocity;

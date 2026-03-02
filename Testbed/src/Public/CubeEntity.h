@@ -10,7 +10,7 @@
 template <template <FieldWidth> class T, FieldWidth WIDTH = FieldWidth::Scalar>
 class BaseCube : public EntityView<T, WIDTH>
 {
-	STRIGID_REGISTER_SUPER_SCHEMA(BaseCube, EntityView, transform, velocity, color)
+	TNX_REGISTER_SUPER_SCHEMA(BaseCube, EntityView, transform, velocity, color)
 
 	Transform<WIDTH> transform;
 	Velocity<WIDTH> velocity;
@@ -37,13 +37,13 @@ class BaseCube : public EntityView<T, WIDTH>
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 class CubeEntity : public BaseCube<CubeEntity, WIDTH>
 {
-	STRIGID_REGISTER_SCHEMA(CubeEntity, BaseCube)
+	TNX_REGISTER_SCHEMA(CubeEntity, BaseCube)
 };
 
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 class SuperCube : public BaseCube<SuperCube, WIDTH>
 {
-	STRIGID_REGISTER_SCHEMA(SuperCube, BaseCube)
+	TNX_REGISTER_SCHEMA(SuperCube, BaseCube)
 	using Base::transform;
 	using Base::velocity;
 	using Base::color;

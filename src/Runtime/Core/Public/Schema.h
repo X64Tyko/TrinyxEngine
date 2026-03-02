@@ -111,7 +111,7 @@ FORCE_INLINE void InvokePostPhysicsImpl(double dt, void** fieldArrayTable, uint3
 		viewBatch.Advance(SIMD_BATCH);
 	}
 
-	STRIGID_ZONE_FINE_N("Tail Batch")
+	TNX_ZONE_FINE_N("Tail Batch")
 	// perform the last batch with a mask.
 	alignas(32) typename T::MaskedType tailBatch;
 	// Handle the tail with a mask

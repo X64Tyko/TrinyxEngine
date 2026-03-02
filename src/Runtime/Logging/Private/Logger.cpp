@@ -26,7 +26,7 @@ void Logger::Init(const std::string& LogFilePath, LogLevel inMinLevel)
 
 	// Write session header
 	LogFile << "\n========================================\n";
-	LogFile << "StrigidEngine Log Session Started\n";
+	LogFile << "TrinyxEngine Log Session Started\n";
 	LogFile << "Timestamp: " << GetTimestamp() << "\n";
 	LogFile << "========================================\n\n";
 	LogFile.flush();
@@ -46,7 +46,7 @@ void Logger::Shutdown()
 	if (LogFile.is_open())
 	{
 		LogFile << "\n========================================\n";
-		LogFile << "StrigidEngine Log Session Ended\n";
+		LogFile << "TrinyxEngine Log Session Ended\n";
 		LogFile << "Timestamp: " << GetTimestamp() << "\n";
 		LogFile << "========================================\n\n";
 		LogFile.flush();

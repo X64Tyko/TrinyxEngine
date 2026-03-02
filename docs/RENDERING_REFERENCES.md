@@ -1,6 +1,6 @@
 # Rendering References
 
-Curated resources for rebuilding StrigidEngine's GPU-driven renderer on Vulkan 1.3.
+Curated resources for rebuilding TrinyxEngine's GPU-driven renderer on Vulkan 1.3.
 Organized by implementation phase. Read in order — each phase builds directly on the last.
 
 ---
@@ -107,7 +107,7 @@ of entity count.
 
 ### Architecture overview
 **[vkguide.dev — GPU Driven Rendering Overview](https://vkguide.dev/docs/gpudriven/gpu_driven_engines/)**
-Explains the predicate → scan → scatter model used in StrigidEngine's compute pipeline.
+Explains the predicate → scan → scatter model used in TrinyxEngine's compute pipeline.
 MultiDrawIndirect structure, per-entity culling in compute, and why the CPU never touches
 draw counts at runtime. A chapter 7 targeting Vulkan 1.3 is actively being written.
 
@@ -205,7 +205,7 @@ match the C++ struct, or generate the C++ struct from the Slang source of truth.
 ### CMake usage
 To link the runtime API from any target:
 ```cmake
-target_link_libraries(StrigidEngine PRIVATE Slang::Compiler)
+target_link_libraries(TrinyxEngine PRIVATE Slang::Compiler)
 ```
 `Slang::Compiler` is defined in the root `CMakeLists.txt`. Nothing currently links it;
 add it when VulkRender or a `ShaderCompiler` subsystem is ready to use it.

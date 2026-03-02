@@ -87,7 +87,7 @@ void RenderThread::ThreadMain()
 {
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
-		STRIGID_ZONE_C(STRIGID_COLOR_RENDERING);
+		TNX_ZONE_C(TNX_COLOR_RENDERING);
 
 		// FPS tracking - measure at start of frame
 		if (LastFpsCounter == 0)
@@ -124,7 +124,7 @@ void RenderThread::ThreadMain()
 		uint32_t latestFrame = LogicPtr->GetLastCompletedFrame();
 		if (latestFrame > LastFrameNumber)
 		{
-			STRIGID_ZONE_N("Render_NewFrame");
+			TNX_ZONE_N("Render_NewFrame");
 			LastFrameNumber = latestFrame;
 
 			// Get frame header for camera/view data
@@ -225,7 +225,7 @@ void RenderThread::ResizeInstanceBuffer(size_t NewSize)
 /*
 void RenderThread::SnapshotSparseArrays(std::shared_ptr<FramePacket> packet)
 {
-    STRIGID_ZONE_N("Render_Snapshot");
+    TNX_ZONE_N("Render_Snapshot");
 
     uint32_t entityCount = packet->ActiveEntityCount;
     // Resize snapshot buffer
@@ -309,7 +309,7 @@ void RenderThread::RequestGPUResources()
 
 void RenderThread::WaitForGPUResources()
 {
-	STRIGID_ZONE_N("Render_WaitGPU");
+	TNX_ZONE_N("Render_WaitGPU");
 
 	// Spin-wait for main thread to provide resources
 	while (CmdBufferAtomic.load(std::memory_order_acquire) == nullptr && bIsRunning.load(std::memory_order_acquire))
@@ -337,7 +337,7 @@ float RenderThread::CalculateInterpolationAlpha()
 /*
 bool RenderThread::InterpolateToTransferBuffer(float alpha)
 {
-    STRIGID_ZONE_N("Render_Interpolate");
+    TNX_ZONE_N("Render_Interpolate");
     size_t entityCount = SnapshotCurrent.size();
 
     if (entityCount == 0)
@@ -398,7 +398,7 @@ bool RenderThread::InterpolateToTransferBuffer(float alpha)
 
 bool RenderThread::InterpolateTemporalFrames(uint32_t frameNumber)
 {
-	STRIGID_ZONE_N("Render_Interpolate");
+	TNX_ZONE_N("Render_Interpolate");
 
 	// Get T and T-1 frame numbers
 	uint32_t framePrev = TemporalCache->GetPrevFrame(frameNumber);
@@ -538,7 +538,7 @@ bool RenderThread::InterpolateTemporalFrames(uint32_t frameNumber)
 
 void RenderThread::WaitForCommandBuffer()
 {
-	STRIGID_ZONE_N("Render_CmdBuf");
+	TNX_ZONE_N("Render_CmdBuf");
 
 	// Spin-wait for main thread to provide resources
 	while (CmdBufferAtomic.load(std::memory_order_acquire) == nullptr && bIsRunning.load(std::memory_order_acquire))
@@ -606,7 +606,7 @@ bool RenderThread::BuildCopyPassAndUniforms()
 
 void RenderThread::WaitForSwapchainTexture()
 {
-	STRIGID_ZONE_N("Render_Swapchain");
+	TNX_ZONE_N("Render_Swapchain");
 
 	// Spin-wait for main thread to provide resources
 	while (SwapchainTextureAtomic.load(std::memory_order_acquire) == nullptr && bIsRunning.load(
@@ -670,7 +670,7 @@ void RenderThread::SignalReadyToSubmit()
 
 void RenderThread::CreateCubeMesh()
 {
-	STRIGID_ZONE_C(STRIGID_COLOR_RENDERING);
+	TNX_ZONE_C(TNX_COLOR_RENDERING);
 
 	// Create vertex buffer
 	SDL_GPUBufferCreateInfo vertexBufferInfo = {};
@@ -759,7 +759,7 @@ void RenderThread::CreateCubeMesh()
 
 void RenderThread::CreateInstanceBuffer(size_t Capacity)
 {
-	STRIGID_ZONE_C(STRIGID_COLOR_RENDERING);
+	TNX_ZONE_C(TNX_COLOR_RENDERING);
 
 	InstanceBufferCapacity = Capacity;
 
@@ -776,7 +776,7 @@ void RenderThread::CreateInstanceBuffer(size_t Capacity)
 
 void RenderThread::CreateRenderPipeline()
 {
-	STRIGID_ZONE_C(STRIGID_COLOR_RENDERING);
+	TNX_ZONE_C(TNX_COLOR_RENDERING);
 
 	// Create vertex shader
 	SDL_GPUShaderCreateInfo vertShaderInfo = {};

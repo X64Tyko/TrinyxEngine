@@ -28,6 +28,8 @@ public:
 	void Stop();
 	void Join();
 
+	bool IsRunning() const { return bIsRunning.load(std::memory_order_relaxed); }
+
 	// Mailbox access for RenderThread - returns the last completed frame number
 	uint32_t GetLastCompletedFrame() const { return LastCompletedFrame.load(std::memory_order_acquire); }
 
@@ -81,21 +83,21 @@ private:
 
 inline void LogicThread::PrePhysics(double dt)
 {
-	STRIGID_ZONE_N("Logic_FixedUpdate");
+	TNX_ZONE_N("Logic_FixedUpdate");
 
 	RegistryPtr->InvokePrePhys(dt, FrameNumber);
 }
 
 inline void LogicThread::ScalarUpdate(double dt)
 {
-	STRIGID_ZONE_N("Logic_Update");
+	TNX_ZONE_N("Logic_Update");
 
 	RegistryPtr->InvokeScalarUpdate(dt, FrameNumber);
 }
 
 inline void LogicThread::PostPhysics(double dt)
 {
-	STRIGID_ZONE_N("Logic_FixedUpdate");
+	TNX_ZONE_N("Logic_FixedUpdate");
 
 	RegistryPtr->InvokePostPhys(dt, FrameNumber);
 }

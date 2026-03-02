@@ -5,15 +5,15 @@
 #include <vector>
 #include <iostream>
 
-namespace Strigid::Testing
+namespace tnx::Testing
 {
     class TestCase
     {
     public:
         std::string name;
-        std::function<void(const StrigidEngine&)> testFunc;
+        std::function<void(const TrinyxEngine&)> testFunc;
         
-        TestCase(std::string name, std::function<void(const StrigidEngine&)> func)
+        TestCase(std::string name, std::function<void(const TrinyxEngine&)> func)
             : name(std::move(name)), testFunc(std::move(func)) {}
     };
 
@@ -26,12 +26,12 @@ namespace Strigid::Testing
             return instance;
         }
 
-        void RegisterTest(const std::string& name, std::function<void(const StrigidEngine&)> func)
+        void RegisterTest(const std::string& name, std::function<void(const TrinyxEngine&)> func)
         {
             tests.emplace_back(name, func);
         }
 
-        int RunAll(const StrigidEngine& Engine)
+        int RunAll(const TrinyxEngine& Engine)
         {
             int passed = 0;
             int failed = 0;
@@ -75,7 +75,7 @@ namespace Strigid::Testing
     class TestRegistrar
     {
     public:
-        TestRegistrar(const std::string& name, std::function<void(const StrigidEngine&)> func)
+        TestRegistrar(const std::string& name, std::function<void(const TrinyxEngine&)> func)
         {
             TestRegistry::Instance().RegisterTest(name, func);
         }
@@ -86,9 +86,9 @@ namespace Strigid::Testing
 
 // Macros for easy test definition
 #define TEST(TestName) \
-    void TestName(const StrigidEngine& Engine); \
-    static Strigid::Testing::TestRegistrar TestName##_registrar(#TestName, TestName); \
-    void TestName(const StrigidEngine& Engine)
+    void TestName(const TrinyxEngine& Engine); \
+    static tnx::Testing::TestRegistrar TestName##_registrar(#TestName, TestName); \
+    void TestName(const TrinyxEngine& Engine)
 
 #define ASSERT(condition) \
     if (!(condition)) throw std::runtime_error("Assertion failed: " #condition)

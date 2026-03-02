@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-#include "volk.h"
+#include "VulkanInclude.h"
 #include "vk_mem_alloc.h"
 
 class VulkanContext;
@@ -30,31 +30,30 @@ enum class GpuMemoryDomain : uint8_t
 // -----------------------------------------------------------------------
 // VulkanBuffer — move-only RAII handle
 //
-// Owns a VkBuffer + VmaAllocation pair.  The embedded VmaAllocator is a
-// non-owning reference (VMA's handle type is already a pointer); storing it
-// here lets the destructor release the allocation without calling back into
+// Owns a VkBuffer + VmaAllocation pair.  Buffer uses vk::Buffer as the
+// handle type (thin wrapper over VkBuffer, zero overhead).
+// The embedded VmaAllocator is a non-owning reference; storing it here
+// lets the destructor release the allocation without calling back into
 // VulkanMemory.
 // -----------------------------------------------------------------------
 struct VulkanBuffer
 {
-	VkBuffer Buffer            = VK_NULL_HANDLE;
-	VmaAllocation Allocation   = VK_NULL_HANDLE;
-	VkDeviceAddress DeviceAddr = 0;       ///< 0 if BDA not requested
-	void* MappedPtr            = nullptr; ///< Non-null for PersistentMapped/Staging
-	VkDeviceSize Size          = 0;
+	vk::Buffer Buffer; ///< thin wrapper, null until allocated
+	VmaAllocation Allocation     = VK_NULL_HANDLE;
+	vk::DeviceAddress DeviceAddr = 0;       ///< 0 if BDA not requested
+	void* MappedPtr              = nullptr; ///< Non-null for PersistentMapped/Staging
+	VkDeviceSize Size            = 0;
 
 	// Non-owning reference to the allocator used to create this buffer.
-	// Set by VulkanMemory::AllocateBuffer(); null until then.
 	VmaAllocator Allocator = VK_NULL_HANDLE;
 
 	VulkanBuffer() = default;
 
 	~VulkanBuffer()
 	{
-		if (Buffer != VK_NULL_HANDLE && Allocator != VK_NULL_HANDLE) vmaDestroyBuffer(Allocator, Buffer, Allocation);
+		if (static_cast<VkBuffer>(Buffer) != VK_NULL_HANDLE && Allocator != VK_NULL_HANDLE) vmaDestroyBuffer(Allocator, static_cast<VkBuffer>(Buffer), Allocation);
 	}
 
-	// Move-only: copying a GPU buffer handle makes no sense.
 	VulkanBuffer(const VulkanBuffer&)            = delete;
 	VulkanBuffer& operator=(const VulkanBuffer&) = delete;
 
@@ -66,7 +65,7 @@ struct VulkanBuffer
 		, Size(o.Size)
 		, Allocator(o.Allocator)
 	{
-		o.Buffer     = VK_NULL_HANDLE;
+		o.Buffer     = vk::Buffer{};
 		o.Allocation = VK_NULL_HANDLE;
 		o.Allocator  = VK_NULL_HANDLE;
 	}
@@ -75,10 +74,10 @@ struct VulkanBuffer
 	{
 		if (this != &o)
 		{
-			if (Buffer != VK_NULL_HANDLE && Allocator != VK_NULL_HANDLE) vmaDestroyBuffer(Allocator, Buffer, Allocation);
+			if (static_cast<VkBuffer>(Buffer) != VK_NULL_HANDLE && Allocator != VK_NULL_HANDLE) vmaDestroyBuffer(Allocator, static_cast<VkBuffer>(Buffer), Allocation);
 
 			Buffer       = o.Buffer;
-			o.Buffer     = VK_NULL_HANDLE;
+			o.Buffer     = vk::Buffer{};
 			Allocation   = o.Allocation;
 			o.Allocation = VK_NULL_HANDLE;
 			Allocator    = o.Allocator;
@@ -90,15 +89,15 @@ struct VulkanBuffer
 		return *this;
 	}
 
-	bool IsValid() const { return Buffer != VK_NULL_HANDLE; }
+	bool IsValid() const { return static_cast<VkBuffer>(Buffer) != VK_NULL_HANDLE; }
 
 	/// Explicit release — use when you need to destroy before the destructor fires.
 	void Free()
 	{
-		if (Buffer != VK_NULL_HANDLE && Allocator != VK_NULL_HANDLE)
+		if (static_cast<VkBuffer>(Buffer) != VK_NULL_HANDLE && Allocator != VK_NULL_HANDLE)
 		{
-			vmaDestroyBuffer(Allocator, Buffer, Allocation);
-			Buffer     = VK_NULL_HANDLE;
+			vmaDestroyBuffer(Allocator, static_cast<VkBuffer>(Buffer), Allocation);
+			Buffer     = vk::Buffer{};
 			Allocation = VK_NULL_HANDLE;
 			Allocator  = VK_NULL_HANDLE;
 		}
@@ -108,14 +107,14 @@ struct VulkanBuffer
 // -----------------------------------------------------------------------
 // VulkanImage — move-only RAII handle
 //
-// Owns a VkImage + VkImageView + VmaAllocation.  The view and image are
-// always created/destroyed as a unit so they live together here.
-// VkDevice is stored as a non-owning reference for vkDestroyImageView.
+// Owns a VkImage + VkImageView + VmaAllocation.  Handle types use vk::
+// wrappers (thin, zero overhead).  VkDevice is stored as a non-owning
+// reference for vkDestroyImageView.
 // -----------------------------------------------------------------------
 struct VulkanImage
 {
-	VkImage Image            = VK_NULL_HANDLE;
-	VkImageView View         = VK_NULL_HANDLE;
+	vk::Image Image;
+	vk::ImageView View;
 	VmaAllocation Allocation = VK_NULL_HANDLE;
 	VkFormat Format          = VK_FORMAT_UNDEFINED;
 	VkExtent2D Extent        = {};
@@ -128,10 +127,10 @@ struct VulkanImage
 
 	~VulkanImage()
 	{
-		if (Image != VK_NULL_HANDLE && Allocator != VK_NULL_HANDLE)
+		if (static_cast<VkImage>(Image) != VK_NULL_HANDLE && Allocator != VK_NULL_HANDLE)
 		{
-			vkDestroyImageView(Device, View, nullptr);
-			vmaDestroyImage(Allocator, Image, Allocation);
+			vkDestroyImageView(Device, static_cast<VkImageView>(View), nullptr);
+			vmaDestroyImage(Allocator, static_cast<VkImage>(Image), Allocation);
 		}
 	}
 
@@ -147,8 +146,8 @@ struct VulkanImage
 		, Allocator(o.Allocator)
 		, Device(o.Device)
 	{
-		o.Image      = VK_NULL_HANDLE;
-		o.View       = VK_NULL_HANDLE;
+		o.Image      = vk::Image{};
+		o.View       = vk::ImageView{};
 		o.Allocation = VK_NULL_HANDLE;
 		o.Allocator  = VK_NULL_HANDLE;
 	}
@@ -157,15 +156,15 @@ struct VulkanImage
 	{
 		if (this != &o)
 		{
-			if (Image != VK_NULL_HANDLE && Allocator != VK_NULL_HANDLE)
+			if (static_cast<VkImage>(Image) != VK_NULL_HANDLE && Allocator != VK_NULL_HANDLE)
 			{
-				vkDestroyImageView(Device, View, nullptr);
-				vmaDestroyImage(Allocator, Image, Allocation);
+				vkDestroyImageView(Device, static_cast<VkImageView>(View), nullptr);
+				vmaDestroyImage(Allocator, static_cast<VkImage>(Image), Allocation);
 			}
 			Image        = o.Image;
-			o.Image      = VK_NULL_HANDLE;
+			o.Image      = vk::Image{};
 			View         = o.View;
-			o.View       = VK_NULL_HANDLE;
+			o.View       = vk::ImageView{};
 			Allocation   = o.Allocation;
 			o.Allocation = VK_NULL_HANDLE;
 			Allocator    = o.Allocator;
@@ -177,16 +176,16 @@ struct VulkanImage
 		return *this;
 	}
 
-	bool IsValid() const { return Image != VK_NULL_HANDLE; }
+	bool IsValid() const { return static_cast<VkImage>(Image) != VK_NULL_HANDLE; }
 
 	void Free()
 	{
-		if (Image != VK_NULL_HANDLE && Allocator != VK_NULL_HANDLE)
+		if (static_cast<VkImage>(Image) != VK_NULL_HANDLE && Allocator != VK_NULL_HANDLE)
 		{
-			vkDestroyImageView(Device, View, nullptr);
-			vmaDestroyImage(Allocator, Image, Allocation);
-			Image      = VK_NULL_HANDLE;
-			View       = VK_NULL_HANDLE;
+			vkDestroyImageView(Device, static_cast<VkImageView>(View), nullptr);
+			vmaDestroyImage(Allocator, static_cast<VkImage>(Image), Allocation);
+			Image      = vk::Image{};
+			View       = vk::ImageView{};
 			Allocation = VK_NULL_HANDLE;
 			Allocator  = VK_NULL_HANDLE;
 		}
@@ -196,14 +195,14 @@ struct VulkanImage
 // -----------------------------------------------------------------------
 // VulkanMemory
 //
-// Wraps VMA.  Single instance owned by StrigidEngine, passed as a pointer
-// to the RenderThread.  All GPU buffer and image allocation goes here.
+// Wraps VMA.  Single instance owned by TrinyxEngine, passed as a pointer
+// to VulkRender.  All GPU buffer and image allocation goes here.
 // -----------------------------------------------------------------------
 class VulkanMemory
 {
 public:
-	VulkanMemory()  = default;
-	~VulkanMemory() = default;
+	VulkanMemory() = default;
+	~VulkanMemory() { Shutdown(); }
 
 	VulkanMemory(const VulkanMemory&)            = delete;
 	VulkanMemory& operator=(const VulkanMemory&) = delete;
@@ -234,6 +233,16 @@ public:
 											VkImageUsageFlags usage,
 											VkImageAspectFlags aspectMask);
 
+	/// Directly write pixels into a device-local image — no staging buffer, no command buffer.
+	/// Requires bSupportsHostImageCopy (Vulkan 1.4 hostImageCopy feature).
+	/// Image must have been created with VK_IMAGE_USAGE_HOST_TRANSFER_BIT.
+	/// Falls back gracefully: returns false if host image copy is unavailable.
+	bool UploadImage(VulkanImage& image,
+					 const void* pixels,
+					 VkDeviceSize byteSize,
+					 uint32_t width,
+					 uint32_t height);
+
 	// ----------------------------------------------------------------
 	// Accessors
 	// ----------------------------------------------------------------
@@ -241,10 +250,12 @@ public:
 	VmaAllocator GetAllocator() const { return Allocator; }
 	bool HasReBAR() const { return bHasReBAR; }
 	bool SupportsBDA() const { return bBDA; }
+	bool SupportsHostImageCopy() const { return bHostImageCopy; }
 
 private:
 	VmaAllocator Allocator = VK_NULL_HANDLE;
 	VkDevice DeviceCache   = VK_NULL_HANDLE;
 	bool bHasReBAR         = false;
 	bool bBDA              = false;
+	bool bHostImageCopy    = false;
 };

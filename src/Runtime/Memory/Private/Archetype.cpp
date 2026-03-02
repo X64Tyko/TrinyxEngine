@@ -25,7 +25,7 @@ Archetype::~Archetype()
 	for (Chunk* ChunkPtr : Chunks)
 	{
 		// Tracy memory profiling: Track chunk deallocation with pool name
-		STRIGID_FREE_N(ChunkPtr, DebugName);
+		TNX_FREE_N(ChunkPtr, DebugName);
 #ifdef _MSC_VER
 		_aligned_free(ChunkPtr);
 #else
@@ -219,7 +219,7 @@ uint32_t Archetype::GetChunkCount(size_t ChunkIndex) const
 
 Archetype::EntitySlot Archetype::PushEntity()
 {
-	STRIGID_ZONE_C(STRIGID_COLOR_MEMORY);
+	TNX_ZONE_C(TNX_COLOR_MEMORY);
 	// Safety check for empty archetypes
 	if (EntitiesPerChunk == 0)
 	{
@@ -249,7 +249,7 @@ Archetype::EntitySlot Archetype::PushEntity()
 
 void Archetype::RemoveEntity(size_t ChunkIndex, uint32_t LocalIndex)
 {
-	STRIGID_ZONE_C(STRIGID_COLOR_MEMORY);
+	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
 	if (TotalEntityCount == 0) return;
 
@@ -364,7 +364,7 @@ std::vector<void*> Archetype::GetFieldArrays(Chunk* TargetChunk, ComponentTypeID
 
 Chunk* Archetype::AllocateChunk()
 {
-	STRIGID_ZONE_C(STRIGID_COLOR_MEMORY);
+	TNX_ZONE_C(TNX_COLOR_MEMORY);
 #ifdef _MSC_VER
 	auto NewChunk = static_cast<Chunk*>(_aligned_malloc(sizeof(Chunk), 64));
 #else
@@ -373,7 +373,7 @@ Chunk* Archetype::AllocateChunk()
 
 	// Tracy memory profiling: Track chunk allocation with pool name
 	// This lets you see separate pools for Archetypes
-	STRIGID_ALLOC_N(NewChunk, sizeof(Chunk), DebugName);
+	TNX_ALLOC_N(NewChunk, sizeof(Chunk), DebugName);
 
 	// Allocate temporal field arrays for this chunk
 	if (TemporalCache && !TemporalFieldIndices.empty())
@@ -418,7 +418,7 @@ Chunk* Archetype::AllocateChunk()
 	if (lastChunk != nullptr)
 	{
 		ptrdiff_t gap = (char*)NewChunk - static_cast<char*>(lastChunk);
-		STRIGID_PLOT("Chunk Gap (KB)", gap / 1024.0);
+		TNX_PLOT("Chunk Gap (KB)", gap / 1024.0);
 
 		// Log suspicious gaps (> 100KB means something's between chunks)
 		if (gap > 100 * 1024)
@@ -426,7 +426,7 @@ Chunk* Archetype::AllocateChunk()
 			char buffer[256];
 			snprintf(buffer, sizeof(buffer), "Large gap detected: %li KB between chunk %u and %u",
 					 gap / 1024, chunkCount - 1, chunkCount);
-			STRIGID_ZONE_TEXT(buffer, strlen(buffer));
+			TNX_ZONE_TEXT(buffer, strlen(buffer));
 		}
 	}
 
@@ -434,9 +434,9 @@ Chunk* Archetype::AllocateChunk()
 
 	// Track total span
 	[[maybe_unused]] ptrdiff_t totalSpan = (char*)NewChunk - static_cast<char*>(firstChunk);
-	STRIGID_PLOT("Total Span (MB)", totalSpan / (1024.0 * 1024.0));
-	STRIGID_PLOT("Chunk Count", static_cast<int64_t>(chunkCount));
-	STRIGID_PLOT("Efficiency %", (chunkCount * sizeof(Chunk) * 100.0) / (totalSpan > 0 ? totalSpan : 1));
+	TNX_PLOT("Total Span (MB)", totalSpan / (1024.0 * 1024.0));
+	TNX_PLOT("Chunk Count", static_cast<int64_t>(chunkCount));
+	TNX_PLOT("Efficiency %", (chunkCount * sizeof(Chunk) * 100.0) / (totalSpan > 0 ? totalSpan : 1));
 
 	lastChunk = NewChunk;
 

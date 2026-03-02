@@ -10,9 +10,9 @@
 
 // Platform-specific attribute to prevent linker from stripping unused symbols
 #if defined(__GNUC__) || defined(__clang__)
-#define STRIGID_USED_ATTR __attribute__((used))
+#define TNX_USED_ATTR __attribute__((used))
 #else
-#define STRIGID_USED_ATTR
+#define TNX_USED_ATTR
 #endif
 
 // --- TYPE TRAITS ---
@@ -164,24 +164,24 @@ FORCE_INLINE void ForEachField(Func&& func)
 }
 
 // --- MACRO ---
-#define STRIGID_REGISTER_ENTITY(CLASS) \
+#define TNX_REGISTER_ENTITY(CLASS) \
     namespace { \
         static const bool g_Reflect_##CLASS = []() { \
             PrefabReflector<CLASS<>>::Register(); \
             return true; \
         }(); \
     }
-#define STRIGID_REGISTER_SCHEMA(CLASS, SUPER, ...) \
+#define TNX_REGISTER_SCHEMA(CLASS, SUPER, ...) \
     public: \
     static constexpr auto DefineSchema() \
     { \
-        return SUPER<CLASS, WIDTH>::DefineSchema().Extend(__VA_OPT__(STRIGID_MAP_LIST(STRIGID_GET_PTR, CLASS, __VA_ARGS__))); \
+        return SUPER<CLASS, WIDTH>::DefineSchema().Extend(__VA_OPT__(TNX_MAP_LIST(TNX_GET_PTR, CLASS, __VA_ARGS__))); \
     } \
     \
     FORCE_INLINE void Advance(uint32_t step) \
     { \
         SUPER<CLASS, WIDTH>::Advance(step); \
-        __VA_OPT__(STRIGID_MAPF_LIST(STRIGID_BIND_ADVANCE, CLASS, __VA_ARGS__)) \
+        __VA_OPT__(TNX_MAPF_LIST(TNX_BIND_ADVANCE, CLASS, __VA_ARGS__)) \
     } \
     \
     using Base = SUPER<CLASS, WIDTH>; \
@@ -192,113 +192,113 @@ FORCE_INLINE void ForEachField(Func&& func)
     struct _EntityRegistrar { \
         _EntityRegistrar() { PrefabReflector<CLASS<>>::Register(); } \
     }; \
-    [[maybe_unused]] STRIGID_USED_ATTR static inline _EntityRegistrar _entity_registered;
+    [[maybe_unused]] TNX_USED_ATTR static inline _EntityRegistrar _entity_registered;
 
-#define STRIGID_REGISTER_SUPER_SCHEMA(CLASS, SUPER, ...) \
+#define TNX_REGISTER_SUPER_SCHEMA(CLASS, SUPER, ...) \
     public: \
     static constexpr auto DefineSchema() \
     { \
-        return SUPER<T, WIDTH>::DefineSchema().Extend(__VA_OPT__(STRIGID_MAP_LIST(STRIGID_GET_PTR, CLASS, __VA_ARGS__))); \
+        return SUPER<T, WIDTH>::DefineSchema().Extend(__VA_OPT__(TNX_MAP_LIST(TNX_GET_PTR, CLASS, __VA_ARGS__))); \
     } \
     \
     FORCE_INLINE void Advance(uint32_t step) \
     { \
         SUPER<T, WIDTH>::Advance(step); \
-        __VA_OPT__(STRIGID_MAPF_LIST(STRIGID_BIND_ADVANCE, CLASS, __VA_ARGS__)) \
+        __VA_OPT__(TNX_MAPF_LIST(TNX_BIND_ADVANCE, CLASS, __VA_ARGS__)) \
     }
-#define STRIGID_EXPAND(x) x
-#define STRIGID_GET_ARG_COUNT(...) STRIGID_EXPAND(STRIGID_INTERNAL_ARG_COUNT(__VA_ARGS__, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1))
-#define STRIGID_INTERNAL_ARG_COUNT(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,_16, count, ...) count
+#define TNX_EXPAND(x) x
+#define TNX_GET_ARG_COUNT(...) TNX_EXPAND(TNX_INTERNAL_ARG_COUNT(__VA_ARGS__, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1))
+#define TNX_INTERNAL_ARG_COUNT(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,_16, count, ...) count
 
 // Mapping Dispatcher
-#define STRIGID_MAP_LIST(m, context, ...) STRIGID_EXPAND(STRIGID_CONCAT(STRIGID_MAP_, STRIGID_GET_ARG_COUNT(__VA_ARGS__))(m, context, __VA_ARGS__))
-#define STRIGID_MAPF_LIST(m, context, ...) STRIGID_EXPAND(STRIGID_CONCAT(STRIGID_MAPF_, STRIGID_GET_ARG_COUNT(__VA_ARGS__))(m, context, __VA_ARGS__))
-#define STRIGID_CONCAT_INNER(a, b) a##b
-#define STRIGID_CONCAT(a, b) STRIGID_CONCAT_INNER(a, b)
+#define TNX_MAP_LIST(m, context, ...) TNX_EXPAND(TNX_CONCAT(TNX_MAP_, TNX_GET_ARG_COUNT(__VA_ARGS__))(m, context, __VA_ARGS__))
+#define TNX_MAPF_LIST(m, context, ...) TNX_EXPAND(TNX_CONCAT(TNX_MAPF_, TNX_GET_ARG_COUNT(__VA_ARGS__))(m, context, __VA_ARGS__))
+#define TNX_CONCAT_INNER(a, b) a##b
+#define TNX_CONCAT(a, b) TNX_CONCAT_INNER(a, b)
 
 // Individual Expansion Steps (Supports up to 16 members per component)
-#define STRIGID_MAP_1(m, c, x)      m(c, x)
-#define STRIGID_MAP_2(m, c, x, ...) m(c, x), STRIGID_MAP_1(m, c, __VA_ARGS__)
-#define STRIGID_MAP_3(m, c, x, ...) m(c, x), STRIGID_MAP_2(m, c, __VA_ARGS__)
-#define STRIGID_MAP_4(m, c, x, ...) m(c, x), STRIGID_MAP_3(m, c, __VA_ARGS__)
-#define STRIGID_MAP_5(m, c, x, ...) m(c, x), STRIGID_MAP_4(m, c, __VA_ARGS__)
-#define STRIGID_MAP_6(m, c, x, ...) m(c, x), STRIGID_MAP_5(m, c, __VA_ARGS__)
-#define STRIGID_MAP_7(m, c, x, ...) m(c, x), STRIGID_MAP_6(m, c, __VA_ARGS__)
-#define STRIGID_MAP_8(m, c, x, ...) m(c, x), STRIGID_MAP_7(m, c, __VA_ARGS__)
-#define STRIGID_MAP_9(m, c, x, ...) m(c, x), STRIGID_MAP_8(m, c, __VA_ARGS__)
-#define STRIGID_MAP_10(m, c, x, ...) m(c, x), STRIGID_MAP_9(m, c, __VA_ARGS__)
-#define STRIGID_MAP_11(m, c, x, ...) m(c, x), STRIGID_MAP_10(m, c, __VA_ARGS__)
-#define STRIGID_MAP_12(m, c, x, ...) m(c, x), STRIGID_MAP_11(m, c, __VA_ARGS__)
-#define STRIGID_MAP_13(m, c, x, ...) m(c, x), STRIGID_MAP_12(m, c, __VA_ARGS__)
-#define STRIGID_MAP_14(m, c, x, ...) m(c, x), STRIGID_MAP_13(m, c, __VA_ARGS__)
-#define STRIGID_MAP_15(m, c, x, ...) m(c, x), STRIGID_MAP_14(m, c, __VA_ARGS__)
-#define STRIGID_MAP_16(m, c, x, ...) m(c, x), STRIGID_MAP_15(m, c, __VA_ARGS__)
+#define TNX_MAP_1(m, c, x)      m(c, x)
+#define TNX_MAP_2(m, c, x, ...) m(c, x), TNX_MAP_1(m, c, __VA_ARGS__)
+#define TNX_MAP_3(m, c, x, ...) m(c, x), TNX_MAP_2(m, c, __VA_ARGS__)
+#define TNX_MAP_4(m, c, x, ...) m(c, x), TNX_MAP_3(m, c, __VA_ARGS__)
+#define TNX_MAP_5(m, c, x, ...) m(c, x), TNX_MAP_4(m, c, __VA_ARGS__)
+#define TNX_MAP_6(m, c, x, ...) m(c, x), TNX_MAP_5(m, c, __VA_ARGS__)
+#define TNX_MAP_7(m, c, x, ...) m(c, x), TNX_MAP_6(m, c, __VA_ARGS__)
+#define TNX_MAP_8(m, c, x, ...) m(c, x), TNX_MAP_7(m, c, __VA_ARGS__)
+#define TNX_MAP_9(m, c, x, ...) m(c, x), TNX_MAP_8(m, c, __VA_ARGS__)
+#define TNX_MAP_10(m, c, x, ...) m(c, x), TNX_MAP_9(m, c, __VA_ARGS__)
+#define TNX_MAP_11(m, c, x, ...) m(c, x), TNX_MAP_10(m, c, __VA_ARGS__)
+#define TNX_MAP_12(m, c, x, ...) m(c, x), TNX_MAP_11(m, c, __VA_ARGS__)
+#define TNX_MAP_13(m, c, x, ...) m(c, x), TNX_MAP_12(m, c, __VA_ARGS__)
+#define TNX_MAP_14(m, c, x, ...) m(c, x), TNX_MAP_13(m, c, __VA_ARGS__)
+#define TNX_MAP_15(m, c, x, ...) m(c, x), TNX_MAP_14(m, c, __VA_ARGS__)
+#define TNX_MAP_16(m, c, x, ...) m(c, x), TNX_MAP_15(m, c, __VA_ARGS__)
 
-#define STRIGID_MAPF_1(m, c, x)      m(c, x)
-#define STRIGID_MAPF_2(m, c, x, ...) m(c, x) STRIGID_MAP_1(m, c, __VA_ARGS__)
-#define STRIGID_MAPF_3(m, c, x, ...) m(c, x) STRIGID_MAPF_2(m, c, __VA_ARGS__)
-#define STRIGID_MAPF_4(m, c, x, ...) m(c, x) STRIGID_MAPF_3(m, c, __VA_ARGS__)
-#define STRIGID_MAPF_5(m, c, x, ...) m(c, x) STRIGID_MAPF_4(m, c, __VA_ARGS__)
-#define STRIGID_MAPF_6(m, c, x, ...) m(c, x) STRIGID_MAPF_5(m, c, __VA_ARGS__)
-#define STRIGID_MAPF_7(m, c, x, ...) m(c, x) STRIGID_MAPF_6(m, c, __VA_ARGS__)
-#define STRIGID_MAPF_8(m, c, x, ...) m(c, x) STRIGID_MAPF_7(m, c, __VA_ARGS__)
-#define STRIGID_MAPF_9(m, c, x, ...) m(c, x) STRIGID_MAPF_8(m, c, __VA_ARGS__)
-#define STRIGID_MAPF_10(m, c, x, ...) m(c, x) STRIGID_MAPF_9(m, c, __VA_ARGS__)
-#define STRIGID_MAPF_11(m, c, x, ...) m(c, x) STRIGID_MAPF_10(m, c, __VA_ARGS__)
-#define STRIGID_MAPF_12(m, c, x, ...) m(c, x) STRIGID_MAPF_11(m, c, __VA_ARGS__)
-#define STRIGID_MAPF_13(m, c, x, ...) m(c, x) STRIGID_MAPF_12(m, c, __VA_ARGS__)
-#define STRIGID_MAPF_14(m, c, x, ...) m(c, x) STRIGID_MAPF_13(m, c, __VA_ARGS__)
-#define STRIGID_MAPF_15(m, c, x, ...) m(c, x) STRIGID_MAPF_14(m, c, __VA_ARGS__)
-#define STRIGID_MAPF_16(m, c, x, ...) m(c, x) STRIGID_MAPF_15(m, c, __VA_ARGS__)
+#define TNX_MAPF_1(m, c, x)      m(c, x)
+#define TNX_MAPF_2(m, c, x, ...) m(c, x) TNX_MAP_1(m, c, __VA_ARGS__)
+#define TNX_MAPF_3(m, c, x, ...) m(c, x) TNX_MAPF_2(m, c, __VA_ARGS__)
+#define TNX_MAPF_4(m, c, x, ...) m(c, x) TNX_MAPF_3(m, c, __VA_ARGS__)
+#define TNX_MAPF_5(m, c, x, ...) m(c, x) TNX_MAPF_4(m, c, __VA_ARGS__)
+#define TNX_MAPF_6(m, c, x, ...) m(c, x) TNX_MAPF_5(m, c, __VA_ARGS__)
+#define TNX_MAPF_7(m, c, x, ...) m(c, x) TNX_MAPF_6(m, c, __VA_ARGS__)
+#define TNX_MAPF_8(m, c, x, ...) m(c, x) TNX_MAPF_7(m, c, __VA_ARGS__)
+#define TNX_MAPF_9(m, c, x, ...) m(c, x) TNX_MAPF_8(m, c, __VA_ARGS__)
+#define TNX_MAPF_10(m, c, x, ...) m(c, x) TNX_MAPF_9(m, c, __VA_ARGS__)
+#define TNX_MAPF_11(m, c, x, ...) m(c, x) TNX_MAPF_10(m, c, __VA_ARGS__)
+#define TNX_MAPF_12(m, c, x, ...) m(c, x) TNX_MAPF_11(m, c, __VA_ARGS__)
+#define TNX_MAPF_13(m, c, x, ...) m(c, x) TNX_MAPF_12(m, c, __VA_ARGS__)
+#define TNX_MAPF_14(m, c, x, ...) m(c, x) TNX_MAPF_13(m, c, __VA_ARGS__)
+#define TNX_MAPF_15(m, c, x, ...) m(c, x) TNX_MAPF_14(m, c, __VA_ARGS__)
+#define TNX_MAPF_16(m, c, x, ...) m(c, x) TNX_MAPF_15(m, c, __VA_ARGS__)
 
 // Macro to auto-register fields during static initialization
-#define STRIGID_REGISTER_COMPONENT_FIELDS(ComponentType) \
+#define TNX_REGISTER_COMPONENT_FIELDS(ComponentType) \
     namespace { \
         static bool _##ComponentType##_FieldsRegistered = RegisterFieldsStatic<ComponentType>(); \
     }
 
 // Helper to prefix the class name to the member pointer
-#define STRIGID_GET_PTR(Class, Member) &Class::Member
+#define TNX_GET_PTR(Class, Member) &Class::Member
 
 // Helper to stringify the member name
-#define STRIGID_GET_NAME(Class, Member) #Member
+#define TNX_GET_NAME(Class, Member) #Member
 
-#define STRIGID_BIND_ADVANCE(ComponentType, Member, ...) Member.Advance(step);
+#define TNX_BIND_ADVANCE(ComponentType, Member, ...) Member.Advance(step);
 
-#define STRIGID_BIND_FINAL(ComponentType, Member, ...) Member.MaskFinal(count);
+#define TNX_BIND_FINAL(ComponentType, Member, ...) Member.MaskFinal(count);
 
-#define STRIGID_BIND_BIND(ComponentType, Member, ...) Member.Bind(arrays[arrayIndex], arrays[arrayIndex + 1], startIndex, count); arrayIndex += 2;
+#define TNX_BIND_BIND(ComponentType, Member, ...) Member.Bind(arrays[arrayIndex], arrays[arrayIndex + 1], startIndex, count); arrayIndex += 2;
 
 // Handles creating the field definition, debug field names, Bind function, and Registering the struct component
-#define STRIGID_REGISTER_FIELDS(ComponentType, ...) \
+#define TNX_REGISTER_FIELDS(ComponentType, ...) \
     static constexpr auto DefineFields() \
     { /* Use the map bindings and __VA_OPT__ to create our Field Definitions for each item passed to the macro */ \
-        return std::make_tuple(__VA_OPT__(STRIGID_MAP_LIST(STRIGID_GET_PTR, ComponentType, __VA_ARGS__))); \
+        return std::make_tuple(__VA_OPT__(TNX_MAP_LIST(TNX_GET_PTR, ComponentType, __VA_ARGS__))); \
     } \
     \
     static constexpr auto FieldNames = std::array{ /* Same thing but for the names of the fields */ \
-        __VA_OPT__(STRIGID_MAP_LIST(STRIGID_GET_NAME, ComponentType, __VA_ARGS__)) \
+        __VA_OPT__(TNX_MAP_LIST(TNX_GET_NAME, ComponentType, __VA_ARGS__)) \
     }; \
 \
     FORCE_INLINE void Advance(uint32_t step) \
     { \
-        __VA_OPT__(STRIGID_MAPF_LIST(STRIGID_BIND_ADVANCE, ComponentType, __VA_ARGS__)) \
+        __VA_OPT__(TNX_MAPF_LIST(TNX_BIND_ADVANCE, ComponentType, __VA_ARGS__)) \
     } \
 \
     FORCE_INLINE void Bind(void** arrays, uint32_t startIndex = 0, int32_t count = -1) \
     { \
         int32_t arrayIndex = 0; \
-        __VA_OPT__(STRIGID_MAPF_LIST(STRIGID_BIND_BIND, ComponentType, __VA_ARGS__)) \
+        __VA_OPT__(TNX_MAPF_LIST(TNX_BIND_BIND, ComponentType, __VA_ARGS__)) \
     }
-#define STRIGID_REGISTER_COMPONENT(ComponentType) \
+#define TNX_REGISTER_COMPONENT(ComponentType) \
     namespace { \
         struct _##ComponentType##_Registrar { \
             _##ComponentType##_Registrar() { \
                 RegisterFieldsStatic<ComponentType<>>(); \
             } \
         }; \
-        [[maybe_unused]] STRIGID_USED_ATTR static _##ComponentType##_Registrar _##ComponentType##_FieldsRegistered; \
+        [[maybe_unused]] TNX_USED_ATTR static _##ComponentType##_Registrar _##ComponentType##_FieldsRegistered; \
     }
-#define STRIGID_TEMPORAL_FIELDS(ComponentType, ...) \
+#define TNX_TEMPORAL_FIELDS(ComponentType, ...) \
     static inline bool bTemporalComp = true; \
-    STRIGID_REGISTER_FIELDS(ComponentType, __VA_ARGS__)
+    TNX_REGISTER_FIELDS(ComponentType, __VA_ARGS__)

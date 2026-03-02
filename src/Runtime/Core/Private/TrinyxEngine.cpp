@@ -1,4 +1,4 @@
-#include "StrigidEngine.h"
+#include "TrinyxEngine.h"
 
 #include <iostream>
 #include <SDL3/SDL.h>
@@ -20,15 +20,15 @@ namespace Internal
 	ClassID g_GlobalClassCounter = 1;
 }
 
-StrigidEngine::StrigidEngine()  = default;
-StrigidEngine::~StrigidEngine() = default;
+TrinyxEngine::TrinyxEngine()  = default;
+TrinyxEngine::~TrinyxEngine() = default;
 
-bool StrigidEngine::Initialize(const char* title, int width, int height)
+bool TrinyxEngine::Initialize(const char* title, int width, int height)
 {
-	STRIGID_ZONE_N("Engine_Init");
+	TNX_ZONE_N("Engine_Init");
 
-	Logger::Get().Init("StrigidEngine.log", LogLevel::Debug);
-	LOG_INFO("StrigidEngine initialization started");
+	Logger::Get().Init("TrinyxEngine.log", LogLevel::Debug);
+	LOG_INFO("TrinyxEngine initialization started");
 
 	// ---- SDL init --------------------------------------------------------
 	if (!SDL_WasInit(SDL_INIT_VIDEO))
@@ -41,13 +41,13 @@ bool StrigidEngine::Initialize(const char* title, int width, int height)
 	}
 
 	// Create GPU Device
-	GpuDevice = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, nullptr);
-	if (!GpuDevice)
-	{
-		std::cerr << "GPU Device Failed: " << SDL_GetError() << std::endl;
-		SDL_DestroyWindow(EngineWindow);
-		return false;
-	}
+	// GpuDevice = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, nullptr);
+	// if (!GpuDevice)
+	// {
+	// 	std::cerr << "GPU Device Failed: " << SDL_GetError() << std::endl;
+	// 	SDL_DestroyWindow(EngineWindow);
+	// 	return false;
+	// }
 	// SDL_WINDOW_VULKAN lets SDL register the window for Vulkan surface creation.
 	EngineWindow = SDL_CreateWindow(title, width, height,
 									SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN);
@@ -58,13 +58,13 @@ bool StrigidEngine::Initialize(const char* title, int width, int height)
 	}
 
 	// Claim the Window for the Device
-	if (!SDL_ClaimWindowForGPUDevice(GpuDevice, EngineWindow))
-	{
-		std::cerr << "Claim Window Failed: " << SDL_GetError() << std::endl;
-		SDL_DestroyGPUDevice(GpuDevice);
-		SDL_DestroyWindow(EngineWindow);
-		return false;
-	}
+	// if (!SDL_ClaimWindowForGPUDevice(GpuDevice, EngineWindow))
+	// {
+	// 	std::cerr << "Claim Window Failed: " << SDL_GetError() << std::endl;
+	// 	SDL_DestroyGPUDevice(GpuDevice);
+	// 	SDL_DestroyWindow(EngineWindow);
+	// 	return false;
+	// }
 
 	// ---- Vulkan init -----------------------------------------------------
 	// Validation layers on in debug, off in release. VulkanContext reads the
@@ -75,7 +75,7 @@ bool StrigidEngine::Initialize(const char* title, int width, int height)
 	[[maybe_unused]] constexpr bool enableValidation = true;
 #endif
 
-	/*
+	
 	if (!VkCtx.Initialize(EngineWindow, enableValidation))
 	{
 		std::cerr << "VulkanContext::Initialize failed" << std::endl;
@@ -92,7 +92,7 @@ bool StrigidEngine::Initialize(const char* title, int width, int height)
 		EngineWindow = nullptr;
 		return false;
 	}
-	*/ // using straight Vulkan is... a bit more dificult than SDL lol.
+	// using straight Vulkan is... a bit more dificult than SDL lol.
 
 	// ---- Core systems ----------------------------------------------------
 	RegistryPtr = std::make_unique<Registry>(&Config);
@@ -100,19 +100,18 @@ bool StrigidEngine::Initialize(const char* title, int width, int height)
 
 	// ---- Threads ---------------------------------------------------------
 	Logic  = std::make_unique<LogicThread>();
-	Render = std::make_unique<RenderThread>();
+	Render = std::make_unique<VulkRender>();
 
 	Logic->Initialize(RegistryPtr.get(), &Config, width, height);
-	Render->Initialize(RegistryPtr.get(), Logic.get(), &Config, GpuDevice, EngineWindow);
+	//Render->Initialize(RegistryPtr.get(), Logic.get(), &Config, GpuDevice, EngineWindow);
 
-	//Render->Initialize(RegistryPtr.get(), Logic.get(), &Config,
-	//				   &VkCtx.GetDevice(), EngineWindow);
+	Render->Initialize(RegistryPtr.get(), Logic.get(), &Config, &VkCtx, &VkMem, EngineWindow);
 
-	LOG_INFO("StrigidEngine initialization complete");
+	LOG_INFO("TrinyxEngine initialization complete");
 	return true;
 }
 
-void StrigidEngine::Run()
+void TrinyxEngine::Run()
 {
 	Logic->Start();
 	Render->Start();
@@ -123,26 +122,35 @@ void StrigidEngine::Run()
 
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
-		STRIGID_ZONE_N("Main_Frame");
+		TNX_ZONE_N("Main_Frame");
 
 		const uint64_t frameStart = SDL_GetPerformanceCounter();
 
 		PumpEvents();
-		// Service render thread (check for GPU resource requests or submit commands)
-		ServiceRenderThread();
+
+		if (Logic && !Logic->IsRunning())
+		{
+			LOG_ERROR("[Sentinel] Logic thread stopped unexpectedly — shutting down");
+			bIsRunning.store(false, std::memory_order_release);
+		}
+		if (Render && !Render->IsRunning())
+		{
+			LOG_ERROR("[Sentinel] Render thread stopped unexpectedly — shutting down");
+			bIsRunning.store(false, std::memory_order_release);
+		}
 
 		if (Config.InputPollHz > 0) WaitForTiming(frameStart, perfFrequency);
 
-		STRIGID_FRAME_MARK();
+		TNX_FRAME_MARK();
 		CalculateFPS();
 	}
 
 	Shutdown();
 }
 
-void StrigidEngine::Shutdown()
+void TrinyxEngine::Shutdown()
 {
-	LOG_INFO("StrigidEngine shutting down");
+	LOG_INFO("TrinyxEngine shutting down");
 
 	// Stop threads.  RenderThread calls vkDeviceWaitIdle before its loop exits.
 	if (Logic) Logic->Stop();
@@ -154,14 +162,16 @@ void StrigidEngine::Shutdown()
 	// RenderThread owns GPU resources (DepthImage, field buffers, pipelines, etc.)
 	// that call vmaDestroy* in their destructors.  VulkanMemory (VMA) must still
 	// be alive when those destructors run, so we reset the unique_ptrs here
-	// rather than letting them fire in StrigidEngine's destructor after Shutdown().
+	// rather than letting them fire in TrinyxEngine's destructor after Shutdown().
 	Render.reset();
 	Logic.reset();
 
-	// Now safe to tear down Vulkan in dependency order:
-	//   VulkanMemory (VMA, all allocations) before VulkanContext (device, instance).
-	//VkMem.Shutdown();
-	//VkCtx.Shutdown();
+	// Tear down Vulkan explicitly here — before SDL_Quit() and before the
+	// TrinyxEngine singleton's atexit destructor fires.  Validation layers
+	// use static memory that is freed before atexit(); calling vkDestroy*
+	// from atexit() causes a dispatch-handle crash in the validation layer.
+	VkMem.Shutdown();    // VMA allocator — must precede device destruction
+	VkCtx.Shutdown();    // device → surface → instance (raii objects cleared)
 
 	if (EngineWindow)
 	{
@@ -173,9 +183,9 @@ void StrigidEngine::Shutdown()
 	Logger::Get().Shutdown();
 }
 
-void StrigidEngine::PumpEvents()
+void TrinyxEngine::PumpEvents()
 {
-	STRIGID_ZONE_N("Input_Poll");
+	TNX_ZONE_N("Input_Poll");
 
 	SDL_Event e;
 	while (SDL_PollEvent(&e))
@@ -186,10 +196,10 @@ void StrigidEngine::PumpEvents()
 		}
 	}
 }
-
-void StrigidEngine::ServiceRenderThread()
+/*
+void TrinyxEngine::ServiceRenderThread()
 {
-	STRIGID_ZONE_N("Service_RenderThread");
+	TNX_ZONE_N("Service_RenderThread");
 
 	if (!Render) return;
 
@@ -206,9 +216,9 @@ void StrigidEngine::ServiceRenderThread()
 	}
 }
 
-void StrigidEngine::AcquireAndProvideGPUResources()
+void TrinyxEngine::AcquireAndProvideGPUResources()
 {
-	STRIGID_ZONE_N("Main_AcquireGPU");
+	TNX_ZONE_N("Main_AcquireGPU");
 
 	if (!Pacer.BeginFrame()) return;
 
@@ -231,9 +241,9 @@ void StrigidEngine::AcquireAndProvideGPUResources()
 	Render->ProvideGPUResources(cmdBuf, swapchainTex);
 }
 
-void StrigidEngine::SubmitRenderCommands()
+void TrinyxEngine::SubmitRenderCommands()
 {
-	STRIGID_ZONE_N("Main_SubmitGPU");
+	TNX_ZONE_N("Main_SubmitGPU");
 
 	// Retrieve command buffer from RenderThread
 	SDL_GPUCommandBuffer* cmdBuf = Render->TakeCommandBuffer();
@@ -246,8 +256,9 @@ void StrigidEngine::SubmitRenderCommands()
 	Pacer.EndFrame(cmdBuf);
 	Render->NotifyFrameSubmitted();
 }
+*/
 
-void StrigidEngine::CalculateFPS()
+void TrinyxEngine::CalculateFPS()
 {
 	FrameCount++;
 	const double now = SDL_GetPerformanceCounter() /
@@ -265,9 +276,9 @@ void StrigidEngine::CalculateFPS()
 	}
 }
 
-void StrigidEngine::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)
+void TrinyxEngine::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)
 {
-	STRIGID_ZONE_N("Main_WaitTiming");
+	TNX_ZONE_N("Main_WaitTiming");
 
 	const uint64_t targetTicks =
 		static_cast<uint64_t>(1.0 / Config.InputPollHz *

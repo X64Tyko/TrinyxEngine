@@ -8,7 +8,7 @@
 Registry::Registry()
 	: NextEntityIndex(1) // Start at 1 (0 is reserved for Invalid)
 {
-	STRIGID_ZONE_N("Registry::Constructor");
+	TNX_ZONE_N("Registry::Constructor");
 }
 
 Registry::Registry(const EngineConfig* Config)
@@ -35,7 +35,7 @@ Registry::~Registry()
 
 Archetype* Registry::GetOrCreateArchetype(const Signature& Sig, const ClassID& ID)
 {
-	STRIGID_ZONE_C(STRIGID_COLOR_MEMORY);
+	TNX_ZONE_C(TNX_COLOR_MEMORY);
 	auto key = Archetype::ArchetypeKey(Sig, ID);
 
 	// Check if archetype already exists
@@ -96,7 +96,7 @@ Archetype* Registry::GetOrCreateArchetype(const Signature& Sig, const ClassID& I
 
 EntityID Registry::AllocateEntityID(uint16_t TypeID)
 {
-	STRIGID_ZONE_C(STRIGID_COLOR_MEMORY);
+	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
 	EntityID Id;
 	Id.Value = 0;
@@ -131,7 +131,7 @@ EntityID Registry::AllocateEntityID(uint16_t TypeID)
 
 void Registry::FreeEntityID(EntityID Id)
 {
-	STRIGID_ZONE_C(STRIGID_COLOR_MEMORY);
+	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
 	uint32_t Index = Id.GetIndex();
 	if (Index >= EntityIndex.size()) return;
@@ -146,7 +146,7 @@ void Registry::FreeEntityID(EntityID Id)
 
 void Registry::Destroy(EntityID Id)
 {
-	STRIGID_ZONE_C(STRIGID_COLOR_MEMORY);
+	TNX_ZONE_C(TNX_COLOR_MEMORY);
 	// Defer destruction until end of frame
 	PendingDestructions.push_back(Id);
 }
@@ -211,7 +211,7 @@ bool Registry::DestroyRecord(EntityRecord& Record)
 
 void Registry::ProcessDeferredDestructions()
 {
-	STRIGID_ZONE_C(STRIGID_COLOR_MEMORY);
+	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
 	for (EntityID Id : PendingDestructions)
 	{
@@ -236,7 +236,7 @@ void Registry::ProcessDeferredDestructions()
 
 	PendingDestructions.clear();
 
-	STRIGID_PLOT("PendingDestructions", static_cast<double>(PendingDestructions.size()));
+	TNX_PLOT("PendingDestructions", static_cast<double>(PendingDestructions.size()));
 
 	LOG_INFO_F("Processed %zu deferred destructions. Existing Entities %u", PendingDestructions.size(), GetTotalEntityCount());
 }

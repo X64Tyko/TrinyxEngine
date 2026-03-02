@@ -4,7 +4,7 @@
 
 This document shows the improved error messages for common schema reflection mistakes.
 
-## 1. Forgetting STRIGID_REGISTER_ENTITY
+## 1. Forgetting TNX_REGISTER_ENTITY
 
 **Code:**
 ```cpp
@@ -18,7 +18,7 @@ struct MyEntity {
     }
 };
 
-// MISSING: STRIGID_REGISTER_ENTITY(MyEntity);
+// MISSING: TNX_REGISTER_ENTITY(MyEntity);
 
 // In main:
 EntityID id = Registry::Create<MyEntity>();  // Runtime error!
@@ -27,7 +27,7 @@ EntityID id = Registry::Create<MyEntity>();  // Runtime error!
 **Error (Runtime - in log file):**
 ```
 [ERROR] FATAL: Entity type 'struct MyEntity' not registered!
-        Did you forget STRIGID_REGISTER_ENTITY(MyEntity)?
+        Did you forget TNX_REGISTER_ENTITY(MyEntity)?
 ```
 
 **Debug build:** Triggers assertion
@@ -47,7 +47,7 @@ struct BadEntity {
     // MISSING: static constexpr auto DefineSchema() { ... }
 };
 
-STRIGID_REGISTER_ENTITY(BadEntity);  // Compile error!
+TNX_REGISTER_ENTITY(BadEntity);  // Compile error!
 ```
 
 **Error (Compile-time):**
@@ -84,7 +84,7 @@ struct VirtualEntity {
     }
 };
 
-STRIGID_REGISTER_ENTITY(VirtualEntity);  // Compile error!
+TNX_REGISTER_ENTITY(VirtualEntity);  // Compile error!
 ```
 
 **Error (Compile-time):**
@@ -120,7 +120,7 @@ struct MyEntity {
     }
 };
 
-STRIGID_REGISTER_ENTITY(MyEntity);
+TNX_REGISTER_ENTITY(MyEntity);
 ```
 
 **Error (Compile-time):**
@@ -174,8 +174,8 @@ class SuperCube : public CubeEntity {
     }
 };
 
-STRIGID_REGISTER_ENTITY(CubeEntity);
-STRIGID_REGISTER_ENTITY(SuperCube);
+TNX_REGISTER_ENTITY(CubeEntity);
+TNX_REGISTER_ENTITY(SuperCube);
 ```
 
 **Error (Runtime - silent!):**
@@ -224,7 +224,7 @@ struct GoodEntity {
     }
 };
 
-STRIGID_REGISTER_ENTITY(GoodEntity);
+TNX_REGISTER_ENTITY(GoodEntity);
 ```
 
 ### ✅ Good Component
@@ -267,7 +267,7 @@ struct BadEntity {
 - ✅ Non-POD components
 
 **Runtime checks:**
-- ✅ Forgetting STRIGID_REGISTER_ENTITY (asserts in debug, logs error in release)
+- ✅ Forgetting TNX_REGISTER_ENTITY (asserts in debug, logs error in release)
 
 **Not checked (gotcha):**
 - ⚠️ Forgetting Replace() in derived entities (silent wrong behavior)

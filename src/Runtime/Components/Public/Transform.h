@@ -8,7 +8,7 @@
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct Transform : ComponentView<Transform, WIDTH>
 {
-	STRIGID_TEMPORAL_FIELDS(Transform, PositionX, PositionY, PositionZ, RotationX, RotationY, RotationZ, ScaleX, ScaleY, ScaleZ)
+	TNX_TEMPORAL_FIELDS(Transform, PositionX, PositionY, PositionZ, RotationX, RotationY, RotationZ, ScaleX, ScaleY, ScaleZ)
 
 	FloatProxy<WIDTH> PositionX;
 	FloatProxy<WIDTH> PositionY;
@@ -23,4 +23,4 @@ struct Transform : ComponentView<Transform, WIDTH>
 	FloatProxy<WIDTH> ScaleZ;
 };
 
-STRIGID_REGISTER_COMPONENT(Transform)
+TNX_REGISTER_COMPONENT(Transform)

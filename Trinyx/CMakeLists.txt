@@ -1,7 +1,7 @@
 # -----------------------------------------------------------------------------
-# StrigidEngine - Static Library
+# Trinyx - Static Library
 # -----------------------------------------------------------------------------
-project(StrigidEngine VERSION 0.1 LANGUAGES CXX)
+project(Trinyx VERSION 0.1 LANGUAGES CXX)
 
 # -----------------------------------------------------------------------------
 # VULKAN
@@ -105,8 +105,10 @@ if(NOT MSVC)
 endif()
 
 # Shader output directory baked into the binary as a compile-time constant.
+# vulkan.hpp: use dynamic dispatch (compatible with volk global function pointers).
 target_compile_definitions(${PROJECT_NAME} PUBLIC
-    STRIGID_SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders"
+    TNX_SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders"
+    VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
 )
 
 # ---------------------------------------------------------------------------
@@ -164,8 +166,8 @@ foreach(SLANG_SRC ${SLANG_SHADER_SOURCES})
     list(APPEND SLANG_SPIRV_OUTPUTS "${SPV_OUT}")
 endforeach()
 
-add_custom_target(StrigidShaders ALL DEPENDS ${SLANG_SPIRV_OUTPUTS})
-add_dependencies(${PROJECT_NAME} StrigidShaders)
+add_custom_target(TrinyxShaders ALL DEPENDS ${SLANG_SPIRV_OUTPUTS})
+add_dependencies(${PROJECT_NAME} TrinyxShaders)
 
 # D. Tracy platform-specific libraries
 if(ENABLE_TRACY)

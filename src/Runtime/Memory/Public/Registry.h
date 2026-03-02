@@ -121,17 +121,17 @@ EntityID Registry::Create()
 		MetaRegistry& MR = MetaRegistry::Get();
 
 #ifdef _DEBUG // || _WITH_EDITOR
-		// Runtime guard: Check if entity type was registered with STRIGID_REGISTER_ENTITY
+		// Runtime guard: Check if entity type was registered with TNX_REGISTER_ENTITY
 		if (MR.ClassToArchetype.find(classID) == MR.ClassToArchetype.end())
 		{
 			// FATAL: Entity type not registered
 			const char* typeName = typeid(T).name();
-			LOG_ERROR_F("FATAL: Entity type '%s' not registered! Did you forget STRIGID_REGISTER_ENTITY(%s)?",
+			LOG_ERROR_F("FATAL: Entity type '%s' not registered! Did you forget TNX_REGISTER_ENTITY(%s)?",
 						typeName, typeName);
 
 		// In debug builds, assert. In release, fail gracefully
 #ifdef _DEBUG
-		assert(false && "Entity type not registered - add STRIGID_REGISTER_ENTITY macro");
+		assert(false && "Entity type not registered - add TNX_REGISTER_ENTITY macro");
 #endif
 
 		// Return invalid entity ID
@@ -246,7 +246,7 @@ std::vector<Archetype*> Registry::ClassQuery()
 
 inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
 {
-	STRIGID_ZONE_C(STRIGID_COLOR_LOGIC);
+	TNX_ZONE_C(TNX_COLOR_LOGIC);
 
 	// Lock frame T+1 for writing (with wrapping)
 	uint32_t writeFrame   = HistorySlab.GetNextFrame(currentFrame);
@@ -300,7 +300,7 @@ inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
 
 inline void Registry::InvokePrePhys(double dt, uint32_t currentFrame)
 {
-	STRIGID_ZONE_C(STRIGID_COLOR_LOGIC);
+	TNX_ZONE_C(TNX_COLOR_LOGIC);
 
 	// Lock frame T+1 for writing (with wrapping)
 	uint32_t writeFrame   = HistorySlab.GetNextFrame(currentFrame);
@@ -354,7 +354,7 @@ inline void Registry::InvokePrePhys(double dt, uint32_t currentFrame)
 
 inline void Registry::InvokePostPhys(double dt, uint32_t currentFrame)
 {
-	STRIGID_ZONE_C(STRIGID_COLOR_LOGIC);
+	TNX_ZONE_C(TNX_COLOR_LOGIC);
 
 	// Lock frame T+1 for writing (with wrapping)
 	uint32_t writeFrame   = HistorySlab.GetNextFrame(currentFrame);

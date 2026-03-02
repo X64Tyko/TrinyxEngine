@@ -1,4 +1,4 @@
-# StrigidEngine
+# TrinyxEngine
 
 **A high-performance, data-oriented game engine for R&D and experimentation**
 
@@ -46,7 +46,7 @@ GPU-driven rendering, lock-free communication) that are too risky to implement d
 
 ## Core Features
 
-### The Strigid Trinity (Three-Thread Architecture)
+### The Trinyx Trinity (Three-Thread Architecture)
 
 - **Sentinel (Main Thread):** 1000Hz input polling, window + Vulkan lifetime management, frame pacing
 - **Brain (Logic Thread):** 512Hz fixed-timestep coordinator. Submits LogicQueue jobs, then acts as a worker.
@@ -96,12 +96,12 @@ struct Transform {
     FieldProxy<float, WIDTH> RotationX, RotationY, RotationZ;
     FieldProxy<float, WIDTH> ScaleX,    ScaleY,    ScaleZ;
 
-    STRIGID_TEMPORAL_FIELDS(Transform, SystemGroup::None,
+    TNX_TEMPORAL_FIELDS(Transform, SystemGroup::None,
         PositionX, PositionY, PositionZ,
         RotationX, RotationY, RotationZ,
         ScaleX, ScaleY, ScaleZ)
 };
-STRIGID_REGISTER_COMPONENT(Transform)
+TNX_REGISTER_COMPONENT(Transform)
 
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct CubeEntity : EntityView<CubeEntity, WIDTH> {
@@ -112,9 +112,9 @@ struct CubeEntity : EntityView<CubeEntity, WIDTH> {
         transform.PositionX += velocity.VelocityX * static_cast<float>(dt);
     }
 
-    STRIGID_REGISTER_SCHEMA(CubeEntity, EntityView, transform, velocity)
+    TNX_REGISTER_SCHEMA(CubeEntity, EntityView, transform, velocity)
 };
-STRIGID_REGISTER_ENTITY(CubeEntity)
+TNX_REGISTER_ENTITY(CubeEntity)
 ```
 
 Users write natural OOP code while the engine handles SoA layout, double-buffering, and SIMD automatically.
@@ -127,7 +127,7 @@ and `WideMask` (tail-masked partial lanes for non-multiples of 8).
 ## Architectural Constraints
 
 ### Hard Constraints
-1. **No virtual functions** in entities or components — compile-time enforced by `STRIGID_REGISTER_ENTITY`
+1. **No virtual functions** in entities or components — compile-time enforced by `TNX_REGISTER_ENTITY`
 2. **PoD Components only** — no `std::vector` or `std::string` (enforced by `VALIDATE_COMPONENT_IS_POD`)
 3. **Zero frame allocations** — no heap allocation in PrePhysics/PostPhysics/Render
 4. **Lock-free inter-thread communication** — atomics and lock-free structures only
@@ -209,7 +209,7 @@ See [docs/PERFORMANCE_TARGETS.md](docs/PERFORMANCE_TARGETS.md) for detailed anal
 ## Contact
 
 - **Author:** Cody "Tyko" Pederson
-- **Issues:** [GitHub Issues](https://github.com/YourUsername/StrigidEngine/issues)
+- **Issues:** [GitHub Issues](https://github.com/YourUsername/TrinyxEngine/issues)
 
 ---
 

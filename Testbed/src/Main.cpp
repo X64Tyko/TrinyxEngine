@@ -2,14 +2,14 @@
 #include <iostream>
 #include <random>
 
-#include "StrigidEngine.h"
+#include "TrinyxEngine.h"
 #include "TestEntity.h"
 #include "Public/CubeEntity.h"
 #include "Archetype.h"
 #include "Logger.h"
 #include "TestFramework.h"
 
-using namespace Strigid::Testing;
+using namespace tnx::Testing;
 
 TEST(Registry_CreateEntities)
 {
@@ -144,9 +144,9 @@ TEST(InitializeTestEntities)
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 {
     // Stack allocation is fine for the main engine object
-    StrigidEngine& Engine = StrigidEngine::Get();
+    TrinyxEngine& Engine = TrinyxEngine::Get();
 
-    if (Engine.Initialize("Strigid v0.1", 1920, 1080))
+    if (Engine.Initialize("Trinyx v0.1", 1920, 1080))
     {
         // Run unit tests
         if (TestRegistry::Instance().RunAll(Engine) != 0)

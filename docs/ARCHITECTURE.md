@@ -1,14 +1,14 @@
-# StrigidEngine Architecture
+# TrinyxEngine Architecture
 
 > **Navigation:** [← Back to README](../README.md) | [Performance Targets →](PERFORMANCE_TARGETS.md)
 
 ---
 
-# Threading Model: The Strigid Trinity
+# Threading Model: The Trinyx Trinity
 
 ## Overview
 
-StrigidEngine uses a **three-thread architecture** with job-based parallelism:
+TrinyxEngine uses a **three-thread architecture** with job-based parallelism:
 
 1. **Sentinel (Main Thread):** 1000Hz input polling, window + Vulkan object lifetime, frame pacing
 2. **Brain (Logic Thread):** 512Hz fixed timestep coordinator + job distribution
@@ -57,7 +57,7 @@ Entity component data lives in one of four tiers based on access pattern and rol
 | Volatile | SoA ring buffer | 5 | No | Cosmetic entities, ambient AI, particles |
 | Temporal | SoA ring buffer | max(8, X) | Yes | Networked, simulation-authoritative entities |
 
-**Cold** components (no `STRIGID_TEMPORAL_FIELDS`) live only in Archetype chunks (AoS layout).
+**Cold** components (no `TNX_TEMPORAL_FIELDS`) live only in Archetype chunks (AoS layout).
 They are rarely accessed by inner loops — inventory, quest state, AI decision trees.
 
 **Static** entities get a dedicated read-only SoA array. No rollback overhead. Physics and render include
@@ -114,18 +114,18 @@ into a different partition at runtime — the regions are pre-allocated.
 
 ## Entity Group Auto-Derivation
 
-The partition group (Dual/Phys/Render/Logic) is computed automatically at `STRIGID_REGISTER_ENTITY`
+The partition group (Dual/Phys/Render/Logic) is computed automatically at `TNX_REGISTER_ENTITY`
 time (static initialization), derived from the SystemGroup tags on each component:
 
 ```cpp
 // Component system group annotations — no manual entity group annotation needed
-STRIGID_TEMPORAL_FIELDS(RigidBody, SystemGroup::Phys,   VelX, VelY, VelZ)
-STRIGID_TEMPORAL_FIELDS(Material,  SystemGroup::Render, ColorR, ColorG, ColorB)
-STRIGID_TEMPORAL_FIELDS(Transform, SystemGroup::None,   PosX, PosY, PosZ)  // partition-agnostic
-STRIGID_TEMPORAL_FIELDS(Stats,     SystemGroup::Logic,  Health, Ammo)
+TNX_TEMPORAL_FIELDS(RigidBody, SystemGroup::Phys,   VelX, VelY, VelZ)
+TNX_TEMPORAL_FIELDS(Material,  SystemGroup::Render, ColorR, ColorG, ColorB)
+TNX_TEMPORAL_FIELDS(Transform, SystemGroup::None,   PosX, PosY, PosZ)  // partition-agnostic
+TNX_TEMPORAL_FIELDS(Stats,     SystemGroup::Logic,  Health, Ammo)
 ```
 
-Derivation rule (applied once at static-init when `STRIGID_REGISTER_ENTITY(T)` fires):
+Derivation rule (applied once at static-init when `TNX_REGISTER_ENTITY(T)` fires):
 
 | Components present | → Entity Group |
 |--------------------|----------------|
@@ -135,7 +135,7 @@ Derivation rule (applied once at static-init when `STRIGID_REGISTER_ENTITY(T)` f
 | Temporal but neither | Logic |
 | No temporal components at all | Non-temporal (flags live in chunk) |
 
-`STRIGID_REGISTER_ENTITY(T)` takes **no manual group annotation** — fully automatic. Giving users a
+`TNX_REGISTER_ENTITY(T)` takes **no manual group annotation** — fully automatic. Giving users a
 manual override is giving them a gun to shoot gaps into their partition regions with.
 
 ---
@@ -163,7 +163,7 @@ Active/Dirty flags live **outside** the per-partition field zones in a dedicated
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-Macro: `STRIGID_UNIVERSAL_COMPONENT(TemporalFlags, Flags)`
+Macro: `TNX_UNIVERSAL_COMPONENT(TemporalFlags, Flags)`
 
 - **Temporal/Volatile entities:** flags in universal strip of their slab (one contiguous array = one SIMD pass
   for ALL entities regardless of partition)
@@ -498,8 +498,8 @@ dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
 - [ ] **Tiered storage partition layout** (Cold/Static/Volatile/Temporal with DUAL/PHYS/RENDER/LOGIC partitions)
 - [ ] **SimulationBody marker component** (Temporal vs Volatile auto-classification)
 - [ ] **Universal strip** (contiguous Flags array outside partition field zones)
-- [ ] `STRIGID_UNIVERSAL_COMPONENT` macro
-- [ ] **SystemGroup tag on STRIGID_TEMPORAL_FIELDS** (drives entity group auto-derivation)
+- [ ] `TNX_UNIVERSAL_COMPONENT` macro
+- [ ] **SystemGroup tag on TNX_TEMPORAL_FIELDS** (drives entity group auto-derivation)
 - [ ] **Cumulative dirty bit array** (double-buffered, lock-free Front/Back swap)
 - [ ] **5 GPU InstanceBuffers** (VSync decoupling)
 - [ ] `GetTemporalFieldWritePtr` migrated from Archetype to TemporalComponentCache
