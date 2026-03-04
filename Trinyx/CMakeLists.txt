@@ -114,7 +114,11 @@ target_compile_definitions(${PROJECT_NAME} PUBLIC
 # ---------------------------------------------------------------------------
 # Slang shader compilation
 # ---------------------------------------------------------------------------
-set(SLANGC "${CMAKE_SOURCE_DIR}/libs/slang/bin/slangc")
+if(WIN32)
+    set(SLANGC "${CMAKE_SOURCE_DIR}/libs/slang/bin/slangc.exe")
+else()
+    set(SLANGC "${CMAKE_SOURCE_DIR}/libs/slang/bin/slangc")
+endif()
 
 # List every .slang shader source here.  Each entry produces a .spv in
 # ${CMAKE_SOURCE_DIR}/shaders/ using the same base name.
