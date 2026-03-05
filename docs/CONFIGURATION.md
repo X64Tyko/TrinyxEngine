@@ -28,26 +28,24 @@ struct EngineConfig
 
     // === Entity Budget Configuration ===
     //
-    // Partition layout within each tier's slab:
-    //   DUAL   [0 .. MaxDualEntities)        — physics + render access
-    //   PHYS   [0 .. MaxPhysEntities)        — physics-only
-    //   RENDER [0 .. MaxRenderEntities)      — render-only
-    //   LOGIC  [remainder of MaxDynamicEntities]
+    // Two fixed-size arenas, each with a dual-ended allocator:
     //
-    // Constraint (validated at startup):
-    //   MaxDualEntities + MaxPhysEntities + MaxRenderEntities <= MaxDynamicEntities
+    //   Arena 1: Physics  [0 .. MaxPhysicsEntities)
+    //     PHYS  (→) from 0             — physics-only bodies, triggers
+    //     DUAL  (←) from MaxPhysics    — physics + render (players, props)
+    //
+    //   Arena 2: Cached  [MaxPhysicsEntities .. MaxCachedEntities)
+    //     RENDER (→) from MaxPhysics   — render-only (particles, decals)
+    //     LOGIC  (←) from MaxCached    — logic/rollback-only entities
+    //
+    // Constraints (validated at startup):
+    //   MaxPhysicsEntities <= MaxCachedEntities
 
-    // Maximum total dynamic entities across all partitions
-    int MaxDynamicEntities = 100000;
+    // Total size of Arena 1 (Physics). PHYS + DUAL must fit within this.
+    int MaxPhysicsEntities = 50000;
 
-    // Entities in the Dual (physics + render) partition
-    int MaxDualEntities    = 20000;
-
-    // Entities in the Phys-only partition
-    int MaxPhysEntities    = 10000;
-
-    // Entities in the Render-only partition
-    int MaxRenderEntities  = 30000;
+    // Total size of both arenas combined. Replaces MaxDynamicEntities.
+    int MaxCachedEntities  = 100000;
 
     // === History / Frame Depth ===
 
@@ -98,7 +96,7 @@ struct EngineConfig
 
     int GetLogicPartitionSize() const
     {
-        return MaxDynamicEntities - MaxDualEntities - MaxPhysEntities - MaxRenderEntities;
+        return MaxCachedEntities - MaxPhysicsEntities - MaxRenderEntities;
     }
 };
 ```
@@ -107,21 +105,23 @@ struct EngineConfig
 
 ## Partition Size Rules
 
-The four partition sizes must satisfy:
+The two-arena layout must satisfy:
 
 ```
-MaxDualEntities + MaxPhysEntities + MaxRenderEntities <= MaxDynamicEntities
+MaxDualEntities + MaxPhysEntities <= MaxPhysicsEntities   // both physics buckets fit in Arena 1
+MaxPhysicsEntities + MaxRenderEntities <= MaxCachedEntities  // arenas fit in total budget
 ```
 
-Logic entities get the remainder:
+Logic entities fill the remainder of Arena 2:
 ```
-MaxLogicEntities = MaxDynamicEntities - MaxDualEntities - MaxPhysEntities - MaxRenderEntities
+MaxLogicEntities = MaxCachedEntities - MaxPhysicsEntities - MaxRenderEntities
 ```
 
-**Physics iterates:** `DUAL[0..N_dual)` → `PHYS[0..N_phys)` → `STATIC[0..N_static)` — 3 dense SIMD passes.
-**Render iterates:** `DUAL[0..N_dual)` → `RENDER[0..N_render)` → `STATIC[0..N_static)` — 3 dense SIMD passes.
+**Physics iterates Arena 1:** `PHYS[0..N_phys)` + `DUAL[MAX_PHYS-N_dual..MAX_PHYS)` + `STATIC`
+**Render iterates:** `DUAL[MAX_PHYS-N_dual..MAX_PHYS)` + `RENDER[MAX_PHYS..MAX_PHYS+N_render)` + `STATIC`
 
-Oversizing a partition wastes memory but has no correctness impact. Undersizing causes a startup assertion failure.
+Oversizing a partition or arena wastes memory but has no correctness impact. Undersizing causes a startup assertion
+failure.
 
 ---
 
@@ -131,13 +131,11 @@ Oversizing a partition wastes memory but has no correctness impact. Undersizing 
 
 ```cpp
 EngineConfig rpgConfig;
-rpgConfig.FixedUpdateHz          = 60;
-rpgConfig.MaxDynamicEntities     = 100000;
-rpgConfig.MaxDualEntities        = 20000;
-rpgConfig.MaxPhysEntities        = 10000;
-rpgConfig.MaxRenderEntities      = 40000;
-rpgConfig.TemporalFrameCount     = 8;
-rpgConfig.NetworkUpdateHz        = 0;
+rpgConfig.FixedUpdateHz           = 60;
+rpgConfig.MaxPhysicsEntities      = 50000;
+rpgConfig.MaxCachedEntities       = 100000;
+rpgConfig.TemporalFrameCount      = 8;
+rpgConfig.NetworkUpdateHz         = 0;
 rpgConfig.DeterministicSimulation = false;  // float32 fields, no fixed-point overhead
 ```
 
@@ -150,13 +148,11 @@ rpgConfig.DeterministicSimulation = false;  // float32 fields, no fixed-point ov
 
 ```cpp
 EngineConfig lightweightConfig;
-lightweightConfig.FixedUpdateHz       = 60;
-lightweightConfig.MaxDynamicEntities  = 50000;
-lightweightConfig.MaxDualEntities     = 10000;
-lightweightConfig.MaxPhysEntities     = 5000;
-lightweightConfig.MaxRenderEntities   = 20000;
-lightweightConfig.TemporalFrameCount  = 8;
-lightweightConfig.NetworkUpdateHz     = 0;
+lightweightConfig.FixedUpdateHz      = 60;
+lightweightConfig.MaxPhysicsEntities = 25000;
+lightweightConfig.MaxCachedEntities  = 50000;
+lightweightConfig.TemporalFrameCount = 8;
+lightweightConfig.NetworkUpdateHz    = 0;
 ```
 
 **Use Case:** Single-player games, simple simulations, no networking.
@@ -167,13 +163,11 @@ lightweightConfig.NetworkUpdateHz     = 0;
 
 ```cpp
 EngineConfig balancedConfig;
-balancedConfig.FixedUpdateHz       = 128;
-balancedConfig.MaxDynamicEntities  = 100000;
-balancedConfig.MaxDualEntities     = 20000;
-balancedConfig.MaxPhysEntities     = 10000;
-balancedConfig.MaxRenderEntities   = 30000;
-balancedConfig.TemporalFrameCount  = 16;   // ~125ms history @ 128Hz
-balancedConfig.NetworkUpdateHz     = 30;
+balancedConfig.FixedUpdateHz      = 128;
+balancedConfig.MaxPhysicsEntities = 50000;
+balancedConfig.MaxCachedEntities  = 100000;
+balancedConfig.TemporalFrameCount = 16;   // ~125ms history @ 128Hz
+balancedConfig.NetworkUpdateHz    = 30;
 ```
 
 **Use Case:** Most networked games, action games.
@@ -184,15 +178,13 @@ balancedConfig.NetworkUpdateHz     = 30;
 
 ```cpp
 EngineConfig competitiveConfig;
-competitiveConfig.FixedUpdateHz          = 512;
+competitiveConfig.FixedUpdateHz           = 512;
 competitiveConfig.DeterministicSimulation = true;  // Fixed32 fields, rollback-safe
-competitiveConfig.InputPollHz         = 1000;
-competitiveConfig.MaxDynamicEntities  = 50000;
-competitiveConfig.MaxDualEntities     = 15000;
-competitiveConfig.MaxPhysEntities     = 5000;
-competitiveConfig.MaxRenderEntities   = 10000;
-competitiveConfig.TemporalFrameCount  = 128;  // ~250ms history @ 512Hz
-competitiveConfig.NetworkUpdateHz     = 60;
+competitiveConfig.InputPollHz             = 1000;
+competitiveConfig.MaxPhysicsEntities      = 30000;
+competitiveConfig.MaxCachedEntities       = 50000;
+competitiveConfig.TemporalFrameCount      = 128;  // ~250ms history @ 512Hz
+competitiveConfig.NetworkUpdateHz         = 60;
 ```
 
 **Use Case:** Fighting games, competitive shooters, esports titles.
@@ -204,13 +196,11 @@ Rollback depth = 250ms, enough for GGPO-style netcode at typical internet latenc
 
 ```cpp
 EngineConfig simulationConfig;
-simulationConfig.FixedUpdateHz       = 60;
-simulationConfig.MaxDynamicEntities  = 250000;
-simulationConfig.MaxDualEntities     = 50000;
-simulationConfig.MaxPhysEntities     = 25000;
-simulationConfig.MaxRenderEntities   = 100000;
-simulationConfig.TemporalFrameCount  = 8;
-simulationConfig.NetworkUpdateHz     = 0;
+simulationConfig.FixedUpdateHz      = 60;
+simulationConfig.MaxPhysicsEntities = 100000;
+simulationConfig.MaxCachedEntities  = 250000;
+simulationConfig.TemporalFrameCount = 8;
+simulationConfig.NetworkUpdateHz    = 0;
 ```
 
 **Use Case:** Strategy games, crowd simulations. Lower Hz compensates for higher entity count.
@@ -233,19 +223,19 @@ simulationConfig.NetworkUpdateHz     = 0;
 ### Volatile Slab Size
 
 ```
-VolatileSlab = MaxDynamicEntities × HotBytesPerEntity × VolatileFrameCount (5)
+VolatileSlab = MaxCachedEntities × HotBytesPerEntity × VolatileFrameCount (5)
              = 100,000 × 92B × 5 ≈ 46 MB
 ```
 
 ### Temporal Slab Size
 
 ```
-TemporalSlab = MaxDynamicEntities × HotBytesPerEntity × TemporalFrameCount
+TemporalSlab = MaxCachedEntities × HotBytesPerEntity × TemporalFrameCount
              = 100,000 × 92B × 8  ≈ 73.6 MB   (TemporalFrameCount = 8)
              = 100,000 × 92B × 128 ≈ 1.18 GB  (TemporalFrameCount = 128)
 ```
 
-### Memory Table (100k entities, 92 B/entity/frame)
+### Memory Table (MaxCachedEntities = 100k, 92 B/entity/frame)
 
 | TemporalFrameCount | Temporal Slab | + Volatile (5) | Total Hot RAM |
 |-------------------|--------------|----------------|---------------|
@@ -295,10 +285,8 @@ int main()
     EngineConfig config;
     config.FixedUpdateHz      = 512;
     config.TemporalFrameCount = 128;
-    config.MaxDynamicEntities = 100000;
-    config.MaxDualEntities    = 20000;
-    config.MaxPhysEntities    = 10000;
-    config.MaxRenderEntities  = 30000;
+    config.MaxPhysicsEntities = 50000;
+    config.MaxCachedEntities  = 100000;
     config.InputPollHz        = 1000;
 
     TrinyxEngine& engine = TrinyxEngine::Get();

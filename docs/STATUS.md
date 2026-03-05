@@ -7,7 +7,7 @@
 ## Timeline Context
 
 **Project Start:** ~2026-02-01 (Week 1)
-**Current Date:** 2026-03-01
+**Current Date:** 2026-03-04
 **Phase:** GPU-Driven Pipeline + Tiered Storage Design
 
 ---
@@ -24,9 +24,11 @@
 
 **Raw Vulkan Stack:**
 - Migrated from SDL3 GPU backend to raw Vulkan (volk 1.4.304 + VMA 3.3.0)
+- VulkanContext + VulkanMemory migrated to vk::raii::
 - VulkanContext: instance, device, swapchain, queues, sync primitives
 - VulkanMemory: VMA allocator lifetime, buffer/image allocation helpers
-- VulkRender: Initialize/Start/Stop/Join wired into TrinyxEngine
+- VulkRender Steps 1–3 complete: clear → indexed cube pipeline → GpuFrameData + BDA draw
+  Orange cube on purple background rendering at full rate via Buffer Device Address pipeline
 
 **GPU-Driven Compute Pipeline (Slang):**
 - 5 shaders in `shaders/`: predicate, prefix_sum, scatter, cube.vert, cube.frag
@@ -98,14 +100,14 @@
 - [x] LogicThread::PublishCompletedFrame (Vulkan RH perspective + identity view)
 - [x] GPU-driven compute pipeline (predicate → prefix_sum → scatter, Slang shaders)
 - [x] InstanceBuffer SoA + indirect draw (DrawArgs)
-- [x] VulkRender skeleton (Initialize/Start/Stop/Join)
+- [x] VulkRender Steps 1–3: clear → indexed cube pipeline → GpuFrameData + BDA draw
 - [x] 3-level Tracy profiling (Coarse/Medium/Fine)
 - [x] `TNX_TEMPORAL_FIELDS` with SystemGroup tag (syntax implemented, partition routing pending)
 - [x] `TemporalFlags` with Active/Dirty bits
 
 ### Designed, Not Yet Implemented
 
-- [ ] **Tiered storage partition layout** — Cold/Static/Volatile/Temporal with DUAL/PHYS/RENDER/LOGIC partitions
+- [ ] **Tiered storage partition layout** — Cold/Static/Volatile/Temporal with dual-ended arena layout
   (current: all temporal entities share one TemporalComponentCache, no partition isolation)
 - [ ] **SimulationBody marker component** — Temporal vs Volatile explicit opt-in
 - [ ] **Universal strip** — contiguous Flags array outside partition field zones
@@ -129,13 +131,13 @@
 2. **TemporalFrameStride duplicated on Archetype:** Should call `cache->GetFrameStride()` instead.
    Currently cached redundantly on every Archetype.
 
-3. **VulkRender::ThreadMain is a stub:** Logs "not yet implemented" and exits. Engine runs with
-   the logic thread functional and render thread placeholder.
+3. **VulkRender Step 4 pending:** Instance SoA is currently hardcoded; needs to read entity data
+   from TemporalComponentCache to render live simulation state.
 
 ### Planned (Next Phase)
 
-- [ ] **VulkRender::ThreadMain** — GPU loop: acquire swapchain → upload dirty → compute dispatch → draw → present
-- [ ] **Tiered slab implementation** — allocate Volatile + Temporal slabs with partition layout
+- [ ] **VulkRender Step 4** — read entity data from TemporalComponentCache (currently hardcoded instance SoA)
+- [ ] **Tiered slab implementation** — allocate Volatile + Temporal slabs with dual-ended arena layout
 - [ ] **Frustum culling** — SIMD 6-plane test, GPU-side predicate enhancement
 - [ ] **State-sorted rendering** — 64-bit sort keys, GPU radix sort after scatter
 - [ ] **Jolt Physics integration** — zero-copy RigidBody mapping

@@ -87,28 +87,37 @@ A wandering ambient bird and a networked player both have a Transform, but only 
 
 ---
 
-## Partition Design
+## Partition Design: Dual-Ended Arenas
 
-Within each tier's slab, entities are organized into fixed-size partitions by system access group:
+The slab is divided into two fixed-size arenas by `EngineConfig`. Within each arena, two buckets grow
+inward from opposite ends. Arena boundaries (`MaxPhysicsEntities`, `MaxCachedEntities`) and maximum
+bucket sizes are all predetermined at startup — no entity can cross an arena boundary at runtime.
 
 ```
-DUAL    [0 .. MAX_DUAL)              ← physics + render access (players, AI, physics props)
-PHYS    [0 .. MAX_PHYS)              ← physics-only (trigger volumes, invisible movers)
-RENDER  [0 .. MAX_RENDER)            ← render-only (particles, decals, ambient props)
-LOGIC   [MAX_DUAL+MAX_PHYS+MAX_RENDER .. MAX_DYNAMIC)   ← remainder
+Arena 1: Physics  [0 .. MAX_PHYSICS_ENTITIES)
+  PHYS  (→) starts at 0            — physics-only (triggers, invisible movers)
+  DUAL  (←) starts at MAX_PHYSICS  — physics + render (players, AI, physics props)
+
+Arena 2: Cached  [MAX_PHYSICS_ENTITIES .. MAX_CACHED_ENTITIES)
+  RENDER (→) starts at MAX_PHYSICS — render-only (particles, decals, ambient props)
+  LOGIC  (←) starts at MAX_CACHED  — logic/rollback-only entities
 ```
 
-Config constraint (validated at startup):
+Config constraints (validated at startup):
 ```
-assert(MaxDualEntities + MaxPhysEntities + MaxRenderEntities <= MaxDynamicEntities)
+assert(MaxDualEntities + MaxPhysEntities <= MaxPhysicsEntities)
+assert(MaxPhysicsEntities + MaxRenderEntities <= MaxCachedEntities)
 ```
 
-**System iteration patterns (three dense passes each, no pointer chasing):**
-- Physics iterates: `DUAL[0..N_dual)` → `PHYS[0..N_phys)` → `STATIC[0..N_static)`
-- Render iterates:  `DUAL[0..N_dual)` → `RENDER[0..N_render)` → `STATIC[0..N_static)`
+**System iteration patterns — two dense passes each, no pointer chasing:**
 
-The partition boundaries are fixed at engine startup from `EngineConfig`. No entity can push another
-into a different partition at runtime — the regions are pre-allocated.
+- Physics iterates Arena 1: `PHYS[0..N_phys)` + `DUAL[MAX_PHYSICS-N_dual..MAX_PHYSICS)` + `STATIC`
+  100% physics entities; render-only and logic-only data are outside this range entirely.
+- Render iterates: `DUAL[MAX_PHYSICS-N_dual..MAX_PHYSICS)` + `RENDER[MAX_PHYSICS..MAX_PHYSICS+N_render)` + `STATIC`
+  The DUAL tail and RENDER head are contiguous at the arena boundary — effectively one scan.
+
+The physics solver iterates Arena 1 exclusively. It sees a dense wall of memory containing 100%
+of its relevant entities, with no render-only or logic-only data anywhere in its access range.
 
 ---
 
@@ -147,19 +156,15 @@ Active/Dirty flags live **outside** the per-partition field zones in a dedicated
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Universal Strip (one contiguous int32 array = one SIMD pass)       │
-│  Flags[0..MAX_DYNAMIC_ENTITIES)   ← TemporalFlagBits::Active | Dirty│
+│  Flags[0..MAX_CACHED_ENTITIES)    ← TemporalFlagBits::Active | Dirty│
 ├─────────────────────────────────────────────────────────────────────┤
-│  DUAL Partition [0..MAX_DUAL)                                        │
-│    PosX[MAX_DUAL], PosY[MAX_DUAL], PosZ[MAX_DUAL], ...              │
-│    VelX[MAX_DUAL], VelY[MAX_DUAL], VelZ[MAX_DUAL], ...              │
+│  Arena 1: Physics  [0..MAX_PHYSICS_ENTITIES)                        │
+│    PHYS [0..N_phys) →  · · · ·  ← DUAL [MAX_PHYS-N_dual..MAX_PHYS)│
+│    Field arrays span full arena width: PosX[MAX_PHYSICS], ...       │
 ├─────────────────────────────────────────────────────────────────────┤
-│  PHYS Partition [0..MAX_PHYS)                                        │
-│    VelX[MAX_PHYS], ...                                              │
-├─────────────────────────────────────────────────────────────────────┤
-│  RENDER Partition [0..MAX_RENDER)                                    │
-│    ColorR[MAX_RENDER], ...                                           │
-├─────────────────────────────────────────────────────────────────────┤
-│  LOGIC Partition [remainder]                                         │
+│  Arena 2: Cached  [MAX_PHYSICS..MAX_CACHED_ENTITIES)                │
+│    RENDER [MAX_PHYS..MAX_PHYS+N_rend) →  · · ·  ← LOGIC            │
+│    ColorR[MAX_CACHED-MAX_PHYSICS], ...                              │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -172,6 +177,14 @@ Macro: `TNX_UNIVERSAL_COMPONENT(TemporalFlags, Flags)`
 Current implementation uses `TemporalFlagBits::Active = 1<<31` and `TemporalFlagBits::Dirty = 1<<30`.
 The dirty bit doubles as the GPU upload trigger and (during rollback) as a selective resimulation marker —
 the dirty set from any correction expands naturally through update logic to the exact blast radius.
+
+**Macro-gap skipping:** The universal strip is scanned 64 entities at a time (one 64-bit word). If the
+entire word is zero (all 64 entities inactive), the branch predictor instantly skips that block — no
+field data is touched. This covers the unused space between the PHYS and DUAL buckets within Arena 1
+and sparse regions at startup with no measurable overhead.
+
+**Micro-gap execution:** When a word has mixed active/inactive entities, `FieldProxy` uses AVX2 masked
+loads/stores (8-wide, branchless) to keep the pipeline saturated even in partially sparse regions.
 
 ---
 
@@ -305,7 +318,7 @@ ConstraintPool (flat AoS, owned by Registry, separate from temporal slab):
     Fixed32        Damping      — spring/soft constraints
 
   uint32_t Count
-  uint32_t ByBodyA[MAX_DYNAMIC_ENTITIES]  — O(1) lookup: "what constraint has entity X as BodyA?"
+  uint32_t ByBodyA[MAX_CACHED_ENTITIES]   — O(1) lookup: "what constraint has entity X as BodyA?"
                                             UINT32_MAX = entity is unconstrained (physics root)
 ```
 
@@ -380,6 +393,54 @@ then Chunk C (TVC) allocates PositionX[200..299] and Color.R[100..199] — entit
 at global index 200 but Color.R at global index 100. Per-chunk access (via chunk header pointers) is correct;
 global-index GPU access is not. The new partition design fixes this because partition regions are pre-allocated
 at fixed offsets, not allocated sequentially per archetype.
+
+---
+
+# Speculative Presentation & Rollback Reconciliation
+
+## Speculative Presentation
+
+TrinyxEngine plays effects immediately based on the predicted game state to preserve crisp 0-ping feel.
+Sound effects, particle spawns, and visual feedback fire at prediction time — not at server confirmation
+time. Mispredictions are handled gracefully during rollback rather than avoided by delaying presentation.
+
+## Event Buffer
+
+A ring buffer of `TemporalEvents` (audio triggers, particle spawns, VFX handles) maps simulation events
+to their presentation handles, timestamped by logic frame:
+
+```cpp
+struct TemporalEvent {
+    uint32_t LogicFrame;  // frame the event was triggered
+    uint32_t EntityID;    // entity that triggered it
+    uint32_t EventType;   // audio, VFX, particle, etc.
+    uint32_t Handle;      // presentation system handle for fade/cancel
+};
+```
+
+## Presentation Reconciler (Planned)
+
+When rollback occurs, the `PresentationReconciler` diffs events from the abandoned timeline against
+the corrected timeline:
+
+1. **Orphaned events** — fired in the abandoned timeline but absent from the corrected one (e.g., a
+   predicted gunshot that never happened): issue an **Anti-Event**.
+2. **New events** — present in the corrected timeline but absent from the prediction: play them now.
+3. **Matching events** — already played correctly; no action needed.
+
+## Anti-Events: Graceful Decay
+
+Instead of instantly culling orphaned effects (which causes audio pops or visual hitches), Anti-Events
+instruct the respective system to fade out rapidly but smoothly:
+
+```
+AudioSystem::RapidFadeOut(handle)   → ~20ms linear fade
+ParticleSystem::SoftCancel(handle)  → freeze emission, drain existing particles
+VFXSystem::RapidDecay(handle)       → accelerate decay curve to zero
+```
+
+The frame after rollback is visually continuous. A brief imperceptible fade replaces the instantaneous
+pop, which is unnoticeable at normal play speeds.
 
 ---
 
@@ -478,24 +539,26 @@ dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
 
 # Migration Status
 
-## Implemented (2026-02)
+## Implemented (2026-03)
 
 - [x] Three-thread architecture (Sentinel/Brain/Encoder)
-- [x] Raw Vulkan: VulkanContext, VulkanMemory (volk + VMA)
+- [x] Raw Vulkan: VulkanContext, VulkanMemory (volk + VMA), migrated to vk::raii::
 - [x] FieldProxy system (Scalar / Wide / WideMask, FieldProxyMask zero-size base)
 - [x] Component decomposition into SoA field arrays
 - [x] EntityView hydration with zero virtual calls
 - [x] TemporalComponentCache dual-buffer (proto-slab)
 - [x] Dirty bit tracking (TemporalFlagBits::Active, Dirty)
 - [x] Registry dirty bit marking after each chunk update
-- [x] LogicThread::PublishCompletedFrame (Vulkan perspective + identity view)
-- [x] GPU-driven compute pipeline (predicate → prefix_sum → scatter, Slang)
-- [x] VulkRender skeleton (Initialize/Start/Stop/Join wired in)
+- [x] LogicThread::PublishCompletedFrame (Vulkan RH perspective + identity view)
+- [x] GPU-driven compute pipeline (predicate → prefix_sum → scatter, Slang shaders)
+- [x] VulkRender Steps 1–3: clear → indexed cube pipeline → GpuFrameData + BDA draw
+  Orange cube on purple background rendering at full rate via Buffer Device Address
 - [x] Tracy profiler integration (3-level: Coarse/Medium/Fine)
 
 ## Designed, Not Yet Implemented
 
-- [ ] **Tiered storage partition layout** (Cold/Static/Volatile/Temporal with DUAL/PHYS/RENDER/LOGIC partitions)
+- [ ] **VulkRender Step 4** — read entity data from TemporalComponentCache (currently hardcoded instance SoA)
+- [ ] **Tiered storage partition layout** (Cold/Static/Volatile/Temporal with dual-ended arena layout)
 - [ ] **SimulationBody marker component** (Temporal vs Volatile auto-classification)
 - [ ] **Universal strip** (contiguous Flags array outside partition field zones)
 - [ ] `TNX_UNIVERSAL_COMPONENT` macro
@@ -504,7 +567,7 @@ dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
 - [ ] **5 GPU InstanceBuffers** (VSync decoupling)
 - [ ] `GetTemporalFieldWritePtr` migrated from Archetype to TemporalComponentCache
 - [ ] `TemporalFrameStride` removed from Archetype (duplicated state — call cache->GetFrameStride())
-- [ ] **VulkRender ThreadMain** (GPU loop: upload → compute → draw → present)
+- [ ] **Presentation Reconciler** (Anti-Events, speculative presentation diff)
 
 ## Planned (Next Phase)
 

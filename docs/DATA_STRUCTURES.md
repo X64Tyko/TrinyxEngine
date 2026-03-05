@@ -167,6 +167,11 @@ struct CubeEntity : EntityView<CubeEntity, WIDTH>
 TNX_REGISTER_ENTITY(CubeEntity)
 ```
 
+**Dynamic chunk sizing (planned):** The target entity count per chunk can be specified at the class
+level via a template parameter on `EntityView`. A data-heavy `Projectile` might request 4096-entity
+chunks for maximum SIMD throughput; a complex `Player` might request 4-entity chunks to eliminate
+padding waste. Currently the engine uses a fixed 64 KB chunk size.
+
 To opt into full rollback (Temporal tier vs Volatile tier), add `SimulationBody`:
 
 ```cpp

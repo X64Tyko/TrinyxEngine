@@ -20,25 +20,26 @@ GPU-driven rendering, lock-free communication) that are too risky to implement d
 
 ---
 
-## Current Status (2026-02)
+## Current Status (2026-03)
 
 **Performance:**
 - **Sentinel (Main):** 1.0ms per frame (1000 Hz) ✅
 - **Brain (Logic):** ~1.7ms per frame (target: 1.95ms @ 512Hz)
-- **Encoder (Render):** Raw Vulkan pipeline active, GPU-driven path in progress
+- **Encoder (Render):** Orange cube rendering at full rate via BDA pipeline ✅
 - **100k entities:** ~0.3ms PrePhysics, ~1.7ms full logic frame
 
 **Architecture:**
 - ✅ Three-thread architecture (Sentinel/Brain/Encoder)
-- ✅ Raw Vulkan (volk 1.4.304 + VMA 3.3.0) — no SDL3 GPU
+- ✅ Raw Vulkan (volk 1.4.304 + VMA 3.3.0), migrated to vk::raii::
 - ✅ SoA component decomposition (FieldProxy with Scalar/Wide/WideMask)
 - ✅ EntityView hydration (zero virtual calls)
 - ✅ SIMD-friendly batch processing (AVX2)
 - ✅ Dirty bit delta tracking (TemporalFlagBits::Dirty in universal strip)
 - ✅ GPU-driven compute pipeline (predicate → prefix_sum → scatter, Slang shaders)
 - ✅ Temporal component dual-buffer (TemporalComponentCache, proto-slab)
-- 🔄 Tiered storage redesign (Cold/Static/Volatile/Temporal + partition layout — design complete)
-- 🔄 VulkRender ThreadMain (skeleton exists, GPU loop in progress)
+- ✅ VulkRender Steps 1–3: clear → indexed cube pipeline → GpuFrameData + BDA draw
+- 🔄 VulkRender Step 4: wire entity data from TemporalComponentCache
+- 🔄 Tiered storage redesign (dual-ended arena partition layout — design complete)
 - ⏳ Physics integration (Jolt, not started)
 - ⏳ Job system (infrastructure planned)
 
@@ -68,8 +69,14 @@ Entity data lives in one of four storage tiers based on access pattern and rollb
 | Temporal | SoA ring buffer | max(8, X) | Yes | Networked, simulation-authoritative entities |
 
 Entities are automatically classified into **Temporal** (has `SimulationBody` component) or **Volatile** (does not).
-Within each tier, entities are placed into partitions — **Dual** (physics+render), **Phys**, **Render**, **Logic** —
-derived automatically from the SystemGroup tags on their components. No manual annotation required.
+Within each tier, entities are placed into one of two fixed-size **arenas** using a dual-ended allocator:
+
+- **Arena 1 (Physics)** `[0..MaxPhysicsEntities)` — PHYS bucket grows right, DUAL bucket grows left. The physics solver
+  iterates this range exclusively.
+- **Arena 2 (Cached)** `[MaxPhysicsEntities..MaxCachedEntities)` — RENDER bucket grows right, LOGIC bucket grows left.
+
+Partition group (Dual/Phys/Render/Logic) is derived automatically from the `SystemGroup` tags on each component. No
+manual annotation required.
 
 See [Architecture Documentation](docs/ARCHITECTURE.md) for full details.
 
