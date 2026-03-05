@@ -14,7 +14,11 @@ Registry::Registry()
 Registry::Registry(const EngineConfig* Config)
 	: Registry()
 {
-	HistorySlab.Initialize(Config);
+#ifdef TNX_ENABLE_ROLLBACK
+	HistorySlab.Initialize(Config); // Temporal: Config->TemporalFrameCount frames, rollback-capable
+#endif
+	VolatileSlab.Initialize(Config); // Volatile: 5 frames, no rollback
+	UniversalSlab.Initialize(Config);
 	// Reserve space for entity index
 	EntityIndex.reserve(1024);
 	InitializeArchetypes();
@@ -61,7 +65,7 @@ Archetype* Registry::GetOrCreateArchetype(const Signature& Sig, const ClassID& I
 		{
 			const std::vector<FieldMeta>* fields = CFR.GetFields(compTypeID);
 			bool isDecomposed                    = (fields && !fields->empty());
-			bool isTemporal                      = CFR.GetComponentMeta(compTypeID).IsTemporal;
+			CacheTier Tier                       = CFR.GetComponentMeta(compTypeID).TemporalTier;
 
 			size_t componentSize = 0;
 			if (isDecomposed && !fields->empty())
@@ -82,13 +86,14 @@ Archetype* Registry::GetOrCreateArchetype(const Signature& Sig, const ClassID& I
 				FIELD_ARRAY_ALIGNMENT,
 				0, // OffsetInChunk computed by BuildLayout
 				isDecomposed,
-				isTemporal,
+				Tier,
+				0,
 				isDecomposed ? *fields : std::vector<FieldMeta>()
 			});
 		}
 	}
 
-	NewArchetype->BuildLayout(Components, &HistorySlab);
+	NewArchetype->BuildLayout(this, Components);
 
 	Archetypes[key] = NewArchetype;
 	return NewArchetype;
@@ -181,10 +186,10 @@ bool Registry::DestroyRecord(EntityRecord& Record)
 	uint32_t lastLocalIndex        = lastEntityGlobalIndex % arch->EntitiesPerChunk;
 
 	// Check if we're actually swapping (not removing the last entity)
-	bool willSwap = (chunkIndex != lastChunkIndex || Record.Index != lastLocalIndex);
+	bool willSwap = false; //(chunkIndex != lastChunkIndex || Record.Index != lastLocalIndex);
 
 	// Remove from archetype (swap-and-pop with last entity)
-	arch->RemoveEntity(chunkIndex, Record.Index);
+	arch->RemoveEntity(chunkIndex, Record.Index, Record.ArchetypeIdx);
 
 	// IMPORTANT: If we swapped with the last entity, update that entity's record
 	if (willSwap)
@@ -213,6 +218,7 @@ void Registry::ProcessDeferredDestructions()
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
+	int pending = PendingDestructions.size();
 	for (EntityID Id : PendingDestructions)
 	{
 		if (!Id.IsValid()) continue;
@@ -238,7 +244,7 @@ void Registry::ProcessDeferredDestructions()
 
 	TNX_PLOT("PendingDestructions", static_cast<double>(PendingDestructions.size()));
 
-	LOG_INFO_F("Processed %zu deferred destructions. Existing Entities %u", PendingDestructions.size(), GetTotalEntityCount());
+	LOG_INFO_F("Processed %i deferred destructions. Existing Entities %u", pending, GetTotalEntityCount());
 }
 
 void Registry::InitializeArchetypes()
@@ -259,9 +265,19 @@ void Registry::InitializeArchetypes()
 			{
 				Components.push_back(CFR.GetComponentMeta(CompID));
 			}
-			NewArch->BuildLayout(Components, &HistorySlab);
+			NewArch->BuildLayout(this, Components);
 		}
 	}
+}
+
+void Registry::PropagateFrame(uint32_t currentFrame)
+{
+	TNX_ZONE_NC("Propagating Frame", TNX_COLOR_LOGIC)
+#ifdef TNX_ENABLE_ROLLBACK
+	HistorySlab.PropagateFrame(currentFrame, currentFrame + 1);
+#endif
+	UniversalSlab.PropagateFrame(currentFrame, currentFrame + 1);
+	VolatileSlab.PropagateFrame(currentFrame, currentFrame + 1);
 }
 
 void Registry::ResetRegistry()

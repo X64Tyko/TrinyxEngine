@@ -27,9 +27,11 @@ public:
 	template <typename T>
 	EntityID Create();
 
+	template <typename T>
+	std::vector<EntityID> Create(size_t count);
+
 	// Destroy an entity (deferred until end of frame)
 	void Destroy(EntityID Id);
-	bool DestroyRecord(EntityRecord& Record);
 
 	// Get component from entity
 	template <typename T>
@@ -38,9 +40,6 @@ public:
 	// Check if entity has component
 	template <typename T>
 	bool HasComponent(EntityID Id);
-
-	// Get or create archetype for a given signature
-	Archetype* GetOrCreateArchetype(const Signature& Sig, const ClassID& ID);
 
 	// Apply all pending destructions (called at end of frame)
 	void ProcessDeferredDestructions();
@@ -57,8 +56,14 @@ public:
 	void InvokePrePhys(double dt, uint32_t currentFrame);
 	void InvokePostPhys(double dt, uint32_t currentFrame);
 
-	// Access temporal cache
-	TemporalComponentCache* GetTemporalCache() { return &HistorySlab; }
+	// Slab accessors — used by LogicThread and RenderThread to get cache pointers at init time.
+	ComponentCache<CacheTier::Volatile>* GetVolatileCache() { return &VolatileSlab; }
+	ComponentCache<CacheTier::Universal>* GetUniversalCache() { return &UniversalSlab; }
+#ifdef TNX_ENABLE_ROLLBACK
+	ComponentCache<CacheTier::Temporal>* GetTemporalCache() { return &HistorySlab; }
+#else
+	ComponentCache<CacheTier::Volatile>* GetTemporalCache() { return &VolatileSlab; }
+#endif
 
 	// Memory diagnostics
 	uint32_t GetTotalChunkCount() const;
@@ -69,8 +74,42 @@ public:
 	void ResetRegistry();
 
 private:
+	friend class Archetype;
+	friend class LogicThread;
+
+	// Get or create archetype for a given signature — called from Create<T> and InitializeArchetypes.
+	Archetype* GetOrCreateArchetype(const Signature& Sig, const ClassID& ID);
+
+	// Immediately destroy an entity record (swap-and-pop) — called from ProcessDeferredDestructions and ResetRegistry.
+	bool DestroyRecord(EntityRecord& Record);
+
+	// Dispatch to the correct slab by tier.
+	// When TNX_ENABLE_ROLLBACK is off, Temporal falls back to the Volatile slab so
+	// no HistorySlab member exists and no memory is wasted on an empty ring buffer.
+	ComponentCacheBase* GetCache(CacheTier tier)
+	{
+#ifdef TNX_ENABLE_ROLLBACK
+		if (tier == CacheTier::Temporal) return &HistorySlab;
+#endif
+		if (tier == CacheTier::Volatile || tier == CacheTier::Temporal) return &VolatileSlab;
+		if (tier == CacheTier::Universal) return &UniversalSlab;
+		return nullptr;
+	}
+
+	const ComponentCacheBase* GetCache(CacheTier tier) const
+	{
+#ifdef TNX_ENABLE_ROLLBACK
+		if (tier == CacheTier::Temporal) return &HistorySlab;
+#endif
+		if (tier == CacheTier::Volatile || tier == CacheTier::Temporal) return &VolatileSlab;
+		if (tier == CacheTier::Universal) return &UniversalSlab;
+		return nullptr;
+	}
+
 	// Initialize archetypes with data from MetaRegistry
 	void InitializeArchetypes();
+
+	void PropagateFrame(uint32_t currentFrame);
 
 	// Global entity lookup table (indexed by EntityID.GetIndex())
 	std::vector<EntityRecord> EntityIndex;
@@ -87,13 +126,17 @@ private:
 	// Pending destructions (processed at end of frame)
 	std::vector<EntityID> PendingDestructions;
 
-	TemporalComponentCache HistorySlab;
+#ifdef TNX_ENABLE_ROLLBACK
+	ComponentCache<CacheTier::Temporal> HistorySlab; // N frames (Config->TemporalFrameCount), rollback-capable
+#endif
+	ComponentCache<CacheTier::Volatile> VolatileSlab;   // 5 frames, no rollback
+	ComponentCache<CacheTier::Universal> UniversalSlab; // N frames, no rollback
 
 	// Pre-allocated dual array table used by all Invoke* methods.
 	// Avoids a large VLA on the stack each call.  Sized by MAX_FIELDS_PER_ARCHETYPE
 	// (not the global MAX_FIELD_ARRAYS) because only one archetype is processed at a time.
 	// Safe to share because all three Invoke methods run serially on the Brain thread.
-	void* DualArrayTableBuffer[MAX_FIELDS_PER_ARCHETYPE * 2]{};
+	void* FieldBufferTable[MAX_FIELDS_PER_ARCHETYPE]{};
 
 	// Allocate a new EntityID
 	EntityID AllocateEntityID(uint16_t TypeID);
@@ -106,10 +149,14 @@ private:
 	Signature BuildSignature();
 };
 
-// Template implementations must be in header
-
 template <typename T>
 EntityID Registry::Create()
+{
+	return Create<T>(1)[0];
+}
+
+template <typename T>
+std::vector<EntityID> Registry::Create(size_t count)
 {
 	// Static local caching - archetype is calculated once per type T
 	static Archetype* CachedArchetype = nullptr;
@@ -145,26 +192,38 @@ EntityID Registry::Create()
 		Initialized     = true;
 	}
 
-	// Allocate entity ID
-	EntityID Id = AllocateEntityID(T::StaticClassID());
 
 	// Allocate slot in archetype
-	Archetype::EntitySlot Slot = CachedArchetype->PushEntity();
+	std::vector<Archetype::EntitySlot> Slots;
+	Slots.resize(count);
+	EntityIndex.reserve(EntityIndex.size() + count);
+	CachedArchetype->PushEntities(Slots, count);
 
-	// Update EntityIndex
-	uint32_t Index = Id.GetIndex();
-	if (Index >= EntityIndex.size())
+	// Allocate entity ID
+	std::vector<EntityID> Entities(count);
+	for (size_t i = 0; i < count; ++i)
 	{
-		EntityIndex.resize(Index * 2);
+		EntityID& Id               = Entities[i];
+		Archetype::EntitySlot Slot = Slots[i];
+
+		Id = AllocateEntityID(T::StaticClassID());
+
+		// Update EntityIndex
+		uint32_t Index = Id.GetIndex();
+		if (Index >= EntityIndex.size())
+		{
+			EntityIndex.resize(Index + 1024);
+		}
+
+		EntityRecord& Record = EntityIndex[Index];
+		Record.Arch          = CachedArchetype;
+		Record.TargetChunk   = Slot.TargetChunk;
+		Record.Index         = static_cast<uint16_t>(Slot.LocalIndex);
+		Record.ArchetypeIdx  = Slot.GlobalIndex;
+		Record.Generation    = Id.GetGeneration();
 	}
 
-	EntityRecord& Record = EntityIndex[Index];
-	Record.Arch          = CachedArchetype;
-	Record.TargetChunk   = Slot.TargetChunk;
-	Record.Index         = static_cast<uint16_t>(Slot.LocalIndex);
-	Record.Generation    = Id.GetGeneration();
-
-	return Id;
+	return Entities;
 }
 
 template <typename T>
@@ -183,7 +242,7 @@ T* Registry::GetComponent(EntityID Id)
 	if (!Record.IsValid()) return nullptr;
 
 	// TODO: Get ComponentTypeID from reflection (Week 5)
-	ComponentTypeID TypeID = GetComponentTypeID<T>();
+	ComponentTypeID TypeID = T::StaticTypeID();
 
 	// Get component array from archetype
 	T* ComponentArray = Record.Arch->GetComponentArray<T>(Record.TargetChunk, TypeID);
@@ -204,7 +263,7 @@ Signature Registry::BuildSignature()
 {
 	Signature Sig;
 	// Fold expression to set all component bits
-	((Sig.Set(GetComponentTypeID<Components>() - 1)), ...);
+	((Sig.Set(Components::StaticTypeID() - 1)), ...);
 	return Sig;
 }
 
@@ -248,20 +307,34 @@ inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
 {
 	TNX_ZONE_C(TNX_COLOR_LOGIC);
 
-	// Lock frame T+1 for writing (with wrapping)
-	uint32_t writeFrame   = HistorySlab.GetNextFrame(currentFrame);
-	uint32_t readFrameIdx = HistorySlab.GetFrameIndex(currentFrame);
-	if (!HistorySlab.TryLockFrameForWrite(writeFrame))
+#ifdef TNX_ENABLE_ROLLBACK
+	uint32_t histWrite = HistorySlab.GetNextFrame(currentFrame);
+	if (!HistorySlab.TryLockFrameForWrite(histWrite))
 	{
-		LOG_ERROR_F("Failed to acquire write lock on frame %u", writeFrame);
+		LOG_ERROR_F("Failed to acquire Temporal write lock on frame %u", histWrite);
 		return;
 	}
-
-	// Verify frame T is readable
-	if (!HistorySlab.VerifyFrameReadable(currentFrame))
+#endif
+	uint32_t volWrite = VolatileSlab.GetNextFrame(currentFrame);
+	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
 	{
-		LOG_ERROR_F("Frame %u is not readable (locked by another thread)", currentFrame);
-		HistorySlab.UnlockFrameWrite(writeFrame);
+		LOG_ERROR_F("Failed to acquire Volatile write lock on frame %u", volWrite);
+#ifdef TNX_ENABLE_ROLLBACK
+		HistorySlab.UnlockFrameWrite(histWrite);
+#endif
+		return;
+	}
+#ifdef TNX_ENABLE_ROLLBACK
+	if (!HistorySlab.VerifyFrameReadable(currentFrame) || !VolatileSlab.VerifyFrameReadable(currentFrame))
+#else
+	if (!VolatileSlab.VerifyFrameReadable(currentFrame))
+#endif
+	{
+		LOG_ERROR_F("Frame %u is not readable on one or both slabs", currentFrame);
+#ifdef TNX_ENABLE_ROLLBACK
+		HistorySlab.UnlockFrameWrite(histWrite);
+#endif
+		VolatileSlab.UnlockFrameWrite(volWrite);
 		return;
 	}
 
@@ -275,18 +348,14 @@ inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
 		{
 			Chunk* chunk         = arch->Chunks[chunkIdx];
 			uint32_t entityCount = arch->GetChunkCount(chunkIdx);
-
 			if (entityCount == 0) continue;
 
-			// Build interleaved dual array table (read T, write T+1)
-			arch->BuildFieldArrayTable(chunk, DualArrayTableBuffer, readFrameIdx, writeFrame);
+			// Each field computes its own read/write indices from absoluteFrame and its FrameCount.
+			arch->BuildFieldArrayTable(chunk, FieldBufferTable, currentFrame);
+			ScalarUpdate(dt, FieldBufferTable, entityCount);
 
-			// Invoke batch processor with dual array table
-			ScalarUpdate(dt, DualArrayTableBuffer, entityCount);
-
-			// Mark every processed entity dirty (bit 30) so RenderThread uploads their data.
-			static const ComponentTypeID kFlagsTypeID = GetComponentTypeID<TemporalFlags<>>();
-			if (int32_t* flagsWrite = arch->GetTemporalFieldWritePtr(chunk, kFlagsTypeID, 0, writeFrame))
+			static const ComponentTypeID kFlagsTypeID = TemporalFlags<>::StaticTypeID();
+			if (int32_t* flagsWrite = arch->GetTemporalFieldWritePtr(chunk, kFlagsTypeID, 0, currentFrame))
 			{
 				constexpr int32_t kDirty = static_cast<int32_t>(1u << 30);
 				for (uint32_t e = 0; e < entityCount; ++e) flagsWrite[e] |= kDirty;
@@ -294,28 +363,44 @@ inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
 		}
 	}
 
-	// Release locks at end of update
-	HistorySlab.UnlockFrameWrite(writeFrame);
+#ifdef TNX_ENABLE_ROLLBACK
+	HistorySlab.UnlockFrameWrite(histWrite);
+#endif
+	VolatileSlab.UnlockFrameWrite(volWrite);
 }
 
 inline void Registry::InvokePrePhys(double dt, uint32_t currentFrame)
 {
 	TNX_ZONE_C(TNX_COLOR_LOGIC);
 
-	// Lock frame T+1 for writing (with wrapping)
-	uint32_t writeFrame   = HistorySlab.GetNextFrame(currentFrame);
-	uint32_t readFrameIdx = HistorySlab.GetFrameIndex(currentFrame);
-	if (!HistorySlab.TryLockFrameForWrite(writeFrame))
+#ifdef TNX_ENABLE_ROLLBACK
+	uint32_t histWrite = HistorySlab.GetNextFrame(currentFrame);
+	if (!HistorySlab.TryLockFrameForWrite(histWrite))
 	{
-		LOG_ERROR_F("Failed to acquire write lock on frame %u", writeFrame);
+		LOG_ERROR_F("Failed to acquire Temporal write lock on frame %u", histWrite);
 		return;
 	}
-
-	// Verify frame T is readable
-	if (!HistorySlab.VerifyFrameReadable(currentFrame))
+#endif
+	uint32_t volWrite = VolatileSlab.GetNextFrame(currentFrame);
+	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
 	{
-		LOG_ERROR_F("Frame %u is not readable (locked by another thread)", currentFrame);
-		HistorySlab.UnlockFrameWrite(writeFrame);
+		LOG_ERROR_F("Failed to acquire Volatile write lock on frame %u", volWrite);
+#ifdef TNX_ENABLE_ROLLBACK
+		HistorySlab.UnlockFrameWrite(histWrite);
+#endif
+		return;
+	}
+#ifdef TNX_ENABLE_ROLLBACK
+	if (!HistorySlab.VerifyFrameReadable(currentFrame) || !VolatileSlab.VerifyFrameReadable(currentFrame))
+#else
+	if (!VolatileSlab.VerifyFrameReadable(currentFrame))
+#endif
+	{
+		LOG_ERROR_F("Frame %u is not readable on one or both slabs", currentFrame);
+#ifdef TNX_ENABLE_ROLLBACK
+		HistorySlab.UnlockFrameWrite(histWrite);
+#endif
+		VolatileSlab.UnlockFrameWrite(volWrite);
 		return;
 	}
 
@@ -329,18 +414,13 @@ inline void Registry::InvokePrePhys(double dt, uint32_t currentFrame)
 		{
 			Chunk* chunk         = arch->Chunks[chunkIdx];
 			uint32_t entityCount = arch->GetChunkCount(chunkIdx);
-
 			if (entityCount == 0) continue;
 
-			// Build interleaved dual array table (read T, write T+1)
-			arch->BuildFieldArrayTable(chunk, DualArrayTableBuffer, readFrameIdx, writeFrame);
+			arch->BuildFieldArrayTable(chunk, FieldBufferTable, currentFrame);
+			prePhys(dt, FieldBufferTable, entityCount);
 
-			// Invoke batch processor with dual array table
-			prePhys(dt, DualArrayTableBuffer, entityCount);
-
-			// Mark every processed entity dirty (bit 30) so RenderThread uploads their data.
-			static const ComponentTypeID kFlagsTypeID = GetComponentTypeID<TemporalFlags<>>();
-			if (int32_t* flagsWrite = arch->GetTemporalFieldWritePtr(chunk, kFlagsTypeID, 0, writeFrame))
+			static const ComponentTypeID kFlagsTypeID = TemporalFlags<>::StaticTypeID();
+			if (int32_t* flagsWrite = arch->GetTemporalFieldWritePtr(chunk, kFlagsTypeID, 0, currentFrame))
 			{
 				constexpr int32_t kDirty = static_cast<int32_t>(1u << 30);
 				for (uint32_t e = 0; e < entityCount; ++e) flagsWrite[e] |= kDirty;
@@ -348,28 +428,44 @@ inline void Registry::InvokePrePhys(double dt, uint32_t currentFrame)
 		}
 	}
 
-	// Release locks at end of update
-	HistorySlab.UnlockFrameWrite(writeFrame);
+#ifdef TNX_ENABLE_ROLLBACK
+	HistorySlab.UnlockFrameWrite(histWrite);
+#endif
+	VolatileSlab.UnlockFrameWrite(volWrite);
 }
 
 inline void Registry::InvokePostPhys(double dt, uint32_t currentFrame)
 {
 	TNX_ZONE_C(TNX_COLOR_LOGIC);
 
-	// Lock frame T+1 for writing (with wrapping)
-	uint32_t writeFrame   = HistorySlab.GetNextFrame(currentFrame);
-	uint32_t readFrameIdx = HistorySlab.GetFrameIndex(currentFrame);
-	if (!HistorySlab.TryLockFrameForWrite(writeFrame))
+#ifdef TNX_ENABLE_ROLLBACK
+	uint32_t histWrite = HistorySlab.GetNextFrame(currentFrame);
+	if (!HistorySlab.TryLockFrameForWrite(histWrite))
 	{
-		LOG_ERROR_F("Failed to acquire write lock on frame %u", writeFrame);
+		LOG_ERROR_F("Failed to acquire Temporal write lock on frame %u", histWrite);
 		return;
 	}
-
-	// Verify frame T is readable
-	if (!HistorySlab.VerifyFrameReadable(currentFrame))
+#endif
+	uint32_t volWrite = VolatileSlab.GetNextFrame(currentFrame);
+	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
 	{
-		LOG_ERROR_F("Frame %u is not readable (locked by another thread)", currentFrame);
-		HistorySlab.UnlockFrameWrite(writeFrame);
+		LOG_ERROR_F("Failed to acquire Volatile write lock on frame %u", volWrite);
+#ifdef TNX_ENABLE_ROLLBACK
+		HistorySlab.UnlockFrameWrite(histWrite);
+#endif
+		return;
+	}
+#ifdef TNX_ENABLE_ROLLBACK
+	if (!HistorySlab.VerifyFrameReadable(currentFrame) || !VolatileSlab.VerifyFrameReadable(currentFrame))
+#else
+	if (!VolatileSlab.VerifyFrameReadable(currentFrame))
+#endif
+	{
+		LOG_ERROR_F("Frame %u is not readable on one or both slabs", currentFrame);
+#ifdef TNX_ENABLE_ROLLBACK
+		HistorySlab.UnlockFrameWrite(histWrite);
+#endif
+		VolatileSlab.UnlockFrameWrite(volWrite);
 		return;
 	}
 
@@ -383,18 +479,13 @@ inline void Registry::InvokePostPhys(double dt, uint32_t currentFrame)
 		{
 			Chunk* chunk         = arch->Chunks[chunkIdx];
 			uint32_t entityCount = arch->GetChunkCount(chunkIdx);
-
 			if (entityCount == 0) continue;
 
-			// Build interleaved dual array table (read T, write T+1)
-			arch->BuildFieldArrayTable(chunk, DualArrayTableBuffer, readFrameIdx, writeFrame);
+			arch->BuildFieldArrayTable(chunk, FieldBufferTable, currentFrame);
+			PostPhys(dt, FieldBufferTable, entityCount);
 
-			// Invoke batch processor with dual array table
-			PostPhys(dt, DualArrayTableBuffer, entityCount);
-
-			// Mark every processed entity dirty (bit 30) so RenderThread uploads their data.
-			static const ComponentTypeID kFlagsTypeID = GetComponentTypeID<TemporalFlags<>>();
-			if (int32_t* flagsWrite = arch->GetTemporalFieldWritePtr(chunk, kFlagsTypeID, 0, writeFrame))
+			static const ComponentTypeID kFlagsTypeID = TemporalFlags<>::StaticTypeID();
+			if (int32_t* flagsWrite = arch->GetTemporalFieldWritePtr(chunk, kFlagsTypeID, 0, currentFrame))
 			{
 				constexpr int32_t kDirty = static_cast<int32_t>(1u << 30);
 				for (uint32_t e = 0; e < entityCount; ++e) flagsWrite[e] |= kDirty;
@@ -402,6 +493,8 @@ inline void Registry::InvokePostPhys(double dt, uint32_t currentFrame)
 		}
 	}
 
-	// Release locks at end of update
-	HistorySlab.UnlockFrameWrite(writeFrame);
+#ifdef TNX_ENABLE_ROLLBACK
+	HistorySlab.UnlockFrameWrite(histWrite);
+#endif
+	VolatileSlab.UnlockFrameWrite(volWrite);
 }

@@ -1,4 +1,4 @@
-﻿#include "TemporalComponentCache.h"
+#include "TemporalComponentCache.h"
 
 #include <cstring>
 #include "Archetype.h"
@@ -8,13 +8,14 @@
 #include "Schema.h"
 #include "Types.h"
 
-TemporalComponentCache::TemporalComponentCache()
+ComponentCacheBase::ComponentCacheBase()
 {
 }
 
-TemporalComponentCache::~TemporalComponentCache()
+ComponentCacheBase::~ComponentCacheBase()
 {
-	LOG_INFO_F("Destroying Temporal Component Slab with %zu bytes", TotalSlabSize);
+	LOG_INFO_F("Destroying %s Component Slab with %zu bytes",
+			   Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal", TotalSlabSize);
 
 #ifdef _MSC_VER
 	_aligned_free(SlabPtr);
@@ -23,37 +24,33 @@ TemporalComponentCache::~TemporalComponentCache()
 #endif
 }
 
-void TemporalComponentCache::Initialize(const EngineConfig* Config)
+void ComponentCacheBase::InitializeInternal(const EngineConfig* Config, uint32_t frameCount)
 {
 	ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
 
 	// Pre-compute field allocation layout (field-major ordering)
-	// For each temporal component, for each field, reserve a zone
+	// For each component in this tier, for each field, reserve a contiguous zone.
 	size_t totalFrameSize = 0;
 
 	for (auto& [typeID, meta] : CFR.GetAllComponents())
 	{
-		if (!meta.IsTemporal) continue;
+		if (meta.TemporalTier != Tier_) continue;
 
 		// For each field in this component
 		for (size_t fieldIdx = 0; fieldIdx < meta.Fields.size(); ++fieldIdx)
 		{
-			const FieldMeta& field = meta.Fields[fieldIdx];
+			const FieldMeta& field            = meta.Fields[fieldIdx];
+			const ComponentTypeID cacheSlotID = meta.CacheSlotIndex;
 
-			// Calculate max capacity for this field across all archetypes
-			// We need: (MaxDynamicEntities * fieldSize) + padding for chunk alignment
-			// Worst case: smallest EntitiesPerChunk across all archetypes = 1 entity/chunk
-			// Therefore: maxChunks = MaxDynamicEntities (if every archetype has 1 entity/chunk)
-			// Each chunk allocation is aligned, wasting up to (ALIGNMENT - 1) bytes
-			size_t baseSize     = Config->MaxDynamicEntities * field.Size;
-			size_t maxChunks    = Config->MaxDynamicEntities; // Worst case: 1 entity per chunk
-			size_t maxPadding   = maxChunks * (FIELD_ARRAY_ALIGNMENT - 1);
-			size_t maxFieldSize = baseSize + maxPadding;
+			// Zone capacity = actual data + worst-case alignment padding.
+			// baseSize covers every possible entity; maxAlignPadding covers chunk-start alignment.
+			size_t baseSize     = static_cast<size_t>(Config->MaxDynamicEntities) * field.Size;
+			size_t maxFieldSize = baseSize * 2; // Lets just assume each allocated chunk is only used 50% full
 
 			// Use flat O(1) table instead of vector
-			if (typeID < MAX_COMPONENTS && fieldIdx < MAX_TEMPORAL_FIELDS_PER_COMPONENT)
+			if (cacheSlotID < MAX_COMPONENTS && fieldIdx < MAX_TEMPORAL_FIELDS_PER_COMPONENT)
 			{
-				const size_t tableIndex      = static_cast<size_t>(typeID) * MAX_TEMPORAL_FIELDS_PER_COMPONENT + fieldIdx;
+				const size_t tableIndex      = static_cast<size_t>(cacheSlotID) * MAX_TEMPORAL_FIELDS_PER_COMPONENT + fieldIdx;
 				FieldAllocations[tableIndex] = {
 					typeID,
 					fieldIdx,
@@ -65,6 +62,9 @@ void TemporalComponentCache::Initialize(const EngineConfig* Config)
 					true // bValid
 				};
 
+				// Track valid entries compactly — avoids scanning all 16k slots on PropagateFrame / logging
+				ValidFields.push_back(tableIndex);
+
 				totalFrameSize += maxFieldSize;
 			}
 		}
@@ -72,7 +72,7 @@ void TemporalComponentCache::Initialize(const EngineConfig* Config)
 
 	const size_t HeaderSize = sizeof(TemporalFrameHeader);
 	FrameDataCapacity       = totalFrameSize;
-	TemporalFrameCount      = Config->TemporalFrameCount;
+	TemporalFrameCount      = frameCount;
 	TotalSlabSize           = (FrameDataCapacity + HeaderSize) * TemporalFrameCount;
 
 	// Aligned allocation for SIMD safety
@@ -84,7 +84,8 @@ void TemporalComponentCache::Initialize(const EngineConfig* Config)
 
 	if (SlabPtr == nullptr)
 	{
-		LOG_ERROR_F("Failed to allocate memory for TemporalComponentCache slab: %zu bytes", TotalSlabSize);
+		LOG_ERROR_F("Failed to allocate memory for %s ComponentCache slab: %zu bytes",
+					Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal", TotalSlabSize);
 		return;
 	}
 
@@ -110,25 +111,21 @@ void TemporalComponentCache::Initialize(const EngineConfig* Config)
 		currentFramePtr += frameStride;
 	}
 
-	// Count valid fields
-	size_t validFieldCount = 0;
-	for (const auto& info : FieldAllocations)
-	{
-		if (info.bValid) ++validFieldCount;
-	}
+	// ValidFields was populated above alongside FieldAllocations — no 16k scan needed.
 
-	LOG_INFO_F("Initialized TemporalComponentCache: %zu fields, %zu frames × %zu bytes = %zu total bytes",
-			   validFieldCount, TemporalFrameCount, frameStride, TotalSlabSize);
+	LOG_INFO_F("Initialized %s ComponentCache: %zu fields, %zu frames × %zu bytes = %zu total bytes",
+			   Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal",
+			   ValidFields.size(), TemporalFrameCount, frameStride, TotalSlabSize);
 }
 
-void* TemporalComponentCache::AllocateFieldArray(Archetype* owner, Chunk* chunk,
-												 ComponentTypeID compType, size_t fieldIndex,
-												 const char* fieldName, size_t entityCount, size_t fieldSize)
+void* ComponentCacheBase::AllocateFieldArray(Archetype* owner, Chunk* chunk,
+											 ComponentTypeID compType, size_t fieldIndex,
+											 const char* fieldName, size_t entityCount, size_t fieldSize)
 {
 	// Direct O(1) lookup into flat table
 	if (compType >= MAX_COMPONENTS || fieldIndex >= MAX_TEMPORAL_FIELDS_PER_COMPONENT)
 	{
-		LOG_ERROR_F("TemporalComponentCache: Invalid component type %u or field index %zu", compType, fieldIndex);
+		LOG_ERROR_F("ComponentCacheBase: Invalid component type %u or field index %zu", compType, fieldIndex);
 		return nullptr;
 	}
 
@@ -137,7 +134,7 @@ void* TemporalComponentCache::AllocateFieldArray(Archetype* owner, Chunk* chunk,
 
 	if (!info.bValid)
 	{
-		LOG_ERROR_F("TemporalComponentCache: Field %s (component %u, field %zu) not initialized",
+		LOG_ERROR_F("ComponentCacheBase: Field %s (component %u, field %zu) not initialized",
 					fieldName, compType, fieldIndex);
 		return nullptr;
 	}
@@ -146,9 +143,13 @@ void* TemporalComponentCache::AllocateFieldArray(Archetype* owner, Chunk* chunk,
 	size_t allocSize = AlignSize(entityCount * fieldSize);
 
 	// Check capacity
-	if (info.CurrentUsed + allocSize > info.TotalCapacity)
+	if (info.CurrentUsed + allocSize > info.TotalCapacity) [[unlikely]]
 	{
-		LOG_ERROR_F("TemporalComponentCache: Out of space for field %s (component %u, field %zu)",
+		if (Tier_ == CacheTier::Universal)
+		{
+			// resize?
+		}
+		LOG_ERROR_F("ComponentCacheBase: Out of space for field %s (component %u, field %zu)",
 					fieldName, compType, fieldIndex);
 		return nullptr;
 	}
@@ -171,8 +172,8 @@ void* TemporalComponentCache::AllocateFieldArray(Archetype* owner, Chunk* chunk,
 	return frame0Data + info.OffsetInFrame + offsetInFieldZone;
 }
 
-void* TemporalComponentCache::GetFieldData(TemporalFrameHeader* header, ComponentTypeID compType,
-										   size_t fieldIndex, size_t& outAllocatedEntities) const
+void* ComponentCacheBase::GetFieldData(TemporalFrameHeader* header, ComponentTypeID compType,
+									   size_t fieldIndex, size_t& outAllocatedEntities) const
 {
 	outAllocatedEntities = 0;
 
@@ -195,7 +196,7 @@ void* TemporalComponentCache::GetFieldData(TemporalFrameHeader* header, Componen
 }
 
 
-bool TemporalComponentCache::TryLockFrameForWrite(uint32_t frameNum)
+bool ComponentCacheBase::TryLockFrameForWrite(uint32_t frameNum)
 {
 	TemporalFrameHeader* header = GetFrameHeader(frameNum);
 
@@ -205,7 +206,7 @@ bool TemporalComponentCache::TryLockFrameForWrite(uint32_t frameNum)
 	return header->OwnershipFlags.compare_exchange_strong(expected, 0x01, std::memory_order_acquire);
 }
 
-bool TemporalComponentCache::VerifyFrameReadable(uint32_t frameNum) const
+bool ComponentCacheBase::VerifyFrameReadable(uint32_t frameNum) const
 {
 	const TemporalFrameHeader* header = GetFrameHeader(frameNum);
 
@@ -214,7 +215,7 @@ bool TemporalComponentCache::VerifyFrameReadable(uint32_t frameNum) const
 	return (flags & 0x01) == 0;
 }
 
-void TemporalComponentCache::UnlockFrameWrite(uint32_t frameNum)
+void ComponentCacheBase::UnlockFrameWrite(uint32_t frameNum)
 {
 	TemporalFrameHeader* header = GetFrameHeader(frameNum);
 
@@ -222,7 +223,7 @@ void TemporalComponentCache::UnlockFrameWrite(uint32_t frameNum)
 	header->OwnershipFlags.fetch_and(~0x01, std::memory_order_release);
 }
 
-bool TemporalComponentCache::TryLockFrameForRead(uint32_t frameNum)
+bool ComponentCacheBase::TryLockFrameForRead(uint32_t frameNum)
 {
 	TemporalFrameHeader* header = GetFrameHeader(frameNum);
 
@@ -236,15 +237,34 @@ bool TemporalComponentCache::TryLockFrameForRead(uint32_t frameNum)
 	return false;
 }
 
-void TemporalComponentCache::UnlockFrameRead(uint32_t frameNum)
+void ComponentCacheBase::UnlockFrameRead(uint32_t frameNum)
 {
 	TemporalFrameHeader* header = GetFrameHeader(frameNum);
 
-	// Release write lock (clear LOGIC_WRITING bit)
+	// Release read lock (clear RENDER_READING bit)
 	header->OwnershipFlags.fetch_and(~0x02, std::memory_order_release);
 }
 
-size_t TemporalComponentCache::AlignSize(size_t size)
+void ComponentCacheBase::PropagateFrame(uint32_t fromFrame, uint32_t toFrame)
+{
+	if (FrameDataCapacity == 0) return;
+
+	uint8_t* readData  = reinterpret_cast<uint8_t*>(GetFrameHeader(fromFrame)) + sizeof(TemporalFrameHeader);
+	uint8_t* writeData = reinterpret_cast<uint8_t*>(GetFrameHeader(toFrame)) + sizeof(TemporalFrameHeader);
+
+	TNX_ZONE_MEDIUM_NC("Memcpy Frame", TNX_COLOR_LOGIC)
+	//std::memcpy(writeData, readData, FrameDataCapacity);
+
+	// Only copy valid data.
+	for (auto& tableID : ValidFields)
+	{
+		auto& info = FieldAllocations[tableID];
+		TNX_ZONE_FINE_NC("Field Copy", TNX_COLOR_LOGIC)
+		std::memcpy(writeData + info.OffsetInFrame, readData + info.OffsetInFrame, info.CurrentUsed);
+	}
+}
+
+size_t ComponentCacheBase::AlignSize(size_t size)
 {
 	return (size + FIELD_ARRAY_ALIGNMENT - 1) & ~(FIELD_ARRAY_ALIGNMENT - 1);
 }

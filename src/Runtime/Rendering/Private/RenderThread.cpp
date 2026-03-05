@@ -427,7 +427,6 @@ bool RenderThread::InterpolateTemporalFrames(uint32_t frameNumber)
 	}
 	InterpBufferCount = 0;
 
-	constexpr size_t MAX_FIELD_ARRAYS = 256;
 	void* fieldArrayTable[MAX_FIELD_ARRAYS * 2];
 
 	// Calculate required size
@@ -463,7 +462,7 @@ bool RenderThread::InterpolateTemporalFrames(uint32_t frameNumber)
 			if (chunkEntityCount == 0) continue;
 
 			// Build field array tables for T-1 and T
-			arch->BuildFieldArrayTable(chunk, fieldArrayTable, framePrev, TemporalCache->GetFrameIndex(frameNumber));
+			arch->BuildFieldDualArrayTable(chunk, fieldArrayTable, frameNumber);
 
 			// Get Transform field arrays (indices 0-8 for position, rotation, scale)
 			auto posXPrev   = static_cast<float*>(fieldArrayTable[2]);

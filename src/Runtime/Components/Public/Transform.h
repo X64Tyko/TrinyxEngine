@@ -21,6 +21,8 @@ struct Transform : ComponentView<Transform, WIDTH>
 	FloatProxy<WIDTH> ScaleX;
 	FloatProxy<WIDTH> ScaleY;
 	FloatProxy<WIDTH> ScaleZ;
+
+	static uint8_t GetTemporalIndex() { return 1; }
 };
 
 TNX_REGISTER_COMPONENT(Transform)

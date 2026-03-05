@@ -8,10 +8,15 @@
 
 #include <SDL3/SDL.h>
 #include "CubeMesh.h"
+#include "FieldMeta.h"
 #include "GpuFrameData.h"
 #include "Logger.h"
 #include "Profiler.h"
+#include "Registry.h"
+#include "TemporalComponentCache.h"
 
+#include "ColorData.h"
+#include "LogicThread.h"
 // -----------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------
@@ -150,7 +155,10 @@ void VulkRender::Join()
 	}
 
 	// GPU must be fully idle before sync objects, images, and pipelines are destroyed.
-	if (VkCtx && VkCtx->GetDevice() != VK_NULL_HANDLE)
+	if (VkCtx&& VkCtx
+	->
+	GetDevice() != VK_NULL_HANDLE
+	)
 	{
 		vkDeviceWaitIdle(VkCtx->GetDevice());
 	}
@@ -348,10 +356,29 @@ void VulkRender::FillGpuFrameData(FrameSync& frame)
 	inst[kSemScaleX - 1] = 1.0f; // scale
 	inst[kSemScaleY - 1] = 1.0f;
 	inst[kSemScaleZ - 1] = 1.0f;
-	inst[kSemColorR - 1] = 1.0f; // orange
-	inst[kSemColorG - 1] = 0.5f;
-	inst[kSemColorB - 1] = 0.0f;
-	inst[kSemColorA - 1] = 1.0f;
+	// Read first entity's color from VolatileSlab frame 0
+	float r = 1.0f, g = 0.5f, b = 0.0f, a = 1.0f; // fallback orange
+	{
+		ComponentCacheBase* cache = RegistryPtr->GetVolatileCache();
+		TemporalFrameHeader* hdr  = cache->GetFrameHeader(LastLogicFrame);
+		const uint8_t slot        = ComponentFieldRegistry::Get().GetCacheSlotIndex(ColorData<>::StaticTypeID());
+		size_t count              = 0;
+		const auto* rp            = static_cast<const float*>(cache->GetFieldData(hdr, slot, 0, count));
+		if (rp && count > 0)
+		{
+			const auto* gp = static_cast<const float*>(cache->GetFieldData(hdr, slot, 1, count));
+			const auto* bp = static_cast<const float*>(cache->GetFieldData(hdr, slot, 2, count));
+			const auto* ap = static_cast<const float*>(cache->GetFieldData(hdr, slot, 3, count));
+			r              = rp[0];
+			g              = gp ? gp[0] : 0.0f;
+			b              = bp ? bp[0] : 0.0f;
+			a              = ap ? ap[0] : 1.0f;
+		}
+	}
+	inst[kSemColorR - 1] = r;
+	inst[kSemColorG - 1] = g;
+	inst[kSemColorB - 1] = b;
+	inst[kSemColorA - 1] = a;
 }
 
 bool VulkRender::CreatePipeline()
@@ -486,6 +513,7 @@ void VulkRender::ThreadMain()
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
 		// Process Render deltas
+		LastLogicFrame = LogicPtr->GetLastCompletedFrame();
 
 		if (RenderFrame() < 0) break;
 

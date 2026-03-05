@@ -17,6 +17,12 @@
 namespace Internal
 {
 	uint32_t g_GlobalComponentCounter(1);
+	std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> g_TemporalComponentCounter = []()
+	{
+		std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> a;
+		a.fill(2); // 0 and 1 reserved for pinned types (TemporalFlags, Transform)
+		return a;
+	}();
 	ClassID g_GlobalClassCounter = 1;
 }
 
@@ -75,7 +81,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height)
 	[[maybe_unused]] constexpr bool enableValidation = true;
 #endif
 
-	
+
 	if (!VkCtx.Initialize(EngineWindow, enableValidation))
 	{
 		std::cerr << "VulkanContext::Initialize failed" << std::endl;
@@ -95,6 +101,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height)
 	// using straight Vulkan is... a bit more dificult than SDL lol.
 
 	// ---- Core systems ----------------------------------------------------
+	Config      = EngineConfig::LoadFromFile("TrinyxDefaults.ini");
 	RegistryPtr = std::make_unique<Registry>(&Config);
 	Pacer.Initialize(GpuDevice);
 
@@ -170,8 +177,8 @@ void TrinyxEngine::Shutdown()
 	// TrinyxEngine singleton's atexit destructor fires.  Validation layers
 	// use static memory that is freed before atexit(); calling vkDestroy*
 	// from atexit() causes a dispatch-handle crash in the validation layer.
-	VkMem.Shutdown();    // VMA allocator — must precede device destruction
-	VkCtx.Shutdown();    // device → surface → instance (raii objects cleared)
+	VkMem.Shutdown(); // VMA allocator — must precede device destruction
+	VkCtx.Shutdown(); // device → surface → instance (raii objects cleared)
 
 	if (EngineWindow)
 	{
@@ -196,6 +203,7 @@ void TrinyxEngine::PumpEvents()
 		}
 	}
 }
+
 /*
 void TrinyxEngine::ServiceRenderThread()
 {

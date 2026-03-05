@@ -58,7 +58,7 @@ void LogicThread::ThreadMain()
 
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
-		TNX_ZONE_C(TNX_COLOR_LOGIC);
+		TNX_ZONE_NC("Logic Frame", TNX_COLOR_LOGIC);
 
 		// Measure delta time
 		const uint64_t frameStartCounter = SDL_GetPerformanceCounter();
@@ -100,9 +100,9 @@ void LogicThread::ThreadMain()
 		Accumulator.store(acc, std::memory_order_relaxed);
 
 		// Fixed update loop with substepping
-		if (fixedStepTime > 0.0)
+		if (Accumulator.load(std::memory_order_relaxed) >= fixedStepTime) [[unlikely]]
 		{
-			TNX_ZONE_C(TNX_COLOR_LOGIC);
+			TNX_ZONE_NC("Physics Loop", TNX_COLOR_LOGIC);
 
 			int steps = 0;
 			while (Accumulator.load(std::memory_order_relaxed) >= fixedStepTime && steps < kMaxPhysSubSteps)
@@ -120,6 +120,7 @@ void LogicThread::ThreadMain()
 				SimulationTime += dt;
 
 				// Publish completed frame to RenderThread
+				RegistryPtr->PropagateFrame(FrameNumber);
 				PublishCompletedFrame();
 			}
 		}

@@ -14,19 +14,20 @@ enum class TemporalFlagBits : int32_t
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct TemporalFlags : ComponentView<TemporalFlags, WIDTH>
 {
-	TNX_TEMPORAL_FIELDS(TemporalFlags, Flags)
+	static inline CacheTier TemporalTier = CacheTier::Universal;
+	TNX_REGISTER_FIELDS(TemporalFlags, Flags)
 
 	IntProxy<WIDTH> Flags;
 
-	/*
-    FORCE_INLINE TemporalFlags& operator&=(TemporalFlagBits flag)
-    {
-        if constexpr (WIDTH == FieldWidth::Scalar)
-            Flags &= static_cast<int32_t>(flag);
+	static uint8_t GetTemporalIndex() { return 0; }
 
-        return *this;
-    }
-    */
+    FORCE_INLINE TemporalFlags& operator&=(TemporalFlagBits flag)
+	{
+		if constexpr (WIDTH == FieldWidth::Scalar) Flags &= static_cast<int32_t>(flag);
+		else Flags                                       = _mm256_and_si256(Flags, _mm256_set1_epi32(static_cast<int32_t>(flag)));
+
+		return *this;
+	}
 };
 
 TNX_REGISTER_COMPONENT(TemporalFlags)
