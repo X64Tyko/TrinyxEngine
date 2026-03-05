@@ -3,6 +3,7 @@
 #include <Logger.h>
 #include <tuple>
 
+#include "FieldMeta.h"
 #include "Profiler.h"
 #include "Signature.h"
 #include "Types.h"
@@ -162,7 +163,7 @@ public:
 	void RegisterPrefabComponent()
 	{
 		const ClassID ID             = C::StaticClassID();
-		const ComponentTypeID TypeID = GetComponentTypeID<T>();
+		const ComponentTypeID TypeID = T::StaticTypeID();
 		ComponentSignature& Def      = ClassToArchetype[ID];
 		Def                          |= 1 << (TypeID - 1);
 
@@ -172,6 +173,14 @@ public:
 		}
 
 		ClassToComponentList[ID].push_back(TypeID);
+
+		// Store the per-slab slot index derived from StaticTemporalIndex().
+		// StaticTemporalIndex() caches its result, so this is safe to call here even though
+		// RegisterPrefabComponent may fire once per entity type that uses this component.
+		if constexpr (requires { T::StaticTemporalIndex(); })
+		{
+			//ComponentFieldRegistry::Get().SetCacheSlotIndex(TypeID, T::StaticTemporalIndex());
+		}
 	}
 };
 

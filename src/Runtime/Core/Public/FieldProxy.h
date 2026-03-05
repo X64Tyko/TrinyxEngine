@@ -174,20 +174,13 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	using Traits  = SIMDTraits<FieldType, WIDTH>;
 	using VecMask = FieldMask<FieldType, typename Traits::VecType, WIDTH>;
 
-	FieldType* __restrict ReadArray  = nullptr; // Frame T (current simulation state)
-	FieldType* __restrict WriteArray = nullptr; // Frame T+1 (next simulation state)
+	FieldType* __restrict WriteArray = nullptr; // Current frame — pre-frame memcpy seeds old state before any updates run
 	uint32_t index;
 
 	explicit operator typename Traits::VecType() const
 	{
-		if constexpr (WIDTH == FieldWidth::Scalar)
-		{
-			return ReadArray[index];
-		}
-		else
-		{
-			return Traits::load(&ReadArray[index]);
-		}
+		if constexpr (WIDTH == FieldWidth::Scalar) return WriteArray[index];
+		else return Traits::load(&WriteArray[index]);
 	}
 
 	template <ProxyType<FieldType, typename Traits::VecType> T>
@@ -309,32 +302,23 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		return *this;
 	}
 
-	// Bind: load from read frame T, immediately stream to frame T+1 (non-temporal), cache T+1 for modifications
-	FORCE_INLINE void Bind(void* readArray, void* writeArray, uint32_t startIndex = 0, int32_t startCount = -1)
+	// Bind: point at the write frame (pre-frame memcpy already seeded old state into it)
+	FORCE_INLINE void Bind(void* writeArray, uint32_t startIndex = 0, int32_t startCount = -1)
 	{
-		ReadArray  = (FieldType*)readArray;
 		WriteArray = (FieldType*)writeArray;
 		index      = startIndex;
 
-		// Mask is only meaningful (and only stored) for Wide/WideMask modes
 		if constexpr (WIDTH != FieldWidth::Scalar)
 		{
 			const __m256i count_vec = _mm256_set1_epi32(startCount);
 			this->mask              = _mm256_cmpgt_epi32(count_vec, FieldProxyConsts::element_indices);
 		}
-
-		// Immediately store to frame T+1
-		if constexpr (WIDTH == FieldWidth::Scalar) WriteArray[index] = ReadArray[index];
-		else Traits::store(&WriteArray[index], this->mask, Traits::load(&ReadArray[index]));
 	}
 
-	// Advance: stream cached vector back, advance index, load from T and stream to T+1
+	// Advance: move index forward — no copy needed, pre-frame memcpy already propagated old state
 	FORCE_INLINE void Advance(uint32_t step)
 	{
 		index += step;
-
-		if constexpr (WIDTH == FieldWidth::Scalar) WriteArray[index] = ReadArray[index];
-		else Traits::store(&WriteArray[index], this->mask, Traits::load(&ReadArray[index]));
 	}
 
 	// FRIEND OPERATORS
@@ -344,11 +328,11 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		if constexpr (WIDTH == FieldWidth::Scalar)
 		{
 			FieldType LVal;
-			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value) LVal = LHS.ReadArray[LHS.index];
+			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value) LVal = LHS.WriteArray[LHS.index];
 			else if constexpr (std::is_same_v<L, std::remove_cvref_t<FieldType>>) LVal = LHS;
 
 			FieldType RVal;
-			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value) RVal = RHS.ReadArray[RHS.index];
+			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value) RVal = RHS.WriteArray[RHS.index];
 			else if constexpr (std::is_same_v<R, std::remove_cvref_t<FieldType>>) RVal = RHS;
 
 			return LVal * RVal;
@@ -376,11 +360,11 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		if constexpr (WIDTH == FieldWidth::Scalar)
 		{
 			FieldType LVal;
-			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value) LVal = LHS.ReadArray[LHS.index];
+			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value) LVal = LHS.WriteArray[LHS.index];
 			else if constexpr (std::is_same_v<L, std::remove_cvref_t<FieldType>>) LVal = LHS;
 
 			FieldType RVal;
-			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value) RVal = RHS.ReadArray[RHS.index];
+			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value) RVal = RHS.WriteArray[RHS.index];
 			else if constexpr (std::is_same_v<R, std::remove_cvref_t<FieldType>>) RVal = RHS;
 
 			return LVal + RVal;

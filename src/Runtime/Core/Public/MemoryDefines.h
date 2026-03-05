@@ -1,4 +1,6 @@
 #pragma once
+#include <cstddef>
+#include <cstdint>
 
 // Memory alignment configuration for SIMD field arrays
 //
@@ -19,3 +21,12 @@ constexpr size_t FIELD_ARRAY_ALIGNMENT = 64;
 #else
 constexpr size_t FIELD_ARRAY_ALIGNMENT = 32;
 #endif
+
+// Maximum number of temporal/volatile components per slab (one per CacheTier).
+// Determines:
+//   - Number of available component-presence bits in TemporalFlags (bits 0..MAX_CACHE_COMPONENTS-1)
+//   - Number of memory slots in each partition zone
+//   - Capped by int32 Flags layout: 32 bits - 1 (Active) - 1 (Dirty) - 1 (reserved) = 29
+// Will eventually be configurable via CMake (-DTNX_MAX_CACHE_COMPONENTS=N).
+// Increase requires recompile; no runtime toggle.
+constexpr uint8_t MAX_CACHE_COMPONENTS = 29;

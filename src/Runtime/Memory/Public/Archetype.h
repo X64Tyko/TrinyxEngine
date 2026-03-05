@@ -61,7 +61,7 @@ public:
 	// Get the number of entities in a specific chunk (handles tail chunk)
 	uint32_t GetChunkCount(size_t ChunkIndex) const;
 
-	// Allocate a new entity slot (returns chunk and local index)
+	// Slot descriptor returned by PushEntity (used by Registry::Create to update EntityIndex)
 	struct EntitySlot
 	{
 		Chunk* TargetChunk;
@@ -69,10 +69,8 @@ public:
 		uint32_t GlobalIndex; // Index across all chunks
 	};
 
-	EntitySlot PushEntity();
-
-	// Remove an entity (swap-and-pop, deferred via active mask)
-	void RemoveEntity(size_t ChunkIndex, uint32_t LocalIndex);
+	std::vector<EntitySlot> ActiveEntitySlots;
+	std::vector<EntitySlot> InactiveEntitySlots;
 
 	// Get typed array pointer for a component in a specific chunk
 	template <typename T>
@@ -95,8 +93,6 @@ public:
 	// Get field arrays for decomposed components (SoA)
 	std::vector<void*> GetFieldArrays(Chunk* TargetChunk, ComponentTypeID TypeID);
 
-	// Build the internal SoA layout from component list
-	void BuildLayout(const std::vector<ComponentMetaEx>& Components, class TemporalComponentCache* temporalCache = nullptr);
 
 	// Edge graph for archetype transitions (future optimization)
 	std::unordered_map<ComponentTypeID, Archetype*> AddEdges;    // Add component X -> go to archetype Y
@@ -106,11 +102,12 @@ public:
 	struct FieldKey
 	{
 		ComponentTypeID componentID;
+		uint8_t temporalFieldIndex;
 		uint32_t fieldIndex;
 
 		bool operator==(const FieldKey& other) const
 		{
-			return componentID == other.componentID && fieldIndex == other.fieldIndex;
+			return componentID == other.componentID && temporalFieldIndex == other.temporalFieldIndex && fieldIndex == other.fieldIndex;
 		}
 	};
 
@@ -118,12 +115,23 @@ public:
 	{
 		size_t operator()(const FieldKey& key) const
 		{
-			return (static_cast<size_t>(key.componentID) << 32) | key.fieldIndex;
+			return (static_cast<size_t>(key.componentID) << 32) | (static_cast<size_t>(key.temporalFieldIndex) << 16) | key.fieldIndex;
 		}
 	};
 
 	// Storage for field array offsets
 	std::unordered_map<FieldKey, size_t, FieldKeyHash> FieldOffsets;
+
+	// Per-SoA-field info used by BuildFieldArrayTable and GetTemporalFieldWritePtr.
+	struct TemporalFieldInfo
+	{
+		uint8_t SlotIndex;   // Index into chunk header temporal pointer array
+		uint32_t FrameCount; // Number of frames in this field's slab ring
+		size_t FrameStride;  // Bytes from frame N base to frame N+1 base
+	};
+
+	// Key: (ComponentTypeID, fieldIndex) → TemporalFieldInfo
+	std::unordered_map<FieldKey, TemporalFieldInfo, FieldKeyHash> TemporalFieldIndices;
 
 	// CACHED FIELD ARRAY TABLE - computed once after BuildLayout()
 	// This stores the field array count and layout order
@@ -131,6 +139,10 @@ public:
 	{
 		ComponentTypeID componentID;
 		uint32_t fieldIndex;
+		uint8_t SlotIndex;
+		size_t FieldFrames;
+		size_t FrameStride;
+		size_t Size;
 		bool isDecomposed;
 	};
 
@@ -149,27 +161,18 @@ public:
 
 	size_t TotalChunkDataSize = 0;
 
-	// Track which fields are temporal with array index mapping
-	// Key: (ComponentTypeID, fieldIndex) → chunk header array index
-	std::unordered_map<FieldKey, uint8_t, FieldKeyHash> TemporalFieldIndices;
-
-	// Temporal cache pointer (needed during chunk allocation)
-	class TemporalComponentCache* TemporalCache = nullptr;
-
-	// Cached frame stride (0 if no temporal fields)
-	size_t TemporalFrameStride = 0;
-
 	// Get pointer to a specific field array within a chunk (always returns frame 0 for temporal)
 	void* GetFieldArray(Chunk* chunk, ComponentTypeID typeID, uint32_t fieldIndex)
 	{
-		FieldKey key{typeID, fieldIndex};
+		ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
+		FieldKey key{typeID, CFR.GetCacheSlotIndex(typeID), fieldIndex};
 
 		// Check if this is a temporal field
 		auto temporalIt = TemporalFieldIndices.find(key);
 		if (temporalIt != TemporalFieldIndices.end())
 		{
 			// Return frame 0 pointer from chunk header
-			return chunk->GetTemporalFieldPointer(temporalIt->second);
+			return chunk->GetTemporalFieldPointer(temporalIt->second.SlotIndex);
 		}
 
 		// Regular chunk field
@@ -180,52 +183,47 @@ public:
 	}
 
 	/// Return the write-frame pointer for any single temporal field within a chunk.
-    /// writeFrameIdx must already be the modular frame index (0..TemporalFrameCount-1),
-    /// exactly as passed to BuildFieldArrayTable.  Returns nullptr if the field is not
-    /// temporal or the component isn't in this archetype.
+	/// absoluteFrame is the raw monotonic frame counter; the modular write index is
+	/// computed internally from the field's FrameCount.  Returns nullptr if the field
+	/// is not SoA or the component isn't in this archetype.
 	int32_t* GetTemporalFieldWritePtr(Chunk* chunk, ComponentTypeID compType,
-									  uint32_t fieldIdx, uint32_t writeFrameIdx) const
+									  uint32_t fieldIdx, uint32_t absoluteFrame) const
 	{
-		FieldKey key{compType, fieldIdx};
+		ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
+		FieldKey key{compType, CFR.GetCacheSlotIndex(compType), fieldIdx};
 		auto it = TemporalFieldIndices.find(key);
 		if (it == TemporalFieldIndices.end()) return nullptr;
-		auto* frame0Ptr = static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(it->second));
-		return reinterpret_cast<int32_t*>(frame0Ptr + static_cast<size_t>(writeFrameIdx) * TemporalFrameStride);
+		const TemporalFieldInfo& info = it->second;
+		auto* frame0Ptr               = static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(info.SlotIndex));
+		uint32_t writeIdx             = (absoluteFrame + 1) % info.FrameCount;
+		return reinterpret_cast<int32_t*>(frame0Ptr + static_cast<size_t>(writeIdx) * info.FrameStride);
 	}
 
 	// Build interleaved dual field array table (read T, write T+1) for FieldProxy::Bind()
 	// Output layout: [read0, write0, read1, write1, read2, write2, ...]
-	// currentFrame: frame T (read from T, write to T+1)
-	// writeFrame: frame T+1 (with wrapping handled by caller)
-	void BuildFieldArrayTable(Chunk* chunk, void** outDualArrayTable, uint32_t currentFrame, uint32_t writeFrame)
+	// absoluteFrame: raw monotonic frame counter — each SoA field computes its own
+	// modular read/write indices from its FrameCount, so Volatile (5-frame) and
+	// Temporal (N-frame) fields in the same archetype work correctly.
+	void BuildFieldDualArrayTable(Chunk* chunk, void** outDualArrayTable, uint32_t absoluteFrame) const
 	{
 		auto chunkBase = chunk->Data;
-
-		size_t frameOffset_T  = currentFrame * TemporalFrameStride;
-		size_t frameOffset_T1 = writeFrame * TemporalFrameStride;
 
 		size_t size = CachedFieldArrayLayout.size();
 		for (size_t i = 0; i < size; ++i)
 		{
 			const auto& desc = CachedFieldArrayLayout[i];
-			FieldKey key{desc.componentID, desc.fieldIndex};
-
-			// Check if this is a temporal field
-			auto temporalIt = TemporalFieldIndices.find(key);
-			if (temporalIt != TemporalFieldIndices.end())
+			if (desc.isDecomposed)
 			{
-				// Get frame 0 pointer from chunk header
-				uint8_t* frame0Ptr = static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(temporalIt->second));
-				uint8_t* f1Ptr     = frame0Ptr + frameOffset_T;
-				uint8_t* f2Ptr     = frame0Ptr + frameOffset_T1;
+				uint8_t* frame0Ptr = static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(desc.fieldIndex));
+				uint32_t readIdx   = absoluteFrame % desc.FieldFrames;
+				uint32_t writeIdx  = (absoluteFrame + 1) % desc.FieldFrames;
 
-				// Interleave read T and write T+1 pointers
-				outDualArrayTable[i * 2]     = f1Ptr; // Read from T
-				outDualArrayTable[i * 2 + 1] = f2Ptr; // Write to T+1
+				outDualArrayTable[i * 2]     = frame0Ptr + readIdx * desc.FrameStride;  // Read T
+				outDualArrayTable[i * 2 + 1] = frame0Ptr + writeIdx * desc.FrameStride; // Write T+1
 			}
 			else
 			{
-				// Regular chunk field - same pointer for read and write
+				// Cold chunk field — read and write are the same pointer
 				void* ptr                    = chunkBase + FieldArrayTemplateCache[i].offsetInChunk;
 				outDualArrayTable[i * 2]     = ptr;
 				outDualArrayTable[i * 2 + 1] = ptr;
@@ -233,8 +231,7 @@ public:
 		}
 	}
 
-	// LEGACY: Build field array table with map lookups (slower, for debugging)
-	void BuildFieldArrayTableSlow(Chunk* chunk, void** outFieldArrayTable)
+	void BuildFieldArrayTable(Chunk* chunk, void** outFieldArrayTable, uint32_t absoluteFrame) const
 	{
 		for (size_t i = 0; i < CachedFieldArrayLayout.size(); ++i)
 		{
@@ -243,12 +240,13 @@ public:
 			if (desc.isDecomposed)
 			{
 				// Decomposed component - get specific field array
-				outFieldArrayTable[i] = GetFieldArray(chunk, desc.componentID, desc.fieldIndex);
+				size_t frameIdx       = (absoluteFrame % desc.FieldFrames) * desc.FrameStride;
+				outFieldArrayTable[i] = static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(desc.SlotIndex)) + frameIdx;
 			}
 			else
 			{
 				// Non-decomposed component - get whole component array
-				outFieldArrayTable[i] = GetComponentArrayRaw(chunk, desc.componentID);
+				outFieldArrayTable[i] = chunk->Data + FieldArrayTemplateCache[i].offsetInChunk;
 			}
 		}
 	}
@@ -298,7 +296,18 @@ public:
 	}
 
 private:
-	// Allocate a new chunk
+	friend class Registry;
+
+	class Registry* Reg = nullptr;
+
+	// Entity slot allocation / removal — only Registry drives these.
+	void PushEntities(std::vector<EntitySlot>& outSlots, size_t count = 1);
+	void RemoveEntity(size_t ChunkIndex, uint32_t LocalIndex, uint32_t ArchetypeIdx);
+
+	// Layout construction — called once by Registry after component metadata is known.
+	void BuildLayout(class Registry* reg, const std::vector<ComponentMetaEx>& Components);
+
+	// Chunk allocation
 	Chunk* AllocateChunk();
 };
 

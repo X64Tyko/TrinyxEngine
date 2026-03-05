@@ -115,7 +115,8 @@ private:
 
 	// Per-frame sync + command buffers (populated in CreateFrameSync).
 	FrameSync Frames[kMaxFramesInFlight];
-	uint32_t CurrentFrame = 0;
+	uint32_t CurrentFrame   = 0;
+	uint64_t LastLogicFrame = 0;
 
 	// One render-finished semaphore per swapchain image (populated in CreateFrameSync).
 	// Indexed by imageIndex so the presentation engine never reuses a semaphore

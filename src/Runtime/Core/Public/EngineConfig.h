@@ -1,7 +1,10 @@
 ﻿#pragma once
+#include <algorithm>
 
 struct EngineConfig
 {
+	// Load from an INI file; writes defaults and returns them if the file does not exist.
+	static EngineConfig LoadFromFile(const char* path);
 	// Variadic Update, let the Logic thread run uncapped or limit its updates, cannot be lower than Fixed update if capped.
 	int TargetFPS = 0; // 0 = Uncapped
 

@@ -87,6 +87,7 @@
 #define TNX_ZONE()
 #define TNX_ZONE_N(name)
 #define TNX_ZONE_C(color)
+#define TNX_ZONE_NC(name, color)
 #define TNX_ZONE_COARSE()
 #define TNX_ZONE_COARSE_N(name)
 #define TNX_ZONE_COARSE_C(color)

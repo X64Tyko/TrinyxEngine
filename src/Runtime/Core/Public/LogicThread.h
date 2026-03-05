@@ -51,9 +51,9 @@ private:
 	void WaitForTiming(uint64_t frameStart, uint64_t perfFrequency);
 
 	// References (non-owning)
-	Registry* RegistryPtr                 = nullptr;
-	const EngineConfig* ConfigPtr         = nullptr;
-	TemporalComponentCache* TemporalCache = nullptr;
+	Registry* RegistryPtr                   = nullptr;
+	const EngineConfig* ConfigPtr           = nullptr;
+	class ComponentCacheBase* TemporalCache = nullptr;
 
 	// Input (future)
 	InputState* CurrentInput = nullptr;

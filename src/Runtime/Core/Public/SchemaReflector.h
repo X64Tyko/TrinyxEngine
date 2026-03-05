@@ -79,13 +79,16 @@ static void RegisterFieldsImpl(std::index_sequence<Is...>)
 	(..., fieldMetas.push_back(ExtractFieldMeta<Derived, Is>(std::get < Is > (fields))));
 
 	// Register with global registry
-	ComponentTypeID typeID = GetComponentTypeID<Derived>();
-	bool bIsTemporal       = false;
-	if constexpr (requires { Derived::bTemporalComp; })
+	ComponentTypeID typeID = Derived::StaticTypeID();
+	CacheTier Tier         = CacheTier::None;
+	if constexpr (requires { Derived::TemporalTier; })
 	{
-		bIsTemporal = Derived::bTemporalComp;
+		Tier = Derived::TemporalTier;
+#ifndef TNX_ENABLE_ROLLBACK
+		if (Tier == CacheTier::Temporal) Tier = CacheTier::Volatile;
+#endif
 	}
-	ComponentFieldRegistry::Get().RegisterFields(typeID, std::move(fieldMetas), bIsTemporal);
+	ComponentFieldRegistry::Get().RegisterFields(typeID, std::move(fieldMetas), Tier, Derived::StaticTemporalIndex());
 }
 
 // Extract metadata from a member pointer
@@ -267,7 +270,7 @@ FORCE_INLINE void ForEachField(Func&& func)
 
 #define TNX_BIND_FINAL(ComponentType, Member, ...) Member.MaskFinal(count);
 
-#define TNX_BIND_BIND(ComponentType, Member, ...) Member.Bind(arrays[arrayIndex], arrays[arrayIndex + 1], startIndex, count); arrayIndex += 2;
+#define TNX_BIND_BIND(ComponentType, Member, ...) Member.Bind(arrays[arrayIndex], startIndex, count); arrayIndex += 1;
 
 // Handles creating the field definition, debug field names, Bind function, and Registering the struct component
 #define TNX_REGISTER_FIELDS(ComponentType, ...) \
@@ -290,6 +293,7 @@ FORCE_INLINE void ForEachField(Func&& func)
         int32_t arrayIndex = 0; \
         __VA_OPT__(TNX_MAPF_LIST(TNX_BIND_BIND, ComponentType, __VA_ARGS__)) \
     }
+
 #define TNX_REGISTER_COMPONENT(ComponentType) \
     namespace { \
         struct _##ComponentType##_Registrar { \
@@ -299,6 +303,11 @@ FORCE_INLINE void ForEachField(Func&& func)
         }; \
         [[maybe_unused]] TNX_USED_ATTR static _##ComponentType##_Registrar _##ComponentType##_FieldsRegistered; \
     }
+
 #define TNX_TEMPORAL_FIELDS(ComponentType, ...) \
-    static inline bool bTemporalComp = true; \
+    static inline CacheTier TemporalTier = CacheTier::Temporal; \
+    TNX_REGISTER_FIELDS(ComponentType, __VA_ARGS__)
+
+#define TNX_VOLATILE_FIELDS(ComponentType, ...) \
+    static inline CacheTier TemporalTier = CacheTier::Volatile; \
     TNX_REGISTER_FIELDS(ComponentType, __VA_ARGS__)

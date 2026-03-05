@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <bitset>
 #include <cstdint>
 #include <functional>
@@ -26,6 +27,18 @@ enum class FieldWidth : uint8_t
 	Scalar,
 	Wide,
 	WideMask
+};
+
+// Identifies which SoA ring buffer tier an entity's fields live in.
+// uint8_t backing for forward-compatibility (Static, Cold tiers planned).
+enum class CacheTier : uint8_t
+{
+	None      = 0,
+	Volatile  = 1, // 5-frame ring buffer — cosmetic entities, no rollback
+	Temporal  = 2, // N-frame ring buffer — simulation-authoritative, rollback-capable
+	Universal = 3, // N-frame ring buffer - Grows as needed and contains components all entities share
+
+	MAX
 };
 
 template <template <FieldWidth> class Derived, FieldWidth WIDTH = FieldWidth::Scalar>
@@ -94,9 +107,6 @@ struct Matrix4
 	Matrix4 operator*(const Matrix4& o) const { return Multiply(*this, o); }
 };
 
-// 16KB Chunks fits perfectly in L1/L2 cache lines
-constexpr uint32_t CHUNK_SIZE = 64 * 1024;
-
 // Component type ID - numeric identifier for each component type (0-255)
 using ComponentTypeID = uint32_t;
 
@@ -106,24 +116,20 @@ static constexpr size_t MAX_TEMPORAL_FIELDS_PER_COMPONENT = 64;                 
 static constexpr size_t MAX_FIELD_ARRAYS                  = MAX_COMPONENTS * MAX_TEMPORAL_FIELDS_PER_COMPONENT; // Max total field arrays across all components
 // Upper bound on field arrays for any single archetype (temporal + non-temporal).
 // Chunk::MAX_TEMPORAL_FIELDS caps temporal fields at 64; this adds headroom for non-temporal.
-static constexpr size_t MAX_FIELDS_PER_ARCHETYPE = 256;
+static constexpr size_t MAX_FIELDS_PER_ARCHETYPE = 64;
 using ComponentSignature                         = std::bitset<MAX_COMPONENTS>;
 using ClassID                                    = uint16_t;
+static constexpr size_t MAX_CLASS_COUNT          = 4096; // based on size of TypeID in Entity header hardcoded for testing
 
-// Global counter (hidden in cpp)
+// roughly 32 entities per chunk if they have 64 fields of 4bytes each all in chunk storage.
+constexpr uint32_t CHUNK_SIZE = 256 * MAX_FIELDS_PER_ARCHETYPE * 4;
+
+// Global counters (defined in TrinyxEngine.cpp)
 namespace Internal
 {
 	extern uint32_t g_GlobalComponentCounter;
-}
 
-template <typename T>
-ComponentTypeID GetComponentTypeID()
-{
-	// THIS LINE RUNS ONCE PER TYPE (T)
-	// The first time you call GetTypeID<Transform>(), it grabs a number.
-	// Every subsequent time, it skips this and just returns 'id'.
-	static ComponentTypeID id = Internal::g_GlobalComponentCounter++;
-	return id;
+	extern std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> g_TemporalComponentCounter;
 }
 
 // EntityID - 64-bit smart handle with embedded metadata

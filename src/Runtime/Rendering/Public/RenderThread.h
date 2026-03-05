@@ -92,10 +92,10 @@ private:
 	void CreateRenderPipeline();
 
 	// References (non-owning)
-	Registry* RegistryPtr                       = nullptr; // For accessing temporal cache
-	LogicThread* LogicPtr                       = nullptr; // For frame number access
-	const EngineConfig* ConfigPtr               = nullptr;
-	class TemporalComponentCache* TemporalCache = nullptr;
+	Registry* RegistryPtr                   = nullptr; // For accessing temporal cache
+	LogicThread* LogicPtr                   = nullptr; // For frame number access
+	const EngineConfig* ConfigPtr           = nullptr;
+	class ComponentCacheBase* TemporalCache = nullptr;
 
 	size_t InterpBufferCapacity = 0;
 	size_t InterpBufferCount    = 0; // Actual number of entities interpolated

@@ -53,7 +53,6 @@ public:
 	FORCE_INLINE void ScalarUpdate([[maybe_unused]] double dt)
 	{
 		color.R = (color.R + (static_cast<float>(dt) * 0.5f) > 1.f) ? 0.f : color.R + (static_cast<float>(dt) * 0.5f);
-		color.G = (color.G + (static_cast<float>(dt) * 0.3f) > 1.f) ? 0.f : color.G + (static_cast<float>(dt) * 0.3f);
-		color.B = (color.B + static_cast<float>(dt) > 1.f) ? 0.f : color.B + static_cast<float>(dt);
+		color.B = ((color.B + static_cast<float>(dt)) > 1.f) ? 0.f : color.B + static_cast<float>(dt);
 	}
 };

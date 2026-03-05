@@ -1,5 +1,6 @@
 #pragma once
 #include <vector>
+#include "MemoryDefines.h"
 #include "Types.h"
 
 // Field metadata for SoA decomposition
@@ -20,7 +21,9 @@ struct ComponentMetaEx
 	size_t Alignment;              // alignof(Component)
 	size_t OffsetInChunk;          // Where this component's data starts in the chunk
 	bool IsFieldDecomposed;        // True if stored as field arrays (SoA)
-	bool IsTemporal;               // True if this component should live in TemporalComponentCache
+	CacheTier TemporalTier;        // Which slab this component lives in (None = cold/chunk only)
+	uint8_t CacheSlotIndex = 0xFF; // Per-slab slot index — set via StaticTemporalIndex() at registration.
+	// 0xFF = unassigned (cold components with TemporalTier::None).
 	std::vector<FieldMeta> Fields; // Field layout if decomposed
 };
 
@@ -37,15 +40,16 @@ public:
 	}
 
 	// Register field decomposition for a component type
-	void RegisterFields(ComponentTypeID typeID, std::vector<FieldMeta>&& fields, bool bIsTemporal)
+	void RegisterFields(ComponentTypeID typeID, std::vector<FieldMeta>&& fields, CacheTier inTier, uint8_t slot)
 	{
 		ComponentMetaEx& meta = ComponentData[typeID];
 		if (meta.Fields.size() != 0) return;
 
 		meta.TypeID            = typeID;
 		meta.IsFieldDecomposed = true;
-		meta.IsTemporal        = bIsTemporal;
+		meta.TemporalTier      = inTier;
 		meta.Fields            = std::move(fields);
+		meta.CacheSlotIndex    = slot;
 		for (const auto& field : meta.Fields) meta.Size += field.Size;
 	}
 
@@ -69,8 +73,23 @@ public:
 		return it != ComponentData.end() ? it->second.Fields.size() : 0;
 	}
 
+	[[nodiscard]] CacheTier GetTemporalTier(ComponentTypeID typeID) const
+	{
+		auto it = ComponentData.find(typeID);
+		return it != ComponentData.end() ? it->second.TemporalTier : CacheTier::None;
+	}
+
+	// Stores the slab slot index assigned by StaticTemporalIndex() at entity registration time.
+	// Idempotent — only writes if still 0xFF (unassigned).
+	void SetCacheSlotIndex(ComponentTypeID typeID, uint8_t slot)
+	{
+		ComponentMetaEx& meta = ComponentData[typeID];
+		if (meta.CacheSlotIndex == 0xFF) meta.CacheSlotIndex = slot;
+	}
+
 	const std::unordered_map<ComponentTypeID, ComponentMetaEx>& GetAllComponents() const { return ComponentData; }
 	const ComponentMetaEx& GetComponentMeta(ComponentTypeID typeID) const { return ComponentData.at(typeID); }
+	uint8_t GetCacheSlotIndex(ComponentTypeID typeID) const { return ComponentData.at(typeID).CacheSlotIndex; }
 
 private:
 	std::unordered_map<ComponentTypeID, ComponentMetaEx> ComponentData;
