@@ -19,10 +19,12 @@ struct EngineConfig
 	// This controls how fast your main thread goes, higher = better input latency
 	int InputPollHz = 1000;
 
-	// The max number of Dynamic entities in the world at one time.
-	int MaxDynamicEntities = 100000;
+	int MAX_PHYSICS_ENTITIES = 101000;
 
-	// Number of temporal frames stored in history. Min 4, must be power of 2.
+	// The max number of Dynamic entities in the world at one time.
+	int MAX_CACHED_ENTITIES = 250000;
+
+	// Number of temporal frames stored in history. Min 8, must be power of 2.
 	// At 128Hz: 128 frames = 1 second of history
 	// At 512Hz: 128 frames = 0.25 seconds of history
 	int TemporalFrameCount = 8;

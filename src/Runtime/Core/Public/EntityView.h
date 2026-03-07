@@ -57,7 +57,7 @@ public:
 		Flags.Advance(step);
 	}
 
-    FORCE_INLINE void Hydrate(void** fieldArrayTable, uint32_t index = 0, int32_t count = -1)
+    FORCE_INLINE void Hydrate(void** fieldArrayTable, uint8_t* FlagBase, uint32_t index = 0, int32_t count = -1)
 	{
 		constexpr auto schema = Derived<WIDTH>::DefineSchema();
 
@@ -73,7 +73,7 @@ public:
 					// Check if this is a FieldProxy<T>
 					if constexpr (HasDefineFields<MemberType>)
 					{
-						(static_cast<Derived<WIDTH>*>(this)->*member).Bind(&fieldArrayTable[fieldArrayBaseIndex], index, count);
+						(static_cast<Derived<WIDTH>*>(this)->*member).Bind(&fieldArrayTable[fieldArrayBaseIndex], FlagBase, index, count);
 
 						// Advance by number of fields for this component
 						constexpr size_t fieldCount = MemberType::FieldNames.size();

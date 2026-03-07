@@ -20,7 +20,19 @@ Registry::Registry(const EngineConfig* Config)
 	VolatileSlab.Initialize(Config); // Volatile: 5 frames, no rollback
 	UniversalSlab.Initialize(Config);
 	// Reserve space for entity index
-	EntityIndex.reserve(1024);
+	EntityIndex.reserve(Config->MAX_CACHED_ENTITIES);
+
+	ComponentAccessBits.resize(MAX_COMPONENTS);
+	for (auto& bitplane : ComponentAccessBits)
+	{
+		bitplane.resize(Config->MAX_CACHED_ENTITIES / 64);
+	}
+	EntityDirtyBits.resize(Config->TemporalFrameCount);
+	for (auto& bitplane : EntityDirtyBits)
+	{
+		bitplane.resize(Config->MAX_CACHED_ENTITIES / 64);
+	}
+	EntityActiveBits.resize(Config->MAX_CACHED_ENTITIES / 64);
 	InitializeArchetypes();
 }
 
@@ -265,7 +277,7 @@ void Registry::InitializeArchetypes()
 			{
 				Components.push_back(CFR.GetComponentMeta(CompID));
 			}
-			NewArch->BuildLayout(this, Components);
+			NewArch->BuildLayout(this, Components, MR.ClassSystemID[Arch.first]);
 		}
 	}
 }
@@ -278,6 +290,10 @@ void Registry::PropagateFrame(uint32_t currentFrame)
 #endif
 	UniversalSlab.PropagateFrame(currentFrame, currentFrame + 1);
 	VolatileSlab.PropagateFrame(currentFrame, currentFrame + 1);
+
+	// Clear dirty bits for the frame we're about to write into next tick
+	auto& nextDirty = *DirtyBitsFrame(currentFrame + 1);
+	std::fill(nextDirty.begin(), nextDirty.end(), 0ULL);
 }
 
 void Registry::ResetRegistry()
@@ -295,6 +311,13 @@ void Registry::ResetRegistry()
 	}
 	PendingDestructions.clear();
 	NextEntityIndex = 1;
+
+
+#ifdef TNX_ENABLE_ROLLBACK
+	HistorySlab.ResetAllocators();
+#endif
+	UniversalSlab.ResetAllocators();
+	VolatileSlab.ResetAllocators();
 }
 
 uint32_t Registry::GetTotalChunkCount() const

@@ -71,19 +71,17 @@ Full history for rollback netcode, lag compensation, and replay.
 
 ---
 
-## Volatile vs Temporal Auto-Classification
+## Volatile vs Temporal Classification
 
-A single marker component selects the tier:
+The tier is determined by the component's registration macro, not by a marker on the entity:
 
-```cpp
-struct SimulationBody { /* empty marker, no fields */ };
-```
+- `TNX_TEMPORAL_FIELDS(...)` → component fields go in the **Temporal** tier (N-frame rollback ring)
+- `TNX_VOLATILE_FIELDS(...)` → component fields go in the **Volatile** tier (5-frame ring, no rollback)
 
-- Entity **has** `SimulationBody` → **Temporal** tier (full rollback ring buffer)
-- Entity **does not have** `SimulationBody` → **Volatile** tier (5-frame ring buffer, no rollback)
-
-The same component types (Transform, Velocity, etc.) can live in either tier depending on the entity.
-A wandering ambient bird and a networked player both have a Transform, but only the player is Temporal.
+An entity's effective tier is the highest tier of any of its components. An entity carrying a
+`RigidBody` (Temporal) is a Temporal entity; an entity with only `ColorData` (Volatile) is Volatile.
+Cold components (`TNX_REGISTER_FIELDS` — no tier) contribute no SoA storage and do not affect the
+entity's tier classification.
 
 ---
 
@@ -559,7 +557,6 @@ dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
 
 - [ ] **VulkRender Step 4** — read entity data from TemporalComponentCache (currently hardcoded instance SoA)
 - [ ] **Tiered storage partition layout** (Cold/Static/Volatile/Temporal with dual-ended arena layout)
-- [ ] **SimulationBody marker component** (Temporal vs Volatile auto-classification)
 - [ ] **Universal strip** (contiguous Flags array outside partition field zones)
 - [ ] `TNX_UNIVERSAL_COMPONENT` macro
 - [ ] **SystemGroup tag on TNX_TEMPORAL_FIELDS** (drives entity group auto-derivation)

@@ -38,6 +38,11 @@ template <FieldWidth WIDTH = FieldWidth::Scalar>
 class CubeEntity : public BaseCube<CubeEntity, WIDTH>
 {
 	TNX_REGISTER_SCHEMA(CubeEntity, BaseCube)
+
+	// Logic
+	FORCE_INLINE void PostPhysics([[maybe_unused]] double dt)
+	{
+	}
 };
 
 template <FieldWidth WIDTH = FieldWidth::Scalar>

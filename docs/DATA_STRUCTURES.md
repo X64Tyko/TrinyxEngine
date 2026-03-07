@@ -172,13 +172,10 @@ level via a template parameter on `EntityView`. A data-heavy `Projectile` might 
 chunks for maximum SIMD throughput; a complex `Player` might request 4-entity chunks to eliminate
 padding waste. Currently the engine uses a fixed 64 KB chunk size.
 
-To opt into full rollback (Temporal tier vs Volatile tier), add `SimulationBody`:
-
 ```cpp
-struct SimulationBody { /* empty marker, no fields */ };
-
-// CubeEntity with SimulationBody → Temporal tier (N-frame rollback ring)
-// CubeEntity without SimulationBody → Volatile tier (5-frame ring, no rollback)
+// RigidBody uses TNX_TEMPORAL_FIELDS → entity is Temporal (N-frame rollback ring)
+// ColorData uses TNX_VOLATILE_FIELDS → entity is Volatile if it has no Temporal components
+// Cold components (TNX_REGISTER_FIELDS) contribute no SoA storage and do not affect tier
 ```
 
 ### Inheritance Pattern

@@ -8,7 +8,7 @@
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct ColorData : ComponentView<ColorData, WIDTH>
 {
-	TNX_VOLATILE_FIELDS(ColorData, R, G, B, A)
+	TNX_VOLATILE_FIELDS(ColorData, Render, R, G, B, A)
 
 	FloatProxy<WIDTH> R;
 	FloatProxy<WIDTH> G;

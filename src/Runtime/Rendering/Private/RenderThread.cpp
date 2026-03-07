@@ -29,7 +29,7 @@ void RenderThread::Initialize(Registry* registry, LogicThread* logic, const Engi
 	EngineWindow  = window;
 
 	// Allocate interp buffer (fixed size based on config)
-	InterpBufferCapacity = config->MaxDynamicEntities;
+	InterpBufferCapacity = config->MAX_CACHED_ENTITIES;
 
 	LOG_INFO_F("[RenderThread] Initialized with interp buffer: %zu entities", InterpBufferCapacity);
 }

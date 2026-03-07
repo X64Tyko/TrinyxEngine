@@ -1,0 +1,62 @@
+#pragma once
+
+#include "Transform.h"
+#include "ColorData.h"
+#include "RigidBody.h"
+#include "Forces.h"
+#include "EntityView.h"
+#include "SchemaReflector.h"
+
+// PhysicsEntity — exercises the full pre-Jolt physics data pipeline.
+// Carries RigidBody (Temporal) and Forces (Volatile) alongside Transform.
+// PrePhysics: accumulates gravity into Forces, integrates velocity into position.
+// PostPhysics: zeroes Forces so each tick starts clean.
+// Partition: Dual (has both Physics and Render components).
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+class PhysicsEntity : public EntityView<PhysicsEntity, WIDTH>
+{
+	TNX_REGISTER_SCHEMA(PhysicsEntity, EntityView, transform, body, forces, color)
+
+public:
+	Transform<WIDTH> transform;
+	RigidBody<WIDTH> body;
+	Forces<WIDTH> forces;
+	ColorData<WIDTH> color;
+
+	static constexpr float Gravity = -9.81f;
+
+	FORCE_INLINE void PrePhysics(double dt)
+	{
+		const float fdt = static_cast<float>(dt);
+
+		// Accumulate gravity
+		forces.ForceY += body.VelY * 0.0f; // placeholder — Jolt will own this path
+		body.VelY     += Gravity * fdt;
+
+		// Integrate velocity into position
+		transform.PositionX += body.VelX * fdt;
+		transform.PositionY += body.VelY * fdt;
+		transform.PositionZ += body.VelZ * fdt;
+
+		// Simple floor bounce at Y = -50
+		body.VelY           = (transform.PositionY < -50.0f).Choose(-body.VelY * 0.7f, body.VelY);
+		transform.PositionY = (transform.PositionY < -50.0f).Choose(-50.0f, transform.PositionY);
+
+		// Tint toward red as downward velocity increases
+		const float speed = body.VelY * -0.02f;
+		color.R           = (speed > 1.0f).Choose(1.0f, speed);
+		color.G           = 1.0f - color.R;
+	}
+
+	FORCE_INLINE void PostPhysics([[maybe_unused]] double dt)
+	{
+		forces.ForceX  = 0.0f;
+		forces.ForceY  = 0.0f;
+		forces.ForceZ  = 0.0f;
+		forces.TorqueX = 0.0f;
+		forces.TorqueY = 0.0f;
+		forces.TorqueZ = 0.0f;
+	}
+};
+
+TNX_REGISTER_ENTITY(PhysicsEntity)

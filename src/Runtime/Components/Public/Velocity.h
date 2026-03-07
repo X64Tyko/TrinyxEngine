@@ -8,7 +8,7 @@
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct Velocity : ComponentView<Velocity, WIDTH>
 {
-	TNX_TEMPORAL_FIELDS(Velocity, vX, vY, vZ)
+	TNX_TEMPORAL_FIELDS(Velocity, Physics, vX, vY, vZ)
 
 	FloatProxy<WIDTH> vX;
 	FloatProxy<WIDTH> vY;

@@ -67,6 +67,32 @@ TEST (Registry_DestroyAndReuse)
 	Reg->ResetRegistry();
 }
 
+TEST(DirtyBits_SetAfterPrePhys)
+{
+	Registry* Reg = Engine.GetRegistry();
+
+	constexpr int kCount = 16; // exactly 2 dirty bytes
+	Reg->Create<CubeEntity<>>(kCount);
+
+	std::vector<Archetype*> arches = Reg->ClassQuery<CubeEntity<>>();
+	ASSERT(!arches.empty());
+	Chunk* chunk = arches[0]->Chunks[0];
+
+	size_t gsi = chunk->Header.GlobalIndexStart;
+	Reg->InvokePrePhys(1.0 / 128.0, 0);
+
+	uint8_t* dirtyBytes = reinterpret_cast<uint8_t*>(Reg->DirtyBitsFrame(0)->data()) + (gsi / 8);
+
+	LOG_INFO_F("[DirtyBits] GlobalIndexStart=%zu  byteOffset=%zu", gsi, gsi / 8);
+	for (int b = 0; b < (kCount + 7) / 8; ++b)
+		LOG_INFO_F("[DirtyBits]   byte[%d] = 0x%02X  (expected 0xFF)", b, dirtyBytes[b]);
+
+	for (int b = 0; b < (kCount + 7) / 8; ++b)
+		ASSERT_EQ((int)dirtyBytes[b], 0xFF);
+
+	Reg->ResetRegistry();
+}
+
 TEST (InitializeTestEntities)
 {
 	Registry* Reg = Engine.GetRegistry();
@@ -104,7 +130,8 @@ TEST (InitializeTestEntities)
 			// Build field array table
 			void* fieldArrayTable[MAX_FIELD_ARRAYS];
 			cubeArch->BuildFieldArrayTable(chunk, fieldArrayTable, 0);
-			Cube.Hydrate(fieldArrayTable);
+			Cube.Hydrate(fieldArrayTable, reinterpret_cast<uint8_t*>(Reg->DirtyBitsFrame(0)->data())
+						 + (chunk->Header.GlobalIndexStart / 8));
 
 			// Initialize all entities in this chunk
 			for (uint32_t i = 0; i < entityCount; ++i, Cube.Advance(1))

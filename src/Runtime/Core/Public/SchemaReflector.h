@@ -76,7 +76,7 @@ static void RegisterFieldsImpl(std::index_sequence<Is...>)
 	fieldMetas.reserve(sizeof...(Is));
 
 	// Extract field metadata for each member pointer
-	(..., fieldMetas.push_back(ExtractFieldMeta<Derived, Is>(std::get < Is > (fields))));
+	(..., fieldMetas.push_back(ExtractFieldMeta<Derived, Is>(std::get<Is>(fields))));
 
 	// Register with global registry
 	ComponentTypeID typeID = Derived::StaticTypeID();
@@ -128,11 +128,10 @@ static constexpr size_t GetFieldCount()
 template <typename Derived>
 static bool RegisterFieldsStatic()
 {
-	RegisterFieldsImpl<Derived>(std::make_index_sequence < GetFieldCount<Derived>() >
-	{
-	}
-	)
-	;
+	RegisterFieldsImpl<Derived>(std::make_index_sequence<GetFieldCount<Derived>()>
+		{
+		}
+	);
 	return true;
 }
 
@@ -162,7 +161,7 @@ FORCE_INLINE void ForEachField(Func&& func)
 	constexpr auto fields = T::DefineFields();
 	[&]<size_t... Is>(std::index_sequence<Is...>)
 	{
-		(func(std::get < Is > (fields), Is), ...);
+		(func(std::get<Is>(fields), Is), ...);
 	}(std::make_index_sequence<std::tuple_size_v<decltype(fields)>>{});
 }
 
@@ -270,7 +269,7 @@ FORCE_INLINE void ForEachField(Func&& func)
 
 #define TNX_BIND_FINAL(ComponentType, Member, ...) Member.MaskFinal(count);
 
-#define TNX_BIND_BIND(ComponentType, Member, ...) Member.Bind(arrays[arrayIndex], startIndex, count); arrayIndex += 1;
+#define TNX_BIND_BIND(ComponentType, Member, ...) Member.Bind(arrays[arrayIndex], dirtyBits, startIndex, count); arrayIndex += 1;
 
 // Handles creating the field definition, debug field names, Bind function, and Registering the struct component
 #define TNX_REGISTER_FIELDS(ComponentType, ...) \
@@ -288,7 +287,7 @@ FORCE_INLINE void ForEachField(Func&& func)
         __VA_OPT__(TNX_MAPF_LIST(TNX_BIND_ADVANCE, ComponentType, __VA_ARGS__)) \
     } \
 \
-    FORCE_INLINE void Bind(void** arrays, uint32_t startIndex = 0, int32_t count = -1) \
+    FORCE_INLINE void Bind(void** arrays, uint8_t* dirtyBits, uint32_t startIndex = 0, int32_t count = -1) \
     { \
         int32_t arrayIndex = 0; \
         __VA_OPT__(TNX_MAPF_LIST(TNX_BIND_BIND, ComponentType, __VA_ARGS__)) \
@@ -304,10 +303,12 @@ FORCE_INLINE void ForEachField(Func&& func)
         [[maybe_unused]] TNX_USED_ATTR static _##ComponentType##_Registrar _##ComponentType##_FieldsRegistered; \
     }
 
-#define TNX_TEMPORAL_FIELDS(ComponentType, ...) \
+#define TNX_TEMPORAL_FIELDS(ComponentType, SysID, ...) \
     static inline CacheTier TemporalTier = CacheTier::Temporal; \
+    static inline SystemID SystemTypeID = SystemID::SysID; \
     TNX_REGISTER_FIELDS(ComponentType, __VA_ARGS__)
 
-#define TNX_VOLATILE_FIELDS(ComponentType, ...) \
+#define TNX_VOLATILE_FIELDS(ComponentType, SysID, ...) \
     static inline CacheTier TemporalTier = CacheTier::Volatile; \
+    static inline SystemID SystemTypeID = SystemID::SysID; \
     TNX_REGISTER_FIELDS(ComponentType, __VA_ARGS__)

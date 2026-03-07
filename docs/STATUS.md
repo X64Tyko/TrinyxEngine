@@ -109,7 +109,6 @@
 
 - [ ] **Tiered storage partition layout** — Cold/Static/Volatile/Temporal with dual-ended arena layout
   (current: all temporal entities share one TemporalComponentCache, no partition isolation)
-- [ ] **SimulationBody marker component** — Temporal vs Volatile explicit opt-in
 - [ ] **Universal strip** — contiguous Flags array outside partition field zones
 - [ ] `TNX_UNIVERSAL_COMPONENT` macro
 - [ ] **Cumulative dirty bit array** — double-buffered dense bit array, lock-free Front/Back swap

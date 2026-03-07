@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "ComponentView.h"
 #include "FieldMeta.h"
 #include "Schema.h"
 
@@ -39,8 +40,8 @@ public:
 	const char* DebugName;
 
 	// Entity capacity and tracking
-	uint32_t EntitiesPerChunk = 0; // How many entities fit in one chunk
-	uint32_t TotalEntityCount = 0; // Total entities across all chunks
+	uint32_t EntitiesPerChunk = 1024; // How many entities fit in one chunk
+	uint32_t TotalEntityCount = 0;    // Total entities across all chunks
 
 	// Chunk storage
 	std::vector<Chunk*> Chunks;
@@ -300,12 +301,14 @@ private:
 
 	class Registry* Reg = nullptr;
 
+	SystemID ArchSystemID = SystemID::None;
+
 	// Entity slot allocation / removal — only Registry drives these.
 	void PushEntities(std::vector<EntitySlot>& outSlots, size_t count = 1);
 	void RemoveEntity(size_t ChunkIndex, uint32_t LocalIndex, uint32_t ArchetypeIdx);
 
 	// Layout construction — called once by Registry after component metadata is known.
-	void BuildLayout(class Registry* reg, const std::vector<ComponentMetaEx>& Components);
+	void BuildLayout(class Registry* reg, const std::vector<ComponentMetaEx>& Components, SystemID inArchSystemID = SystemID::None);
 
 	// Chunk allocation
 	Chunk* AllocateChunk();

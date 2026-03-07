@@ -41,7 +41,8 @@ set(SLANG_PATH "${CMAKE_SOURCE_DIR}/libs/slang")
 # Slang runtime API — headers + importable library target.
 # Nothing in the engine links it yet; the target exists so rendering code can
 # do: target_link_libraries(MyTarget PRIVATE Slang::Compiler)
-add_library(Slang::Compiler SHARED IMPORTED GLOBAL)
+add_library(Slang::Compiler SHARED IMPORTED GLOBAL
+        src/Runtime/Core/Public/TnxDenseMap.h)
 set_target_properties(Slang::Compiler PROPERTIES
     IMPORTED_LOCATION             "${SLANG_PATH}/lib/libslang-compiler.so"
     INTERFACE_INCLUDE_DIRECTORIES "${SLANG_PATH}/include"

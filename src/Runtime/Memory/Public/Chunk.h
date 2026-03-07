@@ -14,7 +14,7 @@ struct Chunk
 	struct ChunkHeader
 	{
 		uint8_t TemporalFieldCount = 0;                   // Number of temporal fields used
-		uint8_t _padding[7];                              // Align to 8 bytes
+		size_t GlobalIndexStart    = -1;                  // The global index for entities in this chunk -1 for no global ID.
 		void* TemporalFieldPointers[MAX_TEMPORAL_FIELDS]; // Absolute pointers to frame 0 data
 	};
 

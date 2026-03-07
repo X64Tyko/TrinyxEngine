@@ -1,6 +1,8 @@
 #include "TemporalComponentCache.h"
 
+#include <cassert>
 #include <cstring>
+#include <immintrin.h>
 #include "Archetype.h"
 #include "EngineConfig.h"
 #include "FieldMeta.h"
@@ -24,6 +26,51 @@ ComponentCacheBase::~ComponentCacheBase()
 #endif
 }
 
+size_t ComponentCacheBase::GetSystemAllocatorIndex(SystemID sysID, size_t size) const
+{
+	if (Equal(sysID, SystemID::Dual)) return MaxPhysicsBoundary - DualOffset - size;
+	if (Equal(sysID, SystemID::Render)) return MaxPhysicsBoundary + RenderOffset;
+	if (Equal(sysID, SystemID::Physics)) return PhysOffset;
+	return MaxCachedBoundary - LogicOffset - size;
+}
+
+size_t ComponentCacheBase::AdvanceSystemAllocatorIndex(SystemID sysID, size_t size)
+{
+	size_t retSize = 0;
+
+	if (Tier_ == CacheTier::None || Tier_ == CacheTier::Universal)
+	{
+		PhysOffset += size;
+		retSize    = PhysOffset;
+	}
+
+	else if (Equal(sysID, SystemID::Dual))
+	{
+		DualOffset += size;
+		retSize    = MaxPhysicsBoundary - DualOffset;
+	}
+	else if (Equal(sysID, SystemID::Render))
+	{
+		retSize      = MaxPhysicsBoundary - RenderOffset;
+		RenderOffset += size;
+	}
+	else if (Equal(sysID, SystemID::Physics))
+	{
+		retSize    = PhysOffset;
+		PhysOffset += size;
+	}
+	else
+	{
+		LogicOffset += size;
+		retSize     = MaxCachedBoundary - LogicOffset;
+	}
+
+	assert(PhysOffset + DualOffset <= MaxPhysicsBoundary);
+	assert(RenderOffset + LogicOffset <= MaxCachedBoundary);
+
+	return retSize / 4; // hardcoded 32-bit value...
+}
+
 void ComponentCacheBase::InitializeInternal(const EngineConfig* Config, uint32_t frameCount)
 {
 	ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
@@ -44,8 +91,8 @@ void ComponentCacheBase::InitializeInternal(const EngineConfig* Config, uint32_t
 
 			// Zone capacity = actual data + worst-case alignment padding.
 			// baseSize covers every possible entity; maxAlignPadding covers chunk-start alignment.
-			size_t baseSize     = static_cast<size_t>(Config->MaxDynamicEntities) * field.Size;
-			size_t maxFieldSize = baseSize * 2; // Lets just assume each allocated chunk is only used 50% full
+			size_t baseSize     = static_cast<size_t>(Config->MAX_CACHED_ENTITIES) * field.Size;
+			size_t maxFieldSize = baseSize; // No padding,
 
 			// Use flat O(1) table instead of vector
 			if (cacheSlotID < MAX_COMPONENTS && fieldIdx < MAX_TEMPORAL_FIELDS_PER_COMPONENT)
@@ -69,6 +116,9 @@ void ComponentCacheBase::InitializeInternal(const EngineConfig* Config, uint32_t
 			}
 		}
 	}
+
+	MaxCachedBoundary  = FieldAllocations[ValidFields[0]].TotalCapacity;
+	MaxPhysicsBoundary = static_cast<size_t>(FieldAllocations[ValidFields[0]].TotalCapacity * (static_cast<double>(Config->MAX_PHYSICS_ENTITIES) / Config->MAX_CACHED_ENTITIES));
 
 	const size_t HeaderSize = sizeof(TemporalFrameHeader);
 	FrameDataCapacity       = totalFrameSize;
@@ -120,7 +170,7 @@ void ComponentCacheBase::InitializeInternal(const EngineConfig* Config, uint32_t
 
 void* ComponentCacheBase::AllocateFieldArray(Archetype* owner, Chunk* chunk,
 											 ComponentTypeID compType, size_t fieldIndex,
-											 const char* fieldName, size_t entityCount, size_t fieldSize)
+											 const char* fieldName, size_t entityCount, size_t fieldSize, SystemID EntitySystemID)
 {
 	// Direct O(1) lookup into flat table
 	if (compType >= MAX_COMPONENTS || fieldIndex >= MAX_TEMPORAL_FIELDS_PER_COMPONENT)
@@ -155,7 +205,7 @@ void* ComponentCacheBase::AllocateFieldArray(Archetype* owner, Chunk* chunk,
 	}
 
 	// Allocate from this field's zone
-	size_t offsetInFieldZone = info.CurrentUsed;
+	size_t offsetInFieldZone = GetSystemAllocatorIndex(EntitySystemID, allocSize);
 	info.CurrentUsed         += allocSize;
 
 	// Store allocation metadata for defrag
@@ -170,6 +220,21 @@ void* ComponentCacheBase::AllocateFieldArray(Archetype* owner, Chunk* chunk,
 	// Return absolute pointer to frame 0's data for this allocation
 	uint8_t* frame0Data = static_cast<uint8_t*>(SlabPtr) + sizeof(TemporalFrameHeader);
 	return frame0Data + info.OffsetInFrame + offsetInFieldZone;
+}
+
+size_t ComponentCacheBase::AdvanceAllocator(SystemID EntitySystemID, size_t entityCount, size_t fieldSize)
+{
+	// Calculate aligned size for this chunk's allocation
+	size_t allocSize = AlignSize(entityCount * fieldSize);
+	return AdvanceSystemAllocatorIndex(EntitySystemID, allocSize);
+}
+
+void ComponentCacheBase::ResetAllocators()
+{
+	PhysOffset   = 0;
+	RenderOffset = 0;
+	DualOffset   = 0;
+	LogicOffset  = 0;
 }
 
 void* ComponentCacheBase::GetFieldData(TemporalFrameHeader* header, ComponentTypeID compType,
@@ -253,15 +318,33 @@ void ComponentCacheBase::PropagateFrame(uint32_t fromFrame, uint32_t toFrame)
 	uint8_t* writeData = reinterpret_cast<uint8_t*>(GetFrameHeader(toFrame)) + sizeof(TemporalFrameHeader);
 
 	TNX_ZONE_MEDIUM_NC("Memcpy Frame", TNX_COLOR_LOGIC)
-	//std::memcpy(writeData, readData, FrameDataCapacity);
 
-	// Only copy valid data.
-	for (auto& tableID : ValidFields)
+	// Copy only live partition ranges — skips dead arena gaps entirely.
+	// NT stores bypass L3; destination frame won't be read until next tick.
+	struct Region
 	{
-		auto& info = FieldAllocations[tableID];
-		TNX_ZONE_FINE_NC("Field Copy", TNX_COLOR_LOGIC)
-		std::memcpy(writeData + info.OffsetInFrame, readData + info.OffsetInFrame, info.CurrentUsed);
-	}
+		size_t offset;
+		size_t size;
+	};
+	const Region regions[3] = {
+		{0, PhysOffset},                                              // Physics
+		{MaxPhysicsBoundary - DualOffset, DualOffset + RenderOffset}, // Dual + Render (adjacent)
+		{MaxCachedBoundary - LogicOffset, LogicOffset},               // Logic
+	};
+
+	auto NTCopy = [&](size_t off, size_t sz)
+	{
+		if (sz == 0) return;
+		const auto* src       = reinterpret_cast<const __m256i*>(readData + off);
+		auto* dst             = reinterpret_cast<__m256i*>(writeData + off);
+		const size_t chunks   = sz / 32;
+		const size_t leftover = sz % 32;
+		for (size_t i = 0; i < chunks; ++i) _mm256_stream_si256(dst + i, _mm256_loadu_si256(src + i));
+		if (leftover) std::memcpy(writeData + off + chunks * 32, readData + off + chunks * 32, leftover);
+	};
+
+	for (const auto& r : regions) NTCopy(r.offset, r.size);
+	_mm_sfence();
 }
 
 size_t ComponentCacheBase::AlignSize(size_t size)

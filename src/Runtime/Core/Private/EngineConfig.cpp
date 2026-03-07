@@ -19,7 +19,8 @@ static void WriteDefaults(const char* path, const EngineConfig& cfg)
 		<< "FixedUpdateHz=" << cfg.FixedUpdateHz << "\n"
 		<< "NetworkUpdateHz=" << cfg.NetworkUpdateHz << "\n"
 		<< "InputPollHz=" << cfg.InputPollHz << "\n"
-		<< "MaxDynamicEntities=" << cfg.MaxDynamicEntities << "\n"
+		<< "MaxPhysicsEntities=" << cfg.MAX_PHYSICS_ENTITIES << "\n"
+		<< "MaxCachedEntities=" << cfg.MAX_CACHED_ENTITIES << "\n"
 		<< "TemporalFrameCount=" << cfg.TemporalFrameCount << "\n";
 }
 
@@ -55,7 +56,8 @@ EngineConfig EngineConfig::LoadFromFile(const char* path)
 		else if (key == "FixedUpdateHz") cfg.FixedUpdateHz = std::stoi(val);
 		else if (key == "NetworkUpdateHz") cfg.NetworkUpdateHz = std::stoi(val);
 		else if (key == "InputPollHz") cfg.InputPollHz = std::stoi(val);
-		else if (key == "MaxDynamicEntities") cfg.MaxDynamicEntities = std::stoi(val);
+		else if (key == "MaxPhysicsEntities") cfg.MAX_PHYSICS_ENTITIES = std::stoi(val);
+		else if (key == "MaxCachedEntities") cfg.MAX_CACHED_ENTITIES = std::stoi(val);
 		else if (key == "TemporalFrameCount") cfg.TemporalFrameCount = std::stoi(val);
 	}
 

@@ -47,8 +47,17 @@ public:
 	template <typename... Components>
 	std::vector<Archetype*> ComponentQuery();
 
+	template <typename... Components>
+	std::vector<std::vector<uint64_t>*> ComponentBitsQuery();
+
 	template <typename... Classes>
 	std::vector<Archetype*> ClassQuery();
+
+
+	std::vector<uint64_t>* DirtyBitsFrame(uint32_t inFrame)
+	{
+		return &EntityDirtyBits[inFrame % EntityDirtyBits.size()];
+	}
 
 	// Invoke all lifecycle functions of a specific type
 	// currentFrame: frame T (read from T, write to T+1)
@@ -119,6 +128,10 @@ private:
 
 	// Next entity index to allocate (if free list is empty)
 	uint32_t NextEntityIndex = 0;
+
+	std::vector<std::vector<uint64_t>> ComponentAccessBits;
+	std::vector<std::vector<uint64_t>> EntityDirtyBits;
+	std::vector<uint64_t> EntityActiveBits;
 
 	// Archetype storage (pair<signature, classID> → archetype)
 	std::unordered_map<Archetype::ArchetypeKey, Archetype*, ArchetypeKeyHash> Archetypes;
@@ -285,6 +298,20 @@ std::vector<Archetype*> Registry::ComponentQuery()
 	return Results;
 }
 
+template <typename... Components>
+std::vector<std::vector<uint64_t>*> Registry::ComponentBitsQuery()
+{
+	std::vector<std::vector<uint64_t>*> Results(sizeof...(Components));
+	std::vector<uint32_t> ComponentIDs{Components::StaticTypeID()...};
+
+	int i = 0;
+	for (auto& ID : ComponentIDs)
+	{
+		Results[i++] = &ComponentAccessBits[ID];
+	}
+	return Results;
+}
+
 template <typename... Classes>
 std::vector<Archetype*> Registry::ClassQuery()
 {
@@ -352,7 +379,9 @@ inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
 
 			// Each field computes its own read/write indices from absoluteFrame and its FrameCount.
 			arch->BuildFieldArrayTable(chunk, FieldBufferTable, currentFrame);
-			ScalarUpdate(dt, FieldBufferTable, entityCount);
+			uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(DirtyBitsFrame(currentFrame)->data())
+				+ (chunk->Header.GlobalIndexStart / 8);
+			ScalarUpdate(dt, FieldBufferTable, chunkDirtyBits, entityCount);
 
 			static const ComponentTypeID kFlagsTypeID = TemporalFlags<>::StaticTypeID();
 			if (int32_t* flagsWrite = arch->GetTemporalFieldWritePtr(chunk, kFlagsTypeID, 0, currentFrame))
@@ -417,7 +446,9 @@ inline void Registry::InvokePrePhys(double dt, uint32_t currentFrame)
 			if (entityCount == 0) continue;
 
 			arch->BuildFieldArrayTable(chunk, FieldBufferTable, currentFrame);
-			prePhys(dt, FieldBufferTable, entityCount);
+			uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(DirtyBitsFrame(currentFrame)->data())
+				+ (chunk->Header.GlobalIndexStart / 8);
+			prePhys(dt, FieldBufferTable, chunkDirtyBits, entityCount);
 
 			static const ComponentTypeID kFlagsTypeID = TemporalFlags<>::StaticTypeID();
 			if (int32_t* flagsWrite = arch->GetTemporalFieldWritePtr(chunk, kFlagsTypeID, 0, currentFrame))
@@ -482,7 +513,9 @@ inline void Registry::InvokePostPhys(double dt, uint32_t currentFrame)
 			if (entityCount == 0) continue;
 
 			arch->BuildFieldArrayTable(chunk, FieldBufferTable, currentFrame);
-			PostPhys(dt, FieldBufferTable, entityCount);
+			uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(DirtyBitsFrame(currentFrame)->data())
+				+ (chunk->Header.GlobalIndexStart / 8);
+			PostPhys(dt, FieldBufferTable, chunkDirtyBits, entityCount);
 
 			static const ComponentTypeID kFlagsTypeID = TemporalFlags<>::StaticTypeID();
 			if (int32_t* flagsWrite = arch->GetTemporalFieldWritePtr(chunk, kFlagsTypeID, 0, currentFrame))

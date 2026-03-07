@@ -98,7 +98,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height)
 		EngineWindow = nullptr;
 		return false;
 	}
-	// using straight Vulkan is... a bit more dificult than SDL lol.
+	// using straight Vulkan is... a bit more difficult than SDL lol.
 
 	// ---- Core systems ----------------------------------------------------
 	Config      = EngineConfig::LoadFromFile("TrinyxDefaults.ini");

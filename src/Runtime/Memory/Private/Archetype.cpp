@@ -37,21 +37,12 @@ Archetype::~Archetype()
 	Chunks.clear();
 }
 
-void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& Components)
+void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& Components, SystemID inArchSystemID)
 {
 	// BuildLayout should only be called once
 	assert(TotalFieldArrayCount == 0 && "BuildLayout called multiple times on same archetype");
-	Reg = reg;
-
-	if (Components.empty())
-	{
-		// Empty archetype - set a reasonable default capacity
-		// (Useful for entities with only script component, no data components)
-		constexpr size_t ReservedHeaderSpace = Chunk::HEADER_SIZE;
-		size_t UsableSpace                   = Chunk::DATA_SIZE - ReservedHeaderSpace;
-		EntitiesPerChunk                     = static_cast<uint32_t>(UsableSpace / 64); // Assume 64 bytes per entity minimum
-		return;
-	}
+	Reg          = reg;
+	ArchSystemID = inArchSystemID;
 
 	// Calculate total stride (sum of all component sizes, excluding temporal)
 	size_t TotalStride = 0;
@@ -66,16 +57,10 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& C
 
 	// Calculate how many entities fit in a chunk
 	constexpr size_t ReservedHeaderSpace = Chunk::HEADER_SIZE;
-	size_t UsableSpace                   = Chunk::DATA_SIZE - ReservedHeaderSpace;
 
-	if (TotalStride > 0)
-	{
-		EntitiesPerChunk = static_cast<uint32_t>(UsableSpace / TotalStride);
-	}
-	else
-	{
-		EntitiesPerChunk = static_cast<uint32_t>(UsableSpace / 64); // Minimum 64 bytes per entity
-	}
+	// Per-class override: entity declares static constexpr uint32_t kEntitiesPerChunk = N.
+	// Must be applied before the layout loop so field offsets and TotalChunkDataSize use the new count.
+	if (uint32_t override_ = MetaRegistry::Get().EntityGetters[ArchClassID].EntitiesPerChunk) EntitiesPerChunk = override_;
 
 	size_t currentOffset       = ReservedHeaderSpace;
 	uint8_t temporalFieldIndex = 0; // Counter for temporal field array indices
@@ -196,7 +181,8 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& C
 		}
 	}
 
-	TotalChunkDataSize = currentOffset;
+	static constexpr size_t MinEntitySize = 64;
+	TotalChunkDataSize                    = std::max(currentOffset, MinEntitySize);
 
 	LOG_INFO_F("Archetype layout: %zu field arrays (%zu temporal), %zu bytes, %u entities/chunk",
 			   TotalFieldArrayCount, TemporalFieldIndices.size(), TotalChunkDataSize, EntitiesPerChunk);
@@ -381,7 +367,9 @@ std::vector<void*> Archetype::GetFieldArrays(Chunk* TargetChunk, ComponentTypeID
 Chunk* Archetype::AllocateChunk()
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
-	size_t newChunkSize = sizeof(Chunk) + Chunk::HEADER_SIZE;
+	// TotalChunkDataSize = HEADER_SIZE + (EntitiesPerChunk * all field strides), set in BuildLayout.
+	// This accounts for per-class kEntitiesPerChunk overrides which may exceed DATA_SIZE.
+	size_t newChunkSize = TotalChunkDataSize * EntitiesPerChunk + Chunk::HEADER_SIZE;
 #ifdef _MSC_VER
 	auto NewChunk = static_cast<Chunk*>(_aligned_malloc(newChunkSize, 64));
 #else
@@ -392,6 +380,9 @@ Chunk* Archetype::AllocateChunk()
 	// This lets you see separate pools for Archetypes
 	TNX_ALLOC_N(NewChunk, newChunkSize, DebugName);
 
+	std::unordered_set<ComponentCacheBase*> UsedCaches(3);
+	size_t largestSize = 0;
+	
 	// Allocate temporal field arrays for this chunk
 	if (!TemporalFieldIndices.empty())
 	{
@@ -401,10 +392,12 @@ Chunk* Archetype::AllocateChunk()
 			const std::vector<FieldMeta>* fields = CFR.GetFields(key.componentID);
 			const CacheTier temporalTier         = CFR.GetTemporalTier(key.componentID);
 			ComponentCacheBase* TemporalCache    = Reg->GetCache(temporalTier);
+			UsedCaches.insert(TemporalCache);
 
 			if (!fields || key.fieldIndex >= fields->size()) continue;
 
 			const FieldMeta& field = (*fields)[key.fieldIndex];
+			largestSize            = std::max(largestSize, field.Size);
 
 			void* temporalPtr = TemporalCache->AllocateFieldArray(
 				this,
@@ -413,7 +406,8 @@ Chunk* Archetype::AllocateChunk()
 				key.fieldIndex,
 				field.Name,
 				EntitiesPerChunk,
-				field.Size
+				field.Size,
+				ArchSystemID
 			);
 
 			// Store frame 0 pointer in chunk header at the assigned array index
@@ -422,6 +416,10 @@ Chunk* Archetype::AllocateChunk()
 
 		LOG_TRACE_F("Allocated %zu temporal field arrays for chunk", TemporalFieldIndices.size());
 	}
+
+	for (auto& cache : UsedCaches) NewChunk->Header.GlobalIndexStart = cache->AdvanceAllocator(ArchSystemID, EntitiesPerChunk, largestSize);
+
+	LOG_INFO_F("Allocated chunk with %i entities at global index %li", EntitiesPerChunk, NewChunk->Header.GlobalIndexStart);
 
 	// Debug: Track virtual memory fragmentation
 	// This helps answer: "Why is 'spanned' so much larger than 'used'?"

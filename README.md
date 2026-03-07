@@ -68,7 +68,6 @@ Entity data lives in one of four storage tiers based on access pattern and rollb
 | Volatile | SoA ring buffer | 5 | No | Cosmetic entities, ambient AI, particles |
 | Temporal | SoA ring buffer | max(8, X) | Yes | Networked, simulation-authoritative entities |
 
-Entities are automatically classified into **Temporal** (has `SimulationBody` component) or **Volatile** (does not).
 Within each tier, entities are placed into one of two fixed-size **arenas** using a dual-ended allocator:
 
 - **Arena 1 (Physics)** `[0..MaxPhysicsEntities)` — PHYS bucket grows right, DUAL bucket grows left. The physics solver

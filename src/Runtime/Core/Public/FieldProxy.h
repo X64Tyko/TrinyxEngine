@@ -174,13 +174,30 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	using Traits  = SIMDTraits<FieldType, WIDTH>;
 	using VecMask = FieldMask<FieldType, typename Traits::VecType, WIDTH>;
 
-	FieldType* __restrict WriteArray = nullptr; // Current frame — pre-frame memcpy seeds old state before any updates run
+	FieldType* __restrict WriteArray = nullptr;
+	uint8_t* __restrict DirtyBits    = nullptr; // - Current frame Dirty bit plane
 	uint32_t index;
+	uint8_t dirtyVal = 1 << 7;
 
 	explicit operator typename Traits::VecType() const
 	{
 		if constexpr (WIDTH == FieldWidth::Scalar) return WriteArray[index];
 		else return Traits::load(&WriteArray[index]);
+	}
+
+	// Bind: point at the write frame (pre-frame memcpy already seeded old state into it)
+	FORCE_INLINE void Bind(void* writeArray, void* dirtyBits, uint32_t startIndex = 0, int32_t startCount = -1)
+	{
+		WriteArray = (FieldType*)writeArray;
+		DirtyBits  = (uint8_t*)dirtyBits;
+		index      = startIndex;
+
+		if constexpr (WIDTH != FieldWidth::Scalar)
+		{
+			const __m256i count_vec = _mm256_set1_epi32(startCount);
+			this->mask              = _mm256_cmpgt_epi32(count_vec, FieldProxyConsts::element_indices);
+			dirtyVal                = startCount < 0 ? 0xFF : static_cast<uint8_t>(~(1U) << (7 - startCount));
+		}
 	}
 
 	template <ProxyType<FieldType, typename Traits::VecType> T>
@@ -191,6 +208,7 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		else if constexpr (std::is_same_v<T, std::remove_cvref_t<FieldType>>) cmp = Traits::set1(threshold);
 		else cmp                                                                  = threshold;
 
+		*DirtyBits |= dirtyVal;
 		// Compare current SIMD lane (this->data) with threshold
 		return Traits::GT(Traits::load(&WriteArray[index]), cmp);
 	}
@@ -203,6 +221,7 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		else if constexpr (std::is_same_v<T, std::remove_cvref_t<FieldType>>) cmp = Traits::set1(threshold);
 		else cmp                                                                  = threshold;
 
+		*DirtyBits |= dirtyVal;
 		// Compare current SIMD lane (this->data) with threshold
 		return Traits::LT(Traits::load(&WriteArray[index]), cmp);
 	}
@@ -223,6 +242,8 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 
 			Traits::store(&WriteArray[index], this->mask, VecVal);
 		}
+
+		*DirtyBits |= dirtyVal;
 		return *this;
 	}
 
@@ -242,6 +263,8 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 
 			Traits::store(&WriteArray[index], this->mask, Traits::add(Traits::load(&WriteArray[index]), VecVal));
 		}
+
+		*DirtyBits |= dirtyVal;
 		return *this;
 	}
 
@@ -261,6 +284,8 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 
 			Traits::store(&WriteArray[index], this->mask, Traits::sub(Traits::load(&WriteArray[index]), VecVal));
 		}
+
+		*DirtyBits |= dirtyVal;
 		return *this;
 	}
 
@@ -280,6 +305,8 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 
 			Traits::store(&WriteArray[index], this->mask, Traits::mul(Traits::load(&WriteArray[index]), VecVal));
 		}
+		
+		*DirtyBits |= dirtyVal;
 		return *this;
 	}
 
@@ -299,26 +326,25 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 
 			Traits::store(&WriteArray[index], this->mask, Traits::div(Traits::load(&WriteArray[index]), VecVal));
 		}
+		
+		*DirtyBits |= dirtyVal;
 		return *this;
-	}
-
-	// Bind: point at the write frame (pre-frame memcpy already seeded old state into it)
-	FORCE_INLINE void Bind(void* writeArray, uint32_t startIndex = 0, int32_t startCount = -1)
-	{
-		WriteArray = (FieldType*)writeArray;
-		index      = startIndex;
-
-		if constexpr (WIDTH != FieldWidth::Scalar)
-		{
-			const __m256i count_vec = _mm256_set1_epi32(startCount);
-			this->mask              = _mm256_cmpgt_epi32(count_vec, FieldProxyConsts::element_indices);
-		}
 	}
 
 	// Advance: move index forward — no copy needed, pre-frame memcpy already propagated old state
 	FORCE_INLINE void Advance(uint32_t step)
 	{
 		index += step;
+
+		if constexpr (WIDTH != FieldWidth::Scalar)
+		{
+			++DirtyBits;
+		}
+		else
+		{
+			DirtyBits += (dirtyVal == 0x01);
+			dirtyVal  = static_cast<uint8_t>((dirtyVal >> 1) | (dirtyVal << 7));
+		}
 	}
 
 	// FRIEND OPERATORS

@@ -9,6 +9,7 @@
 #include "Types.h"
 
 
+enum class SystemID : uint8_t;
 // Helper concept to detect if T has a specific method
 template <typename T> concept HasOnCreate = requires(T t) { t.OnCreate(); };
 template <typename T> concept HasOnDestroy = requires(T t) { t.OnDestroy(); };
@@ -21,7 +22,7 @@ template <typename T> concept HasOnCollide = requires(T t) { t.OnCollide(); };
 template <typename T> concept HasDefineSchema = requires(T t) { t.DefineSchema(); };
 template <typename T> concept HasDefineFields = requires(T t) { t.DefineFields(); };
 
-using UpdateFunc = void(*)(double, void**, uint32_t);
+using UpdateFunc = void(*)(double, void**, uint8_t*, uint32_t);
 
 #define REGISTER_ENTITY_PREPHYS(Type, ClassID) \
     case ClassID: InvokePrePhysicsImpl<Type>(dt, fieldArrayTable, componentCount); break;
@@ -33,6 +34,8 @@ struct EntityMeta
 	UpdateFunc PrePhys      = nullptr;
 	UpdateFunc PostPhys     = nullptr;
 	UpdateFunc ScalarUpdate = nullptr;
+
+	uint32_t EntitiesPerChunk = 0; // 0 = auto-compute from chunk size
 
 	EntityMeta()
 	{
@@ -51,19 +54,20 @@ struct EntityMeta
 		, PrePhys(rhs.PrePhys)
 		, PostPhys(rhs.PostPhys)
 		, ScalarUpdate(rhs.ScalarUpdate)
+		, EntitiesPerChunk(rhs.EntitiesPerChunk)
 	{
 	}
 };
 
 template <typename T>
-FORCE_INLINE void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, uint32_t componentCount)
+FORCE_INLINE void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, uint8_t* FlagBase, uint32_t componentCount)
 {
 	alignas(32) typename T::WideType viewBatch;
 
 	constexpr uint32_t SIMD_BATCH = 8;
 	const uint32_t batchCount     = componentCount / SIMD_BATCH;
 
-	viewBatch.Hydrate(fieldArrayTable);
+	viewBatch.Hydrate(fieldArrayTable, FlagBase);
 
 	// Process batches
 	for (uint32_t i = 0; i < batchCount; i++)
@@ -75,17 +79,17 @@ FORCE_INLINE void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, uint32
 	// perform the last batch with a mask.
 	alignas(32) typename T::MaskedType tailBatch;
 	// Handle the tail with a mask
-	tailBatch.Hydrate(fieldArrayTable, SIMD_BATCH * batchCount, componentCount % SIMD_BATCH);
+	tailBatch.Hydrate(fieldArrayTable, FlagBase, SIMD_BATCH * batchCount, componentCount % SIMD_BATCH);
 	tailBatch.PrePhysics(dt);
 }
 
 template <typename T>
-FORCE_INLINE void InvokeScalarUpdateImpl(double dt, void** fieldArrayTable, uint32_t componentCount)
+FORCE_INLINE void InvokeScalarUpdateImpl(double dt, void** fieldArrayTable, uint8_t* FlagBase, uint32_t componentCount)
 {
 	// Use Scalar for the update, this is where users can cross-reference entities and do non-SIMD things.
 	alignas(32) T viewBatch;
 
-	viewBatch.Hydrate(fieldArrayTable);
+	viewBatch.Hydrate(fieldArrayTable, FlagBase);
 
 	// Process batches
 	for (uint32_t i = 0; i < componentCount; i++)
@@ -96,14 +100,14 @@ FORCE_INLINE void InvokeScalarUpdateImpl(double dt, void** fieldArrayTable, uint
 }
 
 template <typename T>
-FORCE_INLINE void InvokePostPhysicsImpl(double dt, void** fieldArrayTable, uint32_t componentCount)
+FORCE_INLINE void InvokePostPhysicsImpl(double dt, void** fieldArrayTable, uint8_t* FlagBase, uint32_t componentCount)
 {
 	alignas(32) typename T::WideType viewBatch;
 
 	constexpr uint32_t SIMD_BATCH = 8;
 	const uint32_t batchCount     = componentCount / SIMD_BATCH;
 
-	viewBatch.Hydrate(fieldArrayTable);
+	viewBatch.Hydrate(fieldArrayTable, FlagBase);
 
 	// Process batches
 	for (uint32_t i = 0; i < batchCount; i++)
@@ -116,7 +120,7 @@ FORCE_INLINE void InvokePostPhysicsImpl(double dt, void** fieldArrayTable, uint3
 	// perform the last batch with a mask.
 	alignas(32) typename T::MaskedType tailBatch;
 	// Handle the tail with a mask
-	tailBatch.Hydrate(fieldArrayTable, SIMD_BATCH * batchCount, componentCount % SIMD_BATCH);
+	tailBatch.Hydrate(fieldArrayTable, FlagBase, SIMD_BATCH * batchCount, componentCount % SIMD_BATCH);
 	tailBatch.PostPhysics(dt);
 }
 
@@ -132,6 +136,7 @@ public:
 	std::unordered_map<ClassID, ComponentSignature> ClassToArchetype;
 	std::unordered_map<ClassID, std::vector<ComponentTypeID>> ClassToComponentList;
 	std::unordered_map<Signature, std::vector<ClassID>> ArchetypeToClass;
+	std::unordered_map<ClassID, SystemID> ClassSystemID;
 	EntityMeta EntityGetters[4096];
 
 	template <typename T>
@@ -157,6 +162,11 @@ public:
 			// Then in RegisterEntity:
 			EntityGetters[ID].PostPhys = InvokePostPhysicsImpl<T>;
 		}
+
+		if constexpr (requires { T::kEntitiesPerChunk; })
+		{
+			EntityGetters[ID].EntitiesPerChunk = T::kEntitiesPerChunk;
+		}
 	}
 
 	template <typename C, typename T>
@@ -173,6 +183,7 @@ public:
 		}
 
 		ClassToComponentList[ID].push_back(TypeID);
+		if constexpr (requires { T::SystemTypeID; }) ClassSystemID[ID] = ClassSystemID[ID] | T::SystemTypeID;
 
 		// Store the per-slab slot index derived from StaticTemporalIndex().
 		// StaticTemporalIndex() caches its result, so this is safe to call here even though

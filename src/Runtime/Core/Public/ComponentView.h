@@ -1,6 +1,22 @@
 #pragma once
 #include "FieldProxy.h"
 
+// Identifies which engine systems access a component's data each frame.
+//   Physics only          → Phys partition   (Arena 1, grows right from 0)
+//   Render only           → Render partition  (Arena 2, grows right from MAX_PHYSICS)
+//   Physics | Render      → Dual partition    (Arena 1, grows left from MAX_PHYSICS)
+//   Logic | None          → Logic partition   (Arena 2, grows left from MAX_CACHED)
+enum class SystemID : uint8_t
+{
+	None    = 0,      // Partition-agnostic — doesn't influence group derivation (e.g. Transform)
+	Physics = 1 << 0, // Physics solver reads/writes this component (e.g. RigidBody, Forces)
+	Render  = 1 << 1, // Render thread reads this component for GPU upload (e.g. ColorData, MeshRef)
+	Logic   = 1 << 2, // Logic-only access, no physics or render (e.g. Stats, AI state)
+
+	Dual = Physics | Render, // Convenience: entity participates in both physics and render passes
+	All  = Physics | Render | Logic,
+};
+
 template <template <FieldWidth> class Derived, FieldWidth WIDTH = FieldWidth::Scalar>
 struct ComponentView
 {
@@ -48,3 +64,36 @@ template <FieldWidth WIDTH = FieldWidth::Scalar>
 using Int64Proxy = FieldProxy<int64_t, WIDTH>;
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 using UInt64Proxy = FieldProxy<uint64_t, WIDTH>;
+
+
+// Overload the bitwise AND operator
+inline SystemID operator&(SystemID lhs, SystemID rhs)
+{
+	return static_cast<SystemID>(
+		static_cast<std::underlying_type_t<SystemID>>(lhs) &
+		static_cast<std::underlying_type_t<SystemID>>(rhs)
+	);
+}
+
+// Overload the bitwise OR operator
+inline SystemID operator|(SystemID lhs, SystemID rhs)
+{
+	return static_cast<SystemID>(
+		static_cast<std::underlying_type_t<SystemID>>(lhs) |
+		static_cast<std::underlying_type_t<SystemID>>(rhs)
+	);
+}
+
+// Overload the bitwise OR operator
+inline SystemID operator|=(SystemID lhs, SystemID rhs)
+{
+	return static_cast<SystemID>(
+		static_cast<std::underlying_type_t<SystemID>>(lhs) |
+		static_cast<std::underlying_type_t<SystemID>>(rhs)
+	);
+}
+
+inline bool Equal(SystemID lhs, SystemID rhs)
+{
+	return static_cast<SystemID>(static_cast<std::underlying_type_t<SystemID>>(lhs) & static_cast<std::underlying_type_t<SystemID>>(rhs)) == rhs;
+}
