@@ -3,6 +3,7 @@
 #include <random>
 
 #include "TrinyxEngine.h"
+#include "GameManager.h"
 #include "TestEntity.h"
 #include "Public/CubeEntity.h"
 #include "Archetype.h"
@@ -162,21 +163,19 @@ TEST (InitializeTestEntities)
 	// Intentionally no Reset call. We want to continue testing with these entities for now.
 }
 
-int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
+// ---------------------------------------------------------------------------
+// Testbed GameManager — runs the test suite, then enters the engine loop
+// ---------------------------------------------------------------------------
+class TestbedGame : public GameManager<TestbedGame>
 {
-	// Stack allocation is fine for the main engine object
-	TrinyxEngine& Engine = TrinyxEngine::Get();
+public:
+	const char* GetWindowTitle() const { return "Trinyx Testbed"; }
 
-	if (Engine.Initialize("Trinyx v0.1", 1920, 1080))
+	bool PostInitialize(TrinyxEngine& engine)
 	{
-		// Run unit tests
-		if (TestRegistry::Instance().RunAll(Engine) != 0)
-		{
-			return 1; // Exit with error if tests failed
-		}
-
-		Engine.Run();
+		if (TestRegistry::Instance().RunAll(engine) != 0) return false;
+		return true;
 	}
+};
 
-	return 0;
-}
+TNX_IMPLEMENT_GAME(TestbedGame)

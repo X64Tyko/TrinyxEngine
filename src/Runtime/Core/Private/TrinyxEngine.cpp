@@ -29,7 +29,7 @@ namespace Internal
 TrinyxEngine::TrinyxEngine()  = default;
 TrinyxEngine::~TrinyxEngine() = default;
 
-bool TrinyxEngine::Initialize(const char* title, int width, int height)
+bool TrinyxEngine::Initialize(const char* title, int width, int height, const char* projectDir)
 {
 	TNX_ZONE_N("Engine_Init");
 
@@ -101,7 +101,8 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height)
 	// using straight Vulkan is... a bit more difficult than SDL lol.
 
 	// ---- Core systems ----------------------------------------------------
-	Config      = EngineConfig::LoadFromFile("TrinyxDefaults.ini");
+	if (projectDir && projectDir[0] != '\0') Config = EngineConfig::LoadFromDirectory(projectDir);
+	else Config                                     = EngineConfig::LoadFromFile("TrinyxDefaults.ini");
 	RegistryPtr = std::make_unique<Registry>(&Config);
 	Pacer.Initialize(GpuDevice);
 

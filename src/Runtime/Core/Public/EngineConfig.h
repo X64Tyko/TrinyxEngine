@@ -5,6 +5,10 @@ struct EngineConfig
 {
 	// Load from an INI file; writes defaults and returns them if the file does not exist.
 	static EngineConfig LoadFromFile(const char* path);
+
+	// Scan a directory for all *Defaults.ini files and load them (alphabetical order).
+	// Later files override earlier values. Writes EngineDefaults.ini if none found.
+	static EngineConfig LoadFromDirectory(const char* dir);
 	// Variadic Update, let the Logic thread run uncapped or limit its updates, cannot be lower than Fixed update if capped.
 	int TargetFPS = 0; // 0 = Uncapped
 
@@ -19,10 +23,10 @@ struct EngineConfig
 	// This controls how fast your main thread goes, higher = better input latency
 	int InputPollHz = 1000;
 
-	int MAX_PHYSICS_ENTITIES = 101000;
+	int MAX_PHYSICS_ENTITIES = 11000;
 
 	// The max number of Dynamic entities in the world at one time.
-	int MAX_CACHED_ENTITIES = 250000;
+	int MAX_CACHED_ENTITIES = 25000;
 
 	// Number of temporal frames stored in history. Min 8, must be power of 2.
 	// At 128Hz: 128 frames = 1 second of history

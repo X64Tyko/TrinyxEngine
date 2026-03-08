@@ -146,3 +146,4 @@ endif()
 # -----------------------------------------------------------------------------
 add_subdirectory(Trinyx)
 add_subdirectory(Testbed)
+add_subdirectory(Game)

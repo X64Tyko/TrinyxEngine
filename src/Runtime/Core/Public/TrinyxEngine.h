@@ -36,7 +36,7 @@ public:
 	TrinyxEngine(const TrinyxEngine&)            = delete;
 	TrinyxEngine& operator=(const TrinyxEngine&) = delete;
 
-	bool Initialize(const char* title, int width, int height);
+	bool Initialize(const char* title, int width, int height, const char* projectDir = nullptr);
 	void Run();
 	void Shutdown();
 
@@ -51,7 +51,7 @@ public:
 
 private:
 	// Sentinel Tasks (Main Thread)
-	void PumpEvents();                    // Handle OS events
+	void PumpEvents(); // Handle OS events
 	//void ServiceRenderThread();           // Check if RenderThread needs GPU resources or wants to submit
 	//void AcquireAndProvideGPUResources(); // Acquire cmd + swapchain, provide to RenderThread
 	//void SubmitRenderCommands();          // Take CmdBuffer from RenderThread and submit
