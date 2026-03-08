@@ -16,6 +16,8 @@
 #include "TemporalComponentCache.h"
 
 #include "ColorData.h"
+#include "Transform.h"
+#include "TemporalFlags.h"
 #include "LogicThread.h"
 // -----------------------------------------------------------------------
 // Helpers
@@ -129,6 +131,12 @@ void VulkRender::Start()
 		return;
 	}
 
+	if (!CreateComputePipelines())
+	{
+		LOG_ERROR("[VulkRender] Compute pipeline creation failed; thread exiting");
+		return;
+	}
+
 	if (!CreateMeshBuffers())
 	{
 		LOG_ERROR("[VulkRender] Mesh buffer upload failed; thread exiting");
@@ -194,8 +202,8 @@ bool VulkRender::CreateFrameSync()
 	// Pre-signal the fence so the first frame doesn't wait on an unsignalled fence.
 	const vk::FenceCreateInfo fenceCI{vk::FenceCreateFlagBits::eSignaled};
 
-	// GpuFrameData struct + appended SoA instance slots (kGpuOutFieldCount floats for 1 entity).
-	constexpr VkDeviceSize kGpuDataSize = sizeof(GpuFrameData) + kGpuOutFieldCount * sizeof(float);
+	// GpuFrameData struct only — field SoA lives in dedicated FieldSlabs[], scatter output in InstancesBuffer.
+	constexpr VkDeviceSize kGpuDataSize = sizeof(GpuFrameData);
 
 	for (int i = 0; i < kMaxFramesInFlight; ++i)
 	{
@@ -214,6 +222,64 @@ bool VulkRender::CreateFrameSync()
 		if (!Frames[i].GpuData.IsValid())
 		{
 			LOG_ERROR_F("[VulkRender] GpuData allocation failed for frame slot %d", i);
+			return false;
+		}
+
+		// Per-frame compute scratch/output buffers.
+		// These must be per-frame-slot: two frame slots can be GPU-in-flight simultaneously
+		// (fence only guarantees the *same* slot is idle, not the other one).
+		// Sharing a single copy would let frame N's scatter overwrite frame N-1's draw args/output.
+		const VkDeviceSize kFlagsSize =
+			static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(uint32_t);
+		Frames[i].FlagsBuffer = VkMem->AllocateBuffer(kFlagsSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+			GpuMemoryDomain::PersistentMapped, /*requestDeviceAddress=*/ true);
+		if (!Frames[i].FlagsBuffer.IsValid()) { LOG_ERROR_F("[VulkRender] FlagsBuffer alloc failed (slot %d)", i); return false; }
+
+		const VkDeviceSize kScanSize =
+			static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(uint32_t);
+		Frames[i].ScanBuffer = VkMem->AllocateBuffer(kScanSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+			GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+		if (!Frames[i].ScanBuffer.IsValid()) { LOG_ERROR_F("[VulkRender] ScanBuffer alloc failed (slot %d)", i); return false; }
+
+		Frames[i].CompactCounterBuffer = VkMem->AllocateBuffer(sizeof(uint32_t),
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+		if (!Frames[i].CompactCounterBuffer.IsValid()) { LOG_ERROR_F("[VulkRender] CompactCounterBuffer alloc failed (slot %d)", i); return false; }
+
+		// DrawArgsBuffer: word 0 (indexCount) set once here; scatter sets word 1 each frame.
+		Frames[i].DrawArgsBuffer = VkMem->AllocateBuffer(sizeof(VkDrawIndexedIndirectCommand),
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+			GpuMemoryDomain::PersistentMapped, /*requestDeviceAddress=*/ true);
+		if (!Frames[i].DrawArgsBuffer.IsValid()) { LOG_ERROR_F("[VulkRender] DrawArgsBuffer alloc failed (slot %d)", i); return false; }
+		auto* drawArgs = static_cast<uint32_t*>(Frames[i].DrawArgsBuffer.MappedPtr);
+		drawArgs[0] = static_cast<uint32_t>(CubeMesh::IndexCount);
+		drawArgs[1] = 0; drawArgs[2] = 0; drawArgs[3] = 0; drawArgs[4] = 0;
+
+		// InstancesBuffer: compact SoA written by scatter, read by vertex shader.
+		// Same layout as a FieldSlab (kGpuOutFieldCount × MAX_CACHED_ENTITIES floats).
+		const VkDeviceSize kInstancesSize =
+			kGpuOutFieldCount * static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
+		Frames[i].InstancesBuffer = VkMem->AllocateBuffer(kInstancesSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+			GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+		if (!Frames[i].InstancesBuffer.IsValid()) { LOG_ERROR_F("[VulkRender] InstancesBuffer alloc failed (slot %d)", i); return false; }
+	}
+
+	// 5 field slabs — CPU cycles through them writing raw SoA field data per frame.
+	// Each slab: kGpuOutFieldCount × MAX_CACHED_ENTITIES × sizeof(float).
+	// Field f base address = slab.DeviceAddr + f * MAX_CACHED_ENTITIES * sizeof(float).
+	const VkDeviceSize kFieldSlabSize =
+		kGpuOutFieldCount * static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
+	for (int i = 0; i < kInstanceBufferCount; ++i)
+	{
+		FieldSlabs[i] = VkMem->AllocateBuffer(
+			kFieldSlabSize,
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+			GpuMemoryDomain::PersistentMapped,
+			/*requestDeviceAddress=*/ true);
+
+		if (!FieldSlabs[i].IsValid())
+		{
+			LOG_ERROR_F("[VulkRender] FieldSlab allocation failed for slot %d", i);
 			return false;
 		}
 	}
@@ -272,16 +338,66 @@ void VulkRender::DestroyShaders()
 {
 	if (!VkCtx) return;
 
-	if (VertShader != VK_NULL_HANDLE)
+	if (PredicatePipeline != VK_NULL_HANDLE)  { vkDestroyPipeline(device, PredicatePipeline,  nullptr); PredicatePipeline  = VK_NULL_HANDLE; }
+	if (PrefixSumPipeline != VK_NULL_HANDLE)  { vkDestroyPipeline(device, PrefixSumPipeline,  nullptr); PrefixSumPipeline  = VK_NULL_HANDLE; }
+	if (ScatterPipeline   != VK_NULL_HANDLE)  { vkDestroyPipeline(device, ScatterPipeline,    nullptr); ScatterPipeline    = VK_NULL_HANDLE; }
+	if (VertShader        != VK_NULL_HANDLE)  { vkDestroyShaderModule(device, VertShader, nullptr); VertShader = VK_NULL_HANDLE; }
+	if (FragShader        != VK_NULL_HANDLE)  { vkDestroyShaderModule(device, FragShader, nullptr); FragShader = VK_NULL_HANDLE; }
+}
+
+bool VulkRender::CreateComputePipelines()
+{
+	const char* paths[3] = {
+		TNX_SHADER_DIR "/predicate.spv",
+		TNX_SHADER_DIR "/prefix_sum.spv",
+		TNX_SHADER_DIR "/scatter.spv",
+	};
+	VkPipeline* targets[3] = { &PredicatePipeline, &PrefixSumPipeline, &ScatterPipeline };
+
+	for (int i = 0; i < 3; ++i)
 	{
-		vkDestroyShaderModule(device, VertShader, nullptr);
-		VertShader = VK_NULL_HANDLE;
+		auto code = ReadSPIRV(paths[i]);
+		if (code.empty())
+		{
+			LOG_ERROR_F("[VulkRender] Failed to read compute SPIR-V: %s", paths[i]);
+			return false;
+		}
+
+		VkShaderModuleCreateInfo modCI{};
+		modCI.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		modCI.codeSize = code.size() * sizeof(uint32_t);
+		modCI.pCode    = code.data();
+
+		VkShaderModule mod = VK_NULL_HANDLE;
+		if (vkCreateShaderModule(device, &modCI, nullptr, &mod) != VK_SUCCESS)
+		{
+			LOG_ERROR_F("[VulkRender] vkCreateShaderModule failed for %s", paths[i]);
+			return false;
+		}
+
+		VkPipelineShaderStageCreateInfo stageCI{};
+		stageCI.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stageCI.stage  = VK_SHADER_STAGE_COMPUTE_BIT;
+		stageCI.module = mod;
+		stageCI.pName  = "main";
+
+		VkComputePipelineCreateInfo pipeCI{};
+		pipeCI.sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+		pipeCI.stage  = stageCI;
+		pipeCI.layout = *PipelineLayout;
+
+		VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeCI, nullptr, targets[i]);
+		vkDestroyShaderModule(device, mod, nullptr); // module no longer needed after pipeline creation
+
+		if (result != VK_SUCCESS)
+		{
+			LOG_ERROR_F("[VulkRender] vkCreateComputePipelines failed for %s: %d", paths[i], result);
+			return false;
+		}
 	}
-	if (FragShader != VK_NULL_HANDLE)
-	{
-		vkDestroyShaderModule(device, FragShader, nullptr);
-		FragShader = VK_NULL_HANDLE;
-	}
+
+	LOG_INFO("[VulkRender] Compute pipelines created (predicate + prefix_sum + scatter)");
+	return true;
 }
 
 bool VulkRender::CreateMeshBuffers()
@@ -320,65 +436,89 @@ bool VulkRender::CreateMeshBuffers()
 	return true;
 }
 
-void VulkRender::FillGpuFrameData(FrameSync& frame)
+void VulkRender::FillGpuFrameData(FrameSync& frame, uint32_t readFrame)
 {
-	const vk::Extent2D ext = VkCtx->GetSwapchain().Extent;
-	const float aspect     = static_cast<float>(ext.width) / static_cast<float>(ext.height);
+	TNX_ZONE_NC("Fill GPU", TNX_COLOR_RENDERING)
 
 	auto* fd = static_cast<GpuFrameData*>(frame.GpuData.MappedPtr);
 	std::memset(fd, 0, sizeof(GpuFrameData));
 
-	// ---- Camera + projection -------------------------------------------
-	BuildViewProjMatrix(fd->ViewProj, aspect);
+	const vk::Extent2D ext = VkCtx->GetSwapchain().Extent;
+	BuildViewProjMatrix(fd->ViewProj, static_cast<float>(ext.width) / static_cast<float>(ext.height));
 
-	// ---- Buffer device addresses ---------------------------------------
-	fd->VerticesAddr = VertexBuffer.DeviceAddr;
-	// SoA instance data sits immediately after GpuFrameData in the same buffer.
-	fd->InstancesAddr = frame.GpuData.DeviceAddr + sizeof(GpuFrameData);
+	// ---- Advance field slab slot ---------------------------------------
+	const uint32_t prevSlab = CurrentFieldSlab;
+	CurrentFieldSlab        = (CurrentFieldSlab + 1) % kInstanceBufferCount;
 
-	// ---- Instance layout -----------------------------------------------
-	fd->EntityCount    = 1;
-	fd->FieldCount     = kGpuOutFieldCount;
-	fd->OutFieldStride = 1; // 1 entity → stride 1, inst[k-1] = field k for entity 0
-	fd->Alpha          = 1.0f;
+	const VkDeviceSize fieldStride = static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
+	uint8_t* slabPtr     = static_cast<uint8_t*>(FieldSlabs[CurrentFieldSlab].MappedPtr);
+	const uint64_t slabBase     = FieldSlabs[CurrentFieldSlab].DeviceAddr;
+	const uint64_t prevSlabBase = FieldSlabs[prevSlab].DeviceAddr;
 
-	// ---- Hardcoded single instance (SoA: kGpuOutFieldCount floats) -----
-	// Slot order matches kSem* constants: inst[kSem - 1] = value for entity 0.
-	auto* inst = reinterpret_cast<float*>(
-		static_cast<uint8_t*>(frame.GpuData.MappedPtr) + sizeof(GpuFrameData));
+	// ---- Per-frame BDAs (compute scratch buffers, one copy per frame slot) ---
+	fd->VerticesAddr       = VertexBuffer.DeviceAddr;
+	fd->InstancesAddr      = frame.InstancesBuffer.DeviceAddr;
+	fd->FlagsAddr          = frame.FlagsBuffer.DeviceAddr;
+	fd->ScanAddr           = frame.ScanBuffer.DeviceAddr;
+	fd->CompactCounterAddr = frame.CompactCounterBuffer.DeviceAddr;
+	fd->DrawArgsAddr       = frame.DrawArgsBuffer.DeviceAddr;
+	fd->Alpha              = 1.0f;
+	fd->EntityCount        = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
+	fd->OutFieldStride     = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
+	fd->FieldCount         = kGpuOutFieldCount;
 
-	inst[kSemPosX - 1]   = 0.0f; // position
-	inst[kSemPosY - 1]   = 0.0f;
-	inst[kSemPosZ - 1]   = 0.0f;
-	inst[kSemRotX - 1]   = 0.0f; // rotation (radians)
-	inst[kSemRotY - 1]   = 0.0f;
-	inst[kSemRotZ - 1]   = 0.0f;
-	inst[kSemScaleX - 1] = 1.0f; // scale
-	inst[kSemScaleY - 1] = 1.0f;
-	inst[kSemScaleZ - 1] = 1.0f;
-	// Read first entity's color from VolatileSlab frame 0
-	float r = 1.0f, g = 0.5f, b = 0.0f, a = 1.0f; // fallback orange
+	// ---- Caches (readFrame already locked by RenderFrame) --------------
+	ComponentCacheBase* temporalCache  = RegistryPtr->GetTemporalCache();
+	ComponentCacheBase* volatileCache  = RegistryPtr->GetVolatileCache();
+
+	TemporalFrameHeader* temporalHdr  = temporalCache->GetFrameHeader(readFrame);
+	TemporalFrameHeader* volatileHdr  = volatileCache->GetFrameHeader(readFrame);
+
+	const ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
+	const uint8_t transformSlot = CFR.GetCacheSlotIndex(Transform<>::StaticTypeID());
+	const uint8_t colorSlot     = CFR.GetCacheSlotIndex(ColorData<>::StaticTypeID());
+	const uint8_t flagsSlot     = CFR.GetCacheSlotIndex(TemporalFlags<>::StaticTypeID());
+
+	// ---- Copy MAX_CACHED_ENTITIES floats per field into current slab ---
+	// Field table: { cache, hdr, compSlot, fieldIndex, semantic }
+	struct FieldDesc { ComponentCacheBase* cache; TemporalFrameHeader* hdr; uint8_t slot; size_t fi; uint32_t sem; };
+	const FieldDesc kFields[kGpuOutFieldCount] = {
+		{ temporalCache, temporalHdr, transformSlot, 0, kSemPosX   },
+		{ temporalCache, temporalHdr, transformSlot, 1, kSemPosY   },
+		{ temporalCache, temporalHdr, transformSlot, 2, kSemPosZ   },
+		{ temporalCache, temporalHdr, transformSlot, 3, kSemRotX   },
+		{ temporalCache, temporalHdr, transformSlot, 4, kSemRotY   },
+		{ temporalCache, temporalHdr, transformSlot, 5, kSemRotZ   },
+		{ temporalCache, temporalHdr, transformSlot, 6, kSemScaleX },
+		{ temporalCache, temporalHdr, transformSlot, 7, kSemScaleY },
+		{ temporalCache, temporalHdr, transformSlot, 8, kSemScaleZ },
+		{ volatileCache, volatileHdr, colorSlot,     0, kSemColorR },
+		{ volatileCache, volatileHdr, colorSlot,     1, kSemColorG },
+		{ volatileCache, volatileHdr, colorSlot,     2, kSemColorB },
+		{ volatileCache, volatileHdr, colorSlot,     3, kSemColorA },
+	};
+
+	for (uint32_t f = 0; f < kGpuOutFieldCount; ++f)
 	{
-		ComponentCacheBase* cache = RegistryPtr->GetVolatileCache();
-		TemporalFrameHeader* hdr  = cache->GetFrameHeader(LastLogicFrame);
-		const uint8_t slot        = ComponentFieldRegistry::Get().GetCacheSlotIndex(ColorData<>::StaticTypeID());
-		size_t count              = 0;
-		const auto* rp            = static_cast<const float*>(cache->GetFieldData(hdr, slot, 0, count));
-		if (rp && count > 0)
-		{
-			const auto* gp = static_cast<const float*>(cache->GetFieldData(hdr, slot, 1, count));
-			const auto* bp = static_cast<const float*>(cache->GetFieldData(hdr, slot, 2, count));
-			const auto* ap = static_cast<const float*>(cache->GetFieldData(hdr, slot, 3, count));
-			r              = rp[0];
-			g              = gp ? gp[0] : 0.0f;
-			b              = bp ? bp[0] : 0.0f;
-			a              = ap ? ap[0] : 1.0f;
-		}
+		const FieldDesc& fd_ = kFields[f];
+		size_t dummy         = 0;
+		const void* src      = fd_.cache->GetFieldData(fd_.hdr, fd_.slot, fd_.fi, dummy);
+		uint8_t* dst         = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
+		if (src) std::memcpy(dst, src, static_cast<size_t>(fieldStride));
+		else     std::memset(dst, 0,   static_cast<size_t>(fieldStride));
+
+		fd->CurrFieldAddrs[f]   = slabBase     + static_cast<uint64_t>(f) * fieldStride;
+		fd->PrevFieldAddrs[f]   = prevSlabBase + static_cast<uint64_t>(f) * fieldStride;
+		fd->FieldSemantics[f]   = fd_.sem;
+		fd->FieldElementSize[f] = sizeof(float);
 	}
-	inst[kSemColorR - 1] = r;
-	inst[kSemColorG - 1] = g;
-	inst[kSemColorB - 1] = b;
-	inst[kSemColorA - 1] = a;
+
+	// ---- Flags: copy from universal slab (bit 31 = Active per entity) -
+	size_t flagsDummy     = 0;
+	const void* flagsSrc  = temporalCache->GetFieldData(temporalHdr, flagsSlot, 0, flagsDummy);
+	const size_t flagsBytes = static_cast<size_t>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(uint32_t);
+	if (flagsSrc) std::memcpy(frame.FlagsBuffer.MappedPtr, flagsSrc, flagsBytes);
+	else          std::memset(frame.FlagsBuffer.MappedPtr, 0, flagsBytes);
 }
 
 bool VulkRender::CreatePipeline()
@@ -386,8 +526,9 @@ bool VulkRender::CreatePipeline()
 	VkFormat colorFmt = static_cast<VkFormat>(VkCtx->GetSwapchain().Format);
 
 	// ---- Push constants: one uint64_t = GpuFrameData BDA ---------------
+	// Shared by vertex shader and all 3 compute shaders — one layout for all pipelines.
 	VkPushConstantRange pushRange{};
-	pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 	pushRange.offset     = 0;
 	pushRange.size       = sizeof(uint64_t);
 
@@ -506,7 +647,7 @@ bool VulkRender::CreatePipeline()
 
 void VulkRender::ThreadMain()
 {
-	LOG_INFO("[VulkRender] Thread running — Step 3 draw cube");
+	LOG_INFO("[VulkRender] Thread running — Step 4 GPU-driven compute pipeline");
 
 	graphicsQueue = static_cast<VkQueue>(VkCtx->GetQueues().Graphics);
 
@@ -539,6 +680,17 @@ int VulkRender::RenderFrame()
 		}
 	}
 
+	// Try to lock a cache frame for reading BEFORE committing to this render tick.
+	// Must happen before vkAcquireNextImageKHR so we can bail cleanly (fence still signaled).
+	ComponentCacheBase* temporalCache = RegistryPtr->GetTemporalCache();
+	uint32_t readFrame = static_cast<uint32_t>(LastLogicFrame);
+	if (!temporalCache->TryLockFrameForRead(readFrame))
+	{
+		//readFrame = temporalCache->GetPrevFrame(readFrame);
+		//if (!temporalCache->TryLockFrameForRead(readFrame))
+			return 0; // Both frames busy — skip tick, fence still signaled
+	}
+
 	uint32_t imageIndex = 0;
 	{
 		TNX_ZONE_COARSE_NC("Render_Acquire", TNX_COLOR_RENDERING)
@@ -550,15 +702,21 @@ int VulkRender::RenderFrame()
 			VK_NULL_HANDLE,
 			&imageIndex);
 
-		if (acquireResult == VK_NOT_READY || acquireResult == VK_TIMEOUT) return 0;
+		if (acquireResult == VK_NOT_READY || acquireResult == VK_TIMEOUT)
+		{
+			temporalCache->UnlockFrameRead(readFrame);
+			return 0;
+		}
 
 		if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR)
 		{
+			temporalCache->UnlockFrameRead(readFrame);
 			OnSwapchainResize();
-			return 0; // fence still SIGNALED — next check on this slot passes immediately
+			return 0;
 		}
 		else if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR)
 		{
+			temporalCache->UnlockFrameRead(readFrame);
 			LOG_ERROR_F("[VulkRender] vkAcquireNextImageKHR failed: %d", acquireResult);
 			return -1;
 		}
@@ -566,8 +724,9 @@ int VulkRender::RenderFrame()
 
 	vkResetFences(device, 1, &fence);
 
-	// Fill per-frame GPU data, then record.
-	FillGpuFrameData(frame);
+	// Fill per-frame GPU data (readFrame is already locked), then unlock and record.
+	FillGpuFrameData(frame, readFrame);
+	temporalCache->UnlockFrameRead(readFrame);
 
 	{
 		TNX_ZONE_COARSE_NC("Render_Record", TNX_COLOR_RENDERING)
@@ -639,7 +798,7 @@ void VulkRender::RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex)
 	const VulkanSwapchain& swap = VkCtx->GetSwapchain();
 	VkImage swapImg             = static_cast<VkImage>(swap.Images[imageIndex]);
 	VkImageView swapView        = *swap.ImageViews[imageIndex];
-	VkImageView depthView       = static_cast<VkImageView>(DepthAttachment.View);
+	VkImageView depthView       = static_cast<VkImageView>(frame.DepthAttachment.View);
 	const vk::Extent2D ext      = swap.Extent;
 
 	vkResetCommandBuffer(cmd, 0);
@@ -676,7 +835,7 @@ void VulkRender::RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex)
 			VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
 		barriers[1].oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
 		barriers[1].newLayout        = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-		barriers[1].image            = static_cast<VkImage>(DepthAttachment.Image);
+		barriers[1].image            = static_cast<VkImage>(frame.DepthAttachment.Image);
 		barriers[1].subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1};
 
 		VkDependencyInfo dep{};
@@ -684,6 +843,84 @@ void VulkRender::RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex)
 		dep.imageMemoryBarrierCount = 2;
 		dep.pImageMemoryBarriers    = barriers;
 		vkCmdPipelineBarrier2(cmd, &dep);
+	}
+
+	// ---- Compute: predicate → prefix_sum → scatter --------------------
+	// All 3 compute shaders read GpuFrameData via the same push constant BDA.
+	// PipelineLayout covers both VERTEX and COMPUTE stages — push once for all.
+	{
+		TNX_ZONE_COARSE_NC("Render_Compute", TNX_COLOR_RENDERING)
+
+		const uint64_t gpuDataAddr  = frame.GpuData.DeviceAddr;
+		const uint32_t entityCount  = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
+		const uint32_t dispatchX    = (entityCount + 63u) / 64u;
+
+		// Helper: global compute→compute memory barrier (all BDA storage accesses).
+		auto ComputeBarrier = [&]()
+		{
+			VkMemoryBarrier2 mb{};
+			mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+			mb.srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+			mb.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+			mb.dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+			mb.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+			VkDependencyInfo d{};
+			d.sType              = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+			d.memoryBarrierCount = 1;
+			d.pMemoryBarriers    = &mb;
+			vkCmdPipelineBarrier2(cmd, &d);
+		};
+
+		// Zero CompactCounterBuffer so prefix_sum accumulates from 0 each frame.
+		vkCmdFillBuffer(cmd, static_cast<VkBuffer>(frame.CompactCounterBuffer.Buffer), 0, sizeof(uint32_t), 0u);
+		{
+			VkMemoryBarrier2 mb{};
+			mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+			mb.srcStageMask  = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+			mb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+			mb.dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+			mb.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+			VkDependencyInfo d{};
+			d.sType              = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+			d.memoryBarrierCount = 1;
+			d.pMemoryBarriers    = &mb;
+			vkCmdPipelineBarrier2(cmd, &d);
+		}
+
+		// Push GpuFrameData BDA once — covers both compute and vertex stages (same PipelineLayout).
+		// This single push is reused by all 3 compute dispatches and the subsequent draw.
+		vkCmdPushConstants(cmd, *PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+		                   0, sizeof(uint64_t), &gpuDataAddr);
+
+		// Pass 1: predicate — reads FlagsAddr, writes ScanAddr (0/1 per entity).
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, PredicatePipeline);
+		vkCmdDispatch(cmd, dispatchX, 1, 1);
+		ComputeBarrier();
+
+		// Pass 2: prefix_sum — reads ScanAddr, overwrites with exclusive-scan indices.
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, PrefixSumPipeline);
+		vkCmdDispatch(cmd, dispatchX, 1, 1);
+		ComputeBarrier();
+
+		// Pass 3: scatter — lerps fields, writes compact output to InstancesAddr;
+		//                    also sets DrawArgsAddr.instanceCount from CompactCounterAddr.
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ScatterPipeline);
+		vkCmdDispatch(cmd, dispatchX, 1, 1);
+
+		// Scatter output → vertex read + indirect draw read.
+		VkMemoryBarrier2 scatterDone{};
+		scatterDone.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+		scatterDone.srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+		scatterDone.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+		scatterDone.dstStageMask  = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+		                            VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+		scatterDone.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+		                            VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+		VkDependencyInfo scatterDep{};
+		scatterDep.sType              = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+		scatterDep.memoryBarrierCount = 1;
+		scatterDep.pMemoryBarriers    = &scatterDone;
+		vkCmdPipelineBarrier2(cmd, &scatterDep);
 	}
 
 	// loadOp CLEAR handles background (purple) and depth (1.0) in one step.
@@ -743,17 +980,16 @@ void VulkRender::RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex)
 
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, *Pipeline);
 
-		// Push the GpuFrameData buffer device address — the vertex shader reads
-		// all per-frame data (ViewProj, VerticesAddr, InstancesAddr) through it.
-		uint64_t gpuDataAddr = frame.GpuData.DeviceAddr;
-		vkCmdPushConstants(cmd, *PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
-						   0, sizeof(uint64_t), &gpuDataAddr);
+		// GpuFrameData BDA was already pushed with VERTEX|COMPUTE flags during the compute section.
+		// Push constants persist across pipeline binds; no re-push needed here.
 
 		// Index buffer bound here; vertex data fetched via BDA (no vertex buffer bind).
 		VkBuffer indexBuf = static_cast<VkBuffer>(IndexBuffer.Buffer);
 		vkCmdBindIndexBuffer(cmd, indexBuf, 0, VK_INDEX_TYPE_UINT16);
 
-		vkCmdDrawIndexed(cmd, static_cast<uint32_t>(CubeMesh::IndexCount), 1, 0, 0, 0);
+		// DrawIndexedIndirect: instanceCount was written by scatter into this frame's DrawArgsBuffer[1].
+		VkBuffer drawBuf = static_cast<VkBuffer>(frame.DrawArgsBuffer.Buffer);
+		vkCmdDrawIndexedIndirect(cmd, drawBuf, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
 	}
 
 	vkCmdEndRendering(cmd);
@@ -830,11 +1066,17 @@ bool VulkRender::CreateDepthImage()
 	DepthFormat = depthFormat;
 
 	const vk::Extent2D ext = VkCtx->GetSwapchain().Extent;
-	DepthAttachment        = VkMem->AllocateImage(
-		{ext.width, ext.height},
-		depthFormat,
-		VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-		VK_IMAGE_ASPECT_DEPTH_BIT);
+	for (int i = 0; i < kMaxFramesInFlight; ++i)
+	{
+		Frames[i].DepthAttachment = VkMem->AllocateImage(
+			{ext.width, ext.height},
+			depthFormat,
+			VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+			VK_IMAGE_ASPECT_DEPTH_BIT);
 
-	return DepthAttachment.IsValid();
+		if (!Frames[i].DepthAttachment.IsValid())
+			return false;
+	}
+
+	return true;
 }

@@ -46,17 +46,33 @@ struct SDL_Window;
 // global function pointers are used directly — no overhead from dynamic dispatch.
 // -----------------------------------------------------------------------
 
-static constexpr int kMaxFramesInFlight = 2;
+static constexpr int kMaxFramesInFlight   = 2;
+static constexpr int kInstanceBufferCount = 5; // CPU cycles freely; GPU holds at most kMaxFramesInFlight at once
 
 // Per-frame synchronization resources.
 // Cmd stays as a raw VkCommandBuffer — all recording uses vkCmd* C API.
 // Sync objects are vk::raii:: so they self-destruct without a manual Cleanup().
+// All GPU-written scratch buffers (compute outputs) live here so concurrent
+// in-flight frames never share mutable GPU resources.
 struct FrameSync
 {
 	VkCommandBuffer Cmd = VK_NULL_HANDLE; // C handle — recording uses vkCmd*
 	vk::raii::Semaphore Acquired{nullptr};
 	vk::raii::Fence Fence{nullptr};
-	VulkanBuffer GpuData; // per-frame instance/uniform buffer
+	VulkanBuffer GpuData; // per-frame GpuFrameData uniform buffer
+
+	// Per-frame depth attachment — prevents depth races between in-flight frames.
+	VulkanImage DepthAttachment;
+
+	// Per-frame compute scratch/output buffers.
+	// Must be per-frame: scatter writes and the indirect draw read these in the
+	// same submission, but two frame slots can be GPU-in-flight simultaneously,
+	// so sharing a single copy would cause write/read races across submissions.
+	VulkanBuffer FlagsBuffer;        // uint per entity (bit 31 = Active); CPU writes, GPU reads
+	VulkanBuffer ScanBuffer;         // predicate 0/1 → exclusive-scan index; device local
+	VulkanBuffer CompactCounterBuffer; // single uint atomicAdd target; device local
+	VulkanBuffer DrawArgsBuffer;     // VkDrawIndexedIndirectCommand; scatter sets instanceCount
+	VulkanBuffer InstancesBuffer;    // compact SoA output; scatter writes, vertex reads via BDA
 };
 
 class VulkRender
@@ -88,8 +104,9 @@ private:
 	bool LoadShaders();
 	void DestroyShaders();
 	bool CreatePipeline();
+	bool CreateComputePipelines();
 	bool CreateMeshBuffers();
-	void FillGpuFrameData(FrameSync& frame);
+	void FillGpuFrameData(FrameSync& frame, uint32_t readFrame);
 	void RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex);
 	void TrackFPS();
 	void OnSwapchainResize();
@@ -109,11 +126,10 @@ private:
 	std::atomic<bool> bIsRunning{false};
 
 	// ---- Thread-owned Vulkan resources ----
-	// Depth attachment — allocated via VMA, auto-destroys on VulkRender teardown.
-	VulkanImage DepthAttachment;
 	VkFormat DepthFormat = VK_FORMAT_UNDEFINED; // selected in CreateDepthImage, read by CreatePipeline
 
 	// Per-frame sync + command buffers (populated in CreateFrameSync).
+	// Each slot also owns its depth image and compute scratch buffers — see FrameSync.
 	FrameSync Frames[kMaxFramesInFlight];
 	uint32_t CurrentFrame   = 0;
 	uint64_t LastLogicFrame = 0;
@@ -127,13 +143,25 @@ private:
 	VkShaderModule VertShader = VK_NULL_HANDLE;
 	VkShaderModule FragShader = VK_NULL_HANDLE;
 
+	// 5 field slabs cycling independently of GPU frame slots.
+	// Each slab = kGpuOutFieldCount × MAX_CACHED_ENTITIES × sizeof(float).
+	// Field f base address = slab.DeviceAddr + f * MAX_CACHED_ENTITIES * sizeof(float).
+	// GPU reads at most kMaxFramesInFlight slabs at once; CPU has ≥3 free slots to write fresh data.
+	VulkanBuffer FieldSlabs[kInstanceBufferCount];
+	uint32_t     CurrentFieldSlab = 0;
+
 	// Mesh buffers (uploaded in CreateMeshBuffers, static for the lifetime of the renderer).
 	VulkanBuffer VertexBuffer; // cube vertices read via BDA in vertex shader
 	VulkanBuffer IndexBuffer;  // cube indices bound via vkCmdBindIndexBuffer
 
-	// Pipeline (populated in Step 2).
+	// Graphics pipeline (shared layout also used by all compute pipelines).
 	vk::raii::PipelineLayout PipelineLayout{nullptr};
 	vk::raii::Pipeline Pipeline{nullptr};
+
+	// Compute pipelines (raw handles — destroyed in DestroyShaders).
+	VkPipeline PredicatePipeline  = VK_NULL_HANDLE;
+	VkPipeline PrefixSumPipeline  = VK_NULL_HANDLE;
+	VkPipeline ScatterPipeline    = VK_NULL_HANDLE;
 
 	// FPS tracking (render thread only).
 	double RenderFpsTimer     = 0.0;

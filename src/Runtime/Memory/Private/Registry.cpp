@@ -18,7 +18,7 @@ Registry::Registry(const EngineConfig* Config)
 	HistorySlab.Initialize(Config); // Temporal: Config->TemporalFrameCount frames, rollback-capable
 #endif
 	VolatileSlab.Initialize(Config); // Volatile: 5 frames, no rollback
-	UniversalSlab.Initialize(Config);
+	//UniversalSlab.Initialize(Config);
 	// Reserve space for entity index
 	EntityIndex.reserve(Config->MAX_CACHED_ENTITIES);
 
@@ -288,7 +288,7 @@ void Registry::PropagateFrame(uint32_t currentFrame)
 #ifdef TNX_ENABLE_ROLLBACK
 	HistorySlab.PropagateFrame(currentFrame, currentFrame + 1);
 #endif
-	UniversalSlab.PropagateFrame(currentFrame, currentFrame + 1);
+	//UniversalSlab.PropagateFrame(currentFrame, currentFrame + 1);
 	VolatileSlab.PropagateFrame(currentFrame, currentFrame + 1);
 
 	// Clear dirty bits for the frame we're about to write into next tick
@@ -316,7 +316,7 @@ void Registry::ResetRegistry()
 #ifdef TNX_ENABLE_ROLLBACK
 	HistorySlab.ResetAllocators();
 #endif
-	UniversalSlab.ResetAllocators();
+	//UniversalSlab.ResetAllocators();
 	VolatileSlab.ResetAllocators();
 }
 

@@ -67,7 +67,6 @@ public:
 
 	// Slab accessors — used by LogicThread and RenderThread to get cache pointers at init time.
 	ComponentCache<CacheTier::Volatile>* GetVolatileCache() { return &VolatileSlab; }
-	ComponentCache<CacheTier::Universal>* GetUniversalCache() { return &UniversalSlab; }
 #ifdef TNX_ENABLE_ROLLBACK
 	ComponentCache<CacheTier::Temporal>* GetTemporalCache() { return &HistorySlab; }
 #else
@@ -101,7 +100,6 @@ private:
 		if (tier == CacheTier::Temporal) return &HistorySlab;
 #endif
 		if (tier == CacheTier::Volatile || tier == CacheTier::Temporal) return &VolatileSlab;
-		if (tier == CacheTier::Universal) return &UniversalSlab;
 		return nullptr;
 	}
 
@@ -111,7 +109,6 @@ private:
 		if (tier == CacheTier::Temporal) return &HistorySlab;
 #endif
 		if (tier == CacheTier::Volatile || tier == CacheTier::Temporal) return &VolatileSlab;
-		if (tier == CacheTier::Universal) return &UniversalSlab;
 		return nullptr;
 	}
 
@@ -143,7 +140,6 @@ private:
 	ComponentCache<CacheTier::Temporal> HistorySlab; // N frames (Config->TemporalFrameCount), rollback-capable
 #endif
 	ComponentCache<CacheTier::Volatile> VolatileSlab;   // 5 frames, no rollback
-	ComponentCache<CacheTier::Universal> UniversalSlab; // N frames, no rollback
 
 	// Pre-allocated dual array table used by all Invoke* methods.
 	// Avoids a large VLA on the stack each call.  Sized by MAX_FIELDS_PER_ARCHETYPE
@@ -345,7 +341,7 @@ inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
 	uint32_t volWrite = VolatileSlab.GetNextFrame(currentFrame);
 	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
 	{
-		LOG_ERROR_F("Failed to acquire Volatile write lock on frame %u", volWrite);
+		//LOG_ERROR_F("Failed to acquire Volatile write lock on frame %u", volWrite);
 #ifdef TNX_ENABLE_ROLLBACK
 		HistorySlab.UnlockFrameWrite(histWrite);
 #endif
@@ -382,13 +378,6 @@ inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
 			uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(DirtyBitsFrame(currentFrame)->data())
 				+ (chunk->Header.GlobalIndexStart / 8);
 			ScalarUpdate(dt, FieldBufferTable, chunkDirtyBits, entityCount);
-
-			static const ComponentTypeID kFlagsTypeID = TemporalFlags<>::StaticTypeID();
-			if (int32_t* flagsWrite = arch->GetTemporalFieldWritePtr(chunk, kFlagsTypeID, 0, currentFrame))
-			{
-				constexpr int32_t kDirty = static_cast<int32_t>(1u << 30);
-				for (uint32_t e = 0; e < entityCount; ++e) flagsWrite[e] |= kDirty;
-			}
 		}
 	}
 
@@ -449,13 +438,6 @@ inline void Registry::InvokePrePhys(double dt, uint32_t currentFrame)
 			uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(DirtyBitsFrame(currentFrame)->data())
 				+ (chunk->Header.GlobalIndexStart / 8);
 			prePhys(dt, FieldBufferTable, chunkDirtyBits, entityCount);
-
-			static const ComponentTypeID kFlagsTypeID = TemporalFlags<>::StaticTypeID();
-			if (int32_t* flagsWrite = arch->GetTemporalFieldWritePtr(chunk, kFlagsTypeID, 0, currentFrame))
-			{
-				constexpr int32_t kDirty = static_cast<int32_t>(1u << 30);
-				for (uint32_t e = 0; e < entityCount; ++e) flagsWrite[e] |= kDirty;
-			}
 		}
 	}
 
@@ -516,13 +498,6 @@ inline void Registry::InvokePostPhys(double dt, uint32_t currentFrame)
 			uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(DirtyBitsFrame(currentFrame)->data())
 				+ (chunk->Header.GlobalIndexStart / 8);
 			PostPhys(dt, FieldBufferTable, chunkDirtyBits, entityCount);
-
-			static const ComponentTypeID kFlagsTypeID = TemporalFlags<>::StaticTypeID();
-			if (int32_t* flagsWrite = arch->GetTemporalFieldWritePtr(chunk, kFlagsTypeID, 0, currentFrame))
-			{
-				constexpr int32_t kDirty = static_cast<int32_t>(1u << 30);
-				for (uint32_t e = 0; e < entityCount; ++e) flagsWrite[e] |= kDirty;
-			}
 		}
 	}
 

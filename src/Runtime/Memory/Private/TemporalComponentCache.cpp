@@ -321,6 +321,8 @@ void ComponentCacheBase::PropagateFrame(uint32_t fromFrame, uint32_t toFrame)
 
 	// Copy only live partition ranges — skips dead arena gaps entirely.
 	// NT stores bypass L3; destination frame won't be read until next tick.
+	// Each partition region must be applied to EVERY field zone in the slab,
+	// because each temporal field has its own zone at a unique OffsetInFrame.
 	struct Region
 	{
 		size_t offset;
@@ -343,7 +345,11 @@ void ComponentCacheBase::PropagateFrame(uint32_t fromFrame, uint32_t toFrame)
 		if (leftover) std::memcpy(writeData + off + chunks * 32, readData + off + chunks * 32, leftover);
 	};
 
-	for (const auto& r : regions) NTCopy(r.offset, r.size);
+	for (uint16_t idx : ValidFields)
+	{
+		const size_t zoneBase = FieldAllocations[idx].OffsetInFrame;
+		for (const auto& r : regions) NTCopy(zoneBase + r.offset, r.size);
+	}
 	_mm_sfence();
 }
 

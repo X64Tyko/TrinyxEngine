@@ -123,6 +123,7 @@ void LogicThread::ThreadMain()
 				RegistryPtr->PropagateFrame(FrameNumber);
 				PublishCompletedFrame();
 			}
+			continue; // don't do the scalar update immediately.
 		}
 
 		// Scalar update only if we're pretty sure we have time.
