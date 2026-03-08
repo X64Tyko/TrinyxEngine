@@ -68,11 +68,11 @@ struct FrameSync
 	// Must be per-frame: scatter writes and the indirect draw read these in the
 	// same submission, but two frame slots can be GPU-in-flight simultaneously,
 	// so sharing a single copy would cause write/read races across submissions.
-	VulkanBuffer FlagsBuffer;        // uint per entity (bit 31 = Active); CPU writes, GPU reads
-	VulkanBuffer ScanBuffer;         // predicate 0/1 → exclusive-scan index; device local
+	VulkanBuffer FlagsBuffer;          // uint per entity (bit 31 = Active); CPU writes, GPU reads
+	VulkanBuffer ScanBuffer;           // predicate 0/1 → exclusive-scan index; device local
 	VulkanBuffer CompactCounterBuffer; // single uint atomicAdd target; device local
-	VulkanBuffer DrawArgsBuffer;     // VkDrawIndexedIndirectCommand; scatter sets instanceCount
-	VulkanBuffer InstancesBuffer;    // compact SoA output; scatter writes, vertex reads via BDA
+	VulkanBuffer DrawArgsBuffer;       // VkDrawIndexedIndirectCommand; scatter sets instanceCount
+	VulkanBuffer InstancesBuffer;      // compact SoA output; scatter writes, vertex reads via BDA
 };
 
 class VulkRender
@@ -148,7 +148,7 @@ private:
 	// Field f base address = slab.DeviceAddr + f * MAX_CACHED_ENTITIES * sizeof(float).
 	// GPU reads at most kMaxFramesInFlight slabs at once; CPU has ≥3 free slots to write fresh data.
 	VulkanBuffer FieldSlabs[kInstanceBufferCount];
-	uint32_t     CurrentFieldSlab = 0;
+	uint32_t CurrentFieldSlab = 0;
 
 	// Mesh buffers (uploaded in CreateMeshBuffers, static for the lifetime of the renderer).
 	VulkanBuffer VertexBuffer; // cube vertices read via BDA in vertex shader
@@ -159,9 +159,9 @@ private:
 	vk::raii::Pipeline Pipeline{nullptr};
 
 	// Compute pipelines (raw handles — destroyed in DestroyShaders).
-	VkPipeline PredicatePipeline  = VK_NULL_HANDLE;
-	VkPipeline PrefixSumPipeline  = VK_NULL_HANDLE;
-	VkPipeline ScatterPipeline    = VK_NULL_HANDLE;
+	VkPipeline PredicatePipeline = VK_NULL_HANDLE;
+	VkPipeline PrefixSumPipeline = VK_NULL_HANDLE;
+	VkPipeline ScatterPipeline   = VK_NULL_HANDLE;
 
 	// FPS tracking (render thread only).
 	double RenderFpsTimer     = 0.0;

@@ -23,7 +23,7 @@ struct TemporalFlags : ComponentView<TemporalFlags, WIDTH>
     FORCE_INLINE TemporalFlags& operator&=(TemporalFlagBits flag)
 	{
 		if constexpr (WIDTH == FieldWidth::Scalar) Flags &= static_cast<int32_t>(flag);
-		else Flags = _mm256_and_si256(Flags, _mm256_set1_epi32(static_cast<int32_t>(flag)));
+		else Flags                                       = _mm256_and_si256(Flags, _mm256_set1_epi32(static_cast<int32_t>(flag)));
 
 		return *this;
 	}

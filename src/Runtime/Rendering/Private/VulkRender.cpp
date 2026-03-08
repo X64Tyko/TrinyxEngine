@@ -232,36 +232,59 @@ bool VulkRender::CreateFrameSync()
 		const VkDeviceSize kFlagsSize =
 			static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(uint32_t);
 		Frames[i].FlagsBuffer = VkMem->AllocateBuffer(kFlagsSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-			GpuMemoryDomain::PersistentMapped, /*requestDeviceAddress=*/ true);
-		if (!Frames[i].FlagsBuffer.IsValid()) { LOG_ERROR_F("[VulkRender] FlagsBuffer alloc failed (slot %d)", i); return false; }
+													  GpuMemoryDomain::PersistentMapped, /*requestDeviceAddress=*/ true);
+		if (!Frames[i].FlagsBuffer.IsValid())
+		{
+			LOG_ERROR_F("[VulkRender] FlagsBuffer alloc failed (slot %d)", i);
+			return false;
+		}
 
 		const VkDeviceSize kScanSize =
 			static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(uint32_t);
 		Frames[i].ScanBuffer = VkMem->AllocateBuffer(kScanSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-			GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
-		if (!Frames[i].ScanBuffer.IsValid()) { LOG_ERROR_F("[VulkRender] ScanBuffer alloc failed (slot %d)", i); return false; }
+													 GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+		if (!Frames[i].ScanBuffer.IsValid())
+		{
+			LOG_ERROR_F("[VulkRender] ScanBuffer alloc failed (slot %d)", i);
+			return false;
+		}
 
 		Frames[i].CompactCounterBuffer = VkMem->AllocateBuffer(sizeof(uint32_t),
-			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-			GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
-		if (!Frames[i].CompactCounterBuffer.IsValid()) { LOG_ERROR_F("[VulkRender] CompactCounterBuffer alloc failed (slot %d)", i); return false; }
+															   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+															   GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+		if (!Frames[i].CompactCounterBuffer.IsValid())
+		{
+			LOG_ERROR_F("[VulkRender] CompactCounterBuffer alloc failed (slot %d)", i);
+			return false;
+		}
 
 		// DrawArgsBuffer: word 0 (indexCount) set once here; scatter sets word 1 each frame.
 		Frames[i].DrawArgsBuffer = VkMem->AllocateBuffer(sizeof(VkDrawIndexedIndirectCommand),
-			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
-			GpuMemoryDomain::PersistentMapped, /*requestDeviceAddress=*/ true);
-		if (!Frames[i].DrawArgsBuffer.IsValid()) { LOG_ERROR_F("[VulkRender] DrawArgsBuffer alloc failed (slot %d)", i); return false; }
+														 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+														 GpuMemoryDomain::PersistentMapped, /*requestDeviceAddress=*/ true);
+		if (!Frames[i].DrawArgsBuffer.IsValid())
+		{
+			LOG_ERROR_F("[VulkRender] DrawArgsBuffer alloc failed (slot %d)", i);
+			return false;
+		}
 		auto* drawArgs = static_cast<uint32_t*>(Frames[i].DrawArgsBuffer.MappedPtr);
-		drawArgs[0] = static_cast<uint32_t>(CubeMesh::IndexCount);
-		drawArgs[1] = 0; drawArgs[2] = 0; drawArgs[3] = 0; drawArgs[4] = 0;
+		drawArgs[0]    = static_cast<uint32_t>(CubeMesh::IndexCount);
+		drawArgs[1]    = 0;
+		drawArgs[2]    = 0;
+		drawArgs[3]    = 0;
+		drawArgs[4]    = 0;
 
 		// InstancesBuffer: compact SoA written by scatter, read by vertex shader.
 		// Same layout as a FieldSlab (kGpuOutFieldCount × MAX_CACHED_ENTITIES floats).
 		const VkDeviceSize kInstancesSize =
 			kGpuOutFieldCount * static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
 		Frames[i].InstancesBuffer = VkMem->AllocateBuffer(kInstancesSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-			GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
-		if (!Frames[i].InstancesBuffer.IsValid()) { LOG_ERROR_F("[VulkRender] InstancesBuffer alloc failed (slot %d)", i); return false; }
+														  GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+		if (!Frames[i].InstancesBuffer.IsValid())
+		{
+			LOG_ERROR_F("[VulkRender] InstancesBuffer alloc failed (slot %d)", i);
+			return false;
+		}
 	}
 
 	// 5 field slabs — CPU cycles through them writing raw SoA field data per frame.
@@ -338,11 +361,31 @@ void VulkRender::DestroyShaders()
 {
 	if (!VkCtx) return;
 
-	if (PredicatePipeline != VK_NULL_HANDLE)  { vkDestroyPipeline(device, PredicatePipeline,  nullptr); PredicatePipeline  = VK_NULL_HANDLE; }
-	if (PrefixSumPipeline != VK_NULL_HANDLE)  { vkDestroyPipeline(device, PrefixSumPipeline,  nullptr); PrefixSumPipeline  = VK_NULL_HANDLE; }
-	if (ScatterPipeline   != VK_NULL_HANDLE)  { vkDestroyPipeline(device, ScatterPipeline,    nullptr); ScatterPipeline    = VK_NULL_HANDLE; }
-	if (VertShader        != VK_NULL_HANDLE)  { vkDestroyShaderModule(device, VertShader, nullptr); VertShader = VK_NULL_HANDLE; }
-	if (FragShader        != VK_NULL_HANDLE)  { vkDestroyShaderModule(device, FragShader, nullptr); FragShader = VK_NULL_HANDLE; }
+	if (PredicatePipeline != VK_NULL_HANDLE)
+	{
+		vkDestroyPipeline(device, PredicatePipeline, nullptr);
+		PredicatePipeline = VK_NULL_HANDLE;
+	}
+	if (PrefixSumPipeline != VK_NULL_HANDLE)
+	{
+		vkDestroyPipeline(device, PrefixSumPipeline, nullptr);
+		PrefixSumPipeline = VK_NULL_HANDLE;
+	}
+	if (ScatterPipeline != VK_NULL_HANDLE)
+	{
+		vkDestroyPipeline(device, ScatterPipeline, nullptr);
+		ScatterPipeline = VK_NULL_HANDLE;
+	}
+	if (VertShader != VK_NULL_HANDLE)
+	{
+		vkDestroyShaderModule(device, VertShader, nullptr);
+		VertShader = VK_NULL_HANDLE;
+	}
+	if (FragShader != VK_NULL_HANDLE)
+	{
+		vkDestroyShaderModule(device, FragShader, nullptr);
+		FragShader = VK_NULL_HANDLE;
+	}
 }
 
 bool VulkRender::CreateComputePipelines()
@@ -352,7 +395,7 @@ bool VulkRender::CreateComputePipelines()
 		TNX_SHADER_DIR "/prefix_sum.spv",
 		TNX_SHADER_DIR "/scatter.spv",
 	};
-	VkPipeline* targets[3] = { &PredicatePipeline, &PrefixSumPipeline, &ScatterPipeline };
+	VkPipeline* targets[3] = {&PredicatePipeline, &PrefixSumPipeline, &ScatterPipeline};
 
 	for (int i = 0; i < 3; ++i)
 	{
@@ -451,9 +494,9 @@ void VulkRender::FillGpuFrameData(FrameSync& frame, uint32_t readFrame)
 	CurrentFieldSlab        = (CurrentFieldSlab + 1) % kInstanceBufferCount;
 
 	const VkDeviceSize fieldStride = static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
-	uint8_t* slabPtr     = static_cast<uint8_t*>(FieldSlabs[CurrentFieldSlab].MappedPtr);
-	const uint64_t slabBase     = FieldSlabs[CurrentFieldSlab].DeviceAddr;
-	const uint64_t prevSlabBase = FieldSlabs[prevSlab].DeviceAddr;
+	uint8_t* slabPtr               = static_cast<uint8_t*>(FieldSlabs[CurrentFieldSlab].MappedPtr);
+	const uint64_t slabBase        = FieldSlabs[CurrentFieldSlab].DeviceAddr;
+	const uint64_t prevSlabBase    = FieldSlabs[prevSlab].DeviceAddr;
 
 	// ---- Per-frame BDAs (compute scratch buffers, one copy per frame slot) ---
 	fd->VerticesAddr       = VertexBuffer.DeviceAddr;
@@ -468,34 +511,41 @@ void VulkRender::FillGpuFrameData(FrameSync& frame, uint32_t readFrame)
 	fd->FieldCount         = kGpuOutFieldCount;
 
 	// ---- Caches (readFrame already locked by RenderFrame) --------------
-	ComponentCacheBase* temporalCache  = RegistryPtr->GetTemporalCache();
-	ComponentCacheBase* volatileCache  = RegistryPtr->GetVolatileCache();
+	ComponentCacheBase* temporalCache = RegistryPtr->GetTemporalCache();
+	ComponentCacheBase* volatileCache = RegistryPtr->GetVolatileCache();
 
-	TemporalFrameHeader* temporalHdr  = temporalCache->GetFrameHeader(readFrame);
-	TemporalFrameHeader* volatileHdr  = volatileCache->GetFrameHeader(readFrame);
+	TemporalFrameHeader* temporalHdr = temporalCache->GetFrameHeader(readFrame);
+	TemporalFrameHeader* volatileHdr = volatileCache->GetFrameHeader(readFrame);
 
 	const ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
-	const uint8_t transformSlot = CFR.GetCacheSlotIndex(Transform<>::StaticTypeID());
-	const uint8_t colorSlot     = CFR.GetCacheSlotIndex(ColorData<>::StaticTypeID());
-	const uint8_t flagsSlot     = CFR.GetCacheSlotIndex(TemporalFlags<>::StaticTypeID());
+	const uint8_t transformSlot       = CFR.GetCacheSlotIndex(Transform<>::StaticTypeID());
+	const uint8_t colorSlot           = CFR.GetCacheSlotIndex(ColorData<>::StaticTypeID());
+	const uint8_t flagsSlot           = CFR.GetCacheSlotIndex(TemporalFlags<>::StaticTypeID());
 
 	// ---- Copy MAX_CACHED_ENTITIES floats per field into current slab ---
 	// Field table: { cache, hdr, compSlot, fieldIndex, semantic }
-	struct FieldDesc { ComponentCacheBase* cache; TemporalFrameHeader* hdr; uint8_t slot; size_t fi; uint32_t sem; };
+	struct FieldDesc
+	{
+		ComponentCacheBase* cache;
+		TemporalFrameHeader* hdr;
+		uint8_t slot;
+		size_t fi;
+		uint32_t sem;
+	};
 	const FieldDesc kFields[kGpuOutFieldCount] = {
-		{ temporalCache, temporalHdr, transformSlot, 0, kSemPosX   },
-		{ temporalCache, temporalHdr, transformSlot, 1, kSemPosY   },
-		{ temporalCache, temporalHdr, transformSlot, 2, kSemPosZ   },
-		{ temporalCache, temporalHdr, transformSlot, 3, kSemRotX   },
-		{ temporalCache, temporalHdr, transformSlot, 4, kSemRotY   },
-		{ temporalCache, temporalHdr, transformSlot, 5, kSemRotZ   },
-		{ temporalCache, temporalHdr, transformSlot, 6, kSemScaleX },
-		{ temporalCache, temporalHdr, transformSlot, 7, kSemScaleY },
-		{ temporalCache, temporalHdr, transformSlot, 8, kSemScaleZ },
-		{ volatileCache, volatileHdr, colorSlot,     0, kSemColorR },
-		{ volatileCache, volatileHdr, colorSlot,     1, kSemColorG },
-		{ volatileCache, volatileHdr, colorSlot,     2, kSemColorB },
-		{ volatileCache, volatileHdr, colorSlot,     3, kSemColorA },
+		{temporalCache, temporalHdr, transformSlot, 0, kSemPosX},
+		{temporalCache, temporalHdr, transformSlot, 1, kSemPosY},
+		{temporalCache, temporalHdr, transformSlot, 2, kSemPosZ},
+		{temporalCache, temporalHdr, transformSlot, 3, kSemRotX},
+		{temporalCache, temporalHdr, transformSlot, 4, kSemRotY},
+		{temporalCache, temporalHdr, transformSlot, 5, kSemRotZ},
+		{temporalCache, temporalHdr, transformSlot, 6, kSemScaleX},
+		{temporalCache, temporalHdr, transformSlot, 7, kSemScaleY},
+		{temporalCache, temporalHdr, transformSlot, 8, kSemScaleZ},
+		{volatileCache, volatileHdr, colorSlot, 0, kSemColorR},
+		{volatileCache, volatileHdr, colorSlot, 1, kSemColorG},
+		{volatileCache, volatileHdr, colorSlot, 2, kSemColorB},
+		{volatileCache, volatileHdr, colorSlot, 3, kSemColorA},
 	};
 
 	for (uint32_t f = 0; f < kGpuOutFieldCount; ++f)
@@ -505,17 +555,17 @@ void VulkRender::FillGpuFrameData(FrameSync& frame, uint32_t readFrame)
 		const void* src      = fd_.cache->GetFieldData(fd_.hdr, fd_.slot, fd_.fi, dummy);
 		uint8_t* dst         = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
 		if (src) std::memcpy(dst, src, static_cast<size_t>(fieldStride));
-		else     std::memset(dst, 0,   static_cast<size_t>(fieldStride));
+		else std::memset(dst, 0, static_cast<size_t>(fieldStride));
 
-		fd->CurrFieldAddrs[f]   = slabBase     + static_cast<uint64_t>(f) * fieldStride;
+		fd->CurrFieldAddrs[f]   = slabBase + static_cast<uint64_t>(f) * fieldStride;
 		fd->PrevFieldAddrs[f]   = prevSlabBase + static_cast<uint64_t>(f) * fieldStride;
 		fd->FieldSemantics[f]   = fd_.sem;
 		fd->FieldElementSize[f] = sizeof(float);
 	}
 
 	// ---- Flags: copy from universal slab (bit 31 = Active per entity) -
-	size_t flagsDummy     = 0;
-	const void* flagsSrc  = temporalCache->GetFieldData(temporalHdr, flagsSlot, 0, flagsDummy);
+	size_t flagsDummy       = 0;
+	const void* flagsSrc    = temporalCache->GetFieldData(temporalHdr, flagsSlot, 0, flagsDummy);
 	const size_t flagsBytes = static_cast<size_t>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(uint32_t);
 	if (flagsSrc) std::memcpy(frame.FlagsBuffer.MappedPtr, flagsSrc, flagsBytes);
 	else          std::memset(frame.FlagsBuffer.MappedPtr, 0, flagsBytes);
@@ -683,7 +733,7 @@ int VulkRender::RenderFrame()
 	// Try to lock a cache frame for reading BEFORE committing to this render tick.
 	// Must happen before vkAcquireNextImageKHR so we can bail cleanly (fence still signaled).
 	ComponentCacheBase* temporalCache = RegistryPtr->GetTemporalCache();
-	uint32_t readFrame = static_cast<uint32_t>(LastLogicFrame);
+	uint32_t readFrame                = static_cast<uint32_t>(LastLogicFrame);
 	if (!temporalCache->TryLockFrameForRead(readFrame))
 	{
 		//readFrame = temporalCache->GetPrevFrame(readFrame);
@@ -851,9 +901,9 @@ void VulkRender::RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex)
 	{
 		TNX_ZONE_COARSE_NC("Render_Compute", TNX_COLOR_RENDERING)
 
-		const uint64_t gpuDataAddr  = frame.GpuData.DeviceAddr;
-		const uint32_t entityCount  = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
-		const uint32_t dispatchX    = (entityCount + 63u) / 64u;
+		const uint64_t gpuDataAddr = frame.GpuData.DeviceAddr;
+		const uint32_t entityCount = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
+		const uint32_t dispatchX   = (entityCount + 63u) / 64u;
 
 		// Helper: global compute→compute memory barrier (all BDA storage accesses).
 		auto ComputeBarrier = [&]()
@@ -890,7 +940,7 @@ void VulkRender::RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex)
 		// Push GpuFrameData BDA once — covers both compute and vertex stages (same PipelineLayout).
 		// This single push is reused by all 3 compute dispatches and the subsequent draw.
 		vkCmdPushConstants(cmd, *PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
-		                   0, sizeof(uint64_t), &gpuDataAddr);
+						   0, sizeof(uint64_t), &gpuDataAddr);
 
 		// Pass 1: predicate — reads FlagsAddr, writes ScanAddr (0/1 per entity).
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, PredicatePipeline);
@@ -913,9 +963,9 @@ void VulkRender::RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex)
 		scatterDone.srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
 		scatterDone.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
 		scatterDone.dstStageMask  = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-		                            VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+			VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
 		scatterDone.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
-		                            VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+			VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
 		VkDependencyInfo scatterDep{};
 		scatterDep.sType              = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
 		scatterDep.memoryBarrierCount = 1;
