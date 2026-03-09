@@ -28,6 +28,7 @@ void LogicThread::Start()
 {
 	bIsRunning.store(true, std::memory_order_release);
 	Thread = std::thread(&LogicThread::ThreadMain, this);
+	TrinyxThreading::PinThread(Thread);
 	LOG_INFO("[LogicThread] Started");
 }
 
@@ -48,8 +49,6 @@ void LogicThread::Join()
 
 void LogicThread::ThreadMain()
 {
-	TrinyxThreading::PinCurrentThread(2);
-
 	const uint64_t perfFrequency = SDL_GetPerformanceFrequency();
 	uint64_t lastCounter         = SDL_GetPerformanceCounter();
 

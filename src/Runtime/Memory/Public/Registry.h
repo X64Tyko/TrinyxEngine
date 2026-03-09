@@ -342,7 +342,7 @@ inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
 	uint32_t volWrite = VolatileSlab.GetNextFrame(currentFrame);
 	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
 	{
-		//LOG_ERROR_F("Failed to acquire Volatile write lock on frame %u", volWrite);
+		LOG_ERROR_F("Failed to acquire Volatile write lock on frame %u", volWrite);
 #ifdef TNX_ENABLE_ROLLBACK
 		HistorySlab.UnlockFrameWrite(histWrite);
 #endif

@@ -39,7 +39,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	LOG_INFO("TrinyxEngine initialization started");
 
 	TrinyxThreading::Initialize();
-	TrinyxThreading::PinCurrentThread(1);
+	TrinyxThreading::PinCurrentThread(TrinyxThreading::GetIdealCore(CoreAffinity::Input));
 
 	// ---- SDL init --------------------------------------------------------
 	if (!SDL_WasInit(SDL_INIT_VIDEO))
@@ -129,6 +129,11 @@ void TrinyxEngine::Run()
 	Logic->Start();
 	Render->Start();
 
+	while (!Logic->IsRunning() || !Render->IsRunning())
+	{
+		// Spin while we wait so that we don't initialize workers before our Primary threads
+	}
+	
 	bool JobsInitialized = TrinyxJobs::Initialize(&Config);
 	bJobsInitialized.store(JobsInitialized, std::memory_order_release);
 

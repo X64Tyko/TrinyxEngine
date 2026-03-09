@@ -21,7 +21,8 @@ namespace TrinyxThreading
 	{
 		uint32_t LogicalId;
 		uint32_t PhysicalId;
-		bool bIsSMT; // true if this logical core is an SMT sibling
+		bool bIsSMT;    // true if this logical core is an SMT sibling
+		bool bIsPinned; // true if this core has already been pinned
 	};
 
 	static std::vector<CoreEntry> s_CoreList; // priority-ordered (physical first, then SMT)
@@ -218,9 +219,13 @@ namespace TrinyxThreading
 	{
 		if (s_CoreList.empty()) return;
 
-		uint32_t idx          = s_NextCore.fetch_add(1, std::memory_order_relaxed);
-		uint32_t wrapped      = idx % static_cast<uint32_t>(s_CoreList.size());
-		const CoreEntry& core = s_CoreList[wrapped];
+		CoreEntry& core = s_CoreList[0];
+		do
+		{
+			uint32_t idx          = s_NextCore.fetch_add(1, std::memory_order_relaxed);
+			uint32_t wrapped      = idx % static_cast<uint32_t>(s_CoreList.size());
+			core = s_CoreList[wrapped];
+		} while (core.bIsPinned);
 
 #ifdef _WIN32
 		DWORD_PTR mask = (1ULL << core.LogicalId);
@@ -232,8 +237,23 @@ namespace TrinyxThreading
 		pthread_setaffinity_np(t.native_handle(), sizeof(cpu_set_t), &cpuset);
 #endif
 
+		core.bIsPinned = true;
 		LOG_INFO_F("[ThreadPinning] Pinned thread to logical core %u (physical %u, %s)",
 				   core.LogicalId, core.PhysicalId, core.bIsSMT ? "SMT" : "primary");
+	}
+
+	uint32_t GetIdealCore(CoreAffinity affinity)
+	{
+		if (s_CoreList.empty()) return 0;
+
+		switch (affinity)
+		{
+			case CoreAffinity::OS: return 0;
+			case CoreAffinity::Input: return s_CoreList[0].LogicalId;
+			case CoreAffinity::Physics: return s_CoreList[1].LogicalId;
+			case CoreAffinity::Render: return s_CoreList[2].LogicalId;
+			case CoreAffinity::Worker: return -1; // > core count, will auto decide
+		}
 	}
 
 	void PinCurrentThread(uint32_t coreId)
@@ -247,6 +267,16 @@ namespace TrinyxThreading
 		CPU_SET(coreId, &cpuset);
 		pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
 #endif
+		
+		for (auto& core : s_CoreList)
+		{
+			if (core.LogicalId == coreId)
+			{
+				core.bIsPinned = true;
+				break;
+			}
+		}
+		
 		LOG_INFO_F("[ThreadPinning] Pinned current thread to core %u", coreId);
 	}
 
@@ -255,7 +285,7 @@ namespace TrinyxThreading
 
 	uint32_t GetWorkerThreadCapacity()
 	{
-		uint32_t available = static_cast<uint32_t>(s_CoreList.size());
+		uint32_t available = HasSMT() ? s_PhysicalCores : static_cast<uint32_t>(s_CoreList.size());
 		return (available > kReservedCores) ? (available - kReservedCores) : 0;
 	}
 

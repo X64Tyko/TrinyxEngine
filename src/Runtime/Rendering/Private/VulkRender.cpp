@@ -147,6 +147,7 @@ void VulkRender::Start()
 
 	bIsRunning.store(true, std::memory_order_release);
 	Thread = std::thread(&VulkRender::ThreadMain, this);
+	TrinyxThreading::PinThread(Thread);
 	LOG_INFO("[VulkRender] Started");
 }
 
@@ -706,7 +707,6 @@ bool VulkRender::CreatePipeline()
 
 void VulkRender::ThreadMain()
 {
-	TrinyxThreading::PinCurrentThread(3);
 	LOG_INFO("[VulkRender] Thread running — Step 4 GPU-driven compute pipeline");
 
 	while (!TrinyxEngine::Get().GetJobsInitialized())

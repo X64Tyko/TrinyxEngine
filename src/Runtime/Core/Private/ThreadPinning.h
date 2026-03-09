@@ -3,6 +3,14 @@
 #include <cstdint>
 #include <thread>
 
+enum class CoreAffinity : uint8_t
+{
+	OS,
+	Input,
+	Physics,
+	Render,
+	Worker
+};
 /**
  * TrinyxThreading — Core-aware thread pinning.
  *
@@ -36,6 +44,11 @@ namespace TrinyxThreading
 	/// How many cores are available for the worker pool
 	/// (logical cores minus the 3 reserved coordinator cores).
 	uint32_t GetWorkerThreadCapacity();
+
+	/** Return the ideal core for the requested affinity based on capacity and SMT.
+	 *
+	 */
+	uint32_t GetIdealCore(CoreAffinity affinity);
 
 	/// Whether the CPU has SMT (hyperthreading) enabled.
 	bool HasSMT();

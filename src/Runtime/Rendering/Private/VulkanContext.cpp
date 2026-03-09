@@ -492,9 +492,9 @@ bool VulkanContext::CreateSwapchain(SDL_Window* window)
 		createInfo.imageUsage       = vk::ImageUsageFlagBits::eColorAttachment
 			| vk::ImageUsageFlagBits::eTransferDst;
 
+		uint32_t indices[] = {Queues.GraphicsFamily, Queues.ComputeFamily};
 		if (Queues.GraphicsFamily != Queues.ComputeFamily)
 		{
-			uint32_t indices[]               = {Queues.GraphicsFamily, Queues.ComputeFamily};
 			createInfo.imageSharingMode      = vk::SharingMode::eConcurrent;
 			createInfo.queueFamilyIndexCount = 2;
 			createInfo.pQueueFamilyIndices   = indices;
