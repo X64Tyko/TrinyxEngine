@@ -26,7 +26,7 @@ GPU-driven rendering, lock-free communication) that are too risky to implement d
 - **Sentinel (Main):** 1.0ms per frame (1000 Hz) ✅
 - **Brain (Logic):** ~1.7ms per frame (target: 1.95ms @ 512Hz)
 - **Encoder (Render):** Orange cube rendering at full rate via BDA pipeline ✅
-- **100k entities:** ~0.3ms PrePhysics, ~1.7ms full logic frame
+- **100k entities:** ~0.1ms PrePhysics, ~0.7ms full logic frame
 
 **Architecture:**
 - ✅ Three-thread architecture (Sentinel/Brain/Encoder)
