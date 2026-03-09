@@ -279,23 +279,29 @@ Add ~100 MB for cold components in archetype chunks + ECS metadata.
 
 ### Initialization
 
-```cpp
-int main()
-{
-    EngineConfig config;
-    config.FixedUpdateHz      = 512;
-    config.TemporalFrameCount = 128;
-    config.MaxPhysicsEntities = 50000;
-    config.MaxCachedEntities  = 100000;
-    config.InputPollHz        = 1000;
+Engine configuration is loaded from `*Defaults.ini` files in the project source directory (not the build directory).
+Projects use the `GameManager` CRTP pattern — no manual `main()` required:
 
-    TrinyxEngine& engine = TrinyxEngine::Get();
-    if (engine.Initialize("My Game", 1920, 1080))
-    {
-        engine.Run();
-    }
-    return 0;
-}
+```cpp
+class MyGame : public GameManager<MyGame> {
+    const char* GetWindowTitle() const { return "My Game"; }
+    bool PostInitialize(TrinyxEngine& engine) { /* spawn entities */ return true; }
+};
+TNX_IMPLEMENT_GAME(MyGame)
+```
+
+The `TNX_IMPLEMENT_GAME` macro generates `main()`, initializes the engine with the project's `TNX_PROJECT_DIR`
+(set by CMake), loads all `*Defaults.ini` files from that directory, and calls `PostInitialize` on your game class.
+
+**Example `GameDefaults.ini`:**
+
+```ini
+FixedUpdateHz = 512
+TemporalFrameCount = 128
+MaxPhysicsEntities = 50000
+MaxCachedEntities = 100000
+InputPollHz = 1000
+JobCacheSize = 1024
 ```
 
 ### What Can Change at Runtime
