@@ -145,6 +145,7 @@ public:
 		size_t FrameStride;
 		size_t Size;
 		bool isDecomposed;
+		CacheTier Tier;
 	};
 
 	std::vector<FieldArrayDescriptor> CachedFieldArrayLayout;
@@ -183,29 +184,12 @@ public:
 		return chunk->GetBuffer(static_cast<uint32_t>(it->second));
 	}
 
-	/// Return the write-frame pointer for any single temporal field within a chunk.
-	/// absoluteFrame is the raw monotonic frame counter; the modular write index is
-	/// computed internally from the field's FrameCount.  Returns nullptr if the field
-	/// is not SoA or the component isn't in this archetype.
-	int32_t* GetTemporalFieldWritePtr(Chunk* chunk, ComponentTypeID compType,
-									  uint32_t fieldIdx, uint32_t absoluteFrame) const
-	{
-		ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
-		FieldKey key{compType, CFR.GetCacheSlotIndex(compType), fieldIdx};
-		auto it = TemporalFieldIndices.find(key);
-		if (it == TemporalFieldIndices.end()) return nullptr;
-		const TemporalFieldInfo& info = it->second;
-		auto* frame0Ptr               = static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(info.SlotIndex));
-		uint32_t writeIdx             = (absoluteFrame + 1) % info.FrameCount;
-		return reinterpret_cast<int32_t*>(frame0Ptr + static_cast<size_t>(writeIdx) * info.FrameStride);
-	}
-
 	// Build interleaved dual field array table (read T, write T+1) for FieldProxy::Bind()
 	// Output layout: [read0, write0, read1, write1, read2, write2, ...]
 	// absoluteFrame: raw monotonic frame counter — each SoA field computes its own
 	// modular read/write indices from its FrameCount, so Volatile (5-frame) and
 	// Temporal (N-frame) fields in the same archetype work correctly.
-	void BuildFieldDualArrayTable(Chunk* chunk, void** outDualArrayTable, uint32_t absoluteFrame) const
+	void BuildFieldDualArrayTable(Chunk* chunk, void** outDualArrayTable, uint32_t absoluteFrame, uint32_t VolatileAbsoluteFrame) const
 	{
 		auto chunkBase = chunk->Data;
 
@@ -216,8 +200,8 @@ public:
 			if (desc.isDecomposed)
 			{
 				uint8_t* frame0Ptr = static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(desc.fieldIndex));
-				uint32_t readIdx   = absoluteFrame % desc.FieldFrames;
-				uint32_t writeIdx  = (absoluteFrame + 1) % desc.FieldFrames;
+				uint32_t readIdx   = (desc.Tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame) % desc.FieldFrames;
+				uint32_t writeIdx  = ((desc.Tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame) + 1) % desc.FieldFrames;
 
 				outDualArrayTable[i * 2]     = frame0Ptr + readIdx * desc.FrameStride;  // Read T
 				outDualArrayTable[i * 2 + 1] = frame0Ptr + writeIdx * desc.FrameStride; // Write T+1
@@ -232,7 +216,7 @@ public:
 		}
 	}
 
-	void BuildFieldArrayTable(Chunk* chunk, void** outFieldArrayTable, uint32_t absoluteFrame) const
+	void BuildFieldArrayTable(Chunk* chunk, void** outFieldArrayTable, uint32_t absoluteFrame, uint32_t VolatileAbsoluteFrame) const
 	{
 		for (size_t i = 0; i < CachedFieldArrayLayout.size(); ++i)
 		{
@@ -241,7 +225,7 @@ public:
 			if (desc.isDecomposed)
 			{
 				// Decomposed component - get specific field array
-				size_t frameIdx       = (absoluteFrame % desc.FieldFrames) * desc.FrameStride;
+				size_t frameIdx       = ((desc.Tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame) % desc.FieldFrames) * desc.FrameStride;
 				outFieldArrayTable[i] = static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(desc.SlotIndex)) + frameIdx;
 			}
 			else

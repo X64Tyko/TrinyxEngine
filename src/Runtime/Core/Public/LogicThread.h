@@ -87,19 +87,19 @@ inline void LogicThread::PrePhysics(double dt)
 {
 	TNX_ZONE_N("Logic_FixedUpdate");
 
-	RegistryPtr->InvokePrePhys(dt, FrameNumber);
+	RegistryPtr->InvokePrePhys(dt);
 }
 
 inline void LogicThread::ScalarUpdate(double dt)
 {
 	TNX_ZONE_N("Logic_Update");
 
-	RegistryPtr->InvokeScalarUpdate(dt, FrameNumber);
+	RegistryPtr->InvokeScalarUpdate(dt);
 }
 
 inline void LogicThread::PostPhysics(double dt)
 {
 	TNX_ZONE_N("Logic_FixedUpdate");
 
-	RegistryPtr->InvokePostPhys(dt, FrameNumber);
+	RegistryPtr->InvokePostPhys(dt);
 }

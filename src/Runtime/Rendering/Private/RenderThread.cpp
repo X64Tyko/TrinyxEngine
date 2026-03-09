@@ -401,7 +401,7 @@ bool RenderThread::InterpolateTemporalFrames(uint32_t frameNumber)
 	TNX_ZONE_N("Render_Interpolate");
 
 	// Get T and T-1 frame numbers
-	uint32_t framePrev = TemporalCache->GetPrevFrame(frameNumber);
+	uint32_t framePrev = 0;//TemporalCache->GetPrevFrame(frameNumber);
 
 	if (!TemporalCache->TryLockFrameForRead(frameNumber) || !TemporalCache->TryLockFrameForRead(framePrev))
 	{
@@ -462,7 +462,7 @@ bool RenderThread::InterpolateTemporalFrames(uint32_t frameNumber)
 			if (chunkEntityCount == 0) continue;
 
 			// Build field array tables for T-1 and T
-			arch->BuildFieldDualArrayTable(chunk, fieldArrayTable, frameNumber);
+			arch->BuildFieldDualArrayTable(chunk, fieldArrayTable, frameNumber, frameNumber - 1);
 
 			// Get Transform field arrays (indices 0-8 for position, rotation, scale)
 			auto posXPrev   = static_cast<float*>(fieldArrayTable[2]);

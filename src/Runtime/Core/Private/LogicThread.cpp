@@ -136,7 +136,7 @@ void LogicThread::PublishCompletedFrame()
 	TNX_ZONE_N("Logic_PublishFrame");
 
 	// Get the frame header we just wrote to
-	TemporalFrameHeader* header = TemporalCache->GetFrameHeader(++FrameNumber);
+	TemporalFrameHeader* header = TemporalCache->GetFrameHeader();
 
 	// Fill frame metadata
 	header->FrameNumber            = FrameNumber;
@@ -214,7 +214,7 @@ void LogicThread::PublishCompletedFrame()
 	header->AmbientIntensity = 0.2f;
 
 	// Publish frame number atomically - RenderThread can now read this frame
-	LastCompletedFrame.store(FrameNumber, std::memory_order_release);
+	LastCompletedFrame.store(FrameNumber++, std::memory_order_release);
 }
 
 void LogicThread::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)

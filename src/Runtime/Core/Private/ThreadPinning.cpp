@@ -244,7 +244,7 @@ namespace TrinyxThreading
 
 	uint32_t GetIdealCore(CoreAffinity affinity)
 	{
-		if (s_CoreList.empty()) return 0;
+		if (s_CoreList.empty()) return -1;
 
 		switch (affinity)
 		{
@@ -254,6 +254,8 @@ namespace TrinyxThreading
 			case CoreAffinity::Render: return s_CoreList[2].LogicalId;
 			case CoreAffinity::Worker: return -1; // > core count, will auto decide
 		}
+		
+		return -1;
 	}
 
 	void PinCurrentThread(uint32_t coreId)

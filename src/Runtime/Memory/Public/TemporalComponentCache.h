@@ -6,9 +6,14 @@
 
 #include "Types.h"
 #include "EngineConfig.h"
+#include "Logger.h"
 
 enum class SystemID : uint8_t;
 class Archetype;
+
+// Function pointer types for tier-specific behavior
+using FnGetNextWriteFramePtr = uint32_t (*)(const class ComponentCacheBase*);
+using FnPropagateFramePtr = void (*)(class ComponentCacheBase*);
 
 struct alignas(64) TemporalFrameHeader
 {
@@ -57,32 +62,23 @@ public:
 	~ComponentCacheBase();
 
 	// O(1) frame header access - external systems manage locking
-	TemporalFrameHeader* GetFrameHeader(uint32_t frameNum) const
+	TemporalFrameHeader* GetFrameHeader(uint32_t frameNum = -1) const
 	{
+		frameNum = frameNum == -1 ? ActiveWriteFrame : frameNum;
 		return FrameHeaders[frameNum % TemporalFrameCount];
 	}
 
-	FORCE_INLINE uint32_t GetFrameIndex(uint32_t frameNum) const
-	{
-		return frameNum % TemporalFrameCount;
-	}
-
-	FORCE_INLINE uint32_t GetNextFrame(uint32_t currentFrame) const
-	{
-		return (currentFrame + 1) % TemporalFrameCount;
-	}
-
-	FORCE_INLINE uint32_t GetPrevFrame(uint32_t currentFrame) const
-	{
-		return (currentFrame + TemporalFrameCount - 1) % TemporalFrameCount;
-	}
-
 	// Frame locking for multi-threaded access
-	bool TryLockFrameForWrite(uint32_t frameNum);
-	bool VerifyFrameReadable(uint32_t frameNum) const;
-	void UnlockFrameWrite(uint32_t frameNum);
-	bool TryLockFrameForRead(uint32_t frameNum);
-	void UnlockFrameRead(uint32_t frameNum);
+	// We assume that after propagating the next frame is locked for writing until propagated again.
+	// outWriteFrame is the actual frame we're writing to, for field data collection
+	bool TryLockFrameForWrite(uint32_t& outWriteFrame);
+	bool VerifyFrameReadable(uint32_t bufferIndex) const;
+	void UnlockFrameWrite();
+	bool TryLockFrameForRead(uint32_t frameNum = -1);
+	void UnlockFrameRead(uint32_t frameNum = -1);
+	
+	uint32_t GetActiveWriteFrame() const { return ActiveWriteFrame; }
+	uint32_t GetActiveReadFrame() const { return LastWrittenFrame; }
 
 	// Allocate field array for a chunk across all frames, returns absolute pointer to frame 0 data.
 	// Archetype calls this for each temporal field when allocating a new chunk.
@@ -99,7 +95,7 @@ public:
 
 	// Copy field data from fromFrame into toFrame before dispatch.
 	// Called once per logic tick so all FieldProxy writes start from the previous frame's state.
-	void PropagateFrame(uint32_t fromFrame, uint32_t toFrame);
+	void PropagateFrameData(uint32_t fromFrame, uint32_t toFrame);
 
 	// Get component field data from specific frame.
 	// Also returns how many entities are allocated/valid for this field so render can clamp scans safely.
@@ -115,13 +111,37 @@ public:
 	size_t GetSystemAllocatorIndex(SystemID sysID, size_t size) const;
 
 	size_t AdvanceSystemAllocatorIndex(SystemID sysID, size_t size);
+	
+	uint32_t GetNextWriteFrame() const
+	{
+		return FnGetNextWriteFrame(this);
+	}
+
+	void PropagateFrame()
+	{
+		FnPropagateFrame(this);
+	}
 
 protected:
+	template <typename Derived>
+	friend class ComponentCacheImpl;
+	
+	template <CacheTier Tier>
+	friend class ComponentCache;
+	
 	// Called by ComponentCacheImpl::Initialize with the correct frame count for the tier.
 	void InitializeInternal(const EngineConfig* Config, uint32_t frameCount);
+	
+	// Internal Lock
+	bool LockFrameForWrite(uint32_t WriteFrame);
 
+	FnGetNextWriteFramePtr FnGetNextWriteFrame = nullptr;
+	FnPropagateFramePtr FnPropagateFrame = nullptr;
+	
 	// Set by ComponentCacheImpl before calling InitializeInternal so GetTier() is valid immediately.
 	CacheTier Tier_ = CacheTier::Volatile;
+	uint32_t LastWrittenFrame = -1;
+	uint32_t ActiveWriteFrame = 0;
 
 	size_t MaxPhysicsBoundary = 0;
 	size_t MaxCachedBoundary  = 0;
@@ -196,8 +216,16 @@ public:
 	void Initialize(const EngineConfig* Config)
 	{
 		Tier_ = static_cast<Derived*>(this)->GetCacheTier();
+		FnGetNextWriteFrame = &Derived::GetNextWriteFrameImpl;
+		FnPropagateFrame = &Derived::PropagateFrameImpl;
 		InitializeInternal(Config, static_cast<Derived*>(this)->GetFrameCount(Config));
 	}
+	
+protected:
+	friend Derived;
+	
+	uint32_t& MutLastWrittenFrame() { return LastWrittenFrame;};
+	uint32_t& MutActiveWriteFrame() { return ActiveWriteFrame;};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -218,12 +246,12 @@ public:
 		if constexpr (Tier == CacheTier::Volatile)
 		{
 			(void)Config;
-			return 5;
+			return 3;
 		}
 		else
 		{
 #ifndef TNX_ENABLE_ROLLBACK
-			return 5;
+			return 3;
 #endif
 			return static_cast<uint32_t>(Config->TemporalFrameCount);
 		}
@@ -237,12 +265,53 @@ public:
 		if constexpr (Tier == CacheTier::Universal) return "Universal";
 		else return "Temporal";
 	}
-	
-	size_t GetSystemAllocatorIndex([[maybe_unused]] SystemID sysID, [[maybe_unused]] size_t size) const
-	{
-		if constexpr (Tier == CacheTier::Universal || Tier == CacheTier::None) return this->PhysOffset;
 
-		return ComponentCacheBase::GetSystemAllocatorIndex(sysID, size);
+	// Static implementations for function pointers
+	static uint32_t GetNextWriteFrameImpl(const ComponentCacheBase* base)
+	{
+		if constexpr (Tier == CacheTier::Volatile)
+		{
+			// Triple-buffer: find the frame that's not locked
+			// We have 3 frames: one being written (T+1), one being read (T), one free (T-1)
+			// Return the buffer slot index (0-2) of the unlocked frame
+			// It's possible another thread is using the buffer for networking or something, loop until we find a valid frame
+			while (true)
+			{
+				for (uint32_t i = 0; i < 3; ++i)
+				{
+					uint32_t candidate = (base->ActiveWriteFrame + 1 + i) % base->GetTotalFrameCount();
+					if (candidate == base->ActiveWriteFrame) continue;
+					TemporalFrameHeader* header = base->GetFrameHeader(candidate);
+					uint8_t flags = header->OwnershipFlags.load(std::memory_order_acquire);
+					// Frame is free if not write-locked and not read-locked
+					if ((flags & 0x03) == 0) // 0x01 = LOGIC_WRITING, 0x02 = RENDER_READING
+					{
+						return candidate;
+					}
+				}
+			}
+		}
+		else
+		{
+			// Temporal/Universal: circular buffer, just increment with modulo
+			return (base->ActiveWriteFrame + 1) % base->GetTotalFrameCount();
+		}
+	}
+
+	static void PropagateFrameImpl(ComponentCacheBase* base)
+	{
+		uint32_t targetSlot = GetNextWriteFrameImpl(base);
+		uint32_t prevSlot = base->ActiveWriteFrame;
+		
+		// We need to lock this frame before we propagate and change our active frame
+		LOG_INFO_F("Attempting Lock on frame %i on cache %s", targetSlot, GetLabel());
+		bool stuck = false;
+		while (!base->LockFrameForWrite(targetSlot)) { if (!stuck) { LOG_INFO("Stuck!"); stuck = true; } }
+		
+		base->LastWrittenFrame = prevSlot;
+		base->ActiveWriteFrame = targetSlot;
+		base->PropagateFrameData(prevSlot, targetSlot);
+		base->UnlockFrameWrite();
 	}
 };
 

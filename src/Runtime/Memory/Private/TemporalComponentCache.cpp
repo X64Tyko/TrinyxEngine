@@ -169,6 +169,18 @@ void ComponentCacheBase::InitializeInternal(const EngineConfig* Config, uint32_t
 			   ValidFields.size(), TemporalFrameCount, frameStride, TotalSlabSize);
 }
 
+bool ComponentCacheBase::LockFrameForWrite(uint32_t WriteFrame)
+{
+	
+	// We still want to make sure only 1 thread is trying to lock the write frame at a time
+	TemporalFrameHeader* header = GetFrameHeader(WriteFrame);
+
+	// Try to acquire write lock - frame must be completely unlocked (no readers or writers)
+	// 0x01 = LOGIC_WRITING, 0x02 = RENDER_READING, 0x04 = NETWORK_READING, 0x08 = DEFRAG_LOCKED
+	uint8_t expected = 0;
+	return header->OwnershipFlags.compare_exchange_strong(expected, 0x01, std::memory_order_acquire);
+}
+
 void* ComponentCacheBase::AllocateFieldArray(Archetype* owner, Chunk* chunk,
 											 ComponentTypeID compType, size_t fieldIndex,
 											 const char* fieldName, size_t entityCount, size_t fieldSize, SystemID EntitySystemID)
@@ -262,9 +274,11 @@ void* ComponentCacheBase::GetFieldData(TemporalFrameHeader* header, ComponentTyp
 }
 
 
-bool ComponentCacheBase::TryLockFrameForWrite(uint32_t frameNum)
+bool ComponentCacheBase::TryLockFrameForWrite(uint32_t& outWriteFrame)
 {
-	TemporalFrameHeader* header = GetFrameHeader(frameNum);
+	outWriteFrame = ActiveWriteFrame;
+	// We still want to make sure only 1 thread is trying to lock the write frame at a time
+	TemporalFrameHeader* header = GetFrameHeader(ActiveWriteFrame);
 
 	// Try to acquire write lock - frame must be completely unlocked (no readers or writers)
 	// 0x01 = LOGIC_WRITING, 0x02 = RENDER_READING, 0x04 = NETWORK_READING, 0x08 = DEFRAG_LOCKED
@@ -272,18 +286,18 @@ bool ComponentCacheBase::TryLockFrameForWrite(uint32_t frameNum)
 	return header->OwnershipFlags.compare_exchange_strong(expected, 0x01, std::memory_order_acquire);
 }
 
-bool ComponentCacheBase::VerifyFrameReadable(uint32_t frameNum) const
+bool ComponentCacheBase::VerifyFrameReadable(uint32_t bufferIndex) const
 {
-	const TemporalFrameHeader* header = GetFrameHeader(frameNum);
+	const TemporalFrameHeader* header = GetFrameHeader(bufferIndex);
 
 	// Frame is readable if no write lock is held (0x01 = LOGIC_WRITING)
 	uint8_t flags = header->OwnershipFlags.load(std::memory_order_acquire);
 	return (flags & 0x01) == 0;
 }
 
-void ComponentCacheBase::UnlockFrameWrite(uint32_t frameNum)
+void ComponentCacheBase::UnlockFrameWrite()
 {
-	TemporalFrameHeader* header = GetFrameHeader(frameNum);
+	TemporalFrameHeader* header = GetFrameHeader(ActiveWriteFrame);
 
 	// Release write lock (clear LOGIC_WRITING bit)
 	header->OwnershipFlags.fetch_and(~0x01, std::memory_order_release);
@@ -291,7 +305,8 @@ void ComponentCacheBase::UnlockFrameWrite(uint32_t frameNum)
 
 bool ComponentCacheBase::TryLockFrameForRead(uint32_t frameNum)
 {
-	TemporalFrameHeader* header = GetFrameHeader(frameNum);
+	uint32_t readFrame = frameNum == -1 ? LastWrittenFrame : frameNum;
+	TemporalFrameHeader* header = GetFrameHeader(readFrame);
 
 	// Frame is readable if no write lock is held (0x01 = LOGIC_WRITING)
 	uint8_t flags = header->OwnershipFlags.load(std::memory_order_acquire);
@@ -305,14 +320,15 @@ bool ComponentCacheBase::TryLockFrameForRead(uint32_t frameNum)
 
 void ComponentCacheBase::UnlockFrameRead(uint32_t frameNum)
 {
-	TemporalFrameHeader* header = GetFrameHeader(frameNum);
+	uint32_t readFrame = frameNum == -1 ? LastWrittenFrame : frameNum;
+	TemporalFrameHeader* header = GetFrameHeader(readFrame);
 
 	// Release read lock (clear RENDER_READING bit)
 	header->OwnershipFlags.fetch_and(~0x02, std::memory_order_release);
 }
 
-void ComponentCacheBase::PropagateFrame(uint32_t fromFrame, uint32_t toFrame)
-{
+void ComponentCacheBase::PropagateFrameData(uint32_t fromFrame, uint32_t toFrame)
+{	
 	if (FrameDataCapacity == 0) return;
 
 	uint8_t* readData  = reinterpret_cast<uint8_t*>(GetFrameHeader(fromFrame)) + sizeof(TemporalFrameHeader);
@@ -334,19 +350,6 @@ void ComponentCacheBase::PropagateFrame(uint32_t fromFrame, uint32_t toFrame)
 		{MaxPhysicsBoundary - DualOffset, DualOffset + RenderOffset}, // Dual + Render (adjacent)
 		{MaxCachedBoundary - LogicOffset, LogicOffset},               // Logic
 	};
-
-	/*
-	auto NTCopy = [&](size_t off, size_t sz)
-	{
-		if (sz == 0) return;
-		const auto* src       = reinterpret_cast<const __m256i*>(readData + off);
-		auto* dst             = reinterpret_cast<__m256i*>(writeData + off);
-		const size_t chunks   = sz / 32;
-		const size_t leftover = sz % 32;
-		for (size_t i = 0; i < chunks; ++i) _mm256_stream_si256(dst + i, _mm256_loadu_si256(src + i));
-		if (leftover) std::memcpy(writeData + off + chunks * 32, readData + off + chunks * 32, leftover);
-	};
-	*/
 
 	TrinyxJobs::JobCounter NTCopyCounter;
 

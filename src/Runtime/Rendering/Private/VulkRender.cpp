@@ -482,7 +482,7 @@ bool VulkRender::CreateMeshBuffers()
 	return true;
 }
 
-void VulkRender::FillGpuFrameData(FrameSync& frame, uint32_t readFrame)
+void VulkRender::FillGpuFrameData(FrameSync& frame)
 {
 	TNX_ZONE_NC("Fill GPU", TNX_COLOR_RENDERING)
 
@@ -517,8 +517,8 @@ void VulkRender::FillGpuFrameData(FrameSync& frame, uint32_t readFrame)
 	ComponentCacheBase* temporalCache = RegistryPtr->GetTemporalCache();
 	ComponentCacheBase* volatileCache = RegistryPtr->GetVolatileCache();
 
-	TemporalFrameHeader* temporalHdr = temporalCache->GetFrameHeader(readFrame);
-	TemporalFrameHeader* volatileHdr = volatileCache->GetFrameHeader(readFrame);
+	TemporalFrameHeader* temporalHdr = temporalCache->GetFrameHeader(temporalCache->GetActiveReadFrame());
+	TemporalFrameHeader* volatileHdr = volatileCache->GetFrameHeader(temporalCache->GetActiveReadFrame());
 
 	const ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
 	const uint8_t transformSlot       = CFR.GetCacheSlotIndex(Transform<>::StaticTypeID());
@@ -714,6 +714,8 @@ void VulkRender::ThreadMain()
 	}
 
 	graphicsQueue = static_cast<VkQueue>(VkCtx->GetQueues().Graphics);
+	LastLogicFrame = LogicPtr->GetLastCompletedFrame();
+	while (LastLogicFrame < 1) { LastLogicFrame = LogicPtr->GetLastCompletedFrame(); }// wait for valid data
 
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
@@ -749,8 +751,7 @@ int VulkRender::RenderFrame()
 	// Try to lock a cache frame for reading BEFORE committing to this render tick.
 	// Must happen before vkAcquireNextImageKHR so we can bail cleanly (fence still signaled).
 	ComponentCacheBase* temporalCache = RegistryPtr->GetTemporalCache();
-	uint32_t readFrame                = static_cast<uint32_t>(LastLogicFrame);
-	if (!temporalCache->TryLockFrameForRead(readFrame))
+	if (!temporalCache->TryLockFrameForRead())
 	{
 		//readFrame = temporalCache->GetPrevFrame(readFrame);
 		//if (!temporalCache->TryLockFrameForRead(readFrame))
@@ -770,19 +771,19 @@ int VulkRender::RenderFrame()
 
 		if (acquireResult == VK_NOT_READY || acquireResult == VK_TIMEOUT)
 		{
-			temporalCache->UnlockFrameRead(readFrame);
+			temporalCache->UnlockFrameRead();
 			return 0;
 		}
 
 		if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR)
 		{
-			temporalCache->UnlockFrameRead(readFrame);
+			temporalCache->UnlockFrameRead();
 			OnSwapchainResize();
 			return 0;
 		}
 		else if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR)
 		{
-			temporalCache->UnlockFrameRead(readFrame);
+			temporalCache->UnlockFrameRead();
 			LOG_ERROR_F("[VulkRender] vkAcquireNextImageKHR failed: %d", acquireResult);
 			return -1;
 		}
@@ -791,8 +792,8 @@ int VulkRender::RenderFrame()
 	vkResetFences(device, 1, &fence);
 
 	// Fill per-frame GPU data (readFrame is already locked), then unlock and record.
-	FillGpuFrameData(frame, readFrame);
-	temporalCache->UnlockFrameRead(readFrame);
+	FillGpuFrameData(frame);
+	temporalCache->UnlockFrameRead();
 
 	{
 		TNX_ZONE_COARSE_NC("Render_Record", TNX_COLOR_RENDERING)

@@ -106,7 +106,7 @@ private:
 	bool CreatePipeline();
 	bool CreateComputePipelines();
 	bool CreateMeshBuffers();
-	void FillGpuFrameData(FrameSync& frame, uint32_t readFrame);
+	void FillGpuFrameData(FrameSync& frame);
 	void RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex);
 	void TrackFPS();
 	void OnSwapchainResize();

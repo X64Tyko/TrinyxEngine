@@ -285,13 +285,17 @@ void Registry::InitializeArchetypes()
 void Registry::PropagateFrame(uint32_t currentFrame)
 {
 	TNX_ZONE_NC("Propagating Frame", TNX_COLOR_LOGIC)
-#ifdef TNX_ENABLE_ROLLBACK
-	HistorySlab.PropagateFrame(currentFrame, currentFrame + 1);
-#endif
-	//UniversalSlab.PropagateFrame(currentFrame, currentFrame + 1);
-	VolatileSlab.PropagateFrame(currentFrame, currentFrame + 1);
 
-	// Clear dirty bits for the frame we're about to write into next tick
+#ifdef TNX_ENABLE_ROLLBACK
+	// Temporal cache: uses circular buffer strategy (defined in ComponentCache<Temporal>)
+	HistorySlab.PropagateFrame();
+#endif
+
+	// Volatile cache: uses triple-buffer strategy with lock-based frame selection
+	// (defined in ComponentCache<Volatile>)
+	VolatileSlab.PropagateFrame();
+
+	// Clear dirty bits for the frame we're about to write into
 	auto& nextDirty = *DirtyBitsFrame(currentFrame + 1);
 	std::fill(nextDirty.begin(), nextDirty.end(), 0ULL);
 }

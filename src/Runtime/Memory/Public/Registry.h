@@ -62,9 +62,9 @@ public:
 
 	// Invoke all lifecycle functions of a specific type
 	// currentFrame: frame T (read from T, write to T+1)
-	void InvokeScalarUpdate(double dt, uint32_t currentFrame);
-	void InvokePrePhys(double dt, uint32_t currentFrame);
-	void InvokePostPhys(double dt, uint32_t currentFrame);
+	void InvokeScalarUpdate(double dt);
+	void InvokePrePhys(double dt);
+	void InvokePostPhys(double dt);
 
 	// Slab accessors — used by LogicThread and RenderThread to get cache pointers at init time.
 	ComponentCache<CacheTier::Volatile>* GetVolatileCache() { return &VolatileSlab; }
@@ -138,9 +138,9 @@ private:
 	std::vector<EntityID> PendingDestructions;
 
 #ifdef TNX_ENABLE_ROLLBACK
-	ComponentCache<CacheTier::Temporal> HistorySlab; // N frames (Config->TemporalFrameCount), rollback-capable
+	TemporalComponentCache HistorySlab; // N frames (Config->TemporalFrameCount), rollback-capable
 #endif
-	ComponentCache<CacheTier::Volatile> VolatileSlab;   // 5 frames, no rollback
+	VolatileComponentCache VolatileSlab;   // 3 frames, no rollback
 
 	// Pre-allocated dual array table used by all Invoke* methods.
 	// Avoids a large VLA on the stack each call.  Sized by MAX_FIELDS_PER_ARCHETYPE
@@ -192,7 +192,7 @@ std::vector<EntityID> Registry::Create(size_t count)
 #endif
 
 		// Return invalid entity ID
-		return EntityID{};
+		return std::vector<EntityID>{ EntityID{} };
         }
 #endif
 
@@ -327,38 +327,25 @@ std::vector<Archetype*> Registry::ClassQuery()
 	return Results;
 }
 
-inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
+inline void Registry::InvokeScalarUpdate(double dt)
 {
 	TNX_ZONE_C(TNX_COLOR_LOGIC);
 
+	uint32_t hisWrite = 0;
 #ifdef TNX_ENABLE_ROLLBACK
-	uint32_t histWrite = HistorySlab.GetNextFrame(currentFrame);
-	if (!HistorySlab.TryLockFrameForWrite(histWrite))
+	if (!HistorySlab.TryLockFrameForWrite(hisWrite))
 	{
-		LOG_ERROR_F("Failed to acquire Temporal write lock on frame %u", histWrite);
+		LOG_ERROR_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
 		return;
 	}
 #endif
-	uint32_t volWrite = VolatileSlab.GetNextFrame(currentFrame);
+	uint32_t volWrite = 0;
 	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
 	{
-		LOG_ERROR_F("Failed to acquire Volatile write lock on frame %u", volWrite);
+		LOG_ERROR_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
 #ifdef TNX_ENABLE_ROLLBACK
-		HistorySlab.UnlockFrameWrite(histWrite);
+		HistorySlab.UnlockFrameWrite();
 #endif
-		return;
-	}
-#ifdef TNX_ENABLE_ROLLBACK
-	if (!HistorySlab.VerifyFrameReadable(currentFrame) || !VolatileSlab.VerifyFrameReadable(currentFrame))
-#else
-	if (!VolatileSlab.VerifyFrameReadable(currentFrame))
-#endif
-	{
-		LOG_ERROR_F("Frame %u is not readable on one or both slabs", currentFrame);
-#ifdef TNX_ENABLE_ROLLBACK
-		HistorySlab.UnlockFrameWrite(histWrite);
-#endif
-		VolatileSlab.UnlockFrameWrite(volWrite);
 		return;
 	}
 
@@ -374,16 +361,16 @@ inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
 		for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
 		{
 			TrinyxJobs::Dispatch(
-				[this, ScalarUpdate, arch, chunkIdx, dt, currentFrame](uint32_t)
+				[this, ScalarUpdate, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
 				{
 					Chunk* chunk         = arch->Chunks[chunkIdx];
 					uint32_t entityCount = arch->GetChunkCount(chunkIdx);
 					if (entityCount == 0) return;
 
 					void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
-					arch->BuildFieldArrayTable(chunk, fieldArrayTable, currentFrame);
+					arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
 					uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(
-							this->DirtyBitsFrame(currentFrame)->data())
+							this->DirtyBitsFrame(hisWrite)->data())
 						+ (chunk->Header.GlobalIndexStart / 8);
 					ScalarUpdate(dt, fieldArrayTable, chunkDirtyBits, entityCount);
 				},
@@ -394,43 +381,30 @@ inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
 	TrinyxJobs::LogicWaitForCounter(&ScalarUpdateCounter);
 
 #ifdef TNX_ENABLE_ROLLBACK
-	HistorySlab.UnlockFrameWrite(histWrite);
+	HistorySlab.UnlockFrameWrite();
 #endif
-	VolatileSlab.UnlockFrameWrite(volWrite);
+	VolatileSlab.UnlockFrameWrite();
 }
 
-inline void Registry::InvokePrePhys(double dt, uint32_t currentFrame)
+inline void Registry::InvokePrePhys(double dt)
 {
 	TNX_ZONE_C(TNX_COLOR_LOGIC);
 
+	uint32_t hisWrite = 0;
 #ifdef TNX_ENABLE_ROLLBACK
-	uint32_t histWrite = HistorySlab.GetNextFrame(currentFrame);
-	if (!HistorySlab.TryLockFrameForWrite(histWrite))
+	if (!HistorySlab.TryLockFrameForWrite(hisWrite))
 	{
-		LOG_ERROR_F("Failed to acquire Temporal write lock on frame %u", histWrite);
+		LOG_ERROR_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
 		return;
 	}
 #endif
-	uint32_t volWrite = VolatileSlab.GetNextFrame(currentFrame);
+	uint32_t volWrite = 0;
 	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
 	{
-		LOG_ERROR_F("Failed to acquire Volatile write lock on frame %u", volWrite);
+		LOG_ERROR_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
 #ifdef TNX_ENABLE_ROLLBACK
-		HistorySlab.UnlockFrameWrite(histWrite);
+		HistorySlab.UnlockFrameWrite();
 #endif
-		return;
-	}
-#ifdef TNX_ENABLE_ROLLBACK
-	if (!HistorySlab.VerifyFrameReadable(currentFrame) || !VolatileSlab.VerifyFrameReadable(currentFrame))
-#else
-	if (!VolatileSlab.VerifyFrameReadable(currentFrame))
-#endif
-	{
-		LOG_ERROR_F("Frame %u is not readable on one or both slabs", currentFrame);
-#ifdef TNX_ENABLE_ROLLBACK
-		HistorySlab.UnlockFrameWrite(histWrite);
-#endif
-		VolatileSlab.UnlockFrameWrite(volWrite);
 		return;
 	}
 
@@ -447,16 +421,16 @@ inline void Registry::InvokePrePhys(double dt, uint32_t currentFrame)
 		for (size_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx)
 		{
 			TrinyxJobs::Dispatch(
-				[this, prePhys, arch, chunkIdx, dt, currentFrame](uint32_t)
+				[this, prePhys, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
 				{
 					Chunk* chunk         = arch->Chunks[chunkIdx];
 					uint32_t entityCount = arch->GetChunkCount(chunkIdx);
 					if (entityCount == 0) return;
 
 					void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
-					arch->BuildFieldArrayTable(chunk, fieldArrayTable, currentFrame);
+					arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
 					uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(
-							this->DirtyBitsFrame(currentFrame)->data())
+							this->DirtyBitsFrame(hisWrite)->data())
 						+ (chunk->Header.GlobalIndexStart / 8);
 					prePhys(dt, fieldArrayTable, chunkDirtyBits, entityCount);
 				},
@@ -467,43 +441,30 @@ inline void Registry::InvokePrePhys(double dt, uint32_t currentFrame)
 	TrinyxJobs::LogicWaitForCounter(&prePhysCounter);
 
 #ifdef TNX_ENABLE_ROLLBACK
-	HistorySlab.UnlockFrameWrite(histWrite);
+	HistorySlab.UnlockFrameWrite();
 #endif
-	VolatileSlab.UnlockFrameWrite(volWrite);
+	VolatileSlab.UnlockFrameWrite();
 }
 
-inline void Registry::InvokePostPhys(double dt, uint32_t currentFrame)
+inline void Registry::InvokePostPhys(double dt)
 {
 	TNX_ZONE_C(TNX_COLOR_LOGIC);
 
+	uint32_t hisWrite = 0;
 #ifdef TNX_ENABLE_ROLLBACK
-	uint32_t histWrite = HistorySlab.GetNextFrame(currentFrame);
-	if (!HistorySlab.TryLockFrameForWrite(histWrite))
+	if (!HistorySlab.TryLockFrameForWrite(hisWrite))
 	{
-		LOG_ERROR_F("Failed to acquire Temporal write lock on frame %u", histWrite);
+		LOG_ERROR_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
 		return;
 	}
 #endif
-	uint32_t volWrite = VolatileSlab.GetNextFrame(currentFrame);
+	uint32_t volWrite = 0;
 	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
 	{
-		LOG_ERROR_F("Failed to acquire Volatile write lock on frame %u", volWrite);
+		LOG_ERROR_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
 #ifdef TNX_ENABLE_ROLLBACK
-		HistorySlab.UnlockFrameWrite(histWrite);
+		HistorySlab.UnlockFrameWrite();
 #endif
-		return;
-	}
-#ifdef TNX_ENABLE_ROLLBACK
-	if (!HistorySlab.VerifyFrameReadable(currentFrame) || !VolatileSlab.VerifyFrameReadable(currentFrame))
-#else
-	if (!VolatileSlab.VerifyFrameReadable(currentFrame))
-#endif
-	{
-		LOG_ERROR_F("Frame %u is not readable on one or both slabs", currentFrame);
-#ifdef TNX_ENABLE_ROLLBACK
-		HistorySlab.UnlockFrameWrite(histWrite);
-#endif
-		VolatileSlab.UnlockFrameWrite(volWrite);
 		return;
 	}
 	
@@ -519,16 +480,16 @@ inline void Registry::InvokePostPhys(double dt, uint32_t currentFrame)
 		for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
 		{
 			TrinyxJobs::Dispatch(
-				[this, PostPhys, arch, chunkIdx, dt, currentFrame](uint32_t)
+				[this, PostPhys, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
 				{
 					Chunk* chunk         = arch->Chunks[chunkIdx];
 					uint32_t entityCount = arch->GetChunkCount(chunkIdx);
 					if (entityCount == 0) return;
 
 					void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
-					arch->BuildFieldArrayTable(chunk, fieldArrayTable, currentFrame);
+					arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
 					uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(
-							this->DirtyBitsFrame(currentFrame)->data())
+							this->DirtyBitsFrame(hisWrite)->data())
 						+ (chunk->Header.GlobalIndexStart / 8);
 					PostPhys(dt, fieldArrayTable, chunkDirtyBits, entityCount);
 				},
@@ -539,7 +500,7 @@ inline void Registry::InvokePostPhys(double dt, uint32_t currentFrame)
 	TrinyxJobs::LogicWaitForCounter(&postPhysCounter);
 
 #ifdef TNX_ENABLE_ROLLBACK
-	HistorySlab.UnlockFrameWrite(histWrite);
+	HistorySlab.UnlockFrameWrite();
 #endif
-	VolatileSlab.UnlockFrameWrite(volWrite);
+	VolatileSlab.UnlockFrameWrite();
 }

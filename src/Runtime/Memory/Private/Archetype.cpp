@@ -130,7 +130,8 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& C
 					temporalCache->GetTotalFrameCount(),
 					temporalCache->GetFrameStride(),
 					field.Size,
-					true
+					true,
+					temporalTier
 				});
 
 				// Add to template cache

@@ -134,7 +134,7 @@ TEST (InitializeTestEntities)
 
 			// Build field array table
 			void* fieldArrayTable[MAX_FIELD_ARRAYS];
-			cubeArch->BuildFieldArrayTable(chunk, fieldArrayTable, 0);
+			cubeArch->BuildFieldArrayTable(chunk, fieldArrayTable, 0, 0);
 			Cube.Hydrate(fieldArrayTable, reinterpret_cast<uint8_t*>(Reg->DirtyBitsFrame(0)->data())
 						 + (chunk->Header.GlobalIndexStart / 8));
 
