@@ -11,6 +11,8 @@
 #include "Profiler.h"
 #include "Registry.h"
 #include "RenderThread.h"
+#include "ThreadPinning.h"
+#include "TrinyxJobs.h"
 #include "VulkRender.h"
 
 // Define global component/class counters (declared in Types.h / SchemaReflector.h)
@@ -35,6 +37,9 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 
 	Logger::Get().Init("TrinyxEngine.log", LogLevel::Debug);
 	LOG_INFO("TrinyxEngine initialization started");
+
+	TrinyxThreading::Initialize();
+	TrinyxThreading::PinCurrentThread(1);
 
 	// ---- SDL init --------------------------------------------------------
 	if (!SDL_WasInit(SDL_INIT_VIDEO))
@@ -124,6 +129,9 @@ void TrinyxEngine::Run()
 	Logic->Start();
 	Render->Start();
 
+	bool JobsInitialized = TrinyxJobs::Initialize(&Config);
+	bJobsInitialized.store(JobsInitialized, std::memory_order_release);
+
 	bIsRunning = true;
 
 	const uint64_t perfFrequency = SDL_GetPerformanceFrequency();
@@ -165,6 +173,10 @@ void TrinyxEngine::Shutdown()
 	if (Render) Render->Stop();
 	if (Logic) Logic->Join();
 	if (Render) Render->Join();
+
+	// Shut down the job system after coordinator threads have exited —
+	// no more jobs will be dispatched, so workers can drain and join.
+	TrinyxJobs::Shutdown();
 
 	// Destroy thread objects BEFORE Vulkan teardown.
 	// RenderThread owns GPU resources (DepthImage, field buffers, pipelines, etc.)

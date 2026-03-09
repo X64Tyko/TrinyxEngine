@@ -33,6 +33,9 @@ struct EngineConfig
 	// At 512Hz: 128 frames = 0.25 seconds of history
 	int TemporalFrameCount = 8;
 
+	// number of jobs to preallocate the job queues to hold. exceeding this value will assert
+	int JobCacheSize = 1024;
+
 	// --- Helpers ---
 	double GetTargetFrameTime() const
 	{

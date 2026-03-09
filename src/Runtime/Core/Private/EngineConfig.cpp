@@ -57,6 +57,7 @@ static void ApplyFromFile(const char* path, EngineConfig& cfg)
 		else if (key == "MaxPhysicsEntities") cfg.MAX_PHYSICS_ENTITIES = std::stoi(val);
 		else if (key == "MaxCachedEntities") cfg.MAX_CACHED_ENTITIES = std::stoi(val);
 		else if (key == "TemporalFrameCount") cfg.TemporalFrameCount = std::stoi(val);
+		else if (key == "JobCacheSize") cfg.JobCacheSize = std::stoi(val);
 	}
 }
 

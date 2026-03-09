@@ -549,29 +549,30 @@ dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
 - [x] Registry dirty bit marking after each chunk update
 - [x] LogicThread::PublishCompletedFrame (Vulkan RH perspective + identity view)
 - [x] GPU-driven compute pipeline (predicate → prefix_sum → scatter, Slang shaders)
-- [x] VulkRender Steps 1–3: clear → indexed cube pipeline → GpuFrameData + BDA draw
-  Orange cube on purple background rendering at full rate via Buffer Device Address
+- [x] VulkRender Steps 1–4: clear → indexed cube → GpuFrameData + BDA draw → entity data from TemporalComponentCache
+  Live entity data rendering at full rate via Buffer Device Address pipeline
 - [x] Tracy profiler integration (3-level: Coarse/Medium/Fine)
+- [x] Lock-free job system (MPMC ring buffers, futex-based wake, per-chunk dispatch)
+- [x] Core-aware thread pinning (physical cores first, SMT siblings second)
+- [x] GameManager CRTP pattern (`TNX_IMPLEMENT_GAME` macro, zero-boilerplate project setup)
+- [x] Project-relative INI config (`*Defaults.ini` scanning from source directory)
+- [x] Tiered storage partition layout (Cold/Static/Volatile/Temporal with dual-ended arena layout)
+- [x] SystemGroup tag on `TNX_TEMPORAL_FIELDS` (drives entity group auto-derivation)
+- [x] 5 GPU InstanceBuffers (circular buffer while rGPU compute pipeline is in progress)
 
 ## Designed, Not Yet Implemented
 
-- [ ] **VulkRender Step 4** — read entity data from TemporalComponentCache (currently hardcoded instance SoA)
-- [ ] **Tiered storage partition layout** (Cold/Static/Volatile/Temporal with dual-ended arena layout)
-- [ ] **Universal strip** (contiguous Flags array outside partition field zones)
-- [ ] `TNX_UNIVERSAL_COMPONENT` macro
-- [ ] **SystemGroup tag on TNX_TEMPORAL_FIELDS** (drives entity group auto-derivation)
-- [ ] **Cumulative dirty bit array** (double-buffered, lock-free Front/Back swap)
-- [ ] **5 GPU InstanceBuffers** (VSync decoupling)
+- [ ] **Cumulative dirty bit array wired to GPU upload** (tracking functional, not yet driving upload path)
 - [ ] `GetTemporalFieldWritePtr` migrated from Archetype to TemporalComponentCache
 - [ ] `TemporalFrameStride` removed from Archetype (duplicated state — call cache->GetFrameStride())
 - [ ] **Presentation Reconciler** (Anti-Events, speculative presentation diff)
 
 ## Planned (Next Phase)
 
+- [ ] Render pipeline optimization (dirty-bit-driven GPU upload, rGPU compute pipeline)
 - [ ] Jolt Physics integration
 - [ ] Frustum culling (SIMD 6-plane test)
 - [ ] State-sorted rendering (64-bit sort keys, GPU radix sort)
 - [ ] Rollback netcode (Temporal slab rollback + dirty resimulation)
-- [ ] Job system (Brain/Encoder currently run inline)
 
 ---

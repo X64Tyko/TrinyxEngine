@@ -49,6 +49,7 @@ private:
 
 	void PublishCompletedFrame(); // Publish last written frame number to mailbox
 	void WaitForTiming(uint64_t frameStart, uint64_t perfFrequency);
+	void TrackFPS();
 
 	// References (non-owning)
 	Registry* RegistryPtr                   = nullptr;
@@ -79,6 +80,7 @@ private:
 	// FPS tracking
 	uint32_t FpsFixedCount = 0;
 	double FpsFixedTimer   = 0.0;
+	double LastFPSCheck    = 0.0;
 };
 
 inline void LogicThread::PrePhysics(double dt)

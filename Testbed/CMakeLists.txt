@@ -21,7 +21,11 @@ add_executable(${PROJECT_NAME}
 # INCLUDES & LINKS
 # -----------------------------------------------------------------------------
 # Link against the Trinyx library
-target_link_libraries(${PROJECT_NAME} PRIVATE Trinyx)
+target_link_libraries(${PROJECT_NAME} PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wl,--whole-archive>
+        Trinyx
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wl,--no-whole-archive>
+)
 
 # Project directory for INI config discovery (source dir, not build dir)
 target_compile_definitions(${PROJECT_NAME} PRIVATE

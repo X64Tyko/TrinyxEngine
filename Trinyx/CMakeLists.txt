@@ -27,6 +27,7 @@ add_library(${PROJECT_NAME} STATIC
     ${TRACY_SOURCES}
     ${VOLK_SOURCES}
         ../src/Runtime/Core/Public/ComponentView.h
+        ../src/Runtime/Core/Public/TrinyxJobs.h
 )
 
 # Suppress all warnings from Tracy (third-party, not our code)

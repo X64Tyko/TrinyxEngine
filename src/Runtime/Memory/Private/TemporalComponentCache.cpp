@@ -8,6 +8,7 @@
 #include "FieldMeta.h"
 #include "MemoryDefines.h"
 #include "Schema.h"
+#include "TrinyxJobs.h"
 #include "Types.h"
 
 ComponentCacheBase::ComponentCacheBase()
@@ -334,6 +335,7 @@ void ComponentCacheBase::PropagateFrame(uint32_t fromFrame, uint32_t toFrame)
 		{MaxCachedBoundary - LogicOffset, LogicOffset},               // Logic
 	};
 
+	/*
 	auto NTCopy = [&](size_t off, size_t sz)
 	{
 		if (sz == 0) return;
@@ -344,12 +346,31 @@ void ComponentCacheBase::PropagateFrame(uint32_t fromFrame, uint32_t toFrame)
 		for (size_t i = 0; i < chunks; ++i) _mm256_stream_si256(dst + i, _mm256_loadu_si256(src + i));
 		if (leftover) std::memcpy(writeData + off + chunks * 32, readData + off + chunks * 32, leftover);
 	};
+	*/
+
+	TrinyxJobs::JobCounter NTCopyCounter;
 
 	for (uint16_t idx : ValidFields)
 	{
 		const size_t zoneBase = FieldAllocations[idx].OffsetInFrame;
-		for (const auto& r : regions) NTCopy(zoneBase + r.offset, r.size);
+		for (const auto& r : regions)
+		{
+			size_t off = zoneBase + r.offset;
+			size_t sz  = r.size;
+			TrinyxJobs::Dispatch([off, sz, readData, writeData](uint32_t)
+			{
+				if (sz == 0) return;
+
+				const auto* src       = reinterpret_cast<const __m256i*>(readData + off);
+				auto* dst             = reinterpret_cast<__m256i*>(writeData + off);
+				const size_t chunks   = sz / 32;
+				const size_t leftover = sz % 32;
+				for (size_t i = 0; i < chunks; ++i) _mm256_stream_si256(dst + i, _mm256_loadu_si256(src + i));
+				if (leftover) std::memcpy(writeData + off + chunks * 32, readData + off + chunks * 32, leftover);
+			}, &NTCopyCounter, TrinyxJobs::Queue::General);
+		}
 	}
+	TrinyxJobs::WaitForCounter(&NTCopyCounter);
 	_mm_sfence();
 }
 

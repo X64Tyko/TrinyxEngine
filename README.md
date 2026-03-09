@@ -38,10 +38,13 @@ GPU-driven rendering, lock-free communication) that are too risky to implement d
 - ✅ GPU-driven compute pipeline (predicate → prefix_sum → scatter, Slang shaders)
 - ✅ Temporal component dual-buffer (TemporalComponentCache, proto-slab)
 - ✅ VulkRender Steps 1–3: clear → indexed cube pipeline → GpuFrameData + BDA draw
-- 🔄 VulkRender Step 4: wire entity data from TemporalComponentCache
-- 🔄 Tiered storage redesign (dual-ended arena partition layout — design complete)
+- ✅ Lock-free job system (MPMC ring buffers, futex-based wake, per-chunk dispatch)
+- ✅ Core-aware thread pinning (physical cores first, SMT siblings second)
+- ✅ GameManager CRTP pattern (TNX_IMPLEMENT_GAME macro, zero-boilerplate project setup)
+- ✅ Project-relative INI config (*Defaults.ini scanning from source directory)
+- ✅ VulkRender Step 4: entity data wired from TemporalComponentCache (functional, optimization pending)
+- ✅ Tiered storage (dual-ended arena partition layout, 4 tiers: Cold/Static/Volatile/Temporal)
 - ⏳ Physics integration (Jolt, not started)
-- ⏳ Job system (infrastructure planned)
 
 ---
 
@@ -50,12 +53,41 @@ GPU-driven rendering, lock-free communication) that are too risky to implement d
 ### The Trinyx Trinity (Three-Thread Architecture)
 
 - **Sentinel (Main Thread):** 1000Hz input polling, window + Vulkan lifetime management, frame pacing
-- **Brain (Logic Thread):** 512Hz fixed-timestep coordinator. Submits LogicQueue jobs, then acts as a worker.
-- **Encoder (Render Thread):** Variable-rate render coordinator. Submits RenderQueue jobs, then acts as a worker.
-- **Worker Threads:** Shared pool pulling from both queues (work-stealing). ~4× speedup on 8-core.
+- **Brain (Logic Thread):** 512Hz fixed-timestep coordinator. Dispatches per-chunk jobs, then steals work while waiting.
+- **Encoder (Render Thread):** Variable-rate render coordinator. Dispatches GPU prep jobs, then steals work while
+  waiting.
+- **Worker Pool:** Core-aware pinned threads pulling from Physics/Render/General queues (work-stealing).
 
-Brain and Encoder are coordinators, not dedicated workers. On an 8-core CPU this gives ~4× speedup for both logic
-and render passes.
+Brain and Encoder are coordinators, not dedicated workers. They dispatch jobs then call `WaitForCounter`,
+which makes them steal work from all queues while waiting — zero idle time. On an 8-core CPU, the 5 remaining
+cores form the worker pool, giving ~6× effective parallelism for logic and render passes.
+
+### Job System
+
+Lock-free MPMC job dispatch with three priority queues:
+
+- **Physics Queue** — PrePhysics/PostPhysics per-chunk jobs (Brain produces, all consume)
+- **Render Queue** — GPU upload/compute dispatch (Encoder produces, all consume)
+- **General Queue** — Everything else + overflow from full queues
+
+Workers block via `std::atomic::wait()` (futex on Linux, WaitOnAddress on Windows) when idle —
+zero CPU usage between bursts, ~1-2us wake latency. Jobs are 64-byte cache-line-aligned structs
+with 48-byte lambda payloads, dispatched through a Vyukov bounded MPMC ring buffer.
+
+### Project Setup
+
+User projects inherit from `GameManager<Derived>` (CRTP) and use `TNX_IMPLEMENT_GAME` to wire up `main()`:
+
+```cpp
+class MyGame : public GameManager<MyGame> {
+    const char* GetWindowTitle() const { return "My Game"; }
+    bool PostInitialize(TrinyxEngine& engine) { /* spawn entities */ return true; }
+};
+TNX_IMPLEMENT_GAME(MyGame)
+```
+
+Engine configuration lives in `*Defaults.ini` files in the project source directory (not the build directory),
+loaded automatically via `TNX_PROJECT_DIR` set by CMake.
 
 ### Memory Model: Tiered Storage
 
@@ -184,11 +216,11 @@ See [docs/BUILD_OPTIONS.md](docs/BUILD_OPTIONS.md) for advanced configuration.
 
 **Target:** 100,000 dynamic entities at 512Hz fixed update (1.95ms per frame)
 
-| Thread | Target | Current |
-|--------|--------|---------|
-| Sentinel | 1.0ms (1000 Hz) | ✅ Achieved |
-| Brain (Logic) | 1.95ms (512 Hz) | ~1.7ms |
-| Encoder (Render) | 8-16ms (60-120 FPS) | In progress |
+| Thread           | Target              | Current                           |
+|------------------|---------------------|-----------------------------------|
+| Sentinel         | 1.0ms (1000 Hz)     | ✅ Achieved                        |
+| Brain (Logic)    | 1.95ms (512 Hz)     | ~1.7ms                            |
+| Encoder (Render) | 8-16ms (60-120 FPS) | Functional (optimization pending) |
 
 The tiered partition design eliminates the cross-archetype co-indexing problem: physics iterates
 DUAL→PHYS→STATIC as three dense SIMD passes; render iterates DUAL→RENDER→STATIC. No pointer chasing,

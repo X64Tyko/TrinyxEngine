@@ -10,6 +10,7 @@
 #include "Signature.h"
 #include "TemporalComponentCache.h"
 #include "TemporalFlags.h"
+#include "TrinyxJobs.h"
 #include "Types.h"
 
 struct EngineConfig;
@@ -361,25 +362,36 @@ inline void Registry::InvokeScalarUpdate(double dt, uint32_t currentFrame)
 		return;
 	}
 
+	TrinyxJobs::JobCounter ScalarUpdateCounter;
+
 	for (auto& [sig, arch] : Archetypes)
 	{
 		UpdateFunc ScalarUpdate = MetaRegistry::Get().EntityGetters[sig.ID].ScalarUpdate;
 		if (!ScalarUpdate) continue;
 
 		size_t size = arch->Chunks.size();
+
 		for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
 		{
-			Chunk* chunk         = arch->Chunks[chunkIdx];
-			uint32_t entityCount = arch->GetChunkCount(chunkIdx);
-			if (entityCount == 0) continue;
+			TrinyxJobs::Dispatch(
+				[this, ScalarUpdate, arch, chunkIdx, dt, currentFrame](uint32_t)
+				{
+					Chunk* chunk         = arch->Chunks[chunkIdx];
+					uint32_t entityCount = arch->GetChunkCount(chunkIdx);
+					if (entityCount == 0) return;
 
-			// Each field computes its own read/write indices from absoluteFrame and its FrameCount.
-			arch->BuildFieldArrayTable(chunk, FieldBufferTable, currentFrame);
-			uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(DirtyBitsFrame(currentFrame)->data())
-				+ (chunk->Header.GlobalIndexStart / 8);
-			ScalarUpdate(dt, FieldBufferTable, chunkDirtyBits, entityCount);
+					void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+					arch->BuildFieldArrayTable(chunk, fieldArrayTable, currentFrame);
+					uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(
+							this->DirtyBitsFrame(currentFrame)->data())
+						+ (chunk->Header.GlobalIndexStart / 8);
+					ScalarUpdate(dt, fieldArrayTable, chunkDirtyBits, entityCount);
+				},
+				&ScalarUpdateCounter, TrinyxJobs::Queue::Physics);
 		}
 	}
+
+	TrinyxJobs::LogicWaitForCounter(&ScalarUpdateCounter);
 
 #ifdef TNX_ENABLE_ROLLBACK
 	HistorySlab.UnlockFrameWrite(histWrite);
@@ -422,24 +434,37 @@ inline void Registry::InvokePrePhys(double dt, uint32_t currentFrame)
 		return;
 	}
 
+	TrinyxJobs::JobCounter prePhysCounter;
+
 	for (auto& [sig, arch] : Archetypes)
 	{
 		UpdateFunc prePhys = MetaRegistry::Get().EntityGetters[sig.ID].PrePhys;
 		if (!prePhys) continue;
 
-		size_t size = arch->Chunks.size();
-		for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
-		{
-			Chunk* chunk         = arch->Chunks[chunkIdx];
-			uint32_t entityCount = arch->GetChunkCount(chunkIdx);
-			if (entityCount == 0) continue;
+		// Capture only what fits in 48 bytes: 5 pointers/values = 40 bytes
+		size_t chunkCount = arch->Chunks.size();
 
-			arch->BuildFieldArrayTable(chunk, FieldBufferTable, currentFrame);
-			uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(DirtyBitsFrame(currentFrame)->data())
-				+ (chunk->Header.GlobalIndexStart / 8);
-			prePhys(dt, FieldBufferTable, chunkDirtyBits, entityCount);
+		for (size_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx)
+		{
+			TrinyxJobs::Dispatch(
+				[this, prePhys, arch, chunkIdx, dt, currentFrame](uint32_t)
+				{
+					Chunk* chunk         = arch->Chunks[chunkIdx];
+					uint32_t entityCount = arch->GetChunkCount(chunkIdx);
+					if (entityCount == 0) return;
+
+					void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+					arch->BuildFieldArrayTable(chunk, fieldArrayTable, currentFrame);
+					uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(
+							this->DirtyBitsFrame(currentFrame)->data())
+						+ (chunk->Header.GlobalIndexStart / 8);
+					prePhys(dt, fieldArrayTable, chunkDirtyBits, entityCount);
+				},
+				&prePhysCounter, TrinyxJobs::Queue::Physics);
 		}
 	}
+
+	TrinyxJobs::LogicWaitForCounter(&prePhysCounter);
 
 #ifdef TNX_ENABLE_ROLLBACK
 	HistorySlab.UnlockFrameWrite(histWrite);
@@ -481,6 +506,8 @@ inline void Registry::InvokePostPhys(double dt, uint32_t currentFrame)
 		VolatileSlab.UnlockFrameWrite(volWrite);
 		return;
 	}
+	
+	TrinyxJobs::JobCounter postPhysCounter;
 
 	for (auto& [sig, arch] : Archetypes)
 	{
@@ -488,18 +515,28 @@ inline void Registry::InvokePostPhys(double dt, uint32_t currentFrame)
 		if (!PostPhys) continue;
 
 		size_t size = arch->Chunks.size();
+
 		for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
 		{
-			Chunk* chunk         = arch->Chunks[chunkIdx];
-			uint32_t entityCount = arch->GetChunkCount(chunkIdx);
-			if (entityCount == 0) continue;
+			TrinyxJobs::Dispatch(
+				[this, PostPhys, arch, chunkIdx, dt, currentFrame](uint32_t)
+				{
+					Chunk* chunk         = arch->Chunks[chunkIdx];
+					uint32_t entityCount = arch->GetChunkCount(chunkIdx);
+					if (entityCount == 0) return;
 
-			arch->BuildFieldArrayTable(chunk, FieldBufferTable, currentFrame);
-			uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(DirtyBitsFrame(currentFrame)->data())
-				+ (chunk->Header.GlobalIndexStart / 8);
-			PostPhys(dt, FieldBufferTable, chunkDirtyBits, entityCount);
+					void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+					arch->BuildFieldArrayTable(chunk, fieldArrayTable, currentFrame);
+					uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(
+							this->DirtyBitsFrame(currentFrame)->data())
+						+ (chunk->Header.GlobalIndexStart / 8);
+					PostPhys(dt, fieldArrayTable, chunkDirtyBits, entityCount);
+				},
+				&postPhysCounter, TrinyxJobs::Queue::Physics);
 		}
 	}
+
+	TrinyxJobs::LogicWaitForCounter(&postPhysCounter);
 
 #ifdef TNX_ENABLE_ROLLBACK
 	HistorySlab.UnlockFrameWrite(histWrite);

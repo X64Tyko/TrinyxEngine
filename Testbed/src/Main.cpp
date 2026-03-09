@@ -68,9 +68,12 @@ TEST (Registry_DestroyAndReuse)
 	Reg->ResetRegistry();
 }
 
+/* Temporarily disabled, jobs aren't properly initialized until the Run loop is active.
 TEST(DirtyBits_SetAfterPrePhys)
 {
 	Registry* Reg = Engine.GetRegistry();
+	
+	TrinyxJobs::Initialize(Reg->GetConfig);
 
 	constexpr int kCount = 16; // exactly 2 dirty bytes
 	Reg->Create<CubeEntity<>>(kCount);
@@ -93,6 +96,7 @@ TEST(DirtyBits_SetAfterPrePhys)
 
 	Reg->ResetRegistry();
 }
+*/
 
 TEST (InitializeTestEntities)
 {

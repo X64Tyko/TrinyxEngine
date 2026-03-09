@@ -1,0 +1,42 @@
+#pragma once
+
+#include <cstdint>
+#include <thread>
+
+/**
+ * TrinyxThreading — Core-aware thread pinning.
+ *
+ * Call Initialize() once at startup to scan the CPU topology.
+ * Then use PinThread() to assign threads to cores in priority order:
+ *   physical cores first (non-SMT), then SMT siblings.
+ * Core 0 is skipped (reserved for OS/interrupts).
+ *
+ * The three coordinator threads (Sentinel, Brain, Encoder) each get
+ * a dedicated physical core. Remaining cores form the worker pool.
+ */
+namespace TrinyxThreading
+{
+	/// Scan CPU topology and build the core assignment list.
+	/// Must be called once before any PinThread() calls.
+	void Initialize();
+
+	/// Pin the given thread to the next best available core.
+	/// Assigns physical cores before SMT siblings. Thread-safe.
+	void PinThread(std::thread & t);
+
+	/// Pin the calling thread to a specific core (e.g. for the main/Sentinel thread).
+	void PinCurrentThread(uint32_t coreId);
+
+	/// Number of physical (processor) cores detected.
+	uint32_t GetPhysicalCoreCount();
+
+	/// Number of logical cores detected (physical + SMT).
+	uint32_t GetLogicalCoreCount();
+
+	/// How many cores are available for the worker pool
+	/// (logical cores minus the 3 reserved coordinator cores).
+	uint32_t GetWorkerThreadCapacity();
+
+	/// Whether the CPU has SMT (hyperthreading) enabled.
+	bool HasSMT();
+}

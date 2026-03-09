@@ -1,4 +1,4 @@
-# Current Status (2026-02)
+# Current Status (2026-03)
 
 > **Navigation:** [← Back to README](../README.md) | [← Configuration](CONFIGURATION.md)
 
@@ -7,8 +7,8 @@
 ## Timeline Context
 
 **Project Start:** ~2026-02-01 (Week 1)
-**Current Date:** 2026-03-04
-**Phase:** GPU-Driven Pipeline + Tiered Storage Design
+**Current Date:** 2026-03-08
+**Phase:** Entity-to-GPU Pipeline Optimization + Physics Prep
 
 ---
 
@@ -20,15 +20,16 @@
 - Trinyx Trinity (Sentinel/Brain/Encoder) fully operational
 - Sentinel runs 1000Hz SDL event loop, owns VulkanContext + VulkanMemory
 - Brain runs 512Hz fixed-timestep loop via accumulator (std::atomic<double>)
-- Encoder (VulkRender) skeleton wired in — ThreadMain logs and exits (GPU loop in progress)
+- Encoder (VulkRender) functional — full GPU loop rendering entity data from TemporalComponentCache
 
 **Raw Vulkan Stack:**
 - Migrated from SDL3 GPU backend to raw Vulkan (volk 1.4.304 + VMA 3.3.0)
 - VulkanContext + VulkanMemory migrated to vk::raii::
 - VulkanContext: instance, device, swapchain, queues, sync primitives
 - VulkanMemory: VMA allocator lifetime, buffer/image allocation helpers
-- VulkRender Steps 1–3 complete: clear → indexed cube pipeline → GpuFrameData + BDA draw
-  Orange cube on purple background rendering at full rate via Buffer Device Address pipeline
+- VulkRender Steps 1–4 complete: clear → indexed cube pipeline → GpuFrameData + BDA draw → entity data from
+  TemporalComponentCache
+  Live entity data rendering at full rate via Buffer Device Address pipeline
 
 **GPU-Driven Compute Pipeline (Slang):**
 - 5 shaders in `shaders/`: predicate, prefix_sum, scatter, cube.vert, cube.frag
@@ -56,6 +57,20 @@
 - `TNX_TEMPORAL_FIELDS(T, SystemGroup, ...)` — SoA temporal field decomposition
 - `TNX_REGISTER_FIELDS(T, ...)` — cold (chunk-only) field registration
 - `TNX_REGISTER_SCHEMA / TNX_REGISTER_SUPER_SCHEMA` — entity schema + Advance generation
+
+**Job System & Threading:**
+
+- Lock-free MPMC job system (Vyukov ring buffers, 3 queues: Physics/Render/General)
+- Futex-based worker wake (`std::atomic::wait`/`notify` — zero idle CPU, ~1-2μs wake latency)
+- Core-aware thread pinning (physical cores first, SMT siblings second, core 0 skipped)
+- Brain/Encoder act as coordinators + workers (dispatch jobs, then steal work while waiting)
+- GameManager CRTP pattern (`TNX_IMPLEMENT_GAME` macro — zero-boilerplate project setup)
+- Project-relative INI config (`*Defaults.ini` scanning from source directory via `TNX_PROJECT_DIR`)
+
+**Tiered Storage:**
+
+- Dual-ended arena partition layout (4 tiers: Cold/Static/Volatile/Temporal)
+- 4 partitions within each slab: Dual/Phys/Render/Logic (auto-derived from SystemGroup tags)
 
 **Architecture & Config Fixes:**
 - `MAX_FIELDS_PER_ARCHETYPE = 256` in Types.h
@@ -100,25 +115,25 @@
 - [x] LogicThread::PublishCompletedFrame (Vulkan RH perspective + identity view)
 - [x] GPU-driven compute pipeline (predicate → prefix_sum → scatter, Slang shaders)
 - [x] InstanceBuffer SoA + indirect draw (DrawArgs)
-- [x] VulkRender Steps 1–3: clear → indexed cube pipeline → GpuFrameData + BDA draw
+- [x] VulkRender Steps 1–4: clear → indexed cube → GpuFrameData + BDA draw → entity data from TemporalComponentCache
 - [x] 3-level Tracy profiling (Coarse/Medium/Fine)
 - [x] `TNX_TEMPORAL_FIELDS` with SystemGroup tag (syntax implemented, partition routing pending)
 - [x] `TemporalFlags` with Active/Dirty bits
+- [x] Lock-free job system (MPMC ring buffers, futex-based wake, per-chunk dispatch)
+- [x] Core-aware thread pinning (physical cores first, SMT siblings second)
+- [x] GameManager CRTP pattern (`TNX_IMPLEMENT_GAME` macro)
+- [x] Project-relative INI config (`*Defaults.ini` scanning from source directory)
+- [x] Tiered storage partition layout (Cold/Static/Volatile/Temporal with dual-ended arena layout)
+- [x] 5 GPU InstanceBuffers (circular buffer while rGPU compute pipeline is in progress)
 
 ### Designed, Not Yet Implemented
 
-- [ ] **Tiered storage partition layout** — Cold/Static/Volatile/Temporal with dual-ended arena layout
-  (current: all temporal entities share one TemporalComponentCache, no partition isolation)
-- [ ] **Universal strip** — contiguous Flags array outside partition field zones
-- [ ] `TNX_UNIVERSAL_COMPONENT` macro
-- [ ] **Cumulative dirty bit array** — double-buffered dense bit array, lock-free Front/Back swap
-- [ ] **5 GPU InstanceBuffers** — VSync decoupling (currently fewer buffers in flight)
+- [ ] **Cumulative dirty bit array** — tracking functional, not yet wired to GPU upload path
 - [ ] **Fixed-point coordinate system** — `Fixed32` value type (1 unit = 0.1mm), `FieldProxy<Fixed32, WIDTH>`, render thread conversion to camera-relative float32 at upload, Jolt bridge (int32↔float32 at cell boundary)
 - [ ] **ConstraintEntity system** — constraint entities in LOGIC partition, `ConstraintType` enum (Rigid/Hinge/BallSocket/Prismatic/Distance/Spring), render thread rigid attachment pass (2-pass depth ordering), physics root determination
 - [ ] **Space partition cell registry** — cell world origins as float64/int64, cell assignment at entity spawn, cross-cell reparenting
 - [ ] `GetTemporalFieldWritePtr` migration from Archetype to TemporalComponentCache
 - [ ] `TemporalFrameStride` removal from Archetype (duplicated from cache)
-- [ ] **VulkRender ThreadMain** — actual GPU loop (acquire → upload → compute → draw → present)
 
 ### Known Issues / Technical Debt
 
@@ -130,18 +145,14 @@
 2. **TemporalFrameStride duplicated on Archetype:** Should call `cache->GetFrameStride()` instead.
    Currently cached redundantly on every Archetype.
 
-3. **VulkRender Step 4 pending:** Instance SoA is currently hardcoded; needs to read entity data
-   from TemporalComponentCache to render live simulation state.
-
 ### Planned (Next Phase)
 
-- [ ] **VulkRender Step 4** — read entity data from TemporalComponentCache (currently hardcoded instance SoA)
-- [ ] **Tiered slab implementation** — allocate Volatile + Temporal slabs with dual-ended arena layout
+- [ ] **Render pipeline optimization** — wire dirty bits to GPU upload, switch from circular buffer to compute-driven
+  rGPU pipeline
 - [ ] **Frustum culling** — SIMD 6-plane test, GPU-side predicate enhancement
 - [ ] **State-sorted rendering** — 64-bit sort keys, GPU radix sort after scatter
 - [ ] **Jolt Physics integration** — zero-copy RigidBody mapping
 - [ ] **Rollback netcode** — Temporal slab rollback + dirty resimulation
-- [ ] **Job system** — Brain/Encoder currently run update loops inline; job infrastructure planned
 - [ ] **Input system** — 1000Hz sampling, action maps
 
 ---

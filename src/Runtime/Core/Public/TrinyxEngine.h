@@ -48,6 +48,7 @@ public:
 	}
 
 	Registry* GetRegistry() const { return RegistryPtr.get(); }
+	bool GetJobsInitialized() const { return bJobsInitialized.load(std::memory_order_relaxed); }
 
 private:
 	// Sentinel Tasks (Main Thread)
@@ -79,6 +80,7 @@ private:
 
 	// --- Lifecycle ---
 	std::atomic<bool> bIsRunning{false};
+	std::atomic<bool> bJobsInitialized{false};
 
 	// --- FPS tracking ---
 	double FpsTimer     = 0.0;

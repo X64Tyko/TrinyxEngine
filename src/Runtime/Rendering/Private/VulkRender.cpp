@@ -19,6 +19,8 @@
 #include "Transform.h"
 #include "TemporalFlags.h"
 #include "LogicThread.h"
+#include "TrinyxEngine.h"
+#include "../../Core/Private/ThreadPinning.h"
 // -----------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------
@@ -483,11 +485,11 @@ void VulkRender::FillGpuFrameData(FrameSync& frame, uint32_t readFrame)
 {
 	TNX_ZONE_NC("Fill GPU", TNX_COLOR_RENDERING)
 
-	auto* fd = static_cast<GpuFrameData*>(frame.GpuData.MappedPtr);
-	std::memset(fd, 0, sizeof(GpuFrameData));
+	auto* FrameData = static_cast<GpuFrameData*>(frame.GpuData.MappedPtr);
+	std::memset(FrameData, 0, sizeof(GpuFrameData));
 
 	const vk::Extent2D ext = VkCtx->GetSwapchain().Extent;
-	BuildViewProjMatrix(fd->ViewProj, static_cast<float>(ext.width) / static_cast<float>(ext.height));
+	BuildViewProjMatrix(FrameData->ViewProj, static_cast<float>(ext.width) / static_cast<float>(ext.height));
 
 	// ---- Advance field slab slot ---------------------------------------
 	const uint32_t prevSlab = CurrentFieldSlab;
@@ -499,16 +501,16 @@ void VulkRender::FillGpuFrameData(FrameSync& frame, uint32_t readFrame)
 	const uint64_t prevSlabBase    = FieldSlabs[prevSlab].DeviceAddr;
 
 	// ---- Per-frame BDAs (compute scratch buffers, one copy per frame slot) ---
-	fd->VerticesAddr       = VertexBuffer.DeviceAddr;
-	fd->InstancesAddr      = frame.InstancesBuffer.DeviceAddr;
-	fd->FlagsAddr          = frame.FlagsBuffer.DeviceAddr;
-	fd->ScanAddr           = frame.ScanBuffer.DeviceAddr;
-	fd->CompactCounterAddr = frame.CompactCounterBuffer.DeviceAddr;
-	fd->DrawArgsAddr       = frame.DrawArgsBuffer.DeviceAddr;
-	fd->Alpha              = 1.0f;
-	fd->EntityCount        = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
-	fd->OutFieldStride     = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
-	fd->FieldCount         = kGpuOutFieldCount;
+	FrameData->VerticesAddr       = VertexBuffer.DeviceAddr;
+	FrameData->InstancesAddr      = frame.InstancesBuffer.DeviceAddr;
+	FrameData->FlagsAddr          = frame.FlagsBuffer.DeviceAddr;
+	FrameData->ScanAddr           = frame.ScanBuffer.DeviceAddr;
+	FrameData->CompactCounterAddr = frame.CompactCounterBuffer.DeviceAddr;
+	FrameData->DrawArgsAddr       = frame.DrawArgsBuffer.DeviceAddr;
+	FrameData->Alpha              = 1.0f;
+	FrameData->EntityCount        = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
+	FrameData->OutFieldStride     = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
+	FrameData->FieldCount         = kGpuOutFieldCount;
 
 	// ---- Caches (readFrame already locked by RenderFrame) --------------
 	ComponentCacheBase* temporalCache = RegistryPtr->GetTemporalCache();
@@ -524,7 +526,7 @@ void VulkRender::FillGpuFrameData(FrameSync& frame, uint32_t readFrame)
 
 	// ---- Copy MAX_CACHED_ENTITIES floats per field into current slab ---
 	// Field table: { cache, hdr, compSlot, fieldIndex, semantic }
-	struct FieldDesc
+	struct FieldDescription
 	{
 		ComponentCacheBase* cache;
 		TemporalFrameHeader* hdr;
@@ -532,7 +534,7 @@ void VulkRender::FillGpuFrameData(FrameSync& frame, uint32_t readFrame)
 		size_t fi;
 		uint32_t sem;
 	};
-	const FieldDesc kFields[kGpuOutFieldCount] = {
+	const FieldDescription kFields[kGpuOutFieldCount] = {
 		{temporalCache, temporalHdr, transformSlot, 0, kSemPosX},
 		{temporalCache, temporalHdr, transformSlot, 1, kSemPosY},
 		{temporalCache, temporalHdr, transformSlot, 2, kSemPosZ},
@@ -548,19 +550,24 @@ void VulkRender::FillGpuFrameData(FrameSync& frame, uint32_t readFrame)
 		{volatileCache, volatileHdr, colorSlot, 3, kSemColorA},
 	};
 
+	TrinyxJobs::JobCounter GPUTransferCounter;
+
 	for (uint32_t f = 0; f < kGpuOutFieldCount; ++f)
 	{
-		const FieldDesc& fd_ = kFields[f];
-		size_t dummy         = 0;
-		const void* src      = fd_.cache->GetFieldData(fd_.hdr, fd_.slot, fd_.fi, dummy);
-		uint8_t* dst         = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
-		if (src) std::memcpy(dst, src, static_cast<size_t>(fieldStride));
-		else std::memset(dst, 0, static_cast<size_t>(fieldStride));
+		const FieldDescription& fieldDesc = kFields[f];
+		size_t dummy                      = 0;
+		const void* src                   = fieldDesc.cache->GetFieldData(fieldDesc.hdr, fieldDesc.slot, fieldDesc.fi, dummy);
+		uint8_t* dst                      = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
+		TrinyxJobs::Dispatch([src, dst, fieldStride](uint32_t)
+		{
+			if (src) std::memcpy(dst, src, static_cast<size_t>(fieldStride));
+			else std::memset(dst, 0, static_cast<size_t>(fieldStride));
+		}, &GPUTransferCounter, TrinyxJobs::Queue::Render);
 
-		fd->CurrFieldAddrs[f]   = slabBase + static_cast<uint64_t>(f) * fieldStride;
-		fd->PrevFieldAddrs[f]   = prevSlabBase + static_cast<uint64_t>(f) * fieldStride;
-		fd->FieldSemantics[f]   = fd_.sem;
-		fd->FieldElementSize[f] = sizeof(float);
+		FrameData->CurrFieldAddrs[f]   = slabBase + static_cast<uint64_t>(f) * fieldStride;
+		FrameData->PrevFieldAddrs[f]   = prevSlabBase + static_cast<uint64_t>(f) * fieldStride;
+		FrameData->FieldSemantics[f]   = fieldDesc.sem;
+		FrameData->FieldElementSize[f] = sizeof(float);
 	}
 
 	// ---- Flags: copy from universal slab (bit 31 = Active per entity) -
@@ -569,6 +576,8 @@ void VulkRender::FillGpuFrameData(FrameSync& frame, uint32_t readFrame)
 	const size_t flagsBytes = static_cast<size_t>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(uint32_t);
 	if (flagsSrc) std::memcpy(frame.FlagsBuffer.MappedPtr, flagsSrc, flagsBytes);
 	else          std::memset(frame.FlagsBuffer.MappedPtr, 0, flagsBytes);
+
+	TrinyxJobs::RenderWaitForCounter(&GPUTransferCounter);
 }
 
 bool VulkRender::CreatePipeline()
@@ -697,7 +706,12 @@ bool VulkRender::CreatePipeline()
 
 void VulkRender::ThreadMain()
 {
+	TrinyxThreading::PinCurrentThread(3);
 	LOG_INFO("[VulkRender] Thread running — Step 4 GPU-driven compute pipeline");
+
+	while (!TrinyxEngine::Get().GetJobsInitialized())
+	{
+	}
 
 	graphicsQueue = static_cast<VkQueue>(VkCtx->GetQueues().Graphics);
 
@@ -706,7 +720,9 @@ void VulkRender::ThreadMain()
 		// Process Render deltas
 		LastLogicFrame = LogicPtr->GetLastCompletedFrame();
 
-		if (RenderFrame() < 0) break;
+		int8_t renderRes = RenderFrame();
+		if (renderRes < 0) break;
+		else if (renderRes == 0) continue; // This stops us counting FPS from failing to render.
 
 		TrackFPS();
 	}

@@ -20,7 +20,11 @@ add_executable(${PROJECT_NAME}
 # -----------------------------------------------------------------------------
 # INCLUDES & LINKS
 # -----------------------------------------------------------------------------
-target_link_libraries(${PROJECT_NAME} PRIVATE Trinyx)
+target_link_libraries(${PROJECT_NAME} PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wl,--whole-archive>
+        Trinyx
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wl,--no-whole-archive>
+)
 
 # Game-specific includes
 target_include_directories(${PROJECT_NAME} PRIVATE

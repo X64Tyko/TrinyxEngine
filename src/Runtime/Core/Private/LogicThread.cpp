@@ -8,6 +8,9 @@
 #include <SDL3/SDL.h>
 #include <cmath>
 
+#include "ThreadPinning.h"
+#include "TrinyxEngine.h"
+
 void LogicThread::Initialize(Registry* registry, const EngineConfig* config, int windowWidth, int windowHeight)
 {
 	RegistryPtr   = registry;
@@ -45,6 +48,8 @@ void LogicThread::Join()
 
 void LogicThread::ThreadMain()
 {
+	TrinyxThreading::PinCurrentThread(2);
+
 	const uint64_t perfFrequency = SDL_GetPerformanceFrequency();
 	uint64_t lastCounter         = SDL_GetPerformanceCounter();
 
@@ -56,6 +61,10 @@ void LogicThread::ThreadMain()
 	constexpr double kMaxAccumulatedTime = 0.25;
 	constexpr int kMaxPhysSubSteps       = 8;
 
+	while (!TrinyxEngine::Get().GetJobsInitialized())
+	{
+	}
+
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
 		TNX_ZONE_NC("Logic Frame", TNX_COLOR_LOGIC);
@@ -66,31 +75,6 @@ void LogicThread::ThreadMain()
 		lastCounter                      = frameStartCounter;
 
 		double dt = static_cast<double>(counterElapsed) / static_cast<double>(perfFrequency);
-
-		// FPS tracking
-		FpsFrameCount++;
-		FpsTimer += dt;
-
-		if (FpsTimer >= 1.0)
-		{
-			double fps = FpsFrameCount / FpsTimer;
-			double ms  = (FpsTimer / FpsFrameCount) * 1000.0;
-
-			LOG_DEBUG_F("Logic FPS: %d | Frame: %.2fms", static_cast<int>(fps), ms);
-
-			FpsFrameCount = 0;
-			FpsTimer      = 0.0;
-		}
-		if (FpsFixedTimer >= 1.0)
-		{
-			double fps = FpsFixedCount / FpsFixedTimer;
-			double ms  = (FpsFixedTimer / FpsFixedCount) * 1000.0;
-
-			LOG_DEBUG_F("Fixed FPS: %d | Frame: %.2fms", static_cast<int>(fps), ms);
-
-			FpsFixedCount = 0;
-			FpsFixedTimer = 0.0;
-		}
 
 		// Spiral of death cap
 		if (dt > kMaxDt) dt = kMaxDt;
@@ -123,12 +107,16 @@ void LogicThread::ThreadMain()
 				RegistryPtr->PropagateFrame(FrameNumber);
 				PublishCompletedFrame();
 			}
+			TrackFPS();
 			continue; // don't do the scalar update immediately.
 		}
 
 		// Scalar update only if we're pretty sure we have time.
 		if (fixedStepTime - dt > Accumulator.load(std::memory_order_relaxed)) [[likely]]
+		{
 			ScalarUpdate(dt);
+			TrackFPS();
+		}
 
 		// Frame limiter (if MaxFPS is set in config)
 		if (ConfigPtr->TargetFPS > 0)
@@ -256,5 +244,32 @@ void LogicThread::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)
 		{
 			// Busy wait
 		}
+	}
+}
+
+void LogicThread::TrackFPS()
+{
+	FpsFrameCount++;
+	const double now = SDL_GetPerformanceCounter() /
+		static_cast<double>(SDL_GetPerformanceFrequency());
+	FpsTimer     += now - LastFPSCheck;
+	LastFPSCheck = now;
+
+	if (FpsTimer >= 1.0) [[unlikely]]
+	{
+		LOG_DEBUG_F("Logic FPS: %d | Frame: %.2fms",
+					static_cast<int>(FpsFrameCount / FpsTimer),
+					(FpsTimer / FpsFrameCount) * 1000.0);
+		FpsFrameCount = 0;
+		FpsTimer      = 0.0;
+	}
+
+	if (FpsFixedTimer >= 1.0) [[unlikely]]
+	{
+		LOG_DEBUG_F("Fixed FPS: %d | Frame: %.2fms",
+					static_cast<int>(FpsFixedCount / FpsFixedTimer),
+					(FpsFixedTimer / FpsFixedCount) * 1000.0);
+		FpsFixedCount = 0;
+		FpsFixedTimer = 0.0;
 	}
 }
