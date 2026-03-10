@@ -305,7 +305,7 @@ void ComponentCacheBase::UnlockFrameWrite()
 
 bool ComponentCacheBase::TryLockFrameForRead(uint32_t frameNum)
 {
-	uint32_t readFrame = frameNum == -1 ? LastWrittenFrame : frameNum;
+	uint32_t readFrame          = static_cast<int32_t>(frameNum) == -1 ? LastWrittenFrame : frameNum;
 	TemporalFrameHeader* header = GetFrameHeader(readFrame);
 
 	// Frame is readable if no write lock is held (0x01 = LOGIC_WRITING)
@@ -320,7 +320,7 @@ bool ComponentCacheBase::TryLockFrameForRead(uint32_t frameNum)
 
 void ComponentCacheBase::UnlockFrameRead(uint32_t frameNum)
 {
-	uint32_t readFrame = frameNum == -1 ? LastWrittenFrame : frameNum;
+	uint32_t readFrame          = static_cast<int32_t>(frameNum) == -1 ? LastWrittenFrame : frameNum;
 	TemporalFrameHeader* header = GetFrameHeader(readFrame);
 
 	// Release read lock (clear RENDER_READING bit)

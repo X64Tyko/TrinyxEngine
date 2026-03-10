@@ -7,7 +7,7 @@
 ## Timeline Context
 
 **Project Start:** ~2026-02-01 (Week 1)
-**Current Date:** 2026-03-08
+**Current Date:** 2026-03-09
 **Phase:** Entity-to-GPU Pipeline Optimization + Physics Prep
 
 ---
@@ -33,9 +33,12 @@
 
 **GPU-Driven Compute Pipeline (Slang):**
 - 5 shaders in `shaders/`: predicate, prefix_sum, scatter, cube.vert, cube.frag
-- Shared struct header: `shaders/GpuFrameData.slang`
+- Shared struct header: `shaders/GpuFrameData.slang` (C++ mirror: `GpuFrameData.h`, static_assert 3192 bytes)
 - CMakeLists: slangc invocations with `-I shaders` + GpuFrameData.slang in DEPENDS
 - 3-pass: predicate → prefix_sum (Option-B subgroup scan) → scatter (GPU interpolation + InstanceBuffer)
+- Flags read from field slab via `CurrFieldAddrs[0]` (kSemFlags=1, always index 0 by convention)
+- 14 field semantics: Flags + PosXYZ + RotXYZ + ScaleXYZ + ColorRGBA (kSemFlags=1..kSemColorA=14)
+- 5 field slabs (PersistentMapped, cycling independently of 2 GPU frame slots)
 - Compute→graphics barrier: `dstStage = VERTEX_SHADER_BIT | DRAW_INDIRECT_BIT`
 - Camera wired: LogicThread::PublishCompletedFrame writes Vulkan RH perspective + identity view each frame
 - Testbed: 10k CubeEntity + 90k SuperCube at Z=-200..-500 (visible as colored specks at z=-200)
@@ -117,7 +120,7 @@
 - [x] InstanceBuffer SoA + indirect draw (DrawArgs)
 - [x] VulkRender Steps 1–4: clear → indexed cube → GpuFrameData + BDA draw → entity data from TemporalComponentCache
 - [x] 3-level Tracy profiling (Coarse/Medium/Fine)
-- [x] `TNX_TEMPORAL_FIELDS` with SystemGroup tag (syntax implemented, partition routing pending)
+- [x] `TNX_TEMPORAL_FIELDS` with SystemGroup tag (drives entity group auto-derivation)
 - [x] `TemporalFlags` with Active/Dirty bits
 - [x] Lock-free job system (MPMC ring buffers, futex-based wake, per-chunk dispatch)
 - [x] Core-aware thread pinning (physical cores first, SMT siblings second)

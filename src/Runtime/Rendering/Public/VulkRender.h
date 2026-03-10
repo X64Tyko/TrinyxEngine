@@ -68,7 +68,6 @@ struct FrameSync
 	// Must be per-frame: scatter writes and the indirect draw read these in the
 	// same submission, but two frame slots can be GPU-in-flight simultaneously,
 	// so sharing a single copy would cause write/read races across submissions.
-	VulkanBuffer FlagsBuffer;          // uint per entity (bit 31 = Active); CPU writes, GPU reads
 	VulkanBuffer ScanBuffer;           // predicate 0/1 → exclusive-scan index; device local
 	VulkanBuffer CompactCounterBuffer; // single uint atomicAdd target; device local
 	VulkanBuffer DrawArgsBuffer;       // VkDrawIndexedIndirectCommand; scatter sets instanceCount
@@ -107,6 +106,7 @@ private:
 	bool CreateComputePipelines();
 	bool CreateMeshBuffers();
 	void FillGpuFrameData(FrameSync& frame);
+	void WriteToFrameSlab();
 	void RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex);
 	void TrackFPS();
 	void OnSwapchainResize();
@@ -131,8 +131,9 @@ private:
 	// Per-frame sync + command buffers (populated in CreateFrameSync).
 	// Each slot also owns its depth image and compute scratch buffers — see FrameSync.
 	FrameSync Frames[kMaxFramesInFlight];
-	uint32_t CurrentFrame   = 0;
-	uint64_t LastLogicFrame = 0;
+	uint32_t CurrentFrame      = 0;
+	uint64_t LastVolatileFrame = 0;
+	uint64_t LastTemporalFrame = 0;
 
 	// One render-finished semaphore per swapchain image (populated in CreateFrameSync).
 	// Indexed by imageIndex so the presentation engine never reuses a semaphore
@@ -148,7 +149,11 @@ private:
 	// Field f base address = slab.DeviceAddr + f * MAX_CACHED_ENTITIES * sizeof(float).
 	// GPU reads at most kMaxFramesInFlight slabs at once; CPU has ≥3 free slots to write fresh data.
 	VulkanBuffer FieldSlabs[kInstanceBufferCount];
+	uint32_t PrevFieldSlab    = 0;
 	uint32_t CurrentFieldSlab = 0;
+
+	uint32_t GPUActiveFrame = 0;
+	uint32_t GPUPrevFrame   = 0;
 
 	// Mesh buffers (uploaded in CreateMeshBuffers, static for the lifetime of the renderer).
 	VulkanBuffer VertexBuffer; // cube vertices read via BDA in vertex shader

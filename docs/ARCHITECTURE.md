@@ -507,11 +507,17 @@ GPU interpolation uses its own persistent previous-frame InstanceBuffer. Render 
 
 Three-pass compute using shared struct header `GpuFrameData.slang`:
 
-1. **predicate.slang** — reads TemporalFlags (Active + custom predicates), writes `scan[i] = 0 or 1`
+1. **predicate.slang** — reads TemporalFlags from `CurrFieldAddrs[0]` (Active bit 31), writes `scan[i] = 0 or 1`
 2. **prefix_sum.slang** — Option-B scan: subgroup-level prefix, then one `atomicAdd` per workgroup for
    cross-group compaction. No second dispatch.
 3. **scatter.slang** — GPU interpolation (lerp between current and previous InstanceBuffer),
    writes compacted InstanceBuffer SoA + `DrawArgs.instanceCount`
+
+All entity data (including flags) flows through the field slab — 5 PersistentMapped GPU buffers
+that cycle independently of the 2 GPU frame-in-flight slots. The render thread copies SoA field
+arrays from TemporalComponentCache/VolatileComponentCache into the current slab when a new logic
+frame is detected. `GpuFrameData.CurrFieldAddrs[]` and `PrevFieldAddrs[]` point into the current
+and previous slabs respectively. Flags are always at field index 0 (`kSemFlags` semantic).
 
 The InstanceBuffer is SoA: field `k` (semantic-1), entity `outIdx` →
 `InstancesAddr[k * OutFieldStride + outIdx]`.

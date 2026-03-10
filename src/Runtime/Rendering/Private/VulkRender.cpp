@@ -166,9 +166,9 @@ void VulkRender::Join()
 	}
 
 	// GPU must be fully idle before sync objects, images, and pipelines are destroyed.
-	if (VkCtx&& VkCtx
-	->
-	GetDevice() != VK_NULL_HANDLE
+	if (VkCtx && VkCtx
+		->
+		GetDevice() != VK_NULL_HANDLE
 	)
 	{
 		vkDeviceWaitIdle(VkCtx->GetDevice());
@@ -232,16 +232,6 @@ bool VulkRender::CreateFrameSync()
 		// These must be per-frame-slot: two frame slots can be GPU-in-flight simultaneously
 		// (fence only guarantees the *same* slot is idle, not the other one).
 		// Sharing a single copy would let frame N's scatter overwrite frame N-1's draw args/output.
-		const VkDeviceSize kFlagsSize =
-			static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(uint32_t);
-		Frames[i].FlagsBuffer = VkMem->AllocateBuffer(kFlagsSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-													  GpuMemoryDomain::PersistentMapped, /*requestDeviceAddress=*/ true);
-		if (!Frames[i].FlagsBuffer.IsValid())
-		{
-			LOG_ERROR_F("[VulkRender] FlagsBuffer alloc failed (slot %d)", i);
-			return false;
-		}
-
 		const VkDeviceSize kScanSize =
 			static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(uint32_t);
 		Frames[i].ScanBuffer = VkMem->AllocateBuffer(kScanSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -492,33 +482,76 @@ void VulkRender::FillGpuFrameData(FrameSync& frame)
 	const vk::Extent2D ext = VkCtx->GetSwapchain().Extent;
 	BuildViewProjMatrix(FrameData->ViewProj, static_cast<float>(ext.width) / static_cast<float>(ext.height));
 
-	// ---- Advance field slab slot ---------------------------------------
-	const uint32_t prevSlab = CurrentFieldSlab;
-	CurrentFieldSlab        = (CurrentFieldSlab + 1) % kInstanceBufferCount;
-
-	const VkDeviceSize fieldStride = static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
-	uint8_t* slabPtr               = static_cast<uint8_t*>(FieldSlabs[CurrentFieldSlab].MappedPtr);
-	const uint64_t slabBase        = FieldSlabs[CurrentFieldSlab].DeviceAddr;
-	const uint64_t prevSlabBase    = FieldSlabs[prevSlab].DeviceAddr;
-
 	// ---- Per-frame BDAs (compute scratch buffers, one copy per frame slot) ---
 	FrameData->VerticesAddr       = VertexBuffer.DeviceAddr;
 	FrameData->InstancesAddr      = frame.InstancesBuffer.DeviceAddr;
-	FrameData->FlagsAddr          = frame.FlagsBuffer.DeviceAddr;
 	FrameData->ScanAddr           = frame.ScanBuffer.DeviceAddr;
 	FrameData->CompactCounterAddr = frame.CompactCounterBuffer.DeviceAddr;
 	FrameData->DrawArgsAddr       = frame.DrawArgsBuffer.DeviceAddr;
-	FrameData->Alpha              = 1.0f;
+	FrameData->Alpha              = LogicPtr->GetFixedAlpha();
 	FrameData->EntityCount        = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
 	FrameData->OutFieldStride     = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
 	FrameData->FieldCount         = kGpuOutFieldCount;
 
-	// ---- Caches (readFrame already locked by RenderFrame) --------------
+	const uint32_t kFields[kGpuOutFieldCount] = {
+		kSemFlags, // always index 0 — shaders read CurrFieldAddrs[0] for flags
+		kSemPosX, kSemPosY, kSemPosZ,
+		kSemRotX, kSemRotY, kSemRotZ,
+		kSemScaleX, kSemScaleY, kSemScaleZ,
+		kSemColorR, kSemColorG, kSemColorB, kSemColorA,
+	};
+
+	const VkDeviceSize fieldStride = static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
+	const uint64_t slabBase        = FieldSlabs[CurrentFieldSlab].DeviceAddr;
+	const uint64_t prevSlabBase    = FieldSlabs[PrevFieldSlab].DeviceAddr;
+
+	for (uint32_t f = 0; f < kGpuOutFieldCount; ++f)
+	{
+		FrameData->CurrFieldAddrs[f]   = slabBase + static_cast<uint64_t>(f) * fieldStride;
+		FrameData->PrevFieldAddrs[f]   = prevSlabBase + static_cast<uint64_t>(f) * fieldStride;
+		FrameData->FieldSemantics[f]   = kFields[f];
+		FrameData->FieldElementSize[f] = sizeof(float);
+	}
+
+	GPUActiveFrame = CurrentFieldSlab;
+	GPUPrevFrame   = PrevFieldSlab;
+}
+
+void VulkRender::WriteToFrameSlab()
+{
+	// ---- Advance field slab slot ---------------------------------------
+	uint32_t nextSlab = CurrentFieldSlab;
+	do
+	{
+		nextSlab = (nextSlab + 1) % kInstanceBufferCount;
+	} while (nextSlab == GPUActiveFrame || nextSlab == GPUPrevFrame);
+
+	const VkDeviceSize fieldStride = static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
+	uint8_t* slabPtr               = static_cast<uint8_t*>(FieldSlabs[nextSlab].MappedPtr);
+
+	// Try to lock a cache frame for reading BEFORE committing to this render tick.
+	// Must happen before vkAcquireNextImageKHR so we can bail cleanly (fence still signaled).
 	ComponentCacheBase* temporalCache = RegistryPtr->GetTemporalCache();
 	ComponentCacheBase* volatileCache = RegistryPtr->GetVolatileCache();
 
-	TemporalFrameHeader* temporalHdr = temporalCache->GetFrameHeader(temporalCache->GetActiveReadFrame());
-	TemporalFrameHeader* volatileHdr = volatileCache->GetFrameHeader(temporalCache->GetActiveReadFrame());
+	if (!volatileCache->TryLockFrameForRead(LastVolatileFrame)
+#ifdef TNX_ENABLE_ROLLBACK
+		|| !temporalCache->TryLockFrameForRead(LastTemporalFrame)
+#endif
+	)
+	{
+		LOG_ERROR("[VulkRender] Failed to lock frame for read");
+		return;
+	}
+
+	TNX_ZONE_NC("Write Frame Slab", TNX_COLOR_RENDERING)
+	PrevFieldSlab    = CurrentFieldSlab;
+	CurrentFieldSlab = nextSlab;
+
+	TemporalFrameHeader* temporalHdr = temporalCache->GetFrameHeader(LastTemporalFrame);
+	TemporalFrameHeader* volatileHdr = volatileCache->GetFrameHeader(LastVolatileFrame);
+
+	assert(temporalHdr->header.frame == volatileHdr->header.frame);
 
 	const ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
 	const uint8_t transformSlot       = CFR.GetCacheSlotIndex(Transform<>::StaticTypeID());
@@ -536,6 +569,7 @@ void VulkRender::FillGpuFrameData(FrameSync& frame)
 		uint32_t sem;
 	};
 	const FieldDescription kFields[kGpuOutFieldCount] = {
+		{temporalCache, temporalHdr, flagsSlot, 0, kSemFlags},
 		{temporalCache, temporalHdr, transformSlot, 0, kSemPosX},
 		{temporalCache, temporalHdr, transformSlot, 1, kSemPosY},
 		{temporalCache, temporalHdr, transformSlot, 2, kSemPosZ},
@@ -564,21 +598,14 @@ void VulkRender::FillGpuFrameData(FrameSync& frame)
 			if (src) std::memcpy(dst, src, static_cast<size_t>(fieldStride));
 			else std::memset(dst, 0, static_cast<size_t>(fieldStride));
 		}, &GPUTransferCounter, TrinyxJobs::Queue::Render);
-
-		FrameData->CurrFieldAddrs[f]   = slabBase + static_cast<uint64_t>(f) * fieldStride;
-		FrameData->PrevFieldAddrs[f]   = prevSlabBase + static_cast<uint64_t>(f) * fieldStride;
-		FrameData->FieldSemantics[f]   = fieldDesc.sem;
-		FrameData->FieldElementSize[f] = sizeof(float);
 	}
 
-	// ---- Flags: copy from universal slab (bit 31 = Active per entity) -
-	size_t flagsDummy       = 0;
-	const void* flagsSrc    = temporalCache->GetFieldData(temporalHdr, flagsSlot, 0, flagsDummy);
-	const size_t flagsBytes = static_cast<size_t>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(uint32_t);
-	if (flagsSrc) std::memcpy(frame.FlagsBuffer.MappedPtr, flagsSrc, flagsBytes);
-	else          std::memset(frame.FlagsBuffer.MappedPtr, 0, flagsBytes);
-
 	TrinyxJobs::RenderWaitForCounter(&GPUTransferCounter);
+
+	volatileCache->UnlockFrameRead(LastVolatileFrame);
+#ifdef TNX_ENABLE_ROLLBACK
+	temporalCache->UnlockFrameRead(LastTemporalFrame);
+#endif
 }
 
 bool VulkRender::CreatePipeline()
@@ -713,20 +740,30 @@ void VulkRender::ThreadMain()
 	{
 	}
 
-	graphicsQueue = static_cast<VkQueue>(VkCtx->GetQueues().Graphics);
-	LastLogicFrame = LogicPtr->GetLastCompletedFrame();
-	while (LastLogicFrame < 1) { LastLogicFrame = LogicPtr->GetLastCompletedFrame(); }// wait for valid data
+	graphicsQueue     = static_cast<VkQueue>(VkCtx->GetQueues().Graphics);
+	LastVolatileFrame = LogicPtr->GetLastCompletedFrame();
+	while (LastVolatileFrame < 1) { LastVolatileFrame = LogicPtr->GetLastCompletedFrame(); } // wait for valid data
 
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
-		// Process Render deltas
-		LastLogicFrame = LogicPtr->GetLastCompletedFrame();
-
 		int8_t renderRes = RenderFrame();
 		if (renderRes < 0) break;
 		else if (renderRes == 0) continue; // This stops us counting FPS from failing to render.
 
+		// Process Render deltas
+		uint32_t newTemporalFrame = RegistryPtr->GetTemporalCache()->GetActiveReadFrame();
+		uint32_t newVolatileFrame = RegistryPtr->GetVolatileCache()->GetActiveReadFrame();
+		if (newVolatileFrame != LastVolatileFrame || newTemporalFrame != LastTemporalFrame)
+		{
+			LastVolatileFrame = newVolatileFrame;
+			LastTemporalFrame = newTemporalFrame;
+			// Write frame data
+			WriteToFrameSlab();
+		}
+
 		TrackFPS();
+
+		// Update alpha value?
 	}
 
 	LOG_INFO("[VulkRender] Thread exiting");
@@ -743,19 +780,8 @@ int VulkRender::RenderFrame()
 		TNX_ZONE_COARSE_NC("Render_FenceCheck", TNX_COLOR_RENDERING)
 		if (vkGetFenceStatus(device, fence) == VK_NOT_READY)
 		{
-			std::this_thread::yield();
 			return 0;
 		}
-	}
-
-	// Try to lock a cache frame for reading BEFORE committing to this render tick.
-	// Must happen before vkAcquireNextImageKHR so we can bail cleanly (fence still signaled).
-	ComponentCacheBase* temporalCache = RegistryPtr->GetTemporalCache();
-	if (!temporalCache->TryLockFrameForRead())
-	{
-		//readFrame = temporalCache->GetPrevFrame(readFrame);
-		//if (!temporalCache->TryLockFrameForRead(readFrame))
-			return 0; // Both frames busy — skip tick, fence still signaled
 	}
 
 	uint32_t imageIndex = 0;
@@ -771,19 +797,16 @@ int VulkRender::RenderFrame()
 
 		if (acquireResult == VK_NOT_READY || acquireResult == VK_TIMEOUT)
 		{
-			temporalCache->UnlockFrameRead();
 			return 0;
 		}
 
 		if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR)
 		{
-			temporalCache->UnlockFrameRead();
 			OnSwapchainResize();
 			return 0;
 		}
 		else if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR)
 		{
-			temporalCache->UnlockFrameRead();
 			LOG_ERROR_F("[VulkRender] vkAcquireNextImageKHR failed: %d", acquireResult);
 			return -1;
 		}
@@ -791,9 +814,7 @@ int VulkRender::RenderFrame()
 
 	vkResetFences(device, 1, &fence);
 
-	// Fill per-frame GPU data (readFrame is already locked), then unlock and record.
 	FillGpuFrameData(frame);
-	temporalCache->UnlockFrameRead();
 
 	{
 		TNX_ZONE_COARSE_NC("Render_Record", TNX_COLOR_RENDERING)
@@ -959,7 +980,7 @@ void VulkRender::RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex)
 		vkCmdPushConstants(cmd, *PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
 						   0, sizeof(uint64_t), &gpuDataAddr);
 
-		// Pass 1: predicate — reads FlagsAddr, writes ScanAddr (0/1 per entity).
+		// Pass 1: predicate — reads Flags slab, writes ScanAddr (0/1 per entity).
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, PredicatePipeline);
 		vkCmdDispatch(cmd, dispatchX, 1, 1);
 		ComputeBarrier();
@@ -1141,8 +1162,7 @@ bool VulkRender::CreateDepthImage()
 			VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
 			VK_IMAGE_ASPECT_DEPTH_BIT);
 
-		if (!Frames[i].DepthAttachment.IsValid())
-			return false;
+		if (!Frames[i].DepthAttachment.IsValid()) return false;
 	}
 
 	return true;

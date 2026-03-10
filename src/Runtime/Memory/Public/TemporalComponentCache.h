@@ -64,7 +64,7 @@ public:
 	// O(1) frame header access - external systems manage locking
 	TemporalFrameHeader* GetFrameHeader(uint32_t frameNum = -1) const
 	{
-		frameNum = frameNum == -1 ? ActiveWriteFrame : frameNum;
+		frameNum = static_cast<int32_t>(frameNum) == -1 ? ActiveWriteFrame : frameNum;
 		return FrameHeaders[frameNum % TemporalFrameCount];
 	}
 
@@ -223,9 +223,6 @@ public:
 	
 protected:
 	friend Derived;
-	
-	uint32_t& MutLastWrittenFrame() { return LastWrittenFrame;};
-	uint32_t& MutActiveWriteFrame() { return ActiveWriteFrame;};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -300,17 +297,43 @@ public:
 
 	static void PropagateFrameImpl(ComponentCacheBase* base)
 	{
-		uint32_t targetSlot = GetNextWriteFrameImpl(base);
-		uint32_t prevSlot = base->ActiveWriteFrame;
-		
-		// We need to lock this frame before we propagate and change our active frame
-		LOG_INFO_F("Attempting Lock on frame %i on cache %s", targetSlot, GetLabel());
-		bool stuck = false;
-		while (!base->LockFrameForWrite(targetSlot)) { if (!stuck) { LOG_INFO("Stuck!"); stuck = true; } }
-		
-		base->LastWrittenFrame = prevSlot;
+		uint32_t targetSlot = (base->ActiveWriteFrame + 1) % base->GetTotalFrameCount();
+		if constexpr (Tier == CacheTier::Volatile)
+		{
+			// Triple-buffer: find the frame that's not locked
+			// We have 3 frames: one being written (T+1), one being read (T), one free (T-1)
+			// Return the buffer slot index (0-2) of the unlocked frame
+			// It's possible another thread is using the buffer for networking or something, loop until we find a valid frame
+			bool bLocked = false;
+			while (!bLocked)
+			{
+				for (uint32_t i = 0; i < 3; ++i)
+				{
+					targetSlot = (base->ActiveWriteFrame + 1 + i) % base->GetTotalFrameCount();
+					if (targetSlot == base->ActiveWriteFrame) continue;
+
+					// Try to lock the frame
+					bLocked = base->LockFrameForWrite(targetSlot);
+					if (bLocked) break;
+				}
+			}
+		}
+		else
+		{
+			bool stuck = false;
+			while (!base->LockFrameForWrite(targetSlot))
+			{
+				if (!stuck)
+				{
+					LOG_INFO("Stuck!");
+					stuck = true;
+				}
+			}
+		}
+
+		base->LastWrittenFrame = base->ActiveWriteFrame;
 		base->ActiveWriteFrame = targetSlot;
-		base->PropagateFrameData(prevSlot, targetSlot);
+		base->PropagateFrameData(base->LastWrittenFrame, targetSlot);
 		base->UnlockFrameWrite();
 	}
 };

@@ -38,7 +38,8 @@ void main(uint3 gid : SV_DispatchThreadID)
         return;
 
     // Re-check active flag (predicate may have been 0 even if tid < entityCount).
-    uint flags = ((uint*)fd->FlagsAddr)[i];
+    // Flags live in the field slab at CurrFieldAddrs[0] (kSemFlags, always index 0).
+    uint flags = ((uint*)fd->CurrFieldAddrs[0])[i];
     if ((flags >> 31u) == 0u)
         return;
 
@@ -56,8 +57,8 @@ void main(uint3 gid : SV_DispatchThreadID)
         uint sem = fd->FieldSemantics[f];
         uint esz = fd->FieldElementSize[f];
 
-        if (sem == kSemGeneric || sem > kGpuOutFieldCount)
-            continue;   // Generic / out-of-range: not mapped to an output slot
+        if (sem == kSemGeneric || sem == kSemFlags || sem > kGpuOutFieldCount)
+            continue;   // Generic / flags (uint, not interpolatable) / out-of-range
 
         if (esz != 4u)
             continue;   // Only float scalar fields for now

@@ -37,6 +37,7 @@ public:
 	// Relaxed load is intentional: a slightly stale alpha produces a barely-visible
 	// interpolation error and is far preferable to synchronization overhead.
 	double GetAccumulator() const { return Accumulator.load(std::memory_order_relaxed); }
+	double GetFixedAlpha() const;
 
 private:
 	void ThreadMain(); // Thread entry point

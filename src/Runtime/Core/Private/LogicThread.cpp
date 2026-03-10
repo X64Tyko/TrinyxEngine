@@ -47,6 +47,11 @@ void LogicThread::Join()
 	}
 }
 
+double LogicThread::GetFixedAlpha() const
+{
+	return Accumulator.load(std::memory_order_relaxed) / ConfigPtr->GetFixedStepTime();
+}
+
 void LogicThread::ThreadMain()
 {
 	const uint64_t perfFrequency = SDL_GetPerformanceFrequency();

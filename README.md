@@ -115,13 +115,15 @@ See [Architecture Documentation](docs/ARCHITECTURE.md) for full details.
 
 A 3-pass compute pipeline processes entity data on the GPU each frame:
 
-1. **Predicate** — mark active + visible entities (writes `scan[i] = 0 or 1`)
+1. **Predicate** — reads flags from field slab (`CurrFieldAddrs[0]`, bit 31 = active), writes `scan[i] = 0 or 1`
 2. **Prefix Sum** — Option-B scan (subgroup lanes + one `atomicAdd` per workgroup)
-3. **Scatter** — lerp fields for GPU interpolation, write to InstanceBuffer SoA, set `DrawArgs.instanceCount`
+3. **Scatter** — lerp fields between current and previous slab for GPU interpolation, write to InstanceBuffer SoA, set
+   `DrawArgs.instanceCount`
 
-The render thread uploads only **dirty entities** each frame (delta upload via cumulative dirty bit array).
-GPU interpolation uses its own persistent previous-frame InstanceBuffer — render thread only uploads current
-frame T; the GPU keeps T-1 itself. Five GPU InstanceBuffers decouple the VSync clock from the logic thread.
+The render thread copies SoA field arrays from the temporal/volatile caches into one of 5 PersistentMapped
+field slabs when a new logic frame is detected. The GPU reads the current and previous slabs via BDA for
+interpolation. Five field slabs cycle independently of the 2 GPU frame-in-flight slots, decoupling VSync
+from the logic thread. Dirty-bit-driven partial upload is tracked but not yet wired (currently full-slab copy).
 
 ### Data-Oriented Components
 
