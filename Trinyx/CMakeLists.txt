@@ -73,6 +73,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     "${CMAKE_SOURCE_DIR}/src/Runtime/Logging/Public"
     "${CMAKE_SOURCE_DIR}/src/Runtime/Components/Public"
     "${CMAKE_SOURCE_DIR}/src/Runtime/Input/Public"
+        "${CMAKE_SOURCE_DIR}/src/Runtime/Physics/Public"
 )
 
 # B. SDL3 - Platform specific
@@ -97,6 +98,10 @@ target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
     "${Vulkan_INCLUDE_DIRS}"
 )
 target_link_libraries(${PROJECT_NAME} PUBLIC Vulkan::Vulkan)
+
+# D. Jolt Physics
+target_link_libraries(${PROJECT_NAME} PUBLIC Jolt)
+target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC "${JOLT_PATH}")
 
 # volk.c must not be compiled with -Werror (upstream code, not ours)
 if(NOT MSVC)
@@ -174,7 +179,7 @@ endforeach()
 add_custom_target(TrinyxShaders ALL DEPENDS ${SLANG_SPIRV_OUTPUTS})
 add_dependencies(${PROJECT_NAME} TrinyxShaders)
 
-# D. Tracy platform-specific libraries
+# E. Tracy platform-specific libraries
 if(ENABLE_TRACY)
     if(WIN32)
         target_link_libraries(${PROJECT_NAME} PUBLIC ws2_32 dbghelp)

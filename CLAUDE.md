@@ -82,7 +82,7 @@ Entities are CRTP structs templated on `FieldWidth`:
 ```cpp
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct CubeEntity : EntityView<CubeEntity, WIDTH> {
-    Transform<WIDTH> transform;
+    TransRot<WIDTH> transform;
     Velocity<WIDTH>  velocity;
     ColorData<WIDTH> color;
 

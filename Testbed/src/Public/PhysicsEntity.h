@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Transform.h"
+#include "TransRot.h"
 #include "ColorData.h"
 #include "RigidBody.h"
 #include "Forces.h"
@@ -18,7 +18,7 @@ class PhysicsEntity : public EntityView<PhysicsEntity, WIDTH>
 	TNX_REGISTER_SCHEMA(PhysicsEntity, EntityView, transform, body, forces, color)
 
 public:
-	Transform<WIDTH> transform;
+	TransRot<WIDTH> transform;
 	RigidBody<WIDTH> body;
 	Forces<WIDTH> forces;
 	ColorData<WIDTH> color;
@@ -34,13 +34,13 @@ public:
 		body.VelY     += Gravity * fdt;
 
 		// Integrate velocity into position
-		transform.PositionX += body.VelX * fdt;
-		transform.PositionY += body.VelY * fdt;
-		transform.PositionZ += body.VelZ * fdt;
+		transform.PosX += body.VelX * fdt;
+		transform.PosY += body.VelY * fdt;
+		transform.PosZ += body.VelZ * fdt;
 
 		// Simple floor bounce at Y = -50
-		body.VelY           = (transform.PositionY < -50.0f).Choose(-body.VelY * 0.7f, body.VelY);
-		transform.PositionY = (transform.PositionY < -50.0f).Choose(-50.0f, transform.PositionY);
+		body.VelY      = (transform.PosY < -50.0f).Choose(-body.VelY * 0.7f, body.VelY);
+		transform.PosY = (transform.PosY < -50.0f).Choose(-50.0f, transform.PosY);
 
 		// Tint toward red as downward velocity increases
 		const float speed = body.VelY * -0.02f;

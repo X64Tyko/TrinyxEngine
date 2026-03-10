@@ -378,6 +378,145 @@ copy. This is the distinction between transform attachment (render thread, free)
 
 ---
 
+# Jolt Physics Sync Architecture
+
+## Overview
+
+Jolt runs on the Brain thread during the physics step of the fixed-timestep loop. **Jolt owns the
+physics state** (position, rotation, velocity) for all simulated bodies. The ECS does not push
+state to Jolt every frame — Jolt's integrator advances bodies internally. The ECS only writes
+to Jolt on explicit overrides (spawn, teleport, applied impulses). After each step, we pull
+results from **awake bodies only** back into SoA WriteArrays.
+
+```
+PrePhysics → [Override if needed] → Jolt Step → Pull (awake only) → Collision Events → PostPhysics
+```
+
+## Overrides (ECS → Jolt, Event-Driven)
+
+The ECS writes to Jolt bodies only when gameplay logic explicitly demands it — not per-frame:
+
+- **Spawn**: `CreateAndAddBody()` with initial transform/velocity from entity data
+- **Teleport**: `SetPositionAndRotation()` when gameplay moves an entity non-physically
+- **Applied forces/impulses**: `AddForce()`, `AddImpulse()` from PrePhysics logic
+- **Kinematic targets**: `MoveKinematic()` for animated platforms, elevators, etc.
+
+```cpp
+// Example: teleport (rare, event-driven)
+JPH::BodyInterface& bi = physicsSystem.GetBodyInterfaceNoLock();
+bi.SetPositionAndRotation(bodyID, pos, rot, JPH::EActivation::Activate);
+
+// Example: gameplay impulse in PrePhysics
+bi.AddImpulse(bodyID, JPH::Vec3(ix, iy, iz));
+```
+
+**Key API details:**
+
+- `GetBodyInterfaceNoLock()` — Brain thread is the only writer; no lock needed
+- `SetPositionAndRotation` — single call, avoids double broad-phase update vs separate Set calls
+- Jolt uses `JPH::Quat(x, y, z, w)` constructor order — matches our `RotQx/Qy/Qz/Qw` field order
+
+## Jolt Step
+
+```cpp
+physicsSystem.Update(fixedDt, collisionSteps, tempAllocator, jobSystem);
+```
+
+- `fixedDt` = 1.0/512.0 (matches Brain tick rate)
+- `collisionSteps` = 1 (one substep per tick at 512Hz — high enough frequency)
+- `tempAllocator` = `JPH::TempAllocatorImpl` with pre-allocated scratch buffer (16MB default).
+  Jolt's temp allocator is a linear bump allocator that resets each step — no heap allocation
+  in the inner loop. Size it for worst-case broad-phase during development, shrink later.
+- `jobSystem` = adapter that submits to our LogicQueue (Jolt jobs run on Brain + Workers)
+
+## Pull (Jolt → ECS, Awake Bodies Only)
+
+After the step, read results back into SoA WriteArrays for **awake bodies only**. Sleeping bodies
+haven't moved — their SoA data is already correct from the last frame they were awake.
+
+```cpp
+JPH::BodyIDVector activeIDs;
+physicsSystem.GetActiveBodies(JPH::EBodyType::RigidBody, activeIDs);
+
+JPH::BodyInterface& bi = physicsSystem.GetBodyInterfaceNoLock();
+
+for (JPH::BodyID bodyID : activeIDs) {
+    uint32_t entityIdx = bodyToEntity[bodyID.GetIndex()];
+
+    // Position + rotation in one call (avoids double body lock)
+    JPH::RVec3 pos;
+    JPH::Quat rot;
+    bi.GetPositionAndRotation(bodyID, pos, rot);
+
+    WriteArray_PosX[entityIdx] = float_to_fixed(pos.GetX());
+    WriteArray_PosY[entityIdx] = float_to_fixed(pos.GetY());
+    WriteArray_PosZ[entityIdx] = float_to_fixed(pos.GetZ());
+
+    WriteArray_RotQx[entityIdx] = rot.GetX();
+    WriteArray_RotQy[entityIdx] = rot.GetY();
+    WriteArray_RotQz[entityIdx] = rot.GetZ();
+    WriteArray_RotQw[entityIdx] = rot.GetW();
+
+    // Mark dirty for GPU upload
+    WriteArray_Flags[entityIdx] |= TemporalFlagBits::Dirty;
+}
+```
+
+**Only transforms are pulled.** Velocities stay in Jolt — they're Jolt's internal state, not SoA
+fields. If gameplay logic needs velocity (e.g. speed-dependent VFX), it queries Jolt directly
+during its Scalar update via `BodyInterface::GetLinearVelocity(bodyID)`.
+
+**Awake-only pull** means a scene with 50K physics bodies where only 200 are moving pays for 200
+pulls, not 50K. Sleeping bodies are the common case (stacked crates, settled debris, resting props).
+
+**Scattered reads:** Each `GetPositionAndRotation` touches a different Jolt `Body` object (AoS layout
+in Jolt's body manager). This is inherently cache-unfriendly. For the current entity count this is
+acceptable. If it becomes a bottleneck, batch the pull using `JPH::BodyManager::GetBodies()` to get
+a contiguous body pointer array and iterate linearly.
+
+## Collision Events
+
+Jolt fires collision callbacks during `Update()`. We buffer these in a thread-local ring:
+
+```cpp
+class ContactListener : public JPH::ContactListener {
+    // Called during Jolt step (potentially from worker threads)
+    void OnContactAdded(const JPH::Body& b1, const JPH::Body& b2,
+                        const JPH::ContactManifold& manifold,
+                        JPH::ContactSettings& settings) override
+    {
+        // Buffer to thread-local ring — no locks
+        threadLocalContactBuffer.Push({b1.GetID(), b2.GetID(), manifold.mWorldSpaceNormal, ...});
+    }
+};
+```
+
+After Pull, Brain drains the contact buffers and dispatches `OnCollision` events to entity update
+functions. Contacts are mapped back to entity IDs via a `BodyID → EntityID` lookup table maintained
+during Push (body creation/destruction).
+
+## Body Lifecycle
+
+Bodies are created/destroyed in response to entity lifecycle events, not per-frame:
+
+- **Entity spawn** (with physics component): create Jolt body, store BodyID↔EntityID mapping
+- **Entity destroy**: remove Jolt body via `BodyInterface::DestroyBody()`
+- **Entity deactivation** (Active flag cleared): `BodyInterface::DeactivateBody()` — Jolt skips it in broadphase
+- **Entity reactivation**: `BodyInterface::ActivateBody()`
+
+Body creation uses `BodyInterface::CreateAndAddBody()` — single call, avoids the
+create-then-add pattern that requires an extra lock acquisition.
+
+## Threading Considerations
+
+- Push and Pull run on the Brain thread only (single writer to SoA WriteArrays)
+- Jolt's internal `Update()` spawns jobs via our job system adapter (LogicQueue)
+- Brain acts as a worker during `Update()`, pulling from LogicQueue alongside generic workers
+- Contact callbacks fire from Jolt worker threads → must use thread-local buffers (no shared state)
+- No GPU thread touches Jolt state — render thread reads SoA fields only
+
+---
+
 ## Current Implementation vs Design
 
 The full tiered partition design is **designed but not yet implemented**. The current code uses
@@ -525,7 +664,7 @@ The InstanceBuffer is SoA: field `k` (semantic-1), entity `outIdx` →
 ## cube.vert / cube.frag
 
 - `cube.vert` reads vertex data via Buffer Device Address (`VerticesAddr`), reads instance SoA via
-  `InstancesAddr`, reconstructs TRS matrix from Euler-XYZ angles
+  `InstancesAddr`, reconstructs TRS matrix from quaternion rotation (nlerp-normalized in shader)
 - ViewProj: column-major `float[16]` from C++ → Slang row-major `float4x4` via `M[r][c] = ViewProj[c*4+r]`
 - Projection: right-handed, Y-flip (`m[5] = -F`), depth [0,1]
 - `cube.frag` reads interpolated color from SoA
@@ -565,6 +704,9 @@ dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
 - [x] Tiered storage partition layout (Cold/Static/Volatile/Temporal with dual-ended arena layout)
 - [x] SystemGroup tag on `TNX_TEMPORAL_FIELDS` (drives entity group auto-derivation)
 - [x] 5 GPU InstanceBuffers (circular buffer while rGPU compute pipeline is in progress)
+- [x] Quaternion-based transforms (TransRot component with nested RotationAccessor, QuatMath library)
+- [x] Component decomposition: Translation, Rotation, TransRot (combined), Scale (Volatile/Render)
+- [x] Component validation: no vtable + all fields must be FieldProxy (SchemaValidation.h)
 
 ## Designed, Not Yet Implemented
 

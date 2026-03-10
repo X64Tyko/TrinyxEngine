@@ -14,6 +14,7 @@
 #include "ThreadPinning.h"
 #include "TrinyxJobs.h"
 #include "VulkRender.h"
+#include "JoltPhysics.h"
 
 // Define global component/class counters (declared in Types.h / SchemaReflector.h)
 namespace Internal
@@ -111,11 +112,19 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	RegistryPtr = std::make_unique<Registry>(&Config);
 	Pacer.Initialize(GpuDevice);
 
+	// ---- Physics ---------------------------------------------------------
+	Physics = std::make_unique<JoltPhysics>();
+	if (!Physics->Initialize(&Config))
+	{
+		std::cerr << "JoltPhysics::Initialize failed" << std::endl;
+		return false;
+	}
+
 	// ---- Threads ---------------------------------------------------------
 	Logic  = std::make_unique<LogicThread>();
 	Render = std::make_unique<VulkRender>();
 
-	Logic->Initialize(RegistryPtr.get(), &Config, width, height);
+	Logic->Initialize(RegistryPtr.get(), &Config, Physics.get(), width, height);
 	//Render->Initialize(RegistryPtr.get(), Logic.get(), &Config, GpuDevice, EngineWindow);
 
 	Render->Initialize(RegistryPtr.get(), Logic.get(), &Config, &VkCtx, &VkMem, EngineWindow);
@@ -190,6 +199,7 @@ void TrinyxEngine::Shutdown()
 	// rather than letting them fire in TrinyxEngine's destructor after Shutdown().
 	Render.reset();
 	Logic.reset();
+	Physics.reset();
 
 	// Tear down Vulkan explicitly here — before SDL_Quit() and before the
 	// TrinyxEngine singleton's atexit destructor fires.  Validation layers

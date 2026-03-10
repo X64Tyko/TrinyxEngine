@@ -16,7 +16,8 @@
 #include "TemporalComponentCache.h"
 
 #include "ColorData.h"
-#include "Transform.h"
+#include "TransRot.h"
+#include "Scale.h"
 #include "TemporalFlags.h"
 #include "LogicThread.h"
 #include "TrinyxEngine.h"
@@ -496,7 +497,7 @@ void VulkRender::FillGpuFrameData(FrameSync& frame)
 	const uint32_t kFields[kGpuOutFieldCount] = {
 		kSemFlags, // always index 0 — shaders read CurrFieldAddrs[0] for flags
 		kSemPosX, kSemPosY, kSemPosZ,
-		kSemRotX, kSemRotY, kSemRotZ,
+		kSemRotQx, kSemRotQy, kSemRotQz, kSemRotQw,
 		kSemScaleX, kSemScaleY, kSemScaleZ,
 		kSemColorR, kSemColorG, kSemColorB, kSemColorA,
 	};
@@ -554,7 +555,8 @@ void VulkRender::WriteToFrameSlab()
 	assert(temporalHdr->header.frame == volatileHdr->header.frame);
 
 	const ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
-	const uint8_t transformSlot       = CFR.GetCacheSlotIndex(Transform<>::StaticTypeID());
+	const uint8_t transformSlot       = CFR.GetCacheSlotIndex(TransRot<>::StaticTypeID());
+	const uint8_t scaleSlot           = CFR.GetCacheSlotIndex(Scale<>::StaticTypeID());
 	const uint8_t colorSlot           = CFR.GetCacheSlotIndex(ColorData<>::StaticTypeID());
 	const uint8_t flagsSlot           = CFR.GetCacheSlotIndex(TemporalFlags<>::StaticTypeID());
 
@@ -573,12 +575,13 @@ void VulkRender::WriteToFrameSlab()
 		{temporalCache, temporalHdr, transformSlot, 0, kSemPosX},
 		{temporalCache, temporalHdr, transformSlot, 1, kSemPosY},
 		{temporalCache, temporalHdr, transformSlot, 2, kSemPosZ},
-		{temporalCache, temporalHdr, transformSlot, 3, kSemRotX},
-		{temporalCache, temporalHdr, transformSlot, 4, kSemRotY},
-		{temporalCache, temporalHdr, transformSlot, 5, kSemRotZ},
-		{temporalCache, temporalHdr, transformSlot, 6, kSemScaleX},
-		{temporalCache, temporalHdr, transformSlot, 7, kSemScaleY},
-		{temporalCache, temporalHdr, transformSlot, 8, kSemScaleZ},
+		{temporalCache, temporalHdr, transformSlot, 3, kSemRotQx},
+		{temporalCache, temporalHdr, transformSlot, 4, kSemRotQy},
+		{temporalCache, temporalHdr, transformSlot, 5, kSemRotQz},
+		{temporalCache, temporalHdr, transformSlot, 6, kSemRotQw},
+		{volatileCache, volatileHdr, scaleSlot, 0, kSemScaleX},
+		{volatileCache, volatileHdr, scaleSlot, 1, kSemScaleY},
+		{volatileCache, volatileHdr, scaleSlot, 2, kSemScaleZ},
 		{volatileCache, volatileHdr, colorSlot, 0, kSemColorR},
 		{volatileCache, volatileHdr, colorSlot, 1, kSemColorG},
 		{volatileCache, volatileHdr, colorSlot, 2, kSemColorB},

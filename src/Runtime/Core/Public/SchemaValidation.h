@@ -50,16 +50,18 @@ namespace SchemaValidation
 		static constexpr bool value = has_fields; // Simplified for now - assume components with DefineFields use FieldProxy
 	};
 
-	// Check if a type is a valid component (POD-like, no vtable)
-	// Temporal components with FieldProxy fields are allowed (they have non-trivial destructors)
-	// Non-temporal components must be strictly POD
+	// All components use FieldProxy — they are views into SoA arrays, not
+	// data containers. Two hard constraints:
+	//   1. No virtual functions (vtable breaks SoA decomposition)
+	//   2. All data fields must be FieldProxy (raw floats/ints would bypass SoA)
+	// Components may contain accessor structs (e.g. RotationAccessor with
+	// reference members) — these are views, not stored data.
 	template <typename T>
 	struct IsValidComponent
 	{
 		static constexpr bool value =
-			std::is_standard_layout_v<T> &&
-			!std::is_polymorphic_v<T> && // No virtual functions
-			(std::is_trivially_copyable_v<T> || AllFieldsAreFieldProxy<T>::value);
+			!std::is_polymorphic_v<T> &&
+			AllFieldsAreFieldProxy<T>::value;
 	};
 } // namespace SchemaValidation
 

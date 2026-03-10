@@ -9,7 +9,12 @@
 //
 // SoA InstanceBuffer layout:
 //   field slot k, entity outIdx  →  InstancesAddr[ k * OutFieldStride + outIdx ]
-//   where k = GpuFieldSemantic - 1  (PosX=0 .. ColorA=12)
+//   where k = GpuFieldSemantic - 1  (PosX=0 .. ColorA=13)
+//
+// Quaternion fields (RotQx..RotQw) are lerped per-component here.
+// The vertex shader normalizes the result (nlerp) to correct for
+// interpolation drift.  This is cheaper than slerp and sufficient
+// for consecutive frames at 512Hz.
 
 #include "GpuFrameData.slang"
 

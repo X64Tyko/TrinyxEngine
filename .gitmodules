@@ -1,0 +1,6 @@
+[submodule "libs/tracy"]
+	path = libs/tracy
+	url = https://github.com/wolfpld/tracy.git
+[submodule "libs/jolt"]
+	path = libs/jolt
+	url = https://github.com/jrouwe/JoltPhysics.git

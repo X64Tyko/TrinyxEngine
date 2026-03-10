@@ -2,9 +2,9 @@
 #include <FieldProxy.h>
 #include "ComponentView.h"
 #include "SchemaReflector.h"
+#include "VecMath.h"
 
-// ColorData Component - RGBA color for rendering
-// Aligned to 32 bytes for GPU upload
+// ColorData Component — RGBA color for rendering.
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct ColorData : ComponentView<ColorData, WIDTH>
 {
@@ -14,6 +14,8 @@ struct ColorData : ComponentView<ColorData, WIDTH>
 	FloatProxy<WIDTH> G;
 	FloatProxy<WIDTH> B;
 	FloatProxy<WIDTH> A;
+
+	Vec4Accessor<WIDTH> Color{R, G, B, A};
 };
 
 TNX_REGISTER_COMPONENT(ColorData)

@@ -13,6 +13,7 @@ class RenderThread;
 class Registry;
 class LogicThread;
 class VulkRender;
+class JoltPhysics;
 
 /**
  * TrinyxEngine: The Sentinel (Main Thread)
@@ -75,6 +76,7 @@ private:
 	EngineConfig Config;
 
 	// --- Thread Modules ---
+	std::unique_ptr<JoltPhysics> Physics;
 	std::unique_ptr<LogicThread> Logic;
 	std::unique_ptr<VulkRender> Render;
 

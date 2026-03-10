@@ -1,6 +1,7 @@
 #pragma once
 
-#include "Transform.h"
+#include "TransRot.h"
+#include "Scale.h"
 #include "ColorData.h"
 #include "MeshRef.h"
 #include "EntityView.h"
@@ -14,10 +15,11 @@
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 class AmbientProp : public EntityView<AmbientProp, WIDTH>
 {
-	TNX_REGISTER_SCHEMA(AmbientProp, EntityView, transform, color, mesh)
+	TNX_REGISTER_SCHEMA(AmbientProp, EntityView, transform, scale, color, mesh)
 
 public:
-	Transform<WIDTH> transform;
+	TransRot<WIDTH> transform;
+	Scale<WIDTH> scale;
 	ColorData<WIDTH> color;
 	MeshRef<WIDTH> mesh;
 
@@ -25,9 +27,9 @@ public:
 	{
 		const float fdt = static_cast<float>(dt);
 
-		// Gentle idle rotation — cheap enough to run on thousands of ambient props
-		transform.RotationY += fdt * 0.3f;
-		transform.RotationZ += fdt * 0.1f;
+		// Gentle idle rotation
+		transform.Rotation.RotateY(fdt * 0.3f);
+		transform.Rotation.RotateZ(fdt * 0.1f);
 
 		// Slow color breathe
 		color.R = (color.R + fdt * 0.15f > 1.0f).Choose(0.0f, color.R + fdt * 0.15f);

@@ -1,6 +1,7 @@
 #pragma once
 
-#include "Transform.h"
+#include "TransRot.h"
+#include "Scale.h"
 #include "ColorData.h"
 #include "EntityView.h"
 #include "Schema.h"
@@ -10,27 +11,26 @@
 template <template <FieldWidth> class T, FieldWidth WIDTH = FieldWidth::Scalar>
 class BaseCube : public EntityView<T, WIDTH>
 {
-	TNX_REGISTER_SUPER_SCHEMA(BaseCube, EntityView, transform, velocity, color)
+	TNX_REGISTER_SUPER_SCHEMA(BaseCube, EntityView, transform, velocity, scale, color)
 
-	Transform<WIDTH> transform;
+	TransRot<WIDTH> transform;
 	Velocity<WIDTH> velocity;
+	Scale<WIDTH> scale;
 	ColorData<WIDTH> color;
 
 	// Lifecycle hooks
 	FORCE_INLINE void PrePhysics([[maybe_unused]] double dt)
 	{
-		//constexpr float TWO_PI = 6.283185307179586f;
+		const float fdt = static_cast<float>(dt);
 
-		// Now we emulate less than ideal assignment and operations in a fixed update.
-		transform.PositionX += static_cast<float>(dt) * velocity.vX;
-		transform.PositionX = (transform.PositionX > 50.f).Choose(-50.f, transform.PositionX);
+		transform.Position += velocity.Vel * fdt;
+		transform.PosX     = (transform.PosX > 50.f).Choose(-50.f, transform.PosX);
 
-		velocity.vX *= static_cast<float>(0.98f);
-		velocity.vY *= static_cast<float>(0.99f);
+		velocity.vX *= 0.98f;
+		velocity.vY *= 0.99f;
 
-		transform.RotationY += static_cast<float>(dt) * 0.2f;
-
-		transform.RotationZ += static_cast<float>(dt) * 0.4f;
+		transform.Rotation.RotateY(fdt * 0.2f);
+		transform.Rotation.RotateZ(fdt * 0.4f);
 	}
 };
 
@@ -51,6 +51,7 @@ class SuperCube : public BaseCube<SuperCube, WIDTH>
 	TNX_REGISTER_SCHEMA(SuperCube, BaseCube)
 	using Base::transform;
 	using Base::velocity;
+	using Base::scale;
 	using Base::color;
 
 public:

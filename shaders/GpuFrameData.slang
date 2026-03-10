@@ -7,15 +7,15 @@
 #pragma once
 
 static const uint kMaxGpuFields    = 128;
-static const uint kGpuOutFieldCount = 14; // Flags + PosXYZ + RotXYZ + ScaleXYZ + ColorRGBA
+static const uint kGpuOutFieldCount = 15; // Flags + PosXYZ + RotQxyzw + ScaleXYZ + ColorRGBA
 
 // GpuFieldSemantic constants (match C++ GpuFrameData.h, slot index = sem - 1)
 static const uint kSemGeneric = 0;
 static const uint kSemFlags   = 1;
 static const uint kSemPosX    = 2;  static const uint kSemPosY    = 3;  static const uint kSemPosZ    = 4;
-static const uint kSemRotX    = 5;  static const uint kSemRotY    = 6;  static const uint kSemRotZ    = 7;
-static const uint kSemScaleX  = 8;  static const uint kSemScaleY  = 9;  static const uint kSemScaleZ  = 10;
-static const uint kSemColorR  = 11; static const uint kSemColorG  = 12; static const uint kSemColorB  = 13; static const uint kSemColorA = 14;
+static const uint kSemRotQx   = 5;  static const uint kSemRotQy   = 6;  static const uint kSemRotQz   = 7;  static const uint kSemRotQw = 8;
+static const uint kSemScaleX  = 9;  static const uint kSemScaleY  = 10; static const uint kSemScaleZ  = 11;
+static const uint kSemColorR  = 12; static const uint kSemColorG  = 13; static const uint kSemColorB  = 14; static const uint kSemColorA = 15;
 
 // Persistently-mapped per-frame GPU struct.
 // A single 8-byte push constant holds its device address.

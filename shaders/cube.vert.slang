@@ -7,6 +7,9 @@
 //   - InstancesAddr  — SoA compact instances written by scatter.slang
 //   - ViewProj       — column-major view-projection matrix
 //
+// Rotation is stored as quaternion (x,y,z,w). The vertex shader normalizes
+// the quaternion to correct for linear interpolation drift from scatter.slang.
+//
 // SoA read for instance instIdx:
 //   field k = semantic - 1;  value = InstancesAddr[ k * OutFieldStride + instIdx ]
 
@@ -28,37 +31,42 @@ struct VSOut
     float4 color : COLOR0;
 };
 
-// Build a TRS model matrix from translation t, Euler-XYZ rotation r (radians),
+// Build a TRS model matrix from translation t, unit quaternion q (x,y,z,w),
 // and per-axis scale s.  Returns a row-major float4x4 (Slang M[row][col]).
 //
-// Rotation: R = Rz * Ry * Rx (intrinsic XYZ order)
-//   M[row][col] = R[row,col] * scale[col]  (for cols 0..2)
-//   M[row][3]   = translation[row]          (col 3)
-float4x4 buildModel(float3 t, float3 r, float3 s)
+// Quaternion is normalized before use to handle interpolation drift.
+// Rotation matrix R from q, then M[row][col] = R[row,col] * scale[col].
+float4x4 buildModel(float3 t, float4 q, float3 s)
 {
-    float cx = cos(r.x), sx = sin(r.x);
-    float cy = cos(r.y), sy = sin(r.y);
-    float cz = cos(r.z), sz = sin(r.z);
+    // Normalize to handle lerp drift from scatter pass
+    float invLen = rsqrt(dot(q, q));
+    q *= invLen;
+
+    float x = q.x, y = q.y, z = q.z, w = q.w;
+    float x2 = x + x, y2 = y + y, z2 = z + z;
+    float xx = x * x2, xy = x * y2, xz = x * z2;
+    float yy = y * y2, yz = y * z2, zz = z * z2;
+    float wx = w * x2, wy = w * y2, wz = w * z2;
 
     float4x4 m;
 
     // Row 0
-    m[0][0] =  cy * cz                    * s.x;
-    m[0][1] = (cz * sx * sy - cx * sz)    * s.y;
-    m[0][2] = (cx * cz * sy + sx * sz)    * s.z;
-    m[0][3] =  t.x;
+    m[0][0] = (1.0f - (yy + zz)) * s.x;
+    m[0][1] = (xy - wz)          * s.y;
+    m[0][2] = (xz + wy)          * s.z;
+    m[0][3] = t.x;
 
     // Row 1
-    m[1][0] =  cy * sz                    * s.x;
-    m[1][1] = (cx * cz + sx * sy * sz)    * s.y;
-    m[1][2] = (cx * sy * sz - cz * sx)    * s.z;
-    m[1][3] =  t.y;
+    m[1][0] = (xy + wz)          * s.x;
+    m[1][1] = (1.0f - (xx + zz)) * s.y;
+    m[1][2] = (yz - wx)          * s.z;
+    m[1][3] = t.y;
 
     // Row 2
-    m[2][0] = -sy                          * s.x;
-    m[2][1] =  cy * sx                     * s.y;
-    m[2][2] =  cx * cy                     * s.z;
-    m[2][3] =  t.z;
+    m[2][0] = (xz - wy)          * s.x;
+    m[2][1] = (yz + wx)          * s.y;
+    m[2][2] = (1.0f - (xx + yy)) * s.z;
+    m[2][3] = t.z;
 
     // Row 3
     m[3][0] = 0.0f;
@@ -98,9 +106,10 @@ VSOut main(uint vertIdx : SV_VertexID, uint instIdx : SV_InstanceID)
                           inst[(kSemPosY   - 1u) * stride + instIdx],
                           inst[(kSemPosZ   - 1u) * stride + instIdx]);
 
-    float3 rot   = float3(inst[(kSemRotX   - 1u) * stride + instIdx],
-                          inst[(kSemRotY   - 1u) * stride + instIdx],
-                          inst[(kSemRotZ   - 1u) * stride + instIdx]);
+    float4 rotQ  = float4(inst[(kSemRotQx  - 1u) * stride + instIdx],
+                          inst[(kSemRotQy  - 1u) * stride + instIdx],
+                          inst[(kSemRotQz  - 1u) * stride + instIdx],
+                          inst[(kSemRotQw  - 1u) * stride + instIdx]);
 
     float3 scale = float3(inst[(kSemScaleX - 1u) * stride + instIdx],
                           inst[(kSemScaleY - 1u) * stride + instIdx],
@@ -112,7 +121,7 @@ VSOut main(uint vertIdx : SV_VertexID, uint instIdx : SV_InstanceID)
                           inst[(kSemColorA - 1u) * stride + instIdx]);
 
     // --- Transform ---
-    float4x4 model = buildModel(pos, rot, scale);
+    float4x4 model = buildModel(pos, rotQ, scale);
     float4x4 vp    = loadViewProj(fd);
 
     float4 worldPos = mul(model, v.position);

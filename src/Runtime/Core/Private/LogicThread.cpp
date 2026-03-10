@@ -10,11 +10,14 @@
 
 #include "ThreadPinning.h"
 #include "TrinyxEngine.h"
+#include "JoltPhysics.h"
 
-void LogicThread::Initialize(Registry* registry, const EngineConfig* config, int windowWidth, int windowHeight)
+void LogicThread::Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
+							 int windowWidth, int windowHeight)
 {
 	RegistryPtr   = registry;
 	ConfigPtr     = config;
+	PhysicsPtr    = physics;
 	TemporalCache = registry->GetTemporalCache();
 	WindowWidth   = windowWidth;
 	WindowHeight  = windowHeight;
@@ -100,7 +103,7 @@ void LogicThread::ThreadMain()
 				FpsFixedTimer += fixedStepTime;
 
 				PrePhysics(fixedStepTime);
-				// insert Sim physics here
+				PhysicsPtr->Step(static_cast<float>(fixedStepTime));
 				PostPhysics(fixedStepTime);
 				Accumulator.store(Accumulator.load(std::memory_order_relaxed) - fixedStepTime,
 								  std::memory_order_relaxed);

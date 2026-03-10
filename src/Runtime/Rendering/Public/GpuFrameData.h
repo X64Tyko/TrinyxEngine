@@ -33,7 +33,7 @@
 // ---------------------------------------------------------------------------
 
 constexpr uint32_t kMaxGpuFields     = 128;
-constexpr uint32_t kGpuOutFieldCount = 14; // Flags + PosXYZ(3) + RotXYZ(3) + ScaleXYZ(3) + ColorRGBA(4)
+constexpr uint32_t kGpuOutFieldCount = 15; // Flags + PosXYZ(3) + RotQxyzw(4) + ScaleXYZ(3) + ColorRGBA(4)
 
 // GpuFieldSemantic constants — match kSem* values in GpuFrameData.slang.
 // SoA slot index for field k = kSem - 1.
@@ -42,16 +42,17 @@ constexpr uint32_t kSemFlags   = 1;
 constexpr uint32_t kSemPosX    = 2;
 constexpr uint32_t kSemPosY    = 3;
 constexpr uint32_t kSemPosZ    = 4;
-constexpr uint32_t kSemRotX    = 5;
-constexpr uint32_t kSemRotY    = 6;
-constexpr uint32_t kSemRotZ    = 7;
-constexpr uint32_t kSemScaleX  = 8;
-constexpr uint32_t kSemScaleY  = 9;
-constexpr uint32_t kSemScaleZ  = 10;
-constexpr uint32_t kSemColorR  = 11;
-constexpr uint32_t kSemColorG  = 12;
-constexpr uint32_t kSemColorB  = 13;
-constexpr uint32_t kSemColorA  = 14;
+constexpr uint32_t kSemRotQx   = 5;
+constexpr uint32_t kSemRotQy   = 6;
+constexpr uint32_t kSemRotQz   = 7;
+constexpr uint32_t kSemRotQw   = 8;
+constexpr uint32_t kSemScaleX  = 9;
+constexpr uint32_t kSemScaleY  = 10;
+constexpr uint32_t kSemScaleZ  = 11;
+constexpr uint32_t kSemColorR  = 12;
+constexpr uint32_t kSemColorG  = 13;
+constexpr uint32_t kSemColorB  = 14;
+constexpr uint32_t kSemColorA  = 15;
 
 struct GpuFrameData
 {

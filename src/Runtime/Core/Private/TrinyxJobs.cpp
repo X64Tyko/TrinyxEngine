@@ -5,9 +5,9 @@
 #include "ThreadPinning.h"
 
 #include <cassert>
-#include <excpt.h>
 #include <thread>
 #include <vector>
+#include <xmmintrin.h>
 
 struct EngineConfig;
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Transform.h"
+#include "TransRot.h"
 #include "RigidBody.h"
 #include "ColorData.h"
 #include "EntityView.h"
@@ -17,7 +17,7 @@ class Projectile : public EntityView<Projectile, WIDTH>
 	TNX_REGISTER_SCHEMA(Projectile, EntityView, transform, body, color)
 
 public:
-	Transform<WIDTH> transform;
+	TransRot<WIDTH> transform;
 	RigidBody<WIDTH> body;
 	ColorData<WIDTH> color;
 
@@ -25,9 +25,9 @@ public:
 	{
 		const float fdt = static_cast<float>(dt);
 
-		transform.PositionX += body.VelX * fdt;
-		transform.PositionY += body.VelY * fdt;
-		transform.PositionZ += body.VelZ * fdt;
+		transform.PosX += body.VelX * fdt;
+		transform.PosY += body.VelY * fdt;
+		transform.PosZ += body.VelZ * fdt;
 
 		// Simple drag
 		body.VelX *= 0.999f;

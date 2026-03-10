@@ -16,7 +16,7 @@
 #include "Profiler.h"
 #include "Registry.h"
 #include "TemporalComponentCache.h"
-#include "Transform.h"
+#include "TransRot.h"
 
 void RenderThread::Initialize(Registry* registry, LogicThread* logic, const EngineConfig* config, SDL_GPUDevice* device,
 							  SDL_Window* window)
@@ -284,9 +284,9 @@ void RenderThread::SnapshotSparseArrays(std::shared_ptr<FramePacket> packet)
                 entry.PositionX = posXArray[i];
                 entry.PositionY = posYArray[i];
                 entry.PositionZ = posZArray[i];
-                entry.RotationX = rotXArray[i];
-                entry.RotationY = rotYArray[i];
-                entry.RotationZ = rotZArray[i];
+                entry.RotQx = rotXArray[i];
+                entry.RotQy = rotYArray[i];
+                entry.RotQz = rotZArray[i];
                 entry.ScaleX = scaleXArray[i];
                 entry.ScaleY = scaleYArray[i];
                 entry.ScaleZ = scaleZArray[i];
@@ -372,9 +372,9 @@ bool RenderThread::InterpolateToTransferBuffer(float alpha)
         instances[i].PositionZ = prev.PositionZ + (curr.PositionZ - prev.PositionZ) * alpha;
 
         // Lerp rotation
-        instances[i].RotationX = prev.RotationX + (curr.RotationX - prev.RotationX) * alpha;
-        instances[i].RotationY = prev.RotationY + (curr.RotationY - prev.RotationY) * alpha;
-        instances[i].RotationZ = prev.RotationZ + (curr.RotationZ - prev.RotationZ) * alpha;
+        instances[i].RotQx = prev.RotQx + (curr.RotQx - prev.RotQx) * alpha;
+        instances[i].RotQy = prev.RotQy + (curr.RotQy - prev.RotQy) * alpha;
+        instances[i].RotQz = prev.RotQz + (curr.RotQz - prev.RotQz) * alpha;
 
         // Lerp scale
         instances[i].ScaleX = prev.ScaleX + (curr.ScaleX - prev.ScaleX) * alpha;
@@ -447,7 +447,7 @@ bool RenderThread::InterpolateTemporalFrames(uint32_t frameNumber)
 	auto instances = static_cast<InstanceData*>(mapped);
 
 	// TODO: Read the temporal arrays directly
-	std::vector<Archetype*> archetypes = RegistryPtr->ComponentQuery<Transform<>, ColorData<>>();
+	std::vector<Archetype*> archetypes = RegistryPtr->ComponentQuery<TransRot<>, ColorData<>>();
 
 	for (Archetype* arch : archetypes)
 	{
@@ -507,9 +507,9 @@ bool RenderThread::InterpolateTemporalFrames(uint32_t frameNumber)
 				instances[InterpBufferCount].PositionZ = Lerp(posZPrev[i], posZCurr[i]);
 
 				// Lerp rotation
-				instances[InterpBufferCount].RotationX = Lerp(rotXPrev[i], rotXCurr[i]);
-				instances[InterpBufferCount].RotationY = Lerp(rotYPrev[i], rotYCurr[i]);
-				instances[InterpBufferCount].RotationZ = Lerp(rotZPrev[i], rotZCurr[i]);
+				instances[InterpBufferCount].RotQx = Lerp(rotXPrev[i], rotXCurr[i]);
+				instances[InterpBufferCount].RotQy = Lerp(rotYPrev[i], rotYCurr[i]);
+				instances[InterpBufferCount].RotQz = Lerp(rotZPrev[i], rotZCurr[i]);
 
 				// Lerp scale
 				instances[InterpBufferCount].ScaleX = Lerp(scaleXPrev[i], scaleXCurr[i]);

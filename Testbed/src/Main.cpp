@@ -141,16 +141,14 @@ TEST (InitializeTestEntities)
 			// Initialize all entities in this chunk
 			for (uint32_t i = 0; i < entityCount; ++i, Cube.Advance(1))
 			{
-				Cube.Flags.Flags         = static_cast<int32_t>(TemporalFlagBits::Active);
-				Cube.transform.PositionX = posX(gen);
-				Cube.transform.PositionY = posY(gen);
-				Cube.transform.PositionZ = posZ(gen);
-				Cube.transform.RotationX = 0.0f;
-				Cube.transform.RotationY = 0.0f;
-				Cube.transform.RotationZ = 0.0f;
-				Cube.transform.ScaleX    = 1.0f;
-				Cube.transform.ScaleY    = 1.0f;
-				Cube.transform.ScaleZ    = 1.0f;
+				Cube.Flags.Flags    = static_cast<int32_t>(TemporalFlagBits::Active);
+				Cube.transform.PosX = posX(gen);
+				Cube.transform.PosY = posY(gen);
+				Cube.transform.PosZ = posZ(gen);
+				Cube.transform.Rotation.SetIdentity();
+				Cube.scale.ScaleX = 1.0f;
+				Cube.scale.ScaleY = 1.0f;
+				Cube.scale.ScaleZ = 1.0f;
 
 				Cube.velocity.vX = velX(gen);
 				Cube.velocity.vY = velY(gen);

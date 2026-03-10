@@ -37,6 +37,7 @@ set(TRACY_PATH "${CMAKE_SOURCE_DIR}/libs/tracy")
 set(VOLK_PATH  "${CMAKE_SOURCE_DIR}/libs/volk")
 set(VMA_PATH   "${CMAKE_SOURCE_DIR}/libs/vma")
 set(SLANG_PATH "${CMAKE_SOURCE_DIR}/libs/slang")
+set(JOLT_PATH "${CMAKE_SOURCE_DIR}/libs/jolt")
 
 # Slang runtime API — headers + importable library target.
 # Nothing in the engine links it yet; the target exists so rendering code can
@@ -144,7 +145,29 @@ else()
 endif()
 
 # -----------------------------------------------------------------------------
-# 6. SUBDIRECTORIES (Projects in Solution)
+# 6. JOLT PHYSICS (vendored, built from source)
+# -----------------------------------------------------------------------------
+# Configure Jolt before add_subdirectory so options take effect.
+# Disable flags that conflict with our own compiler settings.
+set(OVERRIDE_CXX_FLAGS OFF CACHE BOOL "" FORCE)
+set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(CPP_RTTI_ENABLED ON CACHE BOOL "" FORCE)
+set(CPP_EXCEPTIONS_ENABLED OFF CACHE BOOL "" FORCE)
+set(ENABLE_OBJECT_STREAM OFF CACHE BOOL "" FORCE)
+set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+set(PROFILER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+
+add_subdirectory("${JOLT_PATH}/Build" jolt-build)
+
+# Suppress all warnings on Jolt (third-party code, same treatment as Tracy).
+if (NOT MSVC)
+    target_compile_options(Jolt PRIVATE -w)
+endif ()
+
+# -----------------------------------------------------------------------------
+# 7. SUBDIRECTORIES (Projects in Solution)
 # -----------------------------------------------------------------------------
 add_subdirectory(Trinyx)
 add_subdirectory(Testbed)

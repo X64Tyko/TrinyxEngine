@@ -19,13 +19,13 @@ struct SDL_GPUTransferBuffer;
 struct alignas(16) InstanceData
 {
 	float PositionX, PositionY, PositionZ, _pad0; // offset  0 — 16 bytes
-	float RotationX, RotationY, RotationZ, _pad1; // offset 16 — 16 bytes
+	float RotQx, RotQy, RotQz, RotQw;             // offset 16 — 16 bytes (quaternion)
 	float ScaleX, ScaleY, ScaleZ, _pad2;          // offset 32 — 16 bytes
 	float ColorR, ColorG, ColorB, ColorA;         // offset 48 — 16 bytes
 };                                                // total: 64 bytes
 
 static_assert(sizeof(InstanceData) == 64, "InstanceData must be 64 bytes");
-static_assert(offsetof(InstanceData, RotationX) == 16, "Rotation must be at offset 16");
+static_assert(offsetof(InstanceData, RotQx) == 16, "Rotation must be at offset 16");
 static_assert(offsetof(InstanceData, ScaleX) == 32, "Scale must be at offset 32");
 static_assert(offsetof(InstanceData, ColorR) == 48, "Color must be at offset 48");
 

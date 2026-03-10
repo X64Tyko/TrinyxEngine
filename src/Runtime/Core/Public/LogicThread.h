@@ -6,6 +6,7 @@
 
 // Forward declarations
 class Registry;
+class JoltPhysics;
 struct EngineConfig;
 struct InputState;
 struct FramePacket;
@@ -23,7 +24,8 @@ public:
 	LogicThread()  = default;
 	~LogicThread() = default;
 
-	void Initialize(Registry* registry, const EngineConfig* config, int windowWidth, int windowHeight);
+	void Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
+					int windowWidth, int windowHeight);
 	void Start();
 	void Stop();
 	void Join();
@@ -55,6 +57,7 @@ private:
 	// References (non-owning)
 	Registry* RegistryPtr                   = nullptr;
 	const EngineConfig* ConfigPtr           = nullptr;
+	JoltPhysics* PhysicsPtr                 = nullptr;
 	class ComponentCacheBase* TemporalCache = nullptr;
 
 	// Input (future)

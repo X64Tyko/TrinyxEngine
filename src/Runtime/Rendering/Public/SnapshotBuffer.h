@@ -9,11 +9,11 @@
  */
 struct alignas(16) SnapshotEntry
 {
-	// Transform data (48 bytes)
+	// Transform data (52 bytes + 12 padding = 64 bytes)
 	float PositionX, PositionY, PositionZ;
-	float RotationX, RotationY, RotationZ;
+	float RotQx, RotQy, RotQz, RotQw;
 	float ScaleX, ScaleY, ScaleZ;
-	float _pad0, _pad1, _pad2; // Padding to 48 bytes
+	float _pad0; // Padding to 64 bytes
 
 	// ColorData (16 bytes)
 	float ColorR, ColorG, ColorB, ColorA = 0.f;
