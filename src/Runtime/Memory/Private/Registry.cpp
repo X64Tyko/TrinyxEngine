@@ -286,18 +286,21 @@ void Registry::PropagateFrame(uint32_t currentFrame)
 {
 	TNX_ZONE_NC("Propagating Frame", TNX_COLOR_LOGIC)
 
+	TrinyxJobs::JobCounter PropagationCounter;
 #ifdef TNX_ENABLE_ROLLBACK
 	// Temporal cache: uses circular buffer strategy (defined in ComponentCache<Temporal>)
-	HistorySlab.PropagateFrame();
+	HistorySlab.PropagateFrame(PropagationCounter);
 #endif
 
 	// Volatile cache: uses triple-buffer strategy with lock-based frame selection
 	// (defined in ComponentCache<Volatile>)
-	VolatileSlab.PropagateFrame();
+	VolatileSlab.PropagateFrame(PropagationCounter);
 
 	// Clear dirty bits for the frame we're about to write into
 	auto& nextDirty = *DirtyBitsFrame(currentFrame + 1);
 	std::fill(nextDirty.begin(), nextDirty.end(), 0ULL);
+	
+	TrinyxJobs::LogicWaitForCounter(&PropagationCounter);
 }
 
 void Registry::ResetRegistry()

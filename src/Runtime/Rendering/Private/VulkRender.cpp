@@ -746,20 +746,20 @@ void VulkRender::ThreadMain()
 
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
-		int8_t renderRes = RenderFrame();
-		if (renderRes < 0) break;
-		else if (renderRes == 0) continue; // This stops us counting FPS from failing to render.
-
 		// Process Render deltas
 		uint32_t newTemporalFrame = RegistryPtr->GetTemporalCache()->GetActiveReadFrame();
 		uint32_t newVolatileFrame = RegistryPtr->GetVolatileCache()->GetActiveReadFrame();
-		if (newVolatileFrame != LastVolatileFrame || newTemporalFrame != LastTemporalFrame)
+		if (newVolatileFrame != LastVolatileFrame && newTemporalFrame != LastTemporalFrame) // make sure both have updated
 		{
 			LastVolatileFrame = newVolatileFrame;
 			LastTemporalFrame = newTemporalFrame;
 			// Write frame data
 			WriteToFrameSlab();
 		}
+		
+		int8_t renderRes = RenderFrame();
+		if (renderRes < 0) break;
+		else if (renderRes == 0) continue; // This stops us counting FPS from failing to render.
 
 		TrackFPS();
 

@@ -5,6 +5,7 @@
 #include "ThreadPinning.h"
 
 #include <cassert>
+#include <excpt.h>
 #include <thread>
 #include <vector>
 
@@ -31,6 +32,9 @@ namespace TrinyxJobs
 	// Uses std::atomic::wait/notify (C++20): futex on Linux, WaitOnAddress on Windows.
 	// Workers block until the value changes, meaning zero CPU when idle.
 	static std::atomic<uint32_t> s_WakeSignal{0};
+	
+	// TODO: make this configurable through ini
+	static uint64_t MaxSpins = 4000;
 
 	// ---- Internal helpers ------------------------------------------------
 
@@ -62,11 +66,14 @@ namespace TrinyxJobs
 	{
 		t_ThreadIndex = workerIndex;
 
+		uint64_t spinCount = 0;
 		while (s_Running.load(std::memory_order_relaxed))
 		{
-			TNX_ZONE_NC("Worker_Tick", TNX_COLOR_WORKER);
+			TNX_ZONE_FINE_NC("Worker_Tick", TNX_COLOR_WORKER);
 
-			if (StealAndExecute()) continue; // Got work — immediately try again, no delay.
+			if (StealAndExecute()) { spinCount = 0; continue; } // Got work — immediately try again, no delay.
+			
+			if (++spinCount < MaxSpins) { _mm_pause(); continue; } // Spin for a bit to see if a job comes in.
 
 			// No work available. Snapshot the wake signal, then check queues
 			// one more time before blocking (avoids missed-wake race).
@@ -198,7 +205,7 @@ namespace TrinyxJobs
 		while (counter->Value.load(std::memory_order_acquire) > 0)
 		{
 			Job job;
-			if (s_Queues[static_cast<int>(Queue::Render)].TryPop(job))
+			if (s_Queues[static_cast<int>(Queue::Render)].TryPop(job) || s_Queues[static_cast<int>(Queue::General)].TryPop(job))
 			{
 				job.EntryPoint(job.Payload, t_ThreadIndex);
 				if (job.Counter)
@@ -234,7 +241,7 @@ namespace TrinyxJobs
 		while (counter->Value.load(std::memory_order_acquire) > 0)
 		{
 			Job job;
-			if (s_Queues[static_cast<int>(Queue::Physics)].TryPop(job))
+			if (s_Queues[static_cast<int>(Queue::Physics)].TryPop(job) || s_Queues[static_cast<int>(Queue::General)].TryPop(job))
 			{
 				job.EntryPoint(job.Payload, t_ThreadIndex);
 				if (job.Counter)

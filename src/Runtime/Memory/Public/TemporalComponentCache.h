@@ -8,12 +8,17 @@
 #include "EngineConfig.h"
 #include "Logger.h"
 
+namespace TrinyxJobs
+{
+	struct JobCounter;
+}
+
 enum class SystemID : uint8_t;
 class Archetype;
 
 // Function pointer types for tier-specific behavior
 using FnGetNextWriteFramePtr = uint32_t (*)(const class ComponentCacheBase*);
-using FnPropagateFramePtr = void (*)(class ComponentCacheBase*);
+using FnPropagateFramePtr = void (*)(class ComponentCacheBase*, TrinyxJobs::JobCounter&);
 
 struct alignas(64) TemporalFrameHeader
 {
@@ -95,7 +100,7 @@ public:
 
 	// Copy field data from fromFrame into toFrame before dispatch.
 	// Called once per logic tick so all FieldProxy writes start from the previous frame's state.
-	void PropagateFrameData(uint32_t fromFrame, uint32_t toFrame);
+	void PropagateFrameData(uint32_t fromFrame, uint32_t toFrame, TrinyxJobs::JobCounter& counter);
 
 	// Get component field data from specific frame.
 	// Also returns how many entities are allocated/valid for this field so render can clamp scans safely.
@@ -117,9 +122,9 @@ public:
 		return FnGetNextWriteFrame(this);
 	}
 
-	void PropagateFrame()
+	void PropagateFrame(TrinyxJobs::JobCounter& counter)
 	{
-		FnPropagateFrame(this);
+		FnPropagateFrame(this, counter);
 	}
 
 protected:
@@ -295,7 +300,7 @@ public:
 		}
 	}
 
-	static void PropagateFrameImpl(ComponentCacheBase* base)
+	static void PropagateFrameImpl(ComponentCacheBase* base, TrinyxJobs::JobCounter& counter)
 	{
 		uint32_t targetSlot = (base->ActiveWriteFrame + 1) % base->GetTotalFrameCount();
 		if constexpr (Tier == CacheTier::Volatile)
@@ -333,7 +338,7 @@ public:
 
 		base->LastWrittenFrame = base->ActiveWriteFrame;
 		base->ActiveWriteFrame = targetSlot;
-		base->PropagateFrameData(base->LastWrittenFrame, targetSlot);
+		base->PropagateFrameData(base->LastWrittenFrame, targetSlot, counter);
 		base->UnlockFrameWrite();
 	}
 };

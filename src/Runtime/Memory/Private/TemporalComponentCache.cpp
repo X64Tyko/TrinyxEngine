@@ -327,7 +327,7 @@ void ComponentCacheBase::UnlockFrameRead(uint32_t frameNum)
 	header->OwnershipFlags.fetch_and(~0x02, std::memory_order_release);
 }
 
-void ComponentCacheBase::PropagateFrameData(uint32_t fromFrame, uint32_t toFrame)
+void ComponentCacheBase::PropagateFrameData(uint32_t fromFrame, uint32_t toFrame, TrinyxJobs::JobCounter& counter)
 {	
 	if (FrameDataCapacity == 0) return;
 
@@ -351,8 +351,6 @@ void ComponentCacheBase::PropagateFrameData(uint32_t fromFrame, uint32_t toFrame
 		{MaxCachedBoundary - LogicOffset, LogicOffset},               // Logic
 	};
 
-	TrinyxJobs::JobCounter NTCopyCounter;
-
 	for (uint16_t idx : ValidFields)
 	{
 		const size_t zoneBase = FieldAllocations[idx].OffsetInFrame;
@@ -370,11 +368,9 @@ void ComponentCacheBase::PropagateFrameData(uint32_t fromFrame, uint32_t toFrame
 				const size_t leftover = sz % 32;
 				for (size_t i = 0; i < chunks; ++i) _mm256_stream_si256(dst + i, _mm256_loadu_si256(src + i));
 				if (leftover) std::memcpy(writeData + off + chunks * 32, readData + off + chunks * 32, leftover);
-			}, &NTCopyCounter, TrinyxJobs::Queue::General);
+			}, &counter, TrinyxJobs::Queue::General);
 		}
 	}
-	TrinyxJobs::WaitForCounter(&NTCopyCounter);
-	_mm_sfence();
 }
 
 size_t ComponentCacheBase::AlignSize(size_t size)
