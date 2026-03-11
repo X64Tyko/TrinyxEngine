@@ -439,25 +439,24 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 		// 4. TRANSPOSE!
 		_MM_TRANSPOSE4_PS(m0, m1, m2, m3);
 
-		_mm_store_ps(fieldScratch[3].data() + i, r0);
-		_mm_store_ps(fieldScratch[4].data() + i, r1);
-		_mm_store_ps(fieldScratch[5].data() + i, r2);
-		_mm_store_ps(fieldScratch[6].data() + i, r2);
+		_mm_store_ps(fieldScratch[3].data() + i, m0);
+		_mm_store_ps(fieldScratch[4].data() + i, m1);
+		_mm_store_ps(fieldScratch[5].data() + i, m2);
+		_mm_store_ps(fieldScratch[6].data() + i, m3);
 	}
 
 	for (; i < activeCount; ++i)
 	{
-		float temp[4];
 		JPH::BodyLockRead lock(bodyInterface, syncList[i].id);
 		JPH::Vec4 pos(lock.GetBody().GetPosition());
 		JPH::Vec4 rot	(lock.GetBody().GetRotation().GetXYZW());
 		fieldScratch[0].data()[i] = pos[0];
 		fieldScratch[1].data()[i] = pos[1];
 		fieldScratch[2].data()[i] = pos[2];
-		fieldScratch[0].data()[i] = pos[3];
-		fieldScratch[1].data()[i] = pos[4];
-		fieldScratch[2].data()[i] = pos[5];
-		fieldScratch[2].data()[i] = pos[6];
+		fieldScratch[3].data()[i] = rot[0];
+		fieldScratch[4].data()[i] = rot[1];
+		fieldScratch[5].data()[i] = rot[2];
+		fieldScratch[6].data()[i] = rot[3];
 	}
 
 	ComponentCacheBase* TC = reg->GetTemporalCache();
