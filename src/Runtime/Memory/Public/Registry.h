@@ -374,11 +374,11 @@ inline void Registry::InvokeScalarUpdate(double dt)
 						+ (chunk->Header.GlobalIndexStart / 8);
 					ScalarUpdate(dt, fieldArrayTable, chunkDirtyBits, entityCount);
 				},
-				&ScalarUpdateCounter, TrinyxJobs::Queue::Physics);
+				&ScalarUpdateCounter, TrinyxJobs::Queue::Logic);
 		}
 	}
 
-	TrinyxJobs::LogicWaitForCounter(&ScalarUpdateCounter);
+	TrinyxJobs::WaitForCounter(&ScalarUpdateCounter, TrinyxJobs::Queue::Logic);
 
 #ifdef TNX_ENABLE_ROLLBACK
 	HistorySlab.UnlockFrameWrite();
@@ -434,11 +434,11 @@ inline void Registry::InvokePrePhys(double dt)
 						+ (chunk->Header.GlobalIndexStart / 8);
 					prePhys(dt, fieldArrayTable, chunkDirtyBits, entityCount);
 				},
-				&prePhysCounter, TrinyxJobs::Queue::Physics);
+				&prePhysCounter, TrinyxJobs::Queue::Logic);
 		}
 	}
 
-	TrinyxJobs::LogicWaitForCounter(&prePhysCounter);
+	TrinyxJobs::WaitForCounter(&prePhysCounter, TrinyxJobs::Queue::Logic);
 
 #ifdef TNX_ENABLE_ROLLBACK
 	HistorySlab.UnlockFrameWrite();
@@ -493,11 +493,11 @@ inline void Registry::InvokePostPhys(double dt)
 						+ (chunk->Header.GlobalIndexStart / 8);
 					PostPhys(dt, fieldArrayTable, chunkDirtyBits, entityCount);
 				},
-				&postPhysCounter, TrinyxJobs::Queue::Physics);
+				&postPhysCounter, TrinyxJobs::Queue::Logic);
 		}
 	}
 
-	TrinyxJobs::LogicWaitForCounter(&postPhysCounter);
+	TrinyxJobs::WaitForCounter(&postPhysCounter, TrinyxJobs::Queue::Logic);
 
 #ifdef TNX_ENABLE_ROLLBACK
 	HistorySlab.UnlockFrameWrite();

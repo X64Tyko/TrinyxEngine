@@ -7,12 +7,13 @@
 #include "Schema.h"
 #include "SchemaReflector.h"
 #include "FieldProxy.h"
+#include "JoltBody.h"
 
 template <template <FieldWidth> class T, FieldWidth WIDTH = FieldWidth::Scalar>
 class BaseCube : public EntityView<T, WIDTH>
 {
 	TNX_REGISTER_SUPER_SCHEMA(BaseCube, EntityView, transform, velocity, scale, color)
-
+public:
 	TransRot<WIDTH> transform;
 	Velocity<WIDTH> velocity;
 	Scale<WIDTH> scale;
@@ -37,10 +38,13 @@ class BaseCube : public EntityView<T, WIDTH>
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 class CubeEntity : public BaseCube<CubeEntity, WIDTH>
 {
-	TNX_REGISTER_SCHEMA(CubeEntity, BaseCube)
+	TNX_REGISTER_SCHEMA(CubeEntity, BaseCube, physBody)
+
+public:
+	JoltBody<WIDTH> physBody;
 
 	// Logic
-	FORCE_INLINE void PostPhysics([[maybe_unused]] double dt)
+	FORCE_INLINE void PrePhysics([[maybe_unused]] double dt)
 	{
 	}
 };
@@ -49,12 +53,12 @@ template <FieldWidth WIDTH = FieldWidth::Scalar>
 class SuperCube : public BaseCube<SuperCube, WIDTH>
 {
 	TNX_REGISTER_SCHEMA(SuperCube, BaseCube)
+public:
 	using Base::transform;
 	using Base::velocity;
 	using Base::scale;
 	using Base::color;
 
-public:
 	// Logic
 	FORCE_INLINE void ScalarUpdate([[maybe_unused]] double dt)
 	{

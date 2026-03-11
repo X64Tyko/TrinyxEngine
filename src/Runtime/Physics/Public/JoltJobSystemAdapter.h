@@ -21,8 +21,9 @@ JPH_SUPPRESS_WARNINGS
 class JoltJobSystemAdapter final : public JPH::JobSystemWithBarrier
 {
 public:
-	JoltJobSystemAdapter(JPH::uint inMaxJobs, JPH::uint inMaxBarriers)
+	JoltJobSystemAdapter(JPH::uint inMaxJobs, JPH::uint inMaxBarriers, TrinyxJobs::JobCounter* jobCounter)
 		: JobSystemWithBarrier(inMaxBarriers)
+		, JobCounter(jobCounter)
 	{
 		mJobs.Init(inMaxJobs, inMaxJobs);
 	}
@@ -55,16 +56,8 @@ protected:
 		// Take a reference so the job stays alive until our lambda completes.
 		inJob->AddRef();
 
-		// Dispatch to TrinyxJobs Physics queue. The lambda captures only the
+		// Dispatch to TrinyxJobs General queue. The lambda captures only the
 		// raw pointer (8 bytes), well within the 48-byte payload limit.
-		TrinyxJobs::JobCounter* noCounter = nullptr;
-		(void)noCounter; // We don't use TrinyxJobs counters for Jolt jobs —
-		// Jolt tracks completion via its own barrier.
-
-		// We can't use Dispatch() with a counter because Jolt manages its own
-		// completion tracking. Submit directly via a one-off counter we ignore.
-		// Actually, we need a counter for SubmitJob. Use a thread-local dummy.
-		static thread_local TrinyxJobs::JobCounter sDummyCounter;
 
 		TrinyxJobs::Dispatch(
 			[inJob](uint32_t)
@@ -72,7 +65,7 @@ protected:
 				inJob->Execute();
 				inJob->Release();
 			},
-			&sDummyCounter, TrinyxJobs::Queue::Physics);
+			JobCounter, TrinyxJobs::Queue::Physics);
 	}
 
 	void QueueJobs(Job** inJobs, JPH::uint inNumJobs) override
@@ -87,4 +80,5 @@ protected:
 
 private:
 	JPH::FixedSizeFreeList<Job> mJobs;
+	TrinyxJobs::JobCounter* JobCounter;
 };

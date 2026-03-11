@@ -9,11 +9,15 @@ struct EngineConfig
 	// Scan a directory for all *Defaults.ini files and load them (alphabetical order).
 	// Later files override earlier values. Writes EngineDefaults.ini if none found.
 	static EngineConfig LoadFromDirectory(const char* dir);
+
 	// Variadic Update, let the Logic thread run uncapped or limit its updates, cannot be lower than Fixed update if capped.
 	int TargetFPS = 0; // 0 = Uncapped
 
-	// Physics/Simulation (Fixed High) - e.g., 60Hz or 128Hz
+	// Gameplay Logic (Fixed High) - e.g., 60Hz or 128Hz
 	int FixedUpdateHz = 128;
+
+	// Number of fixed updates per Phyics update -> at 8 = fixed: 512Hz physics: 64Hz
+	int PhysicsUpdateInterval = 8;
 
 	// Networking (Fixed Low/Med) - e.g., 20Hz or 30Hz
 	// This is your "Tick Rate". Lower = Less Bandwidth, Higher = More Precision.
@@ -34,7 +38,7 @@ struct EngineConfig
 	int TemporalFrameCount = 8;
 
 	// number of jobs to preallocate the job queues to hold. exceeding this value will assert
-	int JobCacheSize = 1024;
+	int JobCacheSize = 16 * 1024;
 
 	// --- Helpers ---
 	double GetTargetFrameTime() const

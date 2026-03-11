@@ -80,16 +80,13 @@ Archetype* Registry::GetOrCreateArchetype(const Signature& Sig, const ClassID& I
 			CacheTier Tier                       = CFR.GetComponentMeta(compTypeID).TemporalTier;
 
 			size_t componentSize = 0;
-			if (isDecomposed && !fields->empty())
+			if (isDecomposed)
 			{
-				// Sum up field sizes for decomposed component
 				for (const auto& field : *fields) componentSize += field.Size;
 			}
 			else
 			{
-				// For non-decomposed, we'd need the actual component size
-				// For now, use a default
-				componentSize = 64; // TODO: Get actual component size
+				componentSize = CFR.GetComponentMeta(compTypeID).Size;
 			}
 
 			Components.push_back(ComponentMetaEx{
@@ -299,8 +296,8 @@ void Registry::PropagateFrame(uint32_t currentFrame)
 	// Clear dirty bits for the frame we're about to write into
 	auto& nextDirty = *DirtyBitsFrame(currentFrame + 1);
 	std::fill(nextDirty.begin(), nextDirty.end(), 0ULL);
-	
-	TrinyxJobs::LogicWaitForCounter(&PropagationCounter);
+
+	TrinyxJobs::WaitForCounter(&PropagationCounter, TrinyxJobs::Queue::Logic);
 }
 
 void Registry::ResetRegistry()

@@ -72,10 +72,11 @@ private:
 
 	// Timing — atomic to allow safe relaxed reads from the RenderThread
 	std::atomic<double> Accumulator{0.0};
-	double SimulationTime = 0.0;
-	uint32_t FrameNumber  = 0;
-	int WindowWidth       = 1920;
-	int WindowHeight      = 1080;
+	double SimulationTime   = 0.0;
+	uint32_t FrameNumber    = 0;
+	uint32_t PhysicsDivizor = 1;
+	int WindowWidth         = 1920;
+	int WindowHeight        = 1080;
 
 	// FPS tracking
 	uint32_t FpsFrameCount = 0;

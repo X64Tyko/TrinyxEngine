@@ -251,10 +251,8 @@ void ComponentCacheBase::ResetAllocators()
 }
 
 void* ComponentCacheBase::GetFieldData(TemporalFrameHeader* header, ComponentTypeID compType,
-									   size_t fieldIndex, size_t& outAllocatedEntities) const
+									   size_t fieldIndex) const
 {
-	outAllocatedEntities = 0;
-
 	if (!header) return nullptr;
 
 	if (compType >= MAX_COMPONENTS || fieldIndex >= MAX_TEMPORAL_FIELDS_PER_COMPONENT) return nullptr;
@@ -263,11 +261,6 @@ void* ComponentCacheBase::GetFieldData(TemporalFrameHeader* header, ComponentTyp
 	const FieldAllocationInfo& info = FieldAllocations[tableIndex];
 
 	if (!info.bValid) return nullptr;
-
-	if (info.FieldSize != 0)
-	{
-		outAllocatedEntities = info.CurrentUsed / info.FieldSize;
-	}
 
 	uint8_t* frameData = reinterpret_cast<uint8_t*>(header) + sizeof(TemporalFrameHeader);
 	return frameData + info.OffsetInFrame;
@@ -368,7 +361,7 @@ void ComponentCacheBase::PropagateFrameData(uint32_t fromFrame, uint32_t toFrame
 				const size_t leftover = sz % 32;
 				for (size_t i = 0; i < chunks; ++i) _mm256_stream_si256(dst + i, _mm256_loadu_si256(src + i));
 				if (leftover) std::memcpy(writeData + off + chunks * 32, readData + off + chunks * 32, leftover);
-			}, &counter, TrinyxJobs::Queue::General);
+			}, &counter, TrinyxJobs::Queue::Logic);
 		}
 	}
 }

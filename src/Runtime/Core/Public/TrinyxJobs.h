@@ -34,11 +34,24 @@ namespace TrinyxJobs
 
 	enum class Queue : uint8_t
 	{
-		Physics, // LogicThread work (PrePhysics, physics sim, PostPhysics)
-		Render,  // RenderThread work (GPU upload, compute dispatch)
-		General, // Anything else
-		COUNT
+		Physics = 1 << 0, // PhysicsThread work (Physics, Collision)
+		Logic   = 1 << 1, // LogicThread work (PrePhysics, PostPhysics)
+		Render  = 1 << 2, // RenderThread work (GPU upload, compute dispatch)
+		General = 1 << 3, // Anything else
+
+		COUNT = 4,
+		All   = Physics | Logic | Render | General
 	};
+
+	constexpr Queue operator|(Queue a, Queue b)
+	{
+		return static_cast<Queue>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
+	}
+
+	constexpr Queue operator&(Queue a, Queue b)
+	{
+		return static_cast<Queue>(static_cast<uint8_t>(a) & static_cast<uint8_t>(b));
+	}
 
 	// ---- Job lambda validation -------------------------------------------
 
@@ -116,9 +129,7 @@ namespace TrinyxJobs
 
 	/// Spin until the counter reaches 0, stealing work from all queues while waiting.
 	/// The calling thread becomes a worker during the wait.
-	void WaitForCounter(JobCounter* counter);
-	void LogicWaitForCounter(JobCounter* counter);
-	void RenderWaitForCounter(JobCounter* counter);
+	void WaitForCounter(JobCounter* counter, Queue affinity = Queue::All);
 
 	// ---- Queries ---------------------------------------------------------
 

@@ -40,14 +40,14 @@ namespace TrinyxJobs
 
 	/// Try to pop and execute one job from any queue.
 	/// Returns true if work was found. Used by workers and WaitForCounter.
-	static bool StealAndExecute()
+	static bool StealAndExecute(const std::vector<uint8_t>& queues)
 	{
 		// Priority order: Physics > Render > General
 		// This ensures physics work (the tightest budget) drains fastest.
 		Job job;
-		for (uint32_t q = 0; q < kQueueCount; ++q)
+		for (auto& queueID : queues)
 		{
-			if (s_Queues[q].TryPop(job))
+			if (s_Queues[queueID].TryPop(job))
 			{
 				job.EntryPoint(job.Payload, t_ThreadIndex);
 				if (job.Counter)
@@ -62,8 +62,15 @@ namespace TrinyxJobs
 	}
 
 	/// Worker thread entry point.
-	static void WorkerMain(uint32_t workerIndex)
+	static void WorkerMain(uint32_t workerIndex, Queue affinity)
 	{
+		// create queue inices for worker affinity
+		std::vector<uint8_t> queues;
+		for (uint8_t id = 0; id < kQueueCount; ++id)
+		{
+			if ((static_cast<uint8_t>(affinity) & (1 << id)) == (1 << id)) queues.push_back(id);
+		}
+
 		t_ThreadIndex = workerIndex;
 
 		uint64_t spinCount = 0;
@@ -71,15 +78,19 @@ namespace TrinyxJobs
 		{
 			TNX_ZONE_FINE_NC("Worker_Tick", TNX_COLOR_WORKER);
 
-			if (StealAndExecute()) { spinCount = 0; continue; } // Got work — immediately try again, no delay.
-			
+			if (StealAndExecute(queues))
+			{
+				spinCount = 0;
+				continue;
+			} // Got work — immediately try again, no delay.
+
 			if (++spinCount < MaxSpins) { _mm_pause(); continue; } // Spin for a bit to see if a job comes in.
 
 			// No work available. Snapshot the wake signal, then check queues
 			// one more time before blocking (avoids missed-wake race).
 			uint32_t snapshot = s_WakeSignal.load(std::memory_order_acquire);
 
-			if (StealAndExecute()) continue; // Work arrived between the first check and snapshot.
+			if (StealAndExecute(queues)) continue; // Work arrived between the first check and snapshot.
 
 			// Block until SubmitJob bumps the signal (futex / WaitOnAddress).
 			// Wakes in ~1-2μs on Linux, near-zero CPU while idle.
@@ -87,7 +98,7 @@ namespace TrinyxJobs
 		}
 
 		// Drain remaining jobs before exiting
-		while (StealAndExecute())
+		while (StealAndExecute(queues))
 		{
 		}
 	}
@@ -122,10 +133,11 @@ namespace TrinyxJobs
 		s_Running.store(true, std::memory_order_release);
 		s_Workers.reserve(s_WorkerCount);
 
+		uint8_t PhysicsDedicated = s_WorkerCount * 0.25;
 		for (uint32_t i = 0; i < s_WorkerCount; ++i)
 		{
 			// Worker indices are 1-based (0 = coordinator/non-worker)
-			s_Workers.emplace_back(WorkerMain, i + 1);
+			s_Workers.emplace_back(WorkerMain, i + 1, i < PhysicsDedicated ? Queue::Physics : Queue::All);
 			TrinyxThreading::PinThread(s_Workers.back());
 		}
 
@@ -158,14 +170,18 @@ namespace TrinyxJobs
 
 	void SubmitJob(const Job& job, Queue queue)
 	{
-		auto idx = static_cast<uint32_t>(queue);
+		uint32_t idx = std::countr_zero(static_cast<uint32_t>(queue));
 		assert(idx < kQueueCount);
 
 		bool pushed = s_Queues[idx].TryPush(job);
 
 		// If the primary queue is full, spill to General.
 		// If General is also full, we've exceeded JobCacheSize — assert.
-		if (!pushed && queue != Queue::General) pushed = s_Queues[static_cast<uint32_t>(Queue::General)].TryPush(job);
+		if (!pushed && queue != Queue::General)
+		{
+			pushed = s_Queues[std::countr_zero(static_cast<uint8_t>(Queue::General))].TryPush(job);
+			LOG_ERROR("[Jobs] Queue full");
+		}
 
 		assert(pushed && "Job queues full — increase JobCacheSize in config");
 		(void)pushed;
@@ -175,8 +191,15 @@ namespace TrinyxJobs
 		s_WakeSignal.notify_one();
 	}
 
-	void WaitForCounter(JobCounter* counter)
+	void WaitForCounter(JobCounter* counter, Queue affinity)
 	{
+		// create queue inices for worker affinity
+		std::vector<uint8_t> queues;
+		for (uint8_t id = 0; id < kQueueCount; ++id)
+		{
+			if ((static_cast<uint8_t>(affinity) & (1 << id)) == (1 << id)) queues.push_back(id);
+		}
+
 		TNX_ZONE_N("Jobs_WaitForCounter");
 
 		// The calling thread becomes a worker while waiting.
@@ -184,7 +207,7 @@ namespace TrinyxJobs
 		// instead of sitting idle.
 		while (counter->Value.load(std::memory_order_acquire) > 0)
 		{
-			if (StealAndExecute()) continue;
+			if (StealAndExecute(queues)) continue;
 
 			// No work to steal — wait for a signal rather than spin.
 			// Short-lived: the jobs we're waiting on will wake us when they
@@ -193,79 +216,7 @@ namespace TrinyxJobs
 
 			// Double-check after snapshot to avoid missed wake
 			if (counter->Value.load(std::memory_order_acquire) == 0) break;
-			if (StealAndExecute()) continue;
-
-			counter->Value.wait(snapshot, std::memory_order_relaxed);
-		}
-	}
-
-	void RenderWaitForCounter(JobCounter* counter)
-	{
-		TNX_ZONE_N("Jobs_RenderWaitForCounter");
-		while (counter->Value.load(std::memory_order_acquire) > 0)
-		{
-			Job job;
-			if (s_Queues[static_cast<int>(Queue::Render)].TryPop(job) || s_Queues[static_cast<int>(Queue::General)].TryPop(job))
-			{
-				job.EntryPoint(job.Payload, t_ThreadIndex);
-				if (job.Counter)
-				{
-					job.Counter->fetch_sub(1, std::memory_order_release);
-					job.Counter->notify_one();
-					continue;
-				}
-			}
-
-			uint32_t snapshot = counter->Value.load(std::memory_order_acquire);
-
-			if (counter->Value.load(std::memory_order_acquire) == 0) break;
-
-			if (s_Queues[static_cast<int>(Queue::Render)].TryPop(job))
-			{
-				job.EntryPoint(job.Payload, t_ThreadIndex);
-				if (job.Counter)
-				{
-					job.Counter->fetch_sub(1, std::memory_order_release);
-					job.Counter->notify_one();
-					continue;
-				}
-			}
-
-			counter->Value.wait(snapshot, std::memory_order_relaxed);
-		}
-	}
-
-	void LogicWaitForCounter(JobCounter* counter)
-	{
-		TNX_ZONE_N("Jobs_LogicWaitForCounter");
-		while (counter->Value.load(std::memory_order_acquire) > 0)
-		{
-			Job job;
-			if (s_Queues[static_cast<int>(Queue::Physics)].TryPop(job) || s_Queues[static_cast<int>(Queue::General)].TryPop(job))
-			{
-				job.EntryPoint(job.Payload, t_ThreadIndex);
-				if (job.Counter)
-				{
-					job.Counter->fetch_sub(1, std::memory_order_release);
-					job.Counter->notify_one();
-					continue;
-				}
-			}
-
-			uint32_t snapshot = counter->Value.load(std::memory_order_acquire);
-
-			if (counter->Value.load(std::memory_order_acquire) == 0) break;
-
-			if (s_Queues[static_cast<int>(Queue::Physics)].TryPop(job))
-			{
-				job.EntryPoint(job.Payload, t_ThreadIndex);
-				if (job.Counter)
-				{
-					job.Counter->fetch_sub(1, std::memory_order_release);
-					job.Counter->notify_one();
-					continue;
-				}
-			}
+			if (StealAndExecute(queues)) continue;
 
 			counter->Value.wait(snapshot, std::memory_order_relaxed);
 		}

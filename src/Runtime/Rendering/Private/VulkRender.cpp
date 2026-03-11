@@ -552,7 +552,7 @@ void VulkRender::WriteToFrameSlab()
 	TemporalFrameHeader* temporalHdr = temporalCache->GetFrameHeader(LastTemporalFrame);
 	TemporalFrameHeader* volatileHdr = volatileCache->GetFrameHeader(LastVolatileFrame);
 
-	assert(temporalHdr->header.frame == volatileHdr->header.frame);
+	assert(temporalHdr->FrameNumber == volatileHdr->FrameNumber);
 
 	const ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
 	const uint8_t transformSlot       = CFR.GetCacheSlotIndex(TransRot<>::StaticTypeID());
@@ -593,8 +593,7 @@ void VulkRender::WriteToFrameSlab()
 	for (uint32_t f = 0; f < kGpuOutFieldCount; ++f)
 	{
 		const FieldDescription& fieldDesc = kFields[f];
-		size_t dummy                      = 0;
-		const void* src                   = fieldDesc.cache->GetFieldData(fieldDesc.hdr, fieldDesc.slot, fieldDesc.fi, dummy);
+		const void* src                   = fieldDesc.cache->GetFieldData(fieldDesc.hdr, fieldDesc.slot, fieldDesc.fi);
 		uint8_t* dst                      = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
 		TrinyxJobs::Dispatch([src, dst, fieldStride](uint32_t)
 		{
@@ -603,7 +602,7 @@ void VulkRender::WriteToFrameSlab()
 		}, &GPUTransferCounter, TrinyxJobs::Queue::Render);
 	}
 
-	TrinyxJobs::RenderWaitForCounter(&GPUTransferCounter);
+	TrinyxJobs::WaitForCounter(&GPUTransferCounter, TrinyxJobs::Queue::Render);
 
 	volatileCache->UnlockFrameRead(LastVolatileFrame);
 #ifdef TNX_ENABLE_ROLLBACK

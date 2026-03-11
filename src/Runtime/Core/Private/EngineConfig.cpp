@@ -24,7 +24,9 @@ static void WriteDefaults(const char* path, const EngineConfig& cfg)
 		<< "InputPollHz=" << cfg.InputPollHz << "\n"
 		<< "MaxPhysicsEntities=" << cfg.MAX_PHYSICS_ENTITIES << "\n"
 		<< "MaxCachedEntities=" << cfg.MAX_CACHED_ENTITIES << "\n"
-		<< "TemporalFrameCount=" << cfg.TemporalFrameCount << "\n";
+		<< "TemporalFrameCount=" << cfg.TemporalFrameCount << "\n"
+		<< "jobCacheSize=" << cfg.JobCacheSize << "\n"
+		<< "PhysicsUpdateInterval=" << cfg.PhysicsUpdateInterval << "\n";
 }
 
 // Apply key=value pairs from a single INI file onto an existing config.
@@ -58,6 +60,7 @@ static void ApplyFromFile(const char* path, EngineConfig& cfg)
 		else if (key == "MaxCachedEntities") cfg.MAX_CACHED_ENTITIES = std::stoi(val);
 		else if (key == "TemporalFrameCount") cfg.TemporalFrameCount = std::stoi(val);
 		else if (key == "JobCacheSize") cfg.JobCacheSize = std::stoi(val);
+		else if (key == "PhysicsUpdateInterval") cfg.PhysicsUpdateInterval = std::stoi(val);
 	}
 }
 

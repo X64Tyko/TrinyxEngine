@@ -15,12 +15,13 @@
 void LogicThread::Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
 							 int windowWidth, int windowHeight)
 {
-	RegistryPtr   = registry;
-	ConfigPtr     = config;
-	PhysicsPtr    = physics;
-	TemporalCache = registry->GetTemporalCache();
-	WindowWidth   = windowWidth;
-	WindowHeight  = windowHeight;
+	RegistryPtr    = registry;
+	ConfigPtr      = config;
+	PhysicsPtr     = physics;
+	TemporalCache  = registry->GetTemporalCache();
+	WindowWidth    = windowWidth;
+	WindowHeight   = windowHeight;
+	PhysicsDivizor = config->PhysicsUpdateInterval;
 
 	LastCompletedFrame.store(0, std::memory_order_release);
 
@@ -103,12 +104,31 @@ void LogicThread::ThreadMain()
 				FpsFixedTimer += fixedStepTime;
 
 				PrePhysics(fixedStepTime);
-				PhysicsPtr->Step(static_cast<float>(fixedStepTime));
+
+				// Flush any entities that have a JoltBody component but no Jolt body yet
+				if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
+				{
+					uint32_t wf  = TemporalCache->GetActiveWriteFrame();
+					uint32_t vwf = RegistryPtr->GetVolatileCache()->GetActiveWriteFrame();
+					PhysicsPtr->FlushPendingBodies(RegistryPtr, wf, vwf);
+
+					TrinyxJobs::Dispatch([this, fixedStepTime](uint32_t)
+					{
+						PhysicsPtr->Step(static_cast<float>(fixedStepTime * PhysicsDivizor));
+					}, PhysicsPtr->GetJoltPhysCounter(), TrinyxJobs::Queue::Physics);
+				}
+
+				// Pull awake body transforms from Jolt back into SoA
+				if (FrameNumber % PhysicsDivizor == PhysicsDivizor - 1) [[unlikely]]
+				{
+					PhysicsPtr->PullActiveTransforms(RegistryPtr);
+				}
+
 				PostPhysics(fixedStepTime);
 				Accumulator.store(Accumulator.load(std::memory_order_relaxed) - fixedStepTime,
 								  std::memory_order_relaxed);
 				++steps;
-				SimulationTime += dt;
+				SimulationTime += fixedStepTime;
 
 				// Publish completed frame to RenderThread
 				RegistryPtr->PropagateFrame(FrameNumber);

@@ -104,8 +104,7 @@ public:
 
 	// Get component field data from specific frame.
 	// Also returns how many entities are allocated/valid for this field so render can clamp scans safely.
-	void* GetFieldData(TemporalFrameHeader* header, ComponentTypeID compType, size_t fieldIndex,
-					   size_t& outAllocatedEntities) const;
+	void* GetFieldData(TemporalFrameHeader* header, ComponentTypeID compType, size_t fieldIndex) const;
 
 	uint32_t GetTotalFrameCount() const { return static_cast<uint32_t>(TemporalFrameCount); }
 	CacheTier GetTier() const { return Tier_; }

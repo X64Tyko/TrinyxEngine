@@ -87,6 +87,10 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& C
 			{
 				const FieldMeta& field = (*fields)[fieldIdx];
 
+				size_t fieldFrames = 1;
+				size_t frameStride = 0;
+				size_t fieldOffset = currentOffset; // Track offset before advancing
+
 				if (temporalTier != CacheTier::None)
 				{
 					// Mark this field as temporal with array index - will be allocated per-chunk
@@ -103,19 +107,22 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& C
 						LOG_INFO_F("  Temporal field %s[%zu] will be allocated per-chunk (index %u)",
 								   field.Name, fieldIdx, temporalFieldIndex - 1);
 					}
+
+					fieldFrames = temporalCache->GetTotalFrameCount();
+					frameStride = temporalCache->GetFrameStride();
 				}
 				else
 				{
 					slotIdx = fieldIdx;
-					// Regular chunk allocation
-					// Align offset for this field array
+					// Cold chunk allocation — single-frame SoA array in chunk data
 					currentOffset = AlignOffset(currentOffset, field.Alignment);
+					fieldOffset   = currentOffset;
 
 					// Store offset for this field array
 					FieldKey key{typeID, cacheSlotID, static_cast<uint32_t>(fieldIdx)};
 					FieldOffsets[key] = currentOffset;
 
-					LOG_TRACE_F("  Field %s[%zu]: offset=%zu, size=%zu",
+					LOG_TRACE_F("  Cold field %s[%zu]: offset=%zu, size=%zu",
 								field.Name, fieldIdx, currentOffset, field.Size);
 
 					// Advance by EntitiesPerChunk * field size
@@ -127,16 +134,16 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& C
 					cacheSlotID,
 					static_cast<uint32_t>(fieldIdx),
 					slotIdx,
-					temporalCache->GetTotalFrameCount(),
-					temporalCache->GetFrameStride(),
+					fieldFrames,
+					frameStride,
 					field.Size,
 					true,
 					temporalTier
 				});
 
-				// Add to template cache
+				// Add to template cache (stores start offset, not end)
 				FieldArrayTemplateCache.push_back({
-					currentOffset,
+					fieldOffset,
 					field.Name
 				});
 			}
@@ -383,7 +390,7 @@ Chunk* Archetype::AllocateChunk()
 
 	std::unordered_set<ComponentCacheBase*> UsedCaches(3);
 	size_t largestSize = 0;
-	
+
 	// Allocate temporal field arrays for this chunk
 	if (!TemporalFieldIndices.empty())
 	{
