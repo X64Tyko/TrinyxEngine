@@ -34,9 +34,9 @@ namespace TrinyxJobs
 
 	enum class Queue : uint8_t
 	{
-		Physics = 1 << 0, // PhysicsThread work (Physics, Collision)
-		Logic   = 1 << 1, // LogicThread work (PrePhysics, PostPhysics)
-		Render  = 1 << 2, // RenderThread work (GPU upload, compute dispatch)
+		Logic   = 1 << 0, // LogicThread work (PrePhysics, PostPhysics)
+		Render  = 1 << 1, // RenderThread work (GPU upload, compute dispatch)
+		Physics = 1 << 2, // PhysicsThread work (Physics, Collision)
 		General = 1 << 3, // Anything else
 
 		COUNT = 4,

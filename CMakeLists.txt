@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.30)
 
+# Force dynamic runtime library for all targets (including Jolt)
+# MUST be set before project() call
+if(MSVC OR CMAKE_GENERATOR MATCHES "Visual Studio")
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif()
+
 # Solution/Workspace level project
 project(TrinyxSolution VERSION 0.1 LANGUAGES CXX)
 
@@ -160,6 +166,11 @@ set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
 set(PROFILER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
 
 add_subdirectory("${JOLT_PATH}/Build" jolt-build)
+
+# Force Jolt to use the same runtime library as the rest of the project
+if(MSVC)
+    set_property(TARGET Jolt PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif()
 
 # Suppress all warnings on Jolt (third-party code, same treatment as Tracy).
 if (NOT MSVC)

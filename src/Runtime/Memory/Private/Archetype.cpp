@@ -427,7 +427,7 @@ Chunk* Archetype::AllocateChunk()
 
 	for (auto& cache : UsedCaches) NewChunk->Header.GlobalIndexStart = cache->AdvanceAllocator(ArchSystemID, EntitiesPerChunk, largestSize);
 
-	LOG_INFO_F("Allocated chunk with %i entities at global index %li", EntitiesPerChunk, NewChunk->Header.GlobalIndexStart);
+	LOG_INFO_F("Allocated chunk with %i entities at global index %zi", EntitiesPerChunk, NewChunk->Header.GlobalIndexStart);
 
 	// Debug: Track virtual memory fragmentation
 	// This helps answer: "Why is 'spanned' so much larger than 'used'?"
@@ -449,7 +449,7 @@ Chunk* Archetype::AllocateChunk()
 		if (gap > 100 * 1024)
 		{
 			char buffer[256];
-			snprintf(buffer, sizeof(buffer), "Large gap detected: %li KB between chunk %u and %u",
+			snprintf(buffer, sizeof(buffer), "Large gap detected: %ti KB between chunk %u and %u",
 					 gap / 1024, chunkCount - 1, chunkCount);
 			TNX_ZONE_TEXT(buffer, strlen(buffer));
 		}

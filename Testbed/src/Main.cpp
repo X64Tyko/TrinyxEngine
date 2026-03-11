@@ -111,7 +111,7 @@ TEST (InitializeTestEntities)
 	std::uniform_real_distribution<float> color(0.2f, 1.0f);
 
 	static int32_t CubeCount  = 10000;
-	static int32_t SuperCount = 90000;
+	static int32_t SuperCount = 50000;
 
 	// Step 1: Create all entities first
 	entityIDs.reserve(CubeCount + SuperCount);

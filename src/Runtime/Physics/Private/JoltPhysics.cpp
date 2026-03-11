@@ -151,8 +151,8 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 	JPH::Factory::sInstance = new JPH::Factory();
 	JPH::RegisterTypes();
 
-	// --- Temp allocator: 64 MB pre-allocated scratch space ---
-	TempAllocator = std::make_unique<JPH::TempAllocatorImpl>(64 * 1024 * 1024);
+	// --- Temp allocator: 32 MB pre-allocated scratch space ---
+	TempAllocator = std::make_unique<JPH::TempAllocatorImpl>(32 * 1024 * 1024);
 
 	// --- Job system adapter ---
 	constexpr JPH::uint kMaxJobs     = JPH::cMaxPhysicsJobs;
@@ -184,7 +184,7 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 	const JPH::uint cMaxBodies             = static_cast<JPH::uint>(config->MAX_PHYSICS_ENTITIES);
 	const JPH::uint cNumBodyMutexes        = 0; // Jolt default
 	const JPH::uint cMaxBodyPairs          = 65536;
-	const JPH::uint cMaxContactConstraints = 65536;
+	const JPH::uint cMaxContactConstraints = 4096;
 
 	PhysSystem = std::make_unique<JPH::PhysicsSystem>();
 	PhysSystem->Init(cMaxBodies, cNumBodyMutexes, cMaxBodyPairs, cMaxContactConstraints,
@@ -196,7 +196,7 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 	EntityToBody.resize(config->MAX_PHYSICS_ENTITIES, JPH::BodyID());
 	BodyToEntity.resize(config->MAX_PHYSICS_ENTITIES, kInvalidEntityIndex);
 
-	LOG_INFO_F("[JoltPhysics] Initialized — maxBodies=%u, tempAlloc=64MB", cMaxBodies);
+	LOG_INFO_F("[JoltPhysics] Initialized — maxBodies=%u, tempAlloc=32MB", cMaxBodies);
 
 	for (auto& vec : fieldScratch)
 	{
@@ -425,16 +425,39 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 		_mm_store_ps(fieldScratch[0].data() + i, m0);
 		_mm_store_ps(fieldScratch[1].data() + i, m1);
 		_mm_store_ps(fieldScratch[2].data() + i, m2);
+		
+		pos0 = lock0.GetBody().GetRotation().GetXYZW();
+		pos1 = lock1.GetBody().GetRotation().GetXYZW();
+		pos2 = lock2.GetBody().GetRotation().GetXYZW();
+		pos3 = lock3.GetBody().GetRotation().GetXYZW();
+
+		m0 = _mm_load_ps(pos0.mF32);
+		m1 = _mm_load_ps(pos1.mF32);
+		m2 = _mm_load_ps(pos2.mF32);
+		m3 = _mm_load_ps(pos3.mF32);
+
+		// 4. TRANSPOSE!
+		_MM_TRANSPOSE4_PS(m0, m1, m2, m3);
+
+		_mm_store_ps(fieldScratch[3].data() + i, r0);
+		_mm_store_ps(fieldScratch[4].data() + i, r1);
+		_mm_store_ps(fieldScratch[5].data() + i, r2);
+		_mm_store_ps(fieldScratch[6].data() + i, r2);
 	}
 
 	for (; i < activeCount; ++i)
 	{
+		float temp[4];
 		JPH::BodyLockRead lock(bodyInterface, syncList[i].id);
 		JPH::Vec4 pos(lock.GetBody().GetPosition());
-		__m128 m                  = _mm_load_ps(pos.mF32);
-		fieldScratch[0].data()[i] = m[0];
-		fieldScratch[1].data()[i] = m[1];
-		fieldScratch[2].data()[i] = m[2];
+		JPH::Vec4 rot	(lock.GetBody().GetRotation().GetXYZW());
+		fieldScratch[0].data()[i] = pos[0];
+		fieldScratch[1].data()[i] = pos[1];
+		fieldScratch[2].data()[i] = pos[2];
+		fieldScratch[0].data()[i] = pos[3];
+		fieldScratch[1].data()[i] = pos[4];
+		fieldScratch[2].data()[i] = pos[5];
+		fieldScratch[2].data()[i] = pos[6];
 	}
 
 	ComponentCacheBase* TC = reg->GetTemporalCache();
@@ -444,7 +467,7 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 
 	TrinyxJobs::JobCounter writebackCounter;
 
-	for (i = 0; i < 3; i++)
+	for (i = 0; i < 7; i++)
 	{
 		float* fieldPtr = fieldScratch[i].data();
 		TrinyxJobs::Dispatch([TC, i, fieldPtr, &syncList](uint32_t)
