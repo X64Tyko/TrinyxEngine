@@ -115,6 +115,8 @@ endif()
 target_compile_definitions(${PROJECT_NAME} PUBLIC
     TNX_SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders"
     VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
+        $<$<NOT:$<CONFIG:Release>>:TNX_DEV_METRICS=1>
+        $<$<BOOL:${TNX_DETAILED_METRICS}>:TNX_DEV_METRICS_DETAILED=1>
 )
 
 # ---------------------------------------------------------------------------

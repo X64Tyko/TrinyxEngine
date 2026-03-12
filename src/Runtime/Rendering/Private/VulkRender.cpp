@@ -119,6 +119,23 @@ void VulkRender::Start()
 		return;
 	}
 
+#if TNX_DEV_METRICS
+	// Query display refresh rate for scanout latency estimate.
+	SDL_DisplayID displayId     = SDL_GetDisplayForWindow(WindowPtr);
+	const SDL_DisplayMode* mode = displayId ? SDL_GetCurrentDisplayMode(displayId) : nullptr;
+	if (mode && mode->refresh_rate > 0.0f)
+	{
+		DisplayRefreshMs = 1000.0 / static_cast<double>(mode->refresh_rate);
+		LOG_INFO_F("[VulkRender] Display refresh: %.1f Hz (%.2f ms scanout offset)",
+				   mode->refresh_rate, DisplayRefreshMs);
+	}
+	else
+	{
+		DisplayRefreshMs = 16.667; // assume 60Hz fallback
+		LOG_INFO("[VulkRender] Could not query refresh rate, assuming 60 Hz");
+	}
+#endif
+
 	bIsRunning.store(true, std::memory_order_release);
 	Thread = std::thread(&VulkRender::ThreadMain, this);
 	TrinyxThreading::PinThread(Thread);
@@ -491,6 +508,10 @@ void VulkRender::FillGpuFrameData(FrameSync& frame)
 
 	GPUActiveFrame = CurrentFieldSlab;
 	GPUPrevFrame   = PrevFieldSlab;
+
+#if TNX_DEV_METRICS
+	FrameInputTimestamp[CurrentFrame] = hdr->InputTimestamp;
+#endif
 }
 
 void VulkRender::WriteToFrameSlab()
@@ -852,6 +873,24 @@ int VulkRender::RenderFrame()
 		}
 	}
 
+#if TNX_DEV_METRICS
+	// Measure input-to-photon latency for this frame.
+	// Pipeline delay = Swap→Present queue time (measured) + one refresh interval (scanout estimate).
+	if (FrameInputTimestamp[CurrentFrame] != 0)
+	{
+		uint64_t presentTime = SDL_GetPerformanceCounter();
+		double pipelineMs    = static_cast<double>(presentTime - FrameInputTimestamp[CurrentFrame])
+			/ static_cast<double>(SDL_GetPerformanceFrequency()) * 1000.0;
+		double totalMs = pipelineMs + DisplayRefreshMs;
+		LatencyAccumMs += totalMs;
+		++LatencySamples;
+#if TNX_DEV_METRICS_DETAILED
+		LOG_DEBUG_F("[Latency] Pipeline: %.2fms | Scanout: %.2fms | Total: %.2fms",
+					pipelineMs, DisplayRefreshMs, totalMs);
+#endif
+	}
+#endif
+
 	CurrentFrame = (CurrentFrame + 1) % kMaxFramesInFlight;
 
 	return 1;
@@ -1099,9 +1138,19 @@ void VulkRender::TrackFPS()
 
 	if (RenderFpsTimer >= 1.0) [[unlikely]]
 	{
+#if TNX_DEV_METRICS
+		double avgLatencyMs = (LatencySamples > 0) ? (LatencyAccumMs / LatencySamples) : 0.0;
+		LOG_DEBUG_F("Render FPS: %d | Frame: %.2fms | Input→Photon: %.2fms",
+					static_cast<int>(RenderFrameCount / RenderFpsTimer),
+					(RenderFpsTimer / RenderFrameCount) * 1000.0,
+					avgLatencyMs);
+		LatencyAccumMs = 0.0;
+		LatencySamples = 0;
+#else
 		LOG_DEBUG_F("Render FPS: %d | Frame: %.2fms",
 					static_cast<int>(RenderFrameCount / RenderFpsTimer),
 					(RenderFpsTimer / RenderFrameCount) * 1000.0);
+#endif
 		RenderFrameCount = 0;
 		RenderFpsTimer   = 0.0;
 	}

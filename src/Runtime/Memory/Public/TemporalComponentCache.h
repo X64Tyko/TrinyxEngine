@@ -46,12 +46,21 @@ struct alignas(64) TemporalFrameHeader
 	Vector3 SunColor;
 	float AmbientIntensity;
 
+#if TNX_DEV_METRICS
+	// Input-to-photon latency tracking
+	uint64_t InputTimestamp; // perf counter when last input event arrived
+#endif
+
 	// Entity metadata
 	uint32_t ActiveEntityCount;
 	uint32_t TotalAllocatedEntities;
 
 	// Padding to cache line
+#if TNX_DEV_METRICS
+	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(float)) % 64];
+#else
 	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(float)) % 64];
+#endif
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -297,6 +297,17 @@ void LogicThread::PublishCompletedFrame()
 	V.m[15] = 1.0f;
 
 	header->CameraPosition = CamPos;
+#if TNX_DEV_METRICS
+	header->InputTimestamp = Input->GetSwapPerfCount();
+#if TNX_DEV_METRICS_DETAILED
+	if (Input->GetSwapPerfCount() != 0)
+	{
+		double bufferMs = static_cast<double>(Input->GetCurrentSwapTime() - Input->GetSwapPerfCount())
+			/ static_cast<double>(SDL_GetPerformanceFrequency()) * 1000.0;
+		LOG_DEBUG_F("[Latency] Buffer: %.2fms (input wait in swap buffer)", bufferMs);
+	}
+#endif
+#endif
 
 	// TODO: Fill SceneState (sun direction, color)
 	header->SunDirection     = Vector3{0.0f, -1.0f, 0.0f};

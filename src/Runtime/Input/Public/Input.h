@@ -74,6 +74,14 @@ struct InputBuffer
 	uint8_t ReadSlot    = 1;
 	uint16_t ReadCursor = 0;
 
+#if TNX_DEV_METRICS
+	// ── Latency tracking ─────────────────────────────────────────────────
+	// Perf counter captured at the moment Brain calls Swap().
+	// Carried through the frame header to VulkRender for input→photon measurement.
+	uint64_t LastSwapPerfCount = 0;
+	uint64_t currentSwapTime   = 0;
+#endif
+
 	// ── Sentinel-side (writer) ───────────────────────────────────────────
 
 	void PushKey(SDL_Scancode key, bool down)
@@ -115,6 +123,10 @@ struct InputBuffer
 	// Call once at the top of each logic frame.
 	void Swap()
 	{
+#if TNX_DEV_METRICS
+		LastSwapPerfCount = currentSwapTime;
+		currentSwapTime   = SDL_GetPerformanceCounter();
+#endif
 		ReadSlot         = WriteSlot.load(std::memory_order_acquire);
 		uint8_t newWrite = ReadSlot ^ 1;
 
@@ -160,4 +172,8 @@ struct InputBuffer
 
 	float GetMouseDX() const { return MouseDX[ReadSlot]; }
 	float GetMouseDY() const { return MouseDY[ReadSlot]; }
+#if TNX_DEV_METRICS
+	uint64_t GetSwapPerfCount() const { return LastSwapPerfCount; }
+	uint64_t GetCurrentSwapTime() const { return currentSwapTime; }
+#endif
 };

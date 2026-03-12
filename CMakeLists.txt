@@ -27,6 +27,7 @@ option(VECTORIZATION_REPORTS "Enable compiler vectorization reports" OFF)
 option(ENABLE_AVX2 "Enable AVX2 instruction set" ON)
 option(TNX_ALIGN_64 "Use 64-byte alignment for field arrays (zero cache line splits, more memory)" OFF)
 option(TNX_ENABLE_ROLLBACK "Enable N-frame rollback history. Off = TNX_TEMPORAL_FIELDS components use Volatile (5-frame) storage." OFF)
+option(TNX_DETAILED_METRICS "Log per-frame latency breakdown (Buffer/Pipeline/Scanout). Noisy." OFF)
 
 if (TNX_ENABLE_ROLLBACK)
     add_compile_definitions(TNX_ENABLE_ROLLBACK)

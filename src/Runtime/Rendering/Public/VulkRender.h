@@ -172,4 +172,14 @@ private:
 	double RenderFpsTimer     = 0.0;
 	double RenderLastFPSCheck = 0.0;
 	uint32_t RenderFrameCount = 0;
+
+#if TNX_DEV_METRICS
+	// Input-to-photon latency tracking.
+	// Stamped per frame slot in FillGpuFrameData, measured after present.
+	// DisplayRefreshMs is added to account for scanout latency after vkQueuePresentKHR returns.
+	uint64_t FrameInputTimestamp[kMaxFramesInFlight]{};
+	double LatencyAccumMs   = 0.0;
+	uint32_t LatencySamples = 0;
+	double DisplayRefreshMs = 0.0;
+#endif
 };
