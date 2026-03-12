@@ -103,25 +103,62 @@ TEST (InitializeTestEntities)
 	Registry* Reg = Engine.GetRegistry();
 	std::random_device rd;
 	std::mt19937 gen(rd());
-	std::uniform_real_distribution<float> posX(-75.0f, 75.0f);
-	std::uniform_real_distribution<float> posY(-10.0f, 50.0f);
-	std::uniform_real_distribution<float> posZ(-100.0f, -50.0f);
-	std::uniform_real_distribution<float> velX(-10.0f, 10.0f);
-	std::uniform_real_distribution<float> velY(-10.0f, 10.0f);
-	std::uniform_real_distribution<float> color(0.2f, 1.0f);
+	std::uniform_real_distribution<float> colorDist(0.2f, 1.0f);
+	const int zOffset = -100;
+	const int yOffset = -30;
 
-	static int32_t CubeCount  = 10000;
-	static int32_t SuperCount = 50000;
+	// --- Jolt Pyramid Test (matches Jorrit's PyramidScene.h) ---
+	constexpr float cBoxSize       = 2.0f;
+	constexpr float cHalfBoxSize   = 1.0f;
+	constexpr float cBoxSeparation = 0.5f;
+	constexpr int cPyramidHeight   = 25; // ~9,455 dynamic boxes
 
-	// Step 1: Create all entities first
-	entityIDs.reserve(CubeCount + SuperCount);
-	std::vector<EntityID> newIds = Reg->Create<SuperCube<>>(SuperCount);
+	// Pre-compute pyramid positions
+	struct BoxSetup
+	{
+		float x, y, z, hx, hy, hz, mass, r, g, b;
+		uint32_t motion;
+	};
+	std::vector<BoxSetup> setups;
+
+	for (int i = 0; i < cPyramidHeight; ++i)
+	{
+		for (int j = i / 2; j < cPyramidHeight - (i + 1) / 2; ++j)
+		{
+			for (int k = i / 2; k < cPyramidHeight - (i + 1) / 2; ++k)
+			{
+				setups.push_back({
+					static_cast<float>(-cPyramidHeight) + cBoxSize * j + ((i & 1) ? cHalfBoxSize : 0.0f),
+					yOffset + 1.0f + (cBoxSize + cBoxSeparation) * i,
+					zOffset + static_cast<float>(-cPyramidHeight) + cBoxSize * k + ((i & 1) ? cHalfBoxSize : 0.0f),
+					cHalfBoxSize, cHalfBoxSize, cHalfBoxSize,
+					1.0f,
+					colorDist(gen), colorDist(gen), colorDist(gen),
+					JoltMotion::Dynamic
+				});
+			}
+		}
+	}
+
+	// Floor
+	setups.push_back({
+		0.0f, yOffset - 1.0f, zOffset,
+		50.0f, 1.0f, 50.0f,
+		0.0f,
+		0.3f, 0.3f, 0.3f,
+		JoltMotion::Static
+	});
+
+	int32_t totalCount = static_cast<int32_t>(setups.size());
+	entityIDs.reserve(totalCount);
+	std::vector<EntityID> newIds = Reg->Create<CubeEntity<>>(totalCount);
 	entityIDs.insert(entityIDs.end(), newIds.begin(), newIds.end());
-	newIds = Reg->Create<CubeEntity<>>(CubeCount);
-	entityIDs.insert(entityIDs.end(), newIds.begin(), newIds.end());
 
-	LOG_ALWAYS_F("Created %i test entities", CubeCount + SuperCount);
+	LOG_ALWAYS_F("Pyramid test: %d dynamic boxes + 1 floor = %d entities",
+				 totalCount - 1, totalCount);
 
+	// Write into chunks
+	uint32_t setupIdx = 0;
 	std::vector<Archetype*> Arches = Reg->ClassQuery<CubeEntity<>>();
 	for (Archetype* cubeArch : Arches)
 	{
@@ -131,129 +168,42 @@ TEST (InitializeTestEntities)
 			Chunk* chunk         = cubeArch->Chunks[chunkIdx];
 			uint32_t entityCount = cubeArch->GetChunkCount(chunkIdx);
 
-			// Build field array table
 			void* fieldArrayTable[MAX_FIELD_ARRAYS];
 			cubeArch->BuildFieldArrayTable(chunk, fieldArrayTable, 0, 0);
 			Cube.Hydrate(fieldArrayTable, reinterpret_cast<uint8_t*>(Reg->DirtyBitsFrame(0)->data())
 						 + (chunk->Header.GlobalIndexStart / 8));
 
-			// Initialize all entities in this chunk
 			for (uint32_t i = 0; i < entityCount; ++i, Cube.Advance(1))
 			{
-				Cube.Flags.Flags    = static_cast<int32_t>(TemporalFlagBits::Active);
-				Cube.transform.PosX = posX(gen);
-				Cube.transform.PosY = posY(gen);
-				Cube.transform.PosZ = posZ(gen);
-				Cube.transform.Rotation.SetIdentity();
-				Cube.scale.ScaleX = 1.0f;
-				Cube.scale.ScaleY = 1.0f;
-				Cube.scale.ScaleZ = 1.0f;
+				if (setupIdx >= setups.size()) break;
+				const auto& s = setups[setupIdx++];
 
-				Cube.velocity.vX = velX(gen);
-				Cube.velocity.vY = velY(gen);
+				Cube.Flags.Flags    = static_cast<int32_t>(TemporalFlagBits::Active);
+				Cube.transform.PosX = s.x;
+				Cube.transform.PosY = s.y;
+				Cube.transform.PosZ = s.z;
+				Cube.transform.Rotation.SetIdentity();
+				Cube.scale.ScaleX = s.hx * 2.0f;
+				Cube.scale.ScaleY = s.hy * 2.0f;
+				Cube.scale.ScaleZ = s.hz * 2.0f;
+
+				Cube.velocity.vX = 0.0f;
+				Cube.velocity.vY = 0.0f;
 				Cube.velocity.vZ = 0.0f;
 
-				Cube.color.R = color(gen);
-				Cube.color.G = color(gen);
-				Cube.color.B = color(gen);
+				Cube.color.R = s.r;
+				Cube.color.G = s.g;
+				Cube.color.B = s.b;
 				Cube.color.A = 1.0f;
 
 				Cube.physBody.Shape       = JoltShapeType::Box;
-				Cube.physBody.HalfExtentX = 0.5f;
-				Cube.physBody.HalfExtentY = 0.5f;
-				Cube.physBody.HalfExtentZ = 0.5f;
-
-				Cube.physBody.Motion      = JoltMotion::Dynamic;
-				Cube.physBody.Mass        = 1.0f;
+				Cube.physBody.HalfExtentX = s.hx;
+				Cube.physBody.HalfExtentY = s.hy;
+				Cube.physBody.HalfExtentZ = s.hz;
+				Cube.physBody.Motion      = s.motion;
+				Cube.physBody.Mass        = s.mass;
 				Cube.physBody.Friction    = 0.5f;
 				Cube.physBody.Restitution = 0.5f;
-			}
-		}
-	}
-
-	// Create a static floor entity
-	{
-		std::vector<EntityID> floorIds = Reg->Create<CubeEntity<>>(1);
-		entityIDs.insert(entityIDs.end(), floorIds.begin(), floorIds.end());
-
-		Arches = Reg->ClassQuery<CubeEntity<>>();
-		// The floor entity is in the last slot of the last chunk
-		for (Archetype* cubeArch : Arches)
-		{
-			CubeEntity<> Floor;
-			size_t lastChunk     = cubeArch->Chunks.size() - 1;
-			Chunk* chunk         = cubeArch->Chunks[lastChunk];
-			uint32_t entityCount = cubeArch->GetChunkCount(lastChunk);
-
-			void* fieldArrayTable[MAX_FIELD_ARRAYS];
-			cubeArch->BuildFieldArrayTable(chunk, fieldArrayTable, 0, 0);
-			Floor.Hydrate(fieldArrayTable, reinterpret_cast<uint8_t*>(Reg->DirtyBitsFrame(0)->data())
-						  + (chunk->Header.GlobalIndexStart / 8));
-
-			// Advance to the last entity in the chunk (the floor we just created)
-			Floor.Advance(entityCount - 1);
-
-			Floor.Flags.Flags    = static_cast<int32_t>(TemporalFlagBits::Active);
-			Floor.transform.PosX = 0.0f;
-			Floor.transform.PosY = -15.0f;
-			Floor.transform.PosZ = -75.0f;
-			Floor.transform.Rotation.SetIdentity();
-			Floor.scale.ScaleX = 200.0f;
-			Floor.scale.ScaleY = 1.0f;
-			Floor.scale.ScaleZ = 200.0f;
-
-			Floor.color.R = 0.3f;
-			Floor.color.G = 0.3f;
-			Floor.color.B = 0.3f;
-			Floor.color.A = 1.0f;
-
-			Floor.physBody.Shape       = JoltShapeType::Box;
-			Floor.physBody.HalfExtentX = 100.0f;
-			Floor.physBody.HalfExtentY = 0.5f;
-			Floor.physBody.HalfExtentZ = 100.0f;
-			Floor.physBody.Motion      = JoltMotion::Static;
-			Floor.physBody.Mass        = 0.0f;
-			Floor.physBody.Friction    = 0.8f;
-			Floor.physBody.Restitution = 0.3f;
-		}
-	}
-
-	// Step 2: Initialize by iterating through archetypes/chunks
-	Arches = Reg->ClassQuery<SuperCube<>>();
-	for (Archetype* cubeArch : Arches)
-	{
-		SuperCube<> Cube;
-		for (size_t chunkIdx = 0; chunkIdx < cubeArch->Chunks.size(); ++chunkIdx)
-		{
-			Chunk* chunk         = cubeArch->Chunks[chunkIdx];
-			uint32_t entityCount = cubeArch->GetChunkCount(chunkIdx);
-
-			// Build field array table
-			void* fieldArrayTable[MAX_FIELD_ARRAYS];
-			cubeArch->BuildFieldArrayTable(chunk, fieldArrayTable, 0, 0);
-			Cube.Hydrate(fieldArrayTable, reinterpret_cast<uint8_t*>(Reg->DirtyBitsFrame(0)->data())
-						 + (chunk->Header.GlobalIndexStart / 8));
-
-			// Initialize all entities in this chunk
-			for (uint32_t i = 0; i < entityCount; ++i, Cube.Advance(1))
-			{
-				Cube.Flags.Flags    = static_cast<int32_t>(TemporalFlagBits::Active);
-				Cube.transform.PosX = posX(gen);
-				Cube.transform.PosY = posY(gen);
-				Cube.transform.PosZ = posZ(gen);
-				Cube.transform.Rotation.SetIdentity();
-				Cube.scale.ScaleX = 1.0f;
-				Cube.scale.ScaleY = 1.0f;
-				Cube.scale.ScaleZ = 1.0f;
-
-				Cube.velocity.vX = velX(gen);
-				Cube.velocity.vY = velY(gen);
-				Cube.velocity.vZ = 0.0f;
-
-				Cube.color.R = color(gen);
-				Cube.color.G = color(gen);
-				Cube.color.B = color(gen);
-				Cube.color.A = 1.0f;
 			}
 		}
 	}

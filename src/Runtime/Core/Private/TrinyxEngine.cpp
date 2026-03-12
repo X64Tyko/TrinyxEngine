@@ -124,7 +124,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	Logic  = std::make_unique<LogicThread>();
 	Render = std::make_unique<VulkRender>();
 
-	Logic->Initialize(RegistryPtr.get(), &Config, Physics.get(), width, height);
+	Logic->Initialize(RegistryPtr.get(), &Config, Physics.get(), &Input, width, height);
 	//Render->Initialize(RegistryPtr.get(), Logic.get(), &Config, GpuDevice, EngineWindow);
 
 	Render->Initialize(RegistryPtr.get(), Logic.get(), &Config, &VkCtx, &VkMem, EngineWindow);
@@ -225,9 +225,31 @@ void TrinyxEngine::PumpEvents()
 	SDL_Event e;
 	while (SDL_PollEvent(&e))
 	{
-		if (e.type == SDL_EVENT_QUIT)
+		switch (e.type)
 		{
-			bIsRunning.store(false, std::memory_order_release);
+			case SDL_EVENT_QUIT: bIsRunning.store(false, std::memory_order_release);
+				break;
+
+			case SDL_EVENT_KEY_DOWN: if (e.key.scancode == SDL_SCANCODE_ESCAPE)
+				{
+					bIsRunning.store(false, std::memory_order_release);
+					break;
+				}
+				if (!e.key.repeat) Input.PushKey(e.key.scancode, true);
+				break;
+
+			case SDL_EVENT_KEY_UP: Input.PushKey(e.key.scancode, false);
+				break;
+
+			case SDL_EVENT_MOUSE_MOTION: Input.AddMouseDelta(e.motion.xrel, e.motion.yrel);
+				break;
+
+			case SDL_EVENT_MOUSE_BUTTON_DOWN:
+				// Click to capture mouse
+				SDL_SetWindowRelativeMouseMode(EngineWindow, true);
+				break;
+
+			default: break;
 		}
 	}
 }

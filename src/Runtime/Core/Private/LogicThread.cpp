@@ -2,6 +2,7 @@
 #include "FramePacket.h"
 #include "Registry.h"
 #include "EngineConfig.h"
+#include "Input.h"
 #include "Profiler.h"
 #include "Logger.h"
 #include "TemporalComponentCache.h"
@@ -13,11 +14,12 @@
 #include "JoltPhysics.h"
 
 void LogicThread::Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
-							 int windowWidth, int windowHeight)
+							 InputBuffer* input, int windowWidth, int windowHeight)
 {
 	RegistryPtr    = registry;
 	ConfigPtr      = config;
 	PhysicsPtr     = physics;
+	Input          = input;
 	TemporalCache  = registry->GetTemporalCache();
 	WindowWidth    = windowWidth;
 	WindowHeight   = windowHeight;
@@ -103,6 +105,7 @@ void LogicThread::ThreadMain()
 				FpsFixedCount++;
 				FpsFixedTimer += fixedStepTime;
 
+				ProcessInput(fixedStepTime);
 				PrePhysics(fixedStepTime);
 
 				// Flush any entities that have a JoltBody component but no Jolt body yet
@@ -153,10 +156,45 @@ void LogicThread::ThreadMain()
 	}
 }
 
-void LogicThread::ProcessInput()
+void LogicThread::ProcessInput(double dt)
 {
-	// TODO: Future feature - swap input mailbox
-	// CurrentInput = InputMailbox.exchange(&InputFrontBuffer, std::memory_order_acq_rel);
+	Input->Swap();
+
+	// ── Mouse look ───────────────────────────────────────────────────────
+	CamYaw   += Input->GetMouseDX() * CamMouseSens;
+	CamPitch -= Input->GetMouseDY() * CamMouseSens;
+
+	// Clamp pitch to avoid gimbal lock at poles
+	constexpr float kMaxPitch = 1.5533f; // ~89 degrees
+	if (CamPitch > kMaxPitch) CamPitch = kMaxPitch;
+	if (CamPitch < -kMaxPitch) CamPitch = -kMaxPitch;
+
+	// ── WASD movement (camera-relative, flying) ──────────────────────────
+	float sinYaw   = std::sin(CamYaw);
+	float cosYaw   = std::cos(CamYaw);
+	float sinPitch = std::sin(CamPitch);
+	float cosPitch = std::cos(CamPitch);
+
+	// Forward = full camera direction including pitch
+	Vector3 forward{sinYaw * cosPitch, sinPitch, -cosYaw * cosPitch};
+	Vector3 right{cosYaw, 0.0f, sinYaw};
+	Vector3 up{0.0f, 1.0f, 0.0f};
+
+	Vector3 moveDir{0.0f, 0.0f, 0.0f};
+
+	if (Input->IsActionDown(Action::MoveForward)) moveDir = moveDir + forward;
+	if (Input->IsActionDown(Action::MoveBackward)) moveDir = moveDir - forward;
+	if (Input->IsActionDown(Action::MoveRight)) moveDir = moveDir + right;
+	if (Input->IsActionDown(Action::MoveLeft)) moveDir = moveDir - right;
+	if (Input->IsActionDown(Action::MoveUp)) moveDir = moveDir + up;
+	if (Input->IsActionDown(Action::MoveDown)) moveDir = moveDir - up;
+
+	// Normalize to prevent diagonal speed boost, then scale
+	float moveLen = moveDir.Length();
+	if (moveLen > 0.001f)
+	{
+		CamPos = CamPos + moveDir * (static_cast<float>(dt) * CamMoveSpeed / moveLen);
+	}
 }
 
 void LogicThread::PublishCompletedFrame()
@@ -175,7 +213,7 @@ void LogicThread::PublishCompletedFrame()
 	float AspectRatio = static_cast<float>(WindowWidth) / static_cast<float>(WindowHeight);
 	float Fov         = 60.0f * 3.14159f / 180.0f; // 60 degrees in radians
 	float ZNear       = 0.1f;
-	float ZFar        = 1000.0f;
+	float ZFar        = 5000.0f;
 
 	// Vulkan perspective matrix (column-major, RH coordinates, depth [0,1]).
 	//   - Camera looks down -Z; entities at negative Z are visible.
@@ -210,31 +248,55 @@ void LogicThread::PublishCompletedFrame()
 	P.m[14] = (ZFar * ZNear) / dz; // b = -ZFar*ZNear/(ZFar-ZNear)
 	P.m[15] = 0.0f;
 
-	// View matrix: identity — camera at world origin looking down -Z.
-	// The slab is memset-zeroed so the Matrix4 constructor never runs;
-	// we must set the diagonal explicitly every frame.
-	auto& V = header->ViewMatrix;
-	V.m[0]  = 1.0f;
-	V.m[1]  = 0.0f;
-	V.m[2]  = 0.0f;
-	V.m[3]  = 0.0f; // col 0
-	V.m[4]  = 0.0f;
-	V.m[5]  = 1.0f;
-	V.m[6]  = 0.0f;
-	V.m[7]  = 0.0f; // col 1
-	V.m[8]  = 0.0f;
-	V.m[9]  = 0.0f;
-	V.m[10] = 1.0f;
-	V.m[11] = 0.0f; // col 2
-	V.m[12] = 0.0f;
-	V.m[13] = 0.0f;
-	V.m[14] = 0.0f;
-	V.m[15] = 1.0f; // col 3
+	// View matrix from camera yaw/pitch/position.
+	// RH coordinate system: camera looks down -Z at yaw=0, Y is up.
+	// The slab is memset-zeroed so Matrix4 constructor never runs;
+	// we must write every element explicitly.
+	//
+	// Basis vectors:
+	//   forward = (sin(yaw)*cos(pitch), sin(pitch), -cos(yaw)*cos(pitch))
+	//   right   = (cos(yaw), 0, sin(yaw))
+	//   up      = cross(right, forward)
+	//
+	// View matrix rows = camera axes (transposed rotation), col 3 = -dot(axis, pos).
+	// Column-major layout: m[col*4 + row].
 
-	// Camera position at origin
-	header->CameraPosition.x = 0.0f;
-	header->CameraPosition.y = 0.0f;
-	header->CameraPosition.z = 0.0f;
+	float sinYaw   = std::sin(CamYaw);
+	float cosYaw   = std::cos(CamYaw);
+	float sinPitch = std::sin(CamPitch);
+	float cosPitch = std::cos(CamPitch);
+
+	// Camera basis
+	Vector3 camForward{sinYaw * cosPitch, sinPitch, -cosYaw * cosPitch};
+	Vector3 camRight{cosYaw, 0.0f, sinYaw};
+	// up = cross(right, forward)
+	Vector3 camUp{
+		camRight.y * camForward.z - camRight.z * camForward.y,
+		camRight.z * camForward.x - camRight.x * camForward.z,
+		camRight.x * camForward.y - camRight.y * camForward.x
+	};
+
+	// Translation = -dot(axis, position)
+	float tx = -(camRight.x * CamPos.x + camRight.y * CamPos.y + camRight.z * CamPos.z);
+	float ty = -(camUp.x * CamPos.x + camUp.y * CamPos.y + camUp.z * CamPos.z);
+	float tz = (camForward.x * CamPos.x + camForward.y * CamPos.y + camForward.z * CamPos.z);
+
+	auto& V = header->ViewMatrix;
+	V.m[0]  = camRight.x;
+	V.m[1]  = camUp.x;
+	V.m[2]  = -camForward.x;   V.m[3] = 0.0f;
+	V.m[4]  = camRight.y;    V.m[5]   = camUp.y;    V.m[6]   = -camForward.y;
+	V.m[7]  = 0.0f;
+	V.m[8]  = camRight.z;
+	V.m[9]  = camUp.z;
+	V.m[10] = -camForward.z;
+	V.m[11] = 0.0f;
+	V.m[12] = tx;
+	V.m[13] = ty;
+	V.m[14] = tz;
+	V.m[15] = 1.0f;
+
+	header->CameraPosition = CamPos;
 
 	// TODO: Fill SceneState (sun direction, color)
 	header->SunDirection     = Vector3{0.0f, -1.0f, 0.0f};

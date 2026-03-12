@@ -87,6 +87,14 @@ private:
 	static constexpr uint32_t kInvalidEntityIndex = UINT32_MAX;
 
 	const EngineConfig* ConfigPtr = nullptr;
-	std::vector<float> fieldScratch[7];
+	alignas(16) std::vector<float> fieldScratch[7];
 	TrinyxJobs::JobCounter JoltPhysCounter;
+
+	struct SyncPair
+	{
+		JPH::BodyID id;
+		uint32_t offset;
+	};
+
+	std::vector<SyncPair> syncList;
 };

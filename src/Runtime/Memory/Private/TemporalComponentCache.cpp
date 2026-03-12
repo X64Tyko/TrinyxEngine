@@ -359,7 +359,7 @@ void ComponentCacheBase::PropagateFrameData(uint32_t fromFrame, uint32_t toFrame
 				auto* dst             = reinterpret_cast<__m256i*>(writeData + off);
 				const size_t chunks   = sz / 32;
 				const size_t leftover = sz % 32;
-				for (size_t i = 0; i < chunks; ++i) _mm256_stream_si256(dst + i, _mm256_loadu_si256(src + i));
+				for (size_t i = 0; i < chunks; ++i) _mm256_stream_si256(dst + i, _mm256_stream_load_si256(src + i));
 				if (leftover) std::memcpy(writeData + off + chunks * 32, readData + off + chunks * 32, leftover);
 			}, &counter, TrinyxJobs::Queue::Logic);
 		}

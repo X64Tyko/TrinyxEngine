@@ -26,46 +26,19 @@
 // Helpers
 // -----------------------------------------------------------------------
 
-// Build a column-major ViewProj matrix for a fixed camera.
-// RH projection, depth [0,1], Y-flip for Vulkan NDC (+Y down).
-// Camera sits at (0, 0, kCamZ) looking toward the origin.
-//
-// Column-major layout: vp[col * 4 + row]
-//   col 0: (F/aspect,  0,  0,  0)
-//   col 1: (0,        -F,  0,  0)   — negative F = Y-flip
-//   col 2: (0,         0,  b, -1)   — b = zfar/(znear-zfar), -1 gives w = -z_view
-//   col 3: (0,         0,  t, kCamZ) — t = b*(-kCamZ)+c, kCamZ = w contribution from translation
-//
-// For the cube at world origin with kCamZ = 3:
-//   view z = -3  →  w_clip = 3  →  NDC z ≈ 0.97  (well within [0,1])
-static void BuildViewProjMatrix(float* vp, float aspect)
+// Multiply two column-major 4x4 matrices: out = A * B
+// ViewProj = Projection * View (apply View first, then Projection).
+static void MultMat4(float* out, const float* A, const float* B)
 {
-	constexpr float kFovY  = 3.14159265f * 0.25f; // 45°
-	constexpr float kZNear = 0.1f;
-	constexpr float kZFar  = 100.0f;
-	constexpr float kCamZ  = 3.0f;
-
-	const float F  = 1.0f / tanf(kFovY * 0.5f);
-	const float dz = kZNear - kZFar;
-	const float b  = kZFar / dz;          // depth scale
-	const float c  = kZNear * kZFar / dz; // depth bias (translation contribution)
-
-	vp[0]  = F / aspect;
-	vp[1]  = 0.0f;
-	vp[2]  = 0.0f;
-	vp[3]  = 0.0f; // col 0
-	vp[4]  = 0.0f;
-	vp[5]  = -F;
-	vp[6]  = 0.0f;
-	vp[7]  = 0.0f; // col 1  Y-flip
-	vp[8]  = 0.0f;
-	vp[9]  = 0.0f;
-	vp[10] = b;
-	vp[11] = -1.0f; // col 2
-	vp[12] = 0.0f;
-	vp[13] = 0.0f;
-	vp[14] = b * (-kCamZ) + c;
-	vp[15] = kCamZ; // col 3
+	for (int col = 0; col < 4; ++col)
+	{
+		for (int row = 0; row < 4; ++row)
+		{
+			float sum = 0.0f;
+			for (int k = 0; k < 4; ++k) sum += A[k * 4 + row] * B[col * 4 + k];
+			out[col * 4 + row] = sum;
+		}
+	}
 }
 
 static std::vector<uint32_t> ReadSPIRV(const char* path)
@@ -480,8 +453,10 @@ void VulkRender::FillGpuFrameData(FrameSync& frame)
 	auto* FrameData = static_cast<GpuFrameData*>(frame.GpuData.MappedPtr);
 	std::memset(FrameData, 0, sizeof(GpuFrameData));
 
-	const vk::Extent2D ext = VkCtx->GetSwapchain().Extent;
-	BuildViewProjMatrix(FrameData->ViewProj, static_cast<float>(ext.width) / static_cast<float>(ext.height));
+	// Build ViewProj from LogicThread's frame header (Projection * View)
+	ComponentCacheBase* tc   = RegistryPtr->GetTemporalCache();
+	TemporalFrameHeader* hdr = tc->GetFrameHeader();
+	MultMat4(FrameData->ViewProj, hdr->ProjectionMatrix.m, hdr->ViewMatrix.m);
 
 	// ---- Per-frame BDAs (compute scratch buffers, one copy per frame slot) ---
 	FrameData->VerticesAddr       = VertexBuffer.DeviceAddr;
@@ -489,7 +464,7 @@ void VulkRender::FillGpuFrameData(FrameSync& frame)
 	FrameData->ScanAddr           = frame.ScanBuffer.DeviceAddr;
 	FrameData->CompactCounterAddr = frame.CompactCounterBuffer.DeviceAddr;
 	FrameData->DrawArgsAddr       = frame.DrawArgsBuffer.DeviceAddr;
-	FrameData->Alpha              = LogicPtr->GetFixedAlpha();
+	FrameData->Alpha              = std::clamp(LogicPtr->GetFixedAlpha(), 0.0, 1.0);
 	FrameData->EntityCount        = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
 	FrameData->OutFieldStride     = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
 	FrameData->FieldCount         = kGpuOutFieldCount;

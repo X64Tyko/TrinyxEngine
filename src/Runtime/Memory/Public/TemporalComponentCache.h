@@ -329,7 +329,7 @@ public:
 			{
 				if (!stuck)
 				{
-					LOG_INFO("Stuck!");
+					LOG_DEBUG("Stuck!");
 					stuck = true;
 				}
 			}

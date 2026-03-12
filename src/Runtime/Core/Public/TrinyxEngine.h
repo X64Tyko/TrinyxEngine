@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "EngineConfig.h"
+#include "Input.h"
 #include "RenderThread.h"
 #include "VulkanContext.h"
 #include "VulkanMemory.h"
@@ -79,6 +80,9 @@ private:
 	std::unique_ptr<JoltPhysics> Physics;
 	std::unique_ptr<LogicThread> Logic;
 	std::unique_ptr<VulkRender> Render;
+
+	// --- Input ---
+	InputBuffer Input;
 
 	// --- Lifecycle ---
 	std::atomic<bool> bIsRunning{false};

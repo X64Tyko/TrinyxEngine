@@ -3,12 +3,13 @@
 #include <atomic>
 
 #include "Registry.h"
+#include "Types.h"
 
 // Forward declarations
 class Registry;
 class JoltPhysics;
 struct EngineConfig;
-struct InputState;
+struct InputBuffer;
 struct FramePacket;
 
 /**
@@ -25,7 +26,7 @@ public:
 	~LogicThread() = default;
 
 	void Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
-					int windowWidth, int windowHeight);
+					InputBuffer* input, int windowWidth, int windowHeight);
 	void Start();
 	void Stop();
 	void Join();
@@ -45,7 +46,7 @@ private:
 	void ThreadMain(); // Thread entry point
 
 	// Lifecycle Methods
-	void ProcessInput();          // Swap input mailbox (TODO: future feature)
+	void ProcessInput(double dt); // Swap input buffer, update camera from WASD + mouse
 	void ScalarUpdate(double dt); // Variable update (runs every frame)
 	void PrePhysics(double dt);   // Fixed update at FixedUpdateHz
 	void PostPhysics(double dt);  // Fixed update at FixedUpdateHz
@@ -60,8 +61,16 @@ private:
 	JoltPhysics* PhysicsPtr                 = nullptr;
 	class ComponentCacheBase* TemporalCache = nullptr;
 
-	// Input (future)
-	InputState* CurrentInput = nullptr;
+	// Input
+	InputBuffer* Input = nullptr;
+
+	// Camera state (FPS-style: yaw around Y, pitch around X)
+	Vector3 CamPos{0.0f, 0.0f, 0.0f};
+	float CamYaw   = 0.0f; // radians, 0 = looking down -Z
+	float CamPitch = 0.0f; // radians, positive = looking up
+
+	static constexpr float CamMoveSpeed = 20.0f;  // units/sec
+	static constexpr float CamMouseSens = 0.002f; // radians/pixel
 
 	// Frame mailbox - last completed frame number that RenderThread can read
 	std::atomic<uint32_t> LastCompletedFrame{0};
