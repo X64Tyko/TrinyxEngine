@@ -10,20 +10,22 @@ The engine is designed for high-frequency simulation with a large number of dyna
 
 ### Core Performance Budget (512Hz = 1.95ms per frame)
 
-| Phase                  | Budget   | Target                                      | Status      |
-|------------------------|----------|---------------------------------------------|-------------|
-| **PrePhysics**         | 0.4ms    | User logic, input processing, AI decisions  | 🎯 Target   |
-| **Physics Simulation** | 0.8ms    | Jolt solver, collision detection, response  | ⏳ Pending  |
-| **PostPhysics**        | 0.3ms    | Collision callbacks, state updates          | 🎯 Target   |
-| **History Write**      | 0.2ms    | Write to History Slab section, update header| ⏳ Pending  |
-| **Overhead**           | 0.25ms   | Scheduling, atomics, profiling              | 🎯 Tracking |
-| **TOTAL**              | **1.95ms** | **Full simulation frame @ 512Hz**         | 🎯 Target   |
+| Phase                  | Budget     | Target                                       | Status      |
+|------------------------|------------|----------------------------------------------|-------------|
+| **PrePhysics**         | 0.4ms      | User logic, input processing, AI decisions   | 🎯 Target   |
+| **Physics Simulation** | 0.8ms      | Jolt solver, collision detection, response   | 🎯 Target   |
+| **PostPhysics**        | 0.3ms      | Collision callbacks, state updates           | 🎯 Target   |
+| **History Write**      | 0.2ms      | Write to History Slab section, update header | 🎯 Target   |
+| **Overhead**           | 0.25ms     | Scheduling, atomics, profiling               | 🎯 Tracking |
+| **TOTAL**              | **1.95ms** | **Full simulation frame @ 512Hz**            | 🎯 Target   |
 
-**Current Reality (Week 3, 128Hz):**
-- PrePhysics: ~1.7ms for 1M entities (stress test)
-- PrePhysics: ~0.3ms for 100k entities (on target)
-- No physics solver yet
-- No History Slab writes yet
+**Current Reality (Week 7, 512Hz):**
+
+- PrePhysics: ~1.0ms for 1M entities (stress test)
+- PrePhysics: ~0.1ms for 100k entities (on target)
+- Setup Jolt solver, configurable fixed updates per tick and runs inside a worker job. default Logic runs at 512Hz with
+  8 fixed steps for phys, 64Hz. ~10k awake cubes in a pyramid (30 layers) ~0.55ms for actual transform pulls.
+- History Write--Frame Propagation: ~0.2ms for 100k entities.
 
 ---
 
@@ -31,19 +33,19 @@ The engine is designed for high-frequency simulation with a large number of dyna
 
 Target: 60-120 FPS (8-16ms per frame) for 100k visible entities
 
-| Phase                       | Budget   | Description                                | Status      |
-|-----------------------------|----------|-------------------------------------------|-------------|
-| **History Access**          | 0.5ms    | Read T-1 and T sections from slab         | ⏳ Pending  |
-| **Culling + Interpolation** | 3.0ms    | Frustum cull, lerp, build InterpBuffer    | 🎯 Target   |
-| **State Sorting**           | 1.0ms    | Sort InterpBuffer by 64-bit keys          | ⏳ Pending  |
-| **GPU Upload**              | 1.5ms    | Transfer buffer write, copy commands      | ✅ Working  |
-| **Command Encoding**        | 2.0ms    | Build render pass, draw calls             | ✅ Working  |
-| **GPU Submit + Sync**       | 0.5ms    | Frame fence, swapchain acquisition        | ✅ Working  |
-| **TOTAL**                   | **8.5ms**| **~117 FPS rendering budget**             | 🔄 In Progress |
+| Phase                       | Budget    | Description                            | Status         |
+|-----------------------------|-----------|----------------------------------------|----------------|
+| **History Access**          | 0.5ms     | Read T-1 and T sections from slab      | 🎯 Target      |
+| **Culling + Interpolation** | 3.0ms     | Frustum cull, lerp, build InterpBuffer | 🎯 Target      |
+| **State Sorting**           | 1.0ms     | Sort InterpBuffer by 64-bit keys       | ⏳ Pending      |
+| **GPU Upload**              | 1.5ms     | Transfer buffer write, copy commands   | ✅ Working      |
+| **Command Encoding**        | 2.0ms     | Build render pass, draw calls          | ✅ Working      |
+| **GPU Submit + Sync**       | 0.5ms     | Frame fence, swapchain acquisition     | ✅ Working      |
+| **TOTAL**                   | **8.5ms** | **~117 FPS rendering budget**          | 🔄 In Progress |
 
-**Current Reality (Week 3):**
-- Full frame: ~3.1ms (321 FPS) for 100k entities
-- Snapshot copy: ~5-8ms (bottleneck, will be eliminated by History Slab)
+**Current Reality (Week 7):**
+
+- Full frame: ~0.7ms (321 FPS) for 100k entities
 - No culling yet (rendering all entities)
 - No state sorting yet (naive draw order)
 
@@ -53,19 +55,18 @@ Target: 60-120 FPS (8-16ms per frame) for 100k visible entities
 
 ### Entity Count vs Performance
 
-| Entity Count | PrePhysics (512Hz) | Render (60 FPS) | Notes                          |
-|--------------|-------------------|-----------------|--------------------------------|
-| 10k          | 0.03ms            | 0.8ms           | ✅ Trivial                     |
-| 50k          | 0.15ms            | 4.0ms           | ✅ Comfortable                 |
-| 100k         | 0.30ms            | 8.0ms           | 🎯 Primary Target              |
-| 250k         | 0.75ms            | 20ms (50 FPS)   | 🎯 Stretch Goal                |
-| 1M           | 1.7ms             | 80ms (12 FPS)   | 🔬 Stress Test Only            |
+| Entity Count | PrePhysics (512Hz) | Render (60 FPS) | Notes               |
+|--------------|--------------------|-----------------|---------------------|
+| 10k          | 0.01ms             | 0.8ms           | ✅ Trivial           |
+| 50k          | 0.08ms             | 4.0ms           | ✅ Comfortable       |
+| 100k         | 0.15ms             | 8.0ms           | 🎯 Primary Target   |
+| 250k         | 0.37ms             | 20ms (50 FPS)   | 🎯 Stretch Goal     |
+| 1M           | 1.0ms              | 80ms (12 FPS)   | 🔬 Stress Test Only |
 
 **Notes:**
 - 1M entities is a **benchmark**, not a production target
 - With physics, 100k is ambitious; 50k may be more realistic
 - Culling will dramatically reduce render times for large scenes
-
 ---
 
 ## Thread Timing Targets
@@ -74,14 +75,11 @@ Target: 60-120 FPS (8-16ms per frame) for 100k visible entities
 
 Target: 1000Hz (1.0ms per iteration)
 
-| Task                    | Budget   | Notes                                    |
-|-------------------------|----------|------------------------------------------|
-| Event Polling           | 0.1ms    | SDL_PollEvent, input sampling            |
-| GPU Resource Acquire    | 0.3ms    | Wait for fence, acquire cmd/swapchain    |
-| GPU Submit              | 0.2ms    | Submit command buffer, signal fence      |
-| Thread Coordination     | 0.1ms    | Check atomics, handoff resources         |
-| Idle/Timing             | 0.3ms    | Sleep to maintain 1000Hz                 |
-| **TOTAL**               | **1.0ms**| **1000Hz main loop**                     |
+| Task          | Budget    | Notes                         |
+|---------------|-----------|-------------------------------|
+| Event Polling | 0.1ms     | SDL_PollEvent, input sampling |
+| Idle/Timing   | 0.9ms     | Sleep to maintain 1000Hz      |
+| **TOTAL**     | **1.0ms** | **1000Hz main loop**          |
 
 Status: ✅ Currently running at ~1.0ms (1000 Hz) - hitting target exactly
 
@@ -90,16 +88,15 @@ Status: ✅ Currently running at ~1.0ms (1000 Hz) - hitting target exactly
 Target: 512Hz (1.95ms per iteration)
 
 - See "Core Performance Budget" table above
-- Currently runs at 128Hz (~1.7ms per frame with render enabled)
-- Already very close to 512Hz target; physics budget available
+- Currently runs at 512Hz with 100k non-physics entities
 
 ### Encoder (Render Thread)
 
 Target: 60-120 FPS (8-16ms per frame)
 
 - See "Render Thread Performance" table above
-- Currently runs at 321 FPS (~3.1ms per frame)
-- Expected to settle around 8-10ms with culling + sorting
+- Currently runs at 1000 FPS (~0.7ms per frame)
+- GPU isn't being taxed at all by instanced cubes, locked to VSync
 
 ---
 
@@ -151,16 +148,16 @@ Assumes 100k entities with 90/10 split between simple and complex entities:
 
 Target: <16ms (one frame @ 60Hz)
 
-| Stage                          | Latency | Notes                                  |
-|--------------------------------|---------|----------------------------------------|
-| Input Sampling (Sentinel)      | 0.5ms   | 1000Hz polling, immediate capture      |
-| Logic Processing (Brain)       | 1.95ms  | One 512Hz tick to process input        |
-| Render Frame (Encoder)         | 8.5ms   | Interpolation + GPU encoding           |
-| GPU Execution                  | 4.0ms   | Actual rendering on GPU                |
-| **TOTAL (best case)**          | **14.95ms** | ✅ Under one 60Hz frame            |
-| **TOTAL (worst case)**         | ~25ms   | If input arrives just after logic tick |
+| Stage                     | Latency Avg. | Notes                                                  |
+|---------------------------|--------------|--------------------------------------------------------|
+| Input Sampling (Sentinel) | 0.5ms        | 1000Hz polling, immediate capture                      |
+| Logic Processing (Brain)  | 1.95ms       | One 512Hz tick to process input                        |
+| Render Frame (Encoder)    | 0.7ms        | GPU BDA push                                           |
+| GPU Execution             | 16.6ms       | Actual rendering on GPU + VSync, assuming 60Hz monitor |
+| **TOTAL (best case)**     | **18.75ms**  | ✅ Under one 60Hz frame                                 |
+| **TOTAL (worst case)**    | ~19.75ms     | If input arrives just after logic tick                 |
 
-**Status:** 🔄 In progress - current architecture supports this, needs measurement
+**Status:** Averaging ~7ms on 240Hz monitor. Even when Logic falls under 30 FPS seeing ~20ms.
 
 ---
 
@@ -186,7 +183,7 @@ All benchmarks performed on:
 - CPU: [Intel Core Ultra 9 275HX, AMD Ryzen 9 9950X]
 - RAM: [32GB, 64GB]
 - GPU: [RTX 5070 Ti, RTX 4070]
-- OS: Windows 11
+- OS: CachyOS Arch Linux, Windows 11
 - Build: RelWithDebInfo (optimized with debug symbols)
 
 **Profiling Tools:**
@@ -203,19 +200,20 @@ All benchmarks performed on:
 
 ---
 
-## Current Status vs Targets (Week 3)
+## Current Status vs Targets (Week 7)
 
-| Target                        | Goal          | Current       | Delta        | Status      |
-|-------------------------------|---------------|---------------|--------------|-------------|
-| Full Frame (100k @ 512Hz)     | 1.95ms        | ~1.7ms @ 128Hz| ✅ Achieved! | ✅          |
-| Render (100k @ 60 FPS)        | 8.5ms         | ~3.1ms (no cull)| ✅ Excellent | ✅          |
-| Memory (100k, 128 pages)      | 685 MB        | ~120 MB (no slab)| ⏳ Pending | 🔄          |
-| Input Latency                 | <16ms         | Not measured  | ⏳ TBD       | ⏳          |
+| Target                    | Goal   | Current                   | Delta       | Status |
+|---------------------------|--------|---------------------------|-------------|--------|
+| Full Frame (100k @ 512Hz) | 1.95ms | ~0.3ms @ 512Hz            | ✅ Achieved! | ✅      |
+| Render (100k @ 60 FPS)    | 8.5ms  | ~0.7ms (no cull)          | ✅ Excellent | ✅      |
+| Memory (100k, 128 pages)  | 685 MB | ~2.2GB w/ 10k Jolt bodies | ⏳ Pending   | 🔄     |
+| Input Latency             | <16ms  | ~7ms on 240Hz monitor     | ⏳ TBD       | ⏳      |
 
 **Key Observations:**
-- Already hitting 1.7ms full frame - exceeding 512Hz target!
+
+- Already hitting 0.3ms full frame - exceeding 512Hz target!
 - FieldProxy SIMD optimization was the breakthrough (4x speedup)
-- Render thread at 3.1ms leaves plenty of headroom
-- Memory usage will increase 5-6x once History Slab is implemented
+- Render thread at 0.73ms leaves plenty of headroom
+- Memory usage is pretty massive with rollback enabled, around 270MB without.
 
 ---

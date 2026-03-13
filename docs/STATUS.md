@@ -7,8 +7,8 @@
 ## Timeline Context
 
 **Project Start:** ~2026-02-01 (Week 1)
-**Current Date:** 2026-03-09
-**Phase:** Entity-to-GPU Pipeline Optimization + Physics Prep
+**Current Date:** 2026-03-12
+**Phase:** Physics Integration + Render Pipeline Optimization
 
 ---
 
@@ -63,10 +63,11 @@
 
 **Job System & Threading:**
 
-- Lock-free MPMC job system (Vyukov ring buffers, 3 queues: Physics/Render/General)
+- Lock-free MPMC job system (Vyukov ring buffers, 4 queues: Physics/Render/Logic/General)
 - Futex-based worker wake (`std::atomic::wait`/`notify` — zero idle CPU, ~1-2μs wake latency)
 - Core-aware thread pinning (physical cores first, SMT siblings second, core 0 skipped)
 - Brain/Encoder act as coordinators + workers (dispatch jobs, then steal work while waiting)
+- 25% workers dedicated to Jolt physics queue by default
 - GameManager CRTP pattern (`TNX_IMPLEMENT_GAME` macro — zero-boilerplate project setup)
 - Project-relative INI config (`*Defaults.ini` scanning from source directory via `TNX_PROJECT_DIR`)
 
@@ -74,6 +75,27 @@
 
 - Dual-ended arena partition layout (4 tiers: Cold/Static/Volatile/Temporal)
 - 4 partitions within each slab: Dual/Phys/Render/Logic (auto-derived from SystemGroup tags)
+
+**Jolt Physics (v5.5.0):**
+
+- JoltJobSystemAdapter bridges JPH::JobSystemWithBarrier onto Jolt job queue
+- JoltBody cold component (TNX_REGISTER_FIELDS, CacheTier::None) — SoA in chunk, not slab
+- FlushPendingBodies: creates Jolt bodies for unmapped entities on spawn
+- PullActiveTransforms: writes pos+rot from awake bodies back into SoA WriteArrays
+- Physics loop: PrePhysics → (FlushPendingBodies → Jolt Step -- phystick % 0) → (PullActiveTransforms -- phystick %
+  phystick - 1) → PostPhysics
+- BodyID↔EntityGlobalIndex bidirectional lookup (EntityToBody, BodyToEntity vectors)
+
+**Input System:**
+
+- Double-buffered input with lock-free polling on Sentinel thread (1000Hz)
+- Event buffer + bitstate for flexible querying (event-driven or polled)
+
+**Math Libraries:**
+
+- VecMath.h: VecLocal<N,WIDTH>, Vec2/3/4Accessor (reference-based, embedded in components)
+- QuatMath.h: QuatLocal<WIDTH>, QuatAccessor
+- FieldMath.h: Read, Clamp, Min, Max, Abs, Lerp, Step, SmoothStep
 
 **Architecture & Config Fixes:**
 - `MAX_FIELDS_PER_ARCHETYPE = 256` in Types.h
@@ -87,21 +109,37 @@
 
 ## Performance Metrics (RelWithDebInfo, Tracy)
 
-### Logic Thread (128Hz Fixed Update)
+### Sentinel (Main Thread)
 
-| Test | Entity Count | Time | Notes |
-|------|-------------|------|-------|
-| PrePhysics (Transform only) | 10k | 0.03ms | Well under budget |
-| PrePhysics (Transform only) | 100k | 0.30ms | On track for 512Hz |
-| Full Frame (PrePhys + overhead) | 100k | 1.7ms | Includes ECS dispatch, Tracy |
+| Task          | Time   | Notes                                 |
+|---------------|--------|---------------------------------------|
+| Full Frame    | 1.0ms  | ✅ 1000Hz target achieved              |
+| Event Polling | 0.1ms  | SDL3, lock-free double-buffered input |
+| Frame Pacing  | ~0.8ms | Sleep + busy-wait tail                |
 
-### Main Thread
+### Brain (Logic Thread, 512Hz)
 
-| Task | Time | Notes |
-|------|------|-------|
-| Full Frame | 1.0ms | ✅ 1000Hz target achieved |
-| Event Polling | 0.1ms | SDL3 |
-| Frame Pacing | ~0.8ms | Sleep + busy-wait tail |
+| Test                           | Entity Count | Time                      | Notes                                      |
+|--------------------------------|--------------|---------------------------|--------------------------------------------|
+| PrePhysics (Transform only)    | 100k         | ~0.1ms                    | On target                                  |
+| Full Frame (no physics)        | 100k         | ~0.3ms with propagation   | Well under 1.95ms budget                   |
+| 15-layer pyramid (1,240 cubes) | 1,240        | avg 1ms (capped 1024 FPS) | 58μs physics, 105μs on Jolt pull frames    |
+| 25-layer pyramid (5,525 cubes) | 5,525        | avg 1ms, max 15.58ms      | 1.16ms physics, 2.44ms on Jolt pull frames |
+| Jolt step (15-layer)           | 1,240        | 4.13ms                    | 512Hz logic / 8 lockstep = 64Hz physics    |
+| Jolt step (25-layer)           | 5,525        | 12.58ms                   | 512Hz logic / 8 lockstep = 64Hz physics    |
+
+### Encoder (Render Thread)
+
+| Task       | Time    | Notes                         |
+|------------|---------|-------------------------------|
+| Full Frame | ~0.73ms | 100k entities, no culling yet |
+
+### Input-to-Photon Latency
+
+| Test             | Avg     | Max     | Notes         |
+|------------------|---------|---------|---------------|
+| 15-layer pyramid | 7.37ms  | —       | 240Hz monitor |
+| 25-layer pyramid | 13.25ms | 18.08ms | Under load    |
 
 ---
 
@@ -128,6 +166,11 @@
 - [x] Project-relative INI config (`*Defaults.ini` scanning from source directory)
 - [x] Tiered storage partition layout (Cold/Static/Volatile/Temporal with dual-ended arena layout)
 - [x] 5 GPU InstanceBuffers (circular buffer while rGPU compute pipeline is in progress)
+- [x] Jolt Physics v5.5.0 (JoltJobSystemAdapter, JoltBody cold component, FlushPendingBodies/PullActiveTransforms)
+- [x] Cold component infrastructure (TNX_REGISTER_FIELDS → CacheTier::None → SoA in chunk)
+- [x] Input buffering (double-buffered, lock-free polling, event + bitstate querying)
+- [x] VecMath / QuatMath / FieldMath libraries
+- [x] Component validation: no vtable + all fields must be FieldProxy (SchemaValidation.h)
 
 ### Designed, Not Yet Implemented
 
@@ -140,23 +183,15 @@
 
 ### Known Issues / Technical Debt
 
-1. **Cross-archetype co-indexing bug:** TemporalComponentCache allocates field zones sequentially
-   per-field-type across all chunks. Entity in Chunk C (TVC) may have PositionX at global index 200
-   but Color.R at global index 100. Per-chunk access is correct; global-index GPU access is not.
-   New partition design fixes this.
-
 2. **TemporalFrameStride duplicated on Archetype:** Should call `cache->GetFrameStride()` instead.
    Currently cached redundantly on every Archetype.
 
 ### Planned (Next Phase)
 
-- [ ] **Render pipeline optimization** — wire dirty bits to GPU upload, switch from circular buffer to compute-driven
-  rGPU pipeline
+- [ ] **Render pipeline optimization** — wire dirty bits to GPU upload
 - [ ] **Frustum culling** — SIMD 6-plane test, GPU-side predicate enhancement
 - [ ] **State-sorted rendering** — 64-bit sort keys, GPU radix sort after scatter
-- [ ] **Jolt Physics integration** — zero-copy RigidBody mapping
 - [ ] **Rollback netcode** — Temporal slab rollback + dirty resimulation
-- [ ] **Input system** — 1000Hz sampling, action maps
 
 ---
 

@@ -1,7 +1,7 @@
 # GPU-Driven Rendering Architecture Design
 
-**Date:** 2026-02-26
-**Status:** Planning Phase
+**Date:** 2026-02-26 (design), updated 2026-03-12
+**Status:** Phase 1 Complete — GPU compute pipeline operational (Slang + BDA)
 **Goal:** Transition from CPU-side interpolation to full GPU-driven rendering pipeline
 
 ---
@@ -407,7 +407,13 @@ struct alignas(16) InstanceData {
 - Pro: Better tooling, familiar for many
 - Con: Requires SPIRV cross-compile
 
-**Decision:** GLSL for now (SDL_GPU uses SPIRV), can support both later
+**Option C:** Slang
+
+- Pro: C++-like syntax, reflection API, import system, compiles to SPIRV
+- Con: Newer ecosystem
+
+**Decision:** Slang — adopted 2026-03. 5 shaders in `shaders/`, compiled offline via `slangc`.
+Runtime compilation via C++ API planned for hot-reload.
 
 ---
 
@@ -469,17 +475,21 @@ struct alignas(16) InstanceData {
 
 ---
 
-## Notes
+## Implementation Notes
 
-- **Philosophy:** GPU-driven is the right choice for Trinyx's scale ambitions
-- **Timeline:** Not urgent, but do it now while designing (no users to break)
-- **Learning:** This is an investment in becoming a "render guru" - modern baseline knowledge
-- **Reversibility:** Can keep CPU path as fallback initially
+**What shipped (2026-03):**
 
----
+- Migrated from SDL3 GPU backend to raw Vulkan (volk 1.4.304 + VMA 3.3.0, vk::raii::)
+- Slang shaders replaced GLSL: predicate, prefix_sum, scatter, cube.vert, cube.frag
+- Buffer Device Address (BDA) replaces descriptor sets — GpuFrameData struct holds all BDAs
+- 3-pass compute: predicate → prefix_sum (Option-B subgroup scan) → scatter (GPU interpolation + InstanceBuffer SoA)
+- 5 PersistentMapped field slabs cycle independently of 2 GPU frame-in-flight slots
+- `DrawIndexedIndirect` driven by scatter pass `DrawArgs.instanceCount`
+- Full-slab copy per new logic frame; dirty-bit-driven partial upload is next
 
-**Next Steps:**
-1. Review this doc
-2. Prototype interpolation compute shader
-3. Benchmark upload strategies
-4. Start Milestone 1
+**Remaining work:**
+
+- Wire cumulative dirty bit array to GPU upload path (partial upload)
+- Frustum culling compute pass
+- State-sorted rendering (64-bit sort keys, GPU radix sort)
+- Slang runtime compilation for hot-reload

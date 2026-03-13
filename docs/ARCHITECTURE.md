@@ -26,18 +26,26 @@ the job system, and act as workers themselves while jobs are pending.
 - **Brain Thread:** 1 dedicated core (logic coordination + logic worker)
 - **Workers:** 5 cores (process tasks from both queues via work-stealing)
 
-### Queue Affinity Rules
+### Queue Architecture
 
-- **Brain Thread:** Only pulls from `LogicQueue` (when acting as worker)
-- **Encoder Thread:** Only pulls from `RenderQueue` (when acting as worker)
-- **Generic Workers:** Pull from both queues (work-stealing)
+Four priority queues with affinity rules:
 
-This prevents Brain from accidentally processing render jobs and vice versa, while generic workers balance load
-across both queues.
+- **Logic Queue** — PrePhysics/PostPhysics per-chunk jobs (Brain produces, all consume)
+- **Render Queue** — GPU upload/compute dispatch (Encoder produces, all consume)
+- **Physics Queue** — Jolt physics solver jobs (Workers produce, workers consume)
+- **General Queue** — Everything else + overflow from full queues
+
+**Affinity:**
+
+- **Brain Thread:** Produces Physics jobs, then steals from Physics queue while waiting
+- **Encoder Thread:** Produces Render jobs, then steals from Render queue while waiting
+- **Workers:** Pull from all queues (work-stealing). 25% dedicated to Jolt queue by default.
 
 ### Job Types
 
-**Logic Jobs:** PrePhysics updates (per-chunk), physics simulation, PostPhysics updates
+**Logic Jobs:** PrePhysics updates (per-chunk), PostPhysics updates
+
+**Physics Jobs:** Jolt solver steps, collision detection, broad-phase (bridged via JoltJobSystemAdapter)
 
 **Render Jobs:** GPU upload (dirty entity delta), compute dispatch (predicate/prefix_sum/scatter),
 frustum culling (planned), sort key generation (planned), command encoding
@@ -510,26 +518,21 @@ create-then-add pattern that requires an extra lock acquisition.
 ## Threading Considerations
 
 - Push and Pull run on the Brain thread only (single writer to SoA WriteArrays)
-- Jolt's internal `Update()` spawns jobs via our job system adapter (LogicQueue)
-- Brain acts as a worker during `Update()`, pulling from LogicQueue alongside generic workers
+- Jolt's internal `Update()` run via a job and spawns jobs via JoltJobSystemAdapter onto the Jolt queue
 - Contact callbacks fire from Jolt worker threads → must use thread-local buffers (no shared state)
 - No GPU thread touches Jolt state — render thread reads SoA fields only
 
 ---
 
-## Current Implementation vs Design
+## Current Implementation Status
 
-The full tiered partition design is **designed but not yet implemented**. The current code uses
-`TemporalComponentCache` as a dual-buffer SoA approximation (Read/Write arrays per field, one frame of
-history). It correctly tracks the Active and Dirty bits per entity and supports the delta-upload path.
+The tiered partition design (Cold/Static/Volatile/Temporal with dual-ended arena layout) is **implemented**.
+`TemporalComponentCache` provides N-frame SoA ring buffers per field with Active and Dirty bit tracking.
+The delta-upload path is tracked but not yet wired to the GPU upload (currently full-slab copy).
 
-**Known issue in current TemporalComponentCache:** Cross-archetype co-indexing bug — field zones are
-allocated sequentially per-field-type across all chunks, so chunks from different archetypes allocate
-sequentially: if Chunk A (TVC) allocates PositionX[0..99] and Chunk B (TV) allocates PositionX[100..199],
-then Chunk C (TVC) allocates PositionX[200..299] and Color.R[100..199] — entity in Chunk C has PositionX
-at global index 200 but Color.R at global index 100. Per-chunk access (via chunk header pointers) is correct;
-global-index GPU access is not. The new partition design fixes this because partition regions are pre-allocated
-at fixed offsets, not allocated sequentially per archetype.
+Jolt Physics v5.5.0 is integrated: `JoltJobSystemAdapter` bridges onto the Jolt job queue, `JoltBody`
+cold component provides shape/motion/mass data, and `FlushPendingBodies`/`PullActiveTransforms` sync
+ECS ↔ Jolt each physics step.
 
 ---
 
@@ -707,6 +710,11 @@ dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
 - [x] Quaternion-based transforms (TransRot component with nested RotationAccessor, QuatMath library)
 - [x] Component decomposition: Translation, Rotation, TransRot (combined), Scale (Volatile/Render)
 - [x] Component validation: no vtable + all fields must be FieldProxy (SchemaValidation.h)
+- [x] Jolt Physics v5.5.0 integration (JoltJobSystemAdapter, JoltBody cold component,
+  FlushPendingBodies/PullActiveTransforms)
+- [x] Cold component infrastructure (TNX_REGISTER_FIELDS → CacheTier::None → SoA in chunk, not slab)
+- [x] Input buffering (double-buffered input, lock-free polling, event + bitstate querying)
+- [x] VecMath / QuatMath / FieldMath libraries
 
 ## Designed, Not Yet Implemented
 
@@ -714,11 +722,12 @@ dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
 - [ ] `GetTemporalFieldWritePtr` migrated from Archetype to TemporalComponentCache
 - [ ] `TemporalFrameStride` removed from Archetype (duplicated state — call cache->GetFrameStride())
 - [ ] **Presentation Reconciler** (Anti-Events, speculative presentation diff)
+- [ ] **Fixed-point coordinate system** (Fixed32, SimFloat alias, Jolt bridge)
+- [ ] **ConstraintEntity system** (constraint pool, rigid attachment pass, physics root determination)
 
 ## Planned (Next Phase)
 
-- [ ] Render pipeline optimization (dirty-bit-driven GPU upload, rGPU compute pipeline)
-- [ ] Jolt Physics integration
+- [ ] Render pipeline optimization (dirty-bit-driven GPU upload)
 - [ ] Frustum culling (SIMD 6-plane test)
 - [ ] State-sorted rendering (64-bit sort keys, GPU radix sort)
 - [ ] Rollback netcode (Temporal slab rollback + dirty resimulation)

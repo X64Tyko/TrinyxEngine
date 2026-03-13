@@ -8,14 +8,13 @@ This document shows the improved error messages for common schema reflection mis
 
 **Code:**
 ```cpp
-struct MyEntity {
-    Ref<Transform> transform;
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+struct MyEntity : EntityView<MyEntity, WIDTH> {
+    Transform<WIDTH> transform;
 
-    void Update(double dt) { /* ... */ }
+    FORCE_INLINE void PrePhysics(double dt) { /* ... */ }
 
-    static constexpr auto DefineSchema() {
-        return Schema::Create(&MyEntity::transform, &MyEntity::Update);
-    }
+    TNX_REGISTER_SCHEMA(MyEntity, EntityView, transform)
 };
 
 // MISSING: TNX_REGISTER_ENTITY(MyEntity);
@@ -26,7 +25,7 @@ EntityID id = Registry::Create<MyEntity>();  // Runtime error!
 
 **Error (Runtime - in log file):**
 ```
-[ERROR] FATAL: Entity type 'struct MyEntity' not registered!
+[ERROR] FATAL: Entity type 'MyEntity' not registered!
         Did you forget TNX_REGISTER_ENTITY(MyEntity)?
 ```
 
@@ -35,16 +34,17 @@ EntityID id = Registry::Create<MyEntity>();  // Runtime error!
 
 ---
 
-## 2. Missing DefineSchema() Method
+## 2. Missing TNX_REGISTER_SCHEMA
 
 **Code:**
 ```cpp
-struct BadEntity {
-    Ref<Transform> transform;
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+struct BadEntity : EntityView<BadEntity, WIDTH> {
+    Transform<WIDTH> transform;
 
-    void Update(double dt) { /* ... */ }
+    FORCE_INLINE void PrePhysics(double dt) { /* ... */ }
 
-    // MISSING: static constexpr auto DefineSchema() { ... }
+    // MISSING: TNX_REGISTER_SCHEMA(BadEntity, EntityView, transform)
 };
 
 TNX_REGISTER_ENTITY(BadEntity);  // Compile error!
@@ -53,17 +53,12 @@ TNX_REGISTER_ENTITY(BadEntity);  // Compile error!
 **Error (Compile-time):**
 ```
 ================================================================
-ERROR: Entity missing DefineSchema()!
+ERROR: Entity missing schema registration!
 ================================================================
 
-Add this to your entity class:
+Add TNX_REGISTER_SCHEMA to your entity class:
 
-    static constexpr auto DefineSchema() {
-        return Schema::Create(
-            &YourEntity::component1,
-            &YourEntity::Update
-        );
-    }
+    TNX_REGISTER_SCHEMA(YourEntity, EntityView, component1, component2, ...)
 
 ================================================================
 ```
@@ -74,14 +69,13 @@ Add this to your entity class:
 
 **Code:**
 ```cpp
-struct VirtualEntity {
-    Ref<Transform> transform;
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+struct VirtualEntity : EntityView<VirtualEntity, WIDTH> {
+    Transform<WIDTH> transform;
 
-    virtual void Update(double dt) { /* ... */ }  // WRONG: virtual!
+    virtual void PrePhysics(double dt) { /* ... */ }  // WRONG: virtual!
 
-    static constexpr auto DefineSchema() {
-        return Schema::Create(&VirtualEntity::transform, &VirtualEntity::Update);
-    }
+    TNX_REGISTER_SCHEMA(VirtualEntity, EntityView, transform)
 };
 
 TNX_REGISTER_ENTITY(VirtualEntity);  // Compile error!
@@ -107,20 +101,14 @@ Entities are lightweight data containers.
 
 **Code:**
 ```cpp
+template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct BadComponent {
-    std::string name;  // WRONG: not POD!
-    float value;
+    std::string name;  // WRONG: not POD! Components must use FieldProxy.
+    FieldProxy<float, WIDTH> value;
+
+    TNX_TEMPORAL_FIELDS(BadComponent, SystemGroup::None, value)
 };
-
-struct MyEntity {
-    Ref<BadComponent> component;  // Compile error!
-
-    static constexpr auto DefineSchema() {
-        return Schema::Create(&MyEntity::component);
-    }
-};
-
-TNX_REGISTER_ENTITY(MyEntity);
+TNX_REGISTER_COMPONENT(BadComponent);  // Compile error from VALIDATE_COMPONENT_IS_POD!
 ```
 
 **Error (Compile-time):**
@@ -135,11 +123,12 @@ Components CANNOT have:
   - std::string, std::vector, or complex types
   - Heap-allocated pointers
 
-Use simple structs with raw data only:
+All component fields must be FieldProxy<T, WIDTH>:
 
+    template <FieldWidth WIDTH = FieldWidth::Scalar>
     struct Transform {
-        float PositionX, PositionY, PositionZ;
-        float RotationX, RotationY, RotationZ;
+        FieldProxy<float, WIDTH> PositionX, PositionY, PositionZ;
+        TNX_TEMPORAL_FIELDS(Transform, SystemGroup::None, PositionX, PositionY, PositionZ)
     };
 
 ================================================================
@@ -147,52 +136,45 @@ Use simple structs with raw data only:
 
 ---
 
-## 5. Forgetting Replace() in Derived Entity
+## 5. Derived Entity Missing TNX_REGISTER_SUPER_SCHEMA on Base
 
 **Code:**
 ```cpp
-struct CubeEntity {
-    Ref<Transform> transform;
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+struct BaseCube : EntityView<BaseCube, WIDTH> {
+    Transform<WIDTH> transform;
 
-    void Update(double dt) {
-        transform->RotationX += dt;
+    FORCE_INLINE void PrePhysics(double dt) {
+        transform.RotationY += static_cast<float>(dt);
     }
 
-    static constexpr auto DefineSchema() {
-        return Schema::Create(&CubeEntity::transform, &CubeEntity::Update);
-    }
+    // WRONG: Using TNX_REGISTER_SCHEMA instead of TNX_REGISTER_SUPER_SCHEMA!
+    TNX_REGISTER_SCHEMA(BaseCube, EntityView, transform)
 };
 
-class SuperCube : public CubeEntity {
-    void Update(double dt) {  // Overrides parent
-        transform->RotationX += dt * 2.0;  // Faster rotation
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+struct SuperCube : BaseCube<SuperCube, WIDTH> {
+    Velocity<WIDTH> velocity;
+
+    FORCE_INLINE void PrePhysics(double dt) {
+        BaseCube<SuperCube, WIDTH>::PrePhysics(dt);
+        this->transform.PositionX += velocity.VelocityX * static_cast<float>(dt);
     }
 
-    static constexpr auto DefineSchema() {
-        // MISSING .Replace()!
-        return CubeEntity::DefineSchema();
-    }
+    TNX_REGISTER_SCHEMA(SuperCube, BaseCube, velocity)
 };
-
-TNX_REGISTER_ENTITY(CubeEntity);
 TNX_REGISTER_ENTITY(SuperCube);
 ```
 
-**Error (Runtime - silent!):**
-- Compiles successfully
-- SuperCube entities call **CubeEntity::Update()** instead of SuperCube::Update()
-- Rotation speed is wrong, but no error message
-
-**Solution:**
+**Solution:** Use `TNX_REGISTER_SUPER_SCHEMA` for non-leaf base entities:
 ```cpp
-static constexpr auto DefineSchema() {
-    return CubeEntity::DefineSchema()
-        .Replace(&CubeEntity::Update, &SuperCube::Update);  // ✓ Correct
-}
+// In BaseCube (intermediate base, not instantiated directly):
+TNX_REGISTER_SUPER_SCHEMA(BaseCube, EntityView, transform)
 ```
 
-**Note:** This is the main "gotcha" that doesn't have a good compile-time check yet.
-We could add runtime validation comparing function pointers, but it's expensive.
+**Note:** `TNX_REGISTER_SUPER_SCHEMA` is required for base classes in the CRTP hierarchy that
+pass `Derived` through to `EntityView`. Using `TNX_REGISTER_SCHEMA` on a base will cause
+incorrect schema generation for derived types.
 
 ---
 
@@ -200,60 +182,60 @@ We could add runtime validation comparing function pointers, but it's expensive.
 
 ### ✅ Good Entity
 ```cpp
-struct GoodEntity {
-    // Simple Ref<> members
-    Ref<Transform> transform;
-    Ref<Velocity> velocity;
-    Ref<ColorData> color;
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+struct GoodEntity : EntityView<GoodEntity, WIDTH> {
+    Transform<WIDTH> transform;
+    Velocity<WIDTH>  velocity;
+    ColorData<WIDTH> color;
 
-    // Lifecycle methods (not virtual)
-    void OnCreate() { /* initialization */ }
-    void Update(double dt) { /* update logic */ }
-    void OnDestroy() { /* cleanup */ }
-
-    // Schema registration
-    static constexpr auto DefineSchema() {
-        return Schema::Create(
-            &GoodEntity::transform,
-            &GoodEntity::velocity,
-            &GoodEntity::color,
-            &GoodEntity::OnCreate,
-            &GoodEntity::Update,
-            &GoodEntity::OnDestroy
-        );
+    // Lifecycle methods (not virtual, FORCE_INLINE)
+    FORCE_INLINE void PrePhysics(double dt) {
+        transform.PositionX += velocity.VelocityX * static_cast<float>(dt);
     }
-};
 
-TNX_REGISTER_ENTITY(GoodEntity);
+    TNX_REGISTER_SCHEMA(GoodEntity, EntityView, transform, velocity, color)
+};
+TNX_REGISTER_ENTITY(GoodEntity)
 ```
 
-### ✅ Good Component
+### ✅ Good Component (Temporal)
 ```cpp
+template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct GoodComponent {
-    // Plain Old Data only
-    float Value1;
-    float Value2;
-    int32_t Value3;
-    bool Value4;
+    FieldProxy<float, WIDTH> Value1, Value2;
+    FieldProxy<int32_t, WIDTH> Value3;
 
-    // No constructors, destructors, or methods
-    // Components are pure data
+    TNX_TEMPORAL_FIELDS(GoodComponent, SystemGroup::None, Value1, Value2, Value3)
 };
+TNX_REGISTER_COMPONENT(GoodComponent)
+```
+
+### ✅ Good Component (Cold)
+
+```cpp
+struct ColdComponent {
+    uint32_t ShapeType;
+    float Mass;
+    float Friction;
+
+    TNX_REGISTER_FIELDS(ColdComponent, ShapeType, Mass, Friction)
+};
+TNX_REGISTER_COMPONENT(ColdComponent)
 ```
 
 ### ❌ Bad Entity
 ```cpp
-struct BadEntity {
-    Ref<Transform> transform;
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+struct BadEntity : EntityView<BadEntity, WIDTH> {
+    Transform<WIDTH> transform;
 
     // WRONG: Virtual function
-    virtual void Update(double dt) { }
+    virtual void PrePhysics(double dt) { }
 
-    // WRONG: Constructor with logic
-    BadEntity() : transform(nullptr) { DoSetup(); }
-
-    // WRONG: Complex member
+    // WRONG: Complex member (not FieldProxy)
     std::vector<int> data;
+
+    TNX_REGISTER_SCHEMA(BadEntity, EntityView, transform)
 };
 ```
 
