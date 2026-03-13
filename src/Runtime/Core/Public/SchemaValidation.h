@@ -30,7 +30,49 @@ namespace SchemaValidation
 	{
 	};
 
-	// Helper to check if all fields of a component are FieldProxy
+	// Extract the member type from a pointer-to-member: &T::x -> decltype(T::x)
+	template <typename>
+	struct MemberType;
+
+	template <typename C, typename M>
+	struct MemberType<M C::*>
+	{
+		using Type = M;
+	};
+
+	// Check that every element in a tuple of member pointers points to a FieldProxy
+	template <typename Tuple, size_t... Is>
+	constexpr bool AllFieldProxyImpl(std::index_sequence<Is...>)
+	{
+		return (IsFieldProxy<typename MemberType<
+				std::tuple_element_t<Is, Tuple>>::Type>::value && ...);
+	}
+
+	template <typename Tuple>
+	constexpr bool AllFieldProxyCheck()
+	{
+		return AllFieldProxyImpl<Tuple>(
+			std::make_index_sequence<std::tuple_size_v<Tuple>>{});
+	}
+
+	// Check that every element in a tuple of member pointers is trivially copyable
+	template <typename Tuple, size_t... Is>
+	constexpr bool AllTriviallyCopyableImpl(std::index_sequence<Is...>)
+	{
+		return (std::is_trivially_copyable_v<typename MemberType<
+				std::tuple_element_t<Is, Tuple>>::Type> && ...);
+	}
+
+	template <typename Tuple>
+	constexpr bool AllTriviallyCopyableCheck()
+	{
+		return AllTriviallyCopyableImpl<Tuple>(
+			std::make_index_sequence<std::tuple_size_v<Tuple>>{});
+	}
+
+	// Helper to check if all fields of a component are valid:
+	// - Temporal/Volatile components: all fields must be FieldProxy
+	// - Cold components: all fields must be trivially copyable
 	template <typename T>
 	struct AllFieldsAreFieldProxy
 	{
@@ -45,9 +87,12 @@ namespace SchemaValidation
 
 		static constexpr bool has_fields = decltype(test<T>(0))::value;
 
-		// If component has fields, check if they're all FieldProxy
-		// Otherwise just use trivially_copyable check
-		static constexpr bool value = has_fields; // Simplified for now - assume components with DefineFields use FieldProxy
+		static constexpr bool value = []()
+		{
+			if constexpr (!has_fields)
+				return false;
+			return AllFieldProxyCheck<decltype(T::DefineFields())>();
+		}();
 	};
 
 	// All components use FieldProxy — they are views into SoA arrays, not
