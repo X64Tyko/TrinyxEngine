@@ -58,24 +58,35 @@ frustum culling (planned), sort key generation (planned), command encoding
 
 Entity component data lives in one of four tiers based on access pattern and rollback requirements:
 
-| Tier | Structure | Frames | Rollback | Use Case |
-|------|-----------|--------|----------|----------|
-| Cold | Archetype chunks (AoS) | 0 | No | Rarely-updated, non-iterable data |
-| Static | Separate read-only array | 0 | No | Geometry/mesh data, never changes |
-| Volatile | SoA ring buffer | 5 | No | Cosmetic entities, ambient AI, particles |
-| Temporal | SoA ring buffer | max(8, X) | Yes | Networked, simulation-authoritative entities |
+| Tier     | Structure                | Frames    | Rollback | Use Case                                     |
+|----------|--------------------------|-----------|----------|----------------------------------------------|
+| Cold     | Archetype chunks (AoS)   | 0         | No       | Rarely-updated, non-iterable data            |
+| Static   | Separate read-only array | 0         | No       | Geometry/mesh data, never changes            |
+| Volatile | SoA ring buffer          | 3         | No       | Cosmetic entities, ambient AI, particles     |
+| Temporal | SoA ring buffer          | max(8, X) | Yes      | Networked, simulation-authoritative entities |
 
-**Cold** components (no `TNX_TEMPORAL_FIELDS`) live only in Archetype chunks (AoS layout).
-They are rarely accessed by inner loops — inventory, quest state, AI decision trees.
+**Cold** components (no `TNX_TEMPORAL_FIELDS`) live only in Archetype chunks (still SoA decomposed for hydration
+iteration).
+Available in Pre/Post Physics and ScalarUpdate iteration. No rollback, changes are permanent.
 
 **Static** entities get a dedicated read-only SoA array. No rollback overhead. Physics and render include
-static data as a third dense pass after their partition ranges.
+static data as a third dense pass after their partition ranges. not implemented yet, want to get asset importing online
+first.
 
-**Volatile** entities use a 5-frame ring buffer per field. 5 frames gives Logic/4 headroom between
-thread tick rates (4 frames = Logic/2 — tighter). No rollback; these entities are not networked.
+**Volatile** entities use triple buffer per field. 3 frames so that renderer always has access to the latest written
+frame and Logic is not blocked if the renderer slows down. No rollback; these entities are not networked. **Old Model:**
+5 frames gives Logic/4 headroom between
+thread tick rates (4 frames = Logic/2 — tighter) used when it worked strictly as a ring buffer, now functions like a
+proper triple buffer. Changes made after determining that Logic and render no longer need access to 2 frames of data
+each.
 
 **Temporal** entities use an N-frame ring buffer where N = `max(8, rollback_depth_at_FixedUpdateHz)`.
-Full history for rollback netcode, lag compensation, and replay.
+Full history for rollback netcode, lag compensation, and replay. Needs testing for rollback and dirty bit propagation as
+well as how Jolt interacts with rollback, particularly when it's ticking at 1/8th the Hz of the Logic thread.
+
+**Valuable Note:** If TNX_ENABLE_ROLLBACK is disabled, the temporal tier is not instantiated, instead any Temporal
+component is treated as Volatile instead. This saves a ton of memory for any game that doesn't require rollback
+functionality.
 
 ---
 
@@ -84,11 +95,11 @@ Full history for rollback netcode, lag compensation, and replay.
 The tier is determined by the component's registration macro, not by a marker on the entity:
 
 - `TNX_TEMPORAL_FIELDS(...)` → component fields go in the **Temporal** tier (N-frame rollback ring)
-- `TNX_VOLATILE_FIELDS(...)` → component fields go in the **Volatile** tier (5-frame ring, no rollback)
+- `TNX_VOLATILE_FIELDS(...)` → component fields go in the **Volatile** tier (Triple buffer, no rollback)
 
 An entity's effective tier is the highest tier of any of its components. An entity carrying a
 `RigidBody` (Temporal) is a Temporal entity; an entity with only `ColorData` (Volatile) is Volatile.
-Cold components (`TNX_REGISTER_FIELDS` — no tier) contribute no SoA storage and do not affect the
+Cold components (`TNX_REGISTER_FIELDS` — no tier) contribute no slab storage and do not affect the
 entity's tier classification.
 
 ---
@@ -97,7 +108,7 @@ entity's tier classification.
 
 The slab is divided into two fixed-size arenas by `EngineConfig`. Within each arena, two buckets grow
 inward from opposite ends. Arena boundaries (`MaxPhysicsEntities`, `MaxCachedEntities`) and maximum
-bucket sizes are all predetermined at startup — no entity can cross an arena boundary at runtime.
+bucket sizes are all predetermined at startup.
 
 ```
 Arena 1: Physics  [0 .. MAX_PHYSICS_ENTITIES)
@@ -123,7 +134,10 @@ assert(MaxPhysicsEntities + MaxRenderEntities <= MaxCachedEntities)
   The DUAL tail and RENDER head are contiguous at the arena boundary — effectively one scan.
 
 The physics solver iterates Arena 1 exclusively. It sees a dense wall of memory containing 100%
-of its relevant entities, with no render-only or logic-only data anywhere in its access range.
+of its relevant entities, with no render-only or logic-only data anywhere in its access range. Because 32-bit slots
+correspond to an entity global ID this can lead to holes and gaps, but the arena layout minimizes the holes and makes
+the significant gap the one between Phys and Dual, allowing processes to fly over it. Might be worth swapping Physics
+and Render alloocation slots in the future depending on if Renderer or physics benefits more for the gapless iteration.
 
 ---
 
@@ -142,47 +156,26 @@ TNX_TEMPORAL_FIELDS(Stats,     SystemGroup::Logic,  Health, Ammo)
 
 Derivation rule (applied once at static-init when `TNX_REGISTER_ENTITY(T)` fires):
 
-| Components present | → Entity Group |
-|--------------------|----------------|
-| Phys AND Render | Dual |
-| Phys only | Phys |
-| Render only | Render |
-| Temporal but neither | Logic |
-| No temporal components at all | Non-temporal (flags live in chunk) |
+| Components present            | → Entity Group                                                                                                                |
+|-------------------------------|-------------------------------------------------------------------------------------------------------------------------------|
+| Phys AND Render               | Dual                                                                                                                          |
+| Phys only                     | Phys                                                                                                                          |
+| Render only                   | Render                                                                                                                        |
+| Temporal but neither          | Logic                                                                                                                         |
+| No temporal components at all | Currently Flags are still temporal, would be nice to get them into the chunk if there's no other temporal components possibly |
 
-`TNX_REGISTER_ENTITY(T)` takes **no manual group annotation** — fully automatic. Giving users a
-manual override is giving them a gun to shoot gaps into their partition regions with.
+`TNX_REGISTER_SCHEMA(T)` takes **no manual group annotation** — fully automatic. Giving users a
+manual override is giving them a foot gun to shoot gaps into their partition regions with.
+
+**Valuable Note:** The engine will provide a wide array of component and entity options out of the box, meaning that
+developers can create gameplay without having to know the intricacies of setting up their own components or entities if
+they don't want to.
 
 ---
 
-## Universal Strip (Flags)
+## Bitplanes:
 
-Active/Dirty flags live **outside** the per-partition field zones in a dedicated universal strip:
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Universal Strip (one contiguous int32 array = one SIMD pass)       │
-│  Flags[0..MAX_CACHED_ENTITIES)    ← TemporalFlagBits::Active | Dirty│
-├─────────────────────────────────────────────────────────────────────┤
-│  Arena 1: Physics  [0..MAX_PHYSICS_ENTITIES)                        │
-│    PHYS [0..N_phys) →  · · · ·  ← DUAL [MAX_PHYS-N_dual..MAX_PHYS)│
-│    Field arrays span full arena width: PosX[MAX_PHYSICS], ...       │
-├─────────────────────────────────────────────────────────────────────┤
-│  Arena 2: Cached  [MAX_PHYSICS..MAX_CACHED_ENTITIES)                │
-│    RENDER [MAX_PHYS..MAX_PHYS+N_rend) →  · · ·  ← LOGIC            │
-│    ColorR[MAX_CACHED-MAX_PHYSICS], ...                              │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-Macro: `TNX_UNIVERSAL_COMPONENT(TemporalFlags, Flags)`
-
-- **Temporal/Volatile entities:** flags in universal strip of their slab (one contiguous array = one SIMD pass
-  for ALL entities regardless of partition)
-- **Non-temporal entities:** flags live in archetype chunk alongside cold data
-
-Current implementation uses `TemporalFlagBits::Active = 1<<31` and `TemporalFlagBits::Dirty = 1<<30`.
-The dirty bit doubles as the GPU upload trigger and (during rollback) as a selective resimulation marker —
-the dirty set from any correction expands naturally through update logic to the exact blast radius.
+There are several bitplanes dedicated to tracking which components an entity has, if the entity is dirty, etc.
 
 **Macro-gap skipping:** The universal strip is scanned 64 entities at a time (one 64-bit word). If the
 entire word is zero (all 64 entities inactive), the branch predictor instantly skips that block — no
@@ -191,6 +184,16 @@ and sparse regions at startup with no measurable overhead.
 
 **Micro-gap execution:** When a word has mixed active/inactive entities, `FieldProxy` uses AVX2 masked
 loads/stores (8-wide, branchless) to keep the pipeline saturated even in partially sparse regions.
+
+The dirty bit doubles as the GPU upload trigger and (during rollback) as a selective resimulation marker —
+the dirty set from any correction expands naturally through update logic to the exact blast radius.
+
+---
+
+## Entity Flags:
+
+Current implementation uses `TemporalFlagBits::Active = 1<<31`. This is used by the GPU compute shader to determine
+which entities to draw. plus 31 other bits for future entity specific flags.
 
 ---
 
@@ -205,7 +208,8 @@ clients running the same inputs must produce bit-identical simulation state — 
 Fixed-point int32 is perfectly deterministic on every platform, every compiler, every optimization level.
 Integer arithmetic produces identical bits on x86, ARM, any future target. This is the gold standard for
 deterministic simulation and the reason fighting game engines (which require frame-perfect rollback) have
-used it for decades.
+used it for decades. _This will need more testing as it sidesteps the benefits of how many floating-point ALUs modern
+CPUs have._
 
 ## Unit Definition
 
@@ -218,8 +222,7 @@ int32 max = 2,147,483,647 units = ±214 km
 Cell size (1km): max value = 5,000,000 units  →  430× headroom before overflow
 ```
 
-This unit definition is baked into all component field definitions. Changing it later requires migrating
-all stored data — choose once, document clearly.
+Unit definition is configurable in the EngineDefaults.ini.
 
 ## Fixed32 Value Type
 
@@ -238,12 +241,14 @@ inline Fixed32 operator*(Fixed32 a, Fixed32 b) {
 transform.PosX += body.VelX * dt;   // Fixed32 * Fixed32 → Fixed32, no overflow
 ```
 
-`FieldProxy<Fixed32, WIDTH>` — all position, velocity, and force fields use this type.
+`FieldProxy<Fixed32, WIDTH>` — all position, velocity, and force fields use this type. because we have the FieldProxy we
+can have a build variable to replace FieldProxy<float> with FieldProxy<fixed32> at runtime, no code changes required.
 
 ## Quaternion Representation
 
-Quaternion components live in [-1, 1]. Store as int32 in 0.31 fixed-point format
-(1 sign bit, 31 fraction bits). Quaternion multiplication is pure integer math with int64
+Quaternion components live in [-1, 1]. Store as int32 in 1.30 fixed-point format
+(1 sign bit, 30 fraction bits, 1 bit for accidental overhead during math). Quaternion multiplication is pure integer
+math with int64
 intermediates — no trig in the inner loop. Trig only appears when creating a quaternion
 from Euler angles (rare: at spawn or explicit rotation assignment).
 
@@ -256,6 +261,9 @@ Cell-relative fixed-point (int32):
 Cell world origin (float64 or int64):
   Absolute world position of each cell's origin
   Stored in Registry/World, never in entity SoA
+  
+  stored as a single int64, 20 bits for value + 1 bit for sign
+  gives us a total world size of ~45M Km at 0.1mm precision.
 
 Camera world position (float64 or int64):
   Maintained by logic thread, published each frame
@@ -287,7 +295,8 @@ Jolt result float32   → int32 fixed-point     → our slab
 
 At cell-relative scale (≤±500m from cell center), float32 precision is ≈0.05mm — finer than our
 0.1mm unit definition. The bridge is lossless. When Jolt is replaced with a custom solver, the
-bridge goes away and the fixed-point data feeds the solver directly.
+bridge goes away and the fixed-point data feeds the solver directly. Needs better testing, but puts
+a major wrinkle in our determinism.
 
 ---
 
@@ -296,7 +305,7 @@ bridge goes away and the fixed-point data feeds the solver directly.
 ## Design: Constraint Pool (Separate AoS, Not in Temporal Slab)
 
 Constraints are structural metadata — which body, which anchor, which type. They don't evolve
-frame-to-frame and don't need rollback history. The *resolved result* of constraints (world transforms
+frame-to-frame and don't need rollback history (probably). The *resolved result* of constraints (world transforms
 of constrained entities) lives in the temporal SoA as normal entity data. The constraint relationships
 themselves live in a separate flat AoS pool.
 
@@ -390,8 +399,21 @@ copy. This is the distinction between transform attachment (render thread, free)
 
 ## Overview
 
-Jolt runs on the Brain thread during the physics step of the fixed-timestep loop. **Jolt owns the
-physics state** (position, rotation, velocity) for all simulated bodies. The ECS does not push
+~~Jolt runs on the Brain thread during the physics step of the fixed-timestep loop~~. That was naive
+and does not work well, especially at 512Hz. Jolt now runs at a customizable fraction of the fixed update rate.
+The physics step is initialted from a worker job, and has it's dedicated queue and workers.
+By default the engine uses 512Hz Logic with 8 fixed steps per Physics step. This allows the physics sim
+to run at 64Hz and asynchronously of other gameplay logic. Because this is configurable a game with
+a need for high physics accuracy and low entities can bump this value 1:1 if desired. Because the physics step
+is tied directly to fixed update rate it is still theoretically deterministic.
+
+Physics entities are pushed into Jolt sim on (currentFrame % fixedStepPerPhysics == 0) as well as initiating
+the physics step. Pulling transforms from jolt is done on (currentFrame % fixedStepPerPhysics == fixedStepPerPhysics -
+1)
+this will lock on the physics job counter before pulling if physics hasn't finished updating, allowing the
+Logic thread to help with physics jobs.
+
+**Jolt owns the physics state** (position, rotation, velocity) for all simulated bodies. The ECS does not push
 state to Jolt every frame — Jolt's integrator advances bodies internally. The ECS only writes
 to Jolt on explicit overrides (spawn, teleport, applied impulses). After each step, we pull
 results from **awake bodies only** back into SoA WriteArrays.
@@ -431,7 +453,7 @@ physicsSystem.Update(fixedDt, collisionSteps, tempAllocator, jobSystem);
 ```
 
 - `fixedDt` = 1.0/512.0 (matches Brain tick rate)
-- `collisionSteps` = 1 (one substep per tick at 512Hz — high enough frequency)
+- `collisionSteps` = calculated from fixed Update rate and fixedStepsPerPhysics to target the suggested 60FPS step rate
 - `tempAllocator` = `JPH::TempAllocatorImpl` with pre-allocated scratch buffer (16MB default).
   Jolt's temp allocator is a linear bump allocator that resets each step — no heap allocation
   in the inner loop. Size it for worst-case broad-phase during development, shrink later.
@@ -477,10 +499,10 @@ during its Scalar update via `BodyInterface::GetLinearVelocity(bodyID)`.
 **Awake-only pull** means a scene with 50K physics bodies where only 200 are moving pays for 200
 pulls, not 50K. Sleeping bodies are the common case (stacked crates, settled debris, resting props).
 
-**Scattered reads:** Each `GetPositionAndRotation` touches a different Jolt `Body` object (AoS layout
-in Jolt's body manager). This is inherently cache-unfriendly. For the current entity count this is
-acceptable. If it becomes a bottleneck, batch the pull using `JPH::BodyManager::GetBodies()` to get
-a contiguous body pointer array and iterate linearly.
+**Scattered reads:** Using GetActiveBodies() to get a list of active bodies. Bodies are stored in AoS,
+so we pull groups of 4 bodies translation and rotation, SIMD transpose and write to a field scratch
+buffer. after we've built our SoA arrays of modified transforms we use the job system to push the values
+back to their respective field array positions.
 
 ## Collision Events
 
@@ -622,16 +644,17 @@ This is a SIMD operation on a 12.5KB bit array (100K entities), fits in L1 cache
 GPU interpolation uses its own persistent previous-frame InstanceBuffer. Render thread uploads frame T only
 (not T-1). GPU has T-1 from its own last-frame buffer, interpolates in vertex shader.
 
-**Separate static GPU buffer** for static entity data (read-only, uploaded once at initialization).
+**Separate static GPU buffer** for static entity data (read-only, uploaded once at initialization). rarely modified.
+Render can listen for a staticChange event and kick off an async worker to update the GPU static buffer.
 
 ## Thread Access Summary
 
-| Thread | Reads | Writes |
-|--------|-------|--------|
-| Logic (Brain) | Frame T (ReadArray) | Frame T+1 (WriteArray) |
-| Render (Encoder) | Current logic frame (for GPU upload) | GPU InstanceBuffer |
-| GPU | Current InstanceBuffer | Previous InstanceBuffer (for interpolation) |
-| Network/Rollback | Historical frames from Temporal slab | Corrected frame (triggers dirty resim) |
+| Thread           | Reads                                        | Writes                                     |
+|------------------|----------------------------------------------|--------------------------------------------|
+| Logic (Brain)    | None, works with current state copied to T+1 | Frame T+1 (WriteArray)                     |
+| Render (Encoder) | Frame T (ReadArray)                          | GPU InstanceBuffer                         |
+| GPU              | Previous InstanceBuffer                      | Current InstanceBuffer (for interpolation) |
+| Network/Rollback | Historical frames from Temporal slab         | Corrected frame (triggers dirty resim)     |
 
 ---
 

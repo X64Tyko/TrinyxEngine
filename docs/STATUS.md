@@ -44,22 +44,28 @@
 - Testbed: 10k CubeEntity + 90k SuperCube at Z=-200..-500 (visible as colored specks at z=-200)
 
 **ECS Architecture:**
-- Archetype-based ECS with 64 KB chunks
+
+- Archetype-based ECS with adjustable EntitiesPerChunk defined in entity classes.
 - FieldProxy system: Scalar / Wide / WideMask modes
 - FieldProxyMask<WIDTH> zero-size base (Scalar mode saves 32 bytes/field)
-- TemporalComponentCache: dual-buffer SoA (ReadArray/WriteArray per field, per archetype)
+- TemporalComponentCache: N-frame buffer SoA
 - EntityView hydration (zero virtual calls, schema-driven)
 - SIMD batch processing (AVX2), 3-level Tracy profiling (Coarse/Medium/Fine)
 
 **Dirty Bit Tracking:**
-- `TemporalFlagBits::Active = 1<<31`, `Dirty = 1<<30`
-- Registry::InvokePrePhys/PostPhys/ScalarUpdate OR bit 30 into write-frame flags after each chunk update
+
+- DirtyFlag bitplane in the registry.
+- FieldProxy manages setting dirty bits any time a value is modified.
 
 **Reflection System:**
 - `TNX_REGISTER_COMPONENT(T)` — component type registration
 - `TNX_TEMPORAL_FIELDS(T, SystemGroup, ...)` — SoA temporal field decomposition
 - `TNX_REGISTER_FIELDS(T, ...)` — cold (chunk-only) field registration
 - `TNX_REGISTER_SCHEMA / TNX_REGISTER_SUPER_SCHEMA` — entity schema + Advance generation
+
+**Worth Noting:** This is entirely template and macro driven at the moment, it is potentially fragile
+and relies on static initialization. A dedicated precompile or something like UBT would be a good idea
+in the long run.
 
 **Job System & Threading:**
 
@@ -197,8 +203,11 @@
 
 ## Design Insights Log
 
-- **Volatile = 5 frames** (not 4): 5 frames gives Logic/4 headroom between thread tick rates.
-  4 frames = Logic/2, which is tighter margin for the render thread to find a safe read frame.
+- **Volatile = 3 frames** ~~(not 4): 5 frames gives Logic/4 headroom between thread tick rates.
+  4 frames = Logic/2, which is tighter margin for the render thread to find a safe read frame.~~
+
+    - With the update to GPU driven rendering and frame propagation, logic and render threads now only need
+      1 frame each to work on and wont be blocked with a triple buffer instead of needing 5.
 
 - **GPU interpolation is self-contained:** Render thread uploads frame T only. GPU keeps T-1 in its
   own persistent previous-frame InstanceBuffer. Render thread does NOT need to read two CPU slab frames.

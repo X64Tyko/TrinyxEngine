@@ -7,8 +7,9 @@
 ## FieldProxy — SoA with OOP Syntax
 
 `FieldProxy<T, FieldWidth>` is the core component abstraction. Each proxy holds:
-- `ReadArray` — frame T (current simulation state, read-only during update)
-- `WriteArray` — frame T+1 (next state, written during update)
+
+- `WriteArray` — frame T+1 (next state, written during frame propagation)
+- `DirtyBits`— any timea field is written the entity is OR'ed in the dirty array.
 - `index` — current entity offset within the SoA arrays
 - `mask` — AVX2 mask for `WideMask` partial-lane writes (zero-size base for `Scalar` mode)
 
@@ -28,7 +29,6 @@ storing `__m256i mask`). Wide and WideMask access the mask via `this->mask`.
 template <typename T, FieldWidth WIDTH = FieldWidth::Scalar>
 struct FieldProxy : FieldProxyMask<WIDTH>
 {
-    T* ReadArray  = nullptr;
     T* WriteArray = nullptr;
     uint32_t index = 0;
 
@@ -40,17 +40,16 @@ struct FieldProxy : FieldProxyMask<WIDTH>
     FieldProxy& operator-=(T value) { WriteArray[index] -= value; return *this; }
     FieldProxy& operator*=(T value) { WriteArray[index] *= value; return *this; }
 
-    // Bind: copy ReadArray → WriteArray and cache index
-    void Bind(T* read, T* write, uint32_t idx);
+    // Bind: 
+    void Bind(T* write, uint32_t idx);
 
-    // Advance: increment index, propagate copy (or SIMD step for Wide/WideMask)
+    // Advance: increment index
     void Advance(uint32_t step);
 };
 ```
 
 **Key Properties:**
 - All operators inline to direct array access — zero overhead
-- `Bind()` copies frame T to frame T+1 at hydration; entity starts from its last known state
 - `Advance()` increments the shared index (or 8 for Wide mode)
 - Users write `transform.PositionX += velocity.VelocityX * dt` — looks like OOP, runs as SoA
 
@@ -58,9 +57,10 @@ struct FieldProxy : FieldProxyMask<WIDTH>
 
 ## Component Definition Patterns
 
-### Temporal (SoA) Component
+### Temporal / Volatile (SoA) Component
 
-Components with `TNX_TEMPORAL_FIELDS` decompose into SoA field arrays in the temporal/volatile slab.
+Components with `TNX_TEMPORAL_FIELDS` or `TNX_VOLATILE_FIELDS` decompose into SoA field arrays in the temporal/volatile
+slab.
 The `SystemGroup` tag drives automatic entity partition placement.
 
 ```cpp
@@ -97,7 +97,7 @@ struct Material
     FieldProxy<float, WIDTH> ColorR, ColorG, ColorB, ColorA;
 
     // SystemGroup::Render = entities with this component go into the Render or Dual partition
-    TNX_TEMPORAL_FIELDS(Material, SystemGroup::Render,
+    TNX_VOLATILE_FIELDS(Material, SystemGroup::Render,
         ColorR, ColorG, ColorB, ColorA)
 };
 TNX_REGISTER_COMPONENT(Material)
@@ -105,37 +105,20 @@ TNX_REGISTER_COMPONENT(Material)
 
 ### Cold (Chunk) Component
 
-Components without `TNX_TEMPORAL_FIELDS` live in archetype chunk memory (AoS layout).
-No FieldProxy — plain POD members.
+Component with `TNX_REGISTER_FIELDS` live in archetype chunk memory (Still decomposed into SoA for use with the
+FieldProxy).
 
 ```cpp
+template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct HealthComponent
 {
-    float CurrentHealth;
-    float MaxHealth;
-    float Armor;
+    FloatProxy<WIDTH> CurrentHealth;
+    FloatProxy<WIDTH> MaxHealth;
+    FloatProxy<WIDTH> Armor;
 
     TNX_REGISTER_FIELDS(HealthComponent, CurrentHealth, MaxHealth, Armor)
 };
 TNX_REGISTER_COMPONENT(HealthComponent)
-```
-
-### Universal Strip Component
-
-Flags that need to be iterable across ALL entities in a single SIMD pass live in the universal strip,
-outside the partition field zones. Declared with `TNX_UNIVERSAL_COMPONENT` (planned macro):
-
-```cpp
-template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct TemporalFlags
-{
-    FieldProxy<int32_t, WIDTH> Flags;
-
-    // TemporalFlagBits:
-    //   Active = 1<<31  — entity exists and is in the simulation
-    //   Dirty  = 1<<30  — modified this frame (drives GPU upload AND rollback resimulation blast radius)
-    TNX_UNIVERSAL_COMPONENT(TemporalFlags, Flags)
-};
 ```
 
 ---
@@ -164,18 +147,25 @@ struct CubeEntity : EntityView<CubeEntity, WIDTH>
 
     TNX_REGISTER_SCHEMA(CubeEntity, EntityView, transform, body, material)
 };
-TNX_REGISTER_ENTITY(CubeEntity)
 ```
 
-**Dynamic chunk sizing (planned):** The target entity count per chunk can be specified at the class
+**Dynamic chunk sizing:** The target entity count per chunk can be specified at the class
 level via a template parameter on `EntityView`. A data-heavy `Projectile` might request 4096-entity
 chunks for maximum SIMD throughput; a complex `Player` might request 4-entity chunks to eliminate
-padding waste. Currently the engine uses a fixed 64 KB chunk size.
+padding waste. Currently the engine defaults to 1024-entity chunks.
+
+```cpp
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+class TestEntity : public EntityView<TestEntity, WIDTH>
+{
+	static constexpr uint32_t kEntitiesPerChunk = 16;
+};
+```
 
 ```cpp
 // RigidBody uses TNX_TEMPORAL_FIELDS → entity is Temporal (N-frame rollback ring)
 // ColorData uses TNX_VOLATILE_FIELDS → entity is Volatile if it has no Temporal components
-// Cold components (TNX_REGISTER_FIELDS) contribute no SoA storage and do not affect tier
+// Cold components (TNX_REGISTER_FIELDS) contribute no slab storage and do not affect tier
 ```
 
 ### Inheritance Pattern
@@ -208,7 +198,6 @@ struct SuperCube : BaseCube<SuperCube, WIDTH>
 
     TNX_REGISTER_SCHEMA(SuperCube, BaseCube, body)
 };
-TNX_REGISTER_ENTITY(SuperCube)
 ```
 
 ---
@@ -222,10 +211,14 @@ template <template <FieldWidth> class T, FieldWidth WIDTH = FieldWidth::Scalar>
 class EntityView
 {
 public:
-    uint32_t ViewIndex = 0;
+    static ClassID StaticClassID()
+    {
+        static ClassID id = Internal::g_GlobalClassCounter++;
+        return id;
+    }
 
     // Hydrate: bind all component FieldProxies to read/write arrays at index
-    FORCE_INLINE void Hydrate(void** readArrays, void** writeArrays, uint32_t index);
+    FORCE_INLINE void Hydrate(void** fieldArrayTable, uint8_t* FlagBase, uint32_t index = 0, int32_t count = -1)
 
     // Advance: increment ViewIndex (+ 8 for Wide, with mask for WideMask)
     FORCE_INLINE void Advance(uint32_t step = 1);
@@ -236,25 +229,27 @@ Iteration pattern (internal, generated by reflection system):
 
 ```cpp
 template <typename T>
-FORCE_INLINE void InvokePrePhysicsImpl(double dt, void** read, void** write, uint32_t count)
+FORCE_INLINE void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, uint8_t* FlagBase, uint32_t componentCount)
 {
-    T entityView;
-    entityView.Hydrate(read, write, 0);
+	alignas(32) typename T::WideType viewBatch;
 
-    uint32_t i = 0;
-    // Wide pass (groups of 8)
-    for (; i + 8 <= count; i += 8)
-    {
-        // WideMask setup not needed for full groups
-        entityView.PrePhysics(dt);
-        entityView.Advance(8);
-    }
-    // Scalar tail
-    for (; i < count; ++i)
-    {
-        entityView.PrePhysics(dt);
-        entityView.Advance(1);
-    }
+	constexpr uint32_t SIMD_BATCH = 8;
+	const uint32_t batchCount     = componentCount / SIMD_BATCH;
+
+	viewBatch.Hydrate(fieldArrayTable, FlagBase);
+
+	// Process batches
+	for (uint32_t i = 0; i < batchCount; i++)
+	{
+		viewBatch.PrePhysics(dt);
+		viewBatch.Advance(SIMD_BATCH);
+	}
+
+	// perform the last batch with a mask.
+	alignas(32) typename T::MaskedType tailBatch;
+	// Handle the tail with a mask
+	tailBatch.Hydrate(fieldArrayTable, FlagBase, SIMD_BATCH * batchCount, componentCount % SIMD_BATCH);
+	tailBatch.PrePhysics(dt);
 }
 ```
 
@@ -387,26 +382,6 @@ physics solver.
 **Entities with a `Type=Rigid` ConstraintEntity as BodyA do not get independent physics bodies.**
 For physics-simulated attachment (ragdoll, rope, soft body), use non-Rigid types — the solver
 resolves them via impulses.
-
----
-
-## TemporalFlags
-
-Live in the universal strip (one contiguous `int32` array per frame, covering ALL dynamic entities):
-
-```cpp
-enum class TemporalFlagBits : int32_t
-{
-    Active = 1 << 31,   // Entity exists and is in the simulation
-    Dirty  = 1 << 30,   // Modified this frame; drives GPU upload + rollback resimulation
-};
-```
-
-Logic sets `Dirty` (bit 30) via `fetch_or(relaxed)` after updating each chunk.
-Render reads `Dirty` bits to build the GPU upload set, then clears them after upload.
-
-During rollback, the dirty set from a correction expands naturally through update logic —
-the exact set of entities affected by the correction is computed automatically.
 
 ---
 
