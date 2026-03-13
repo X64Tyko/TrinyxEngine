@@ -133,7 +133,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	return true;
 }
 
-void TrinyxEngine::Run()
+void TrinyxEngine::StartThreadsAndJobs()
 {
 	Logic->Start();
 	Render->Start();
@@ -142,12 +142,15 @@ void TrinyxEngine::Run()
 	{
 		// Spin while we wait so that we don't initialize workers before our Primary threads
 	}
-	
+
 	bool JobsInitialized = TrinyxJobs::Initialize(&Config);
 	bJobsInitialized.store(JobsInitialized, std::memory_order_release);
 
 	bIsRunning = true;
+}
 
+void TrinyxEngine::RunMainLoop()
+{
 	const uint64_t perfFrequency = SDL_GetPerformanceFrequency();
 
 	while (bIsRunning.load(std::memory_order_acquire))
@@ -174,8 +177,6 @@ void TrinyxEngine::Run()
 		TNX_FRAME_MARK();
 		CalculateFPS();
 	}
-
-	Shutdown();
 }
 
 void TrinyxEngine::Shutdown()

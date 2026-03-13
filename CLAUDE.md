@@ -8,7 +8,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **TrinyxEngine** is a C++20, data-oriented game engine R&D project built for competitive multiplayer games where determinism, rollback netcode, and input latency are first-class design constraints — not afterthoughts. The goal is to run 100,000+ dynamic entities at 512Hz fixed update (1.95ms/frame budget) while exposing a familiar OOP-style API (PlayerController, GameMode, GameState, behavior trees) to entity authors. It is structured as two CMake targets: `TrinyxEngine` (static library) and `Testbed` (executable).
 
-This is not a general-purpose engine competing on breadth. It is the correct architecture for a specific and important problem: competitive multiplayer simulations where two clients running the same inputs must produce bit-identical state, and where input latency is a design constraint at the substrate level.
+This is not a general-purpose engine competing on breadth. It is the correct architecture for a specific and important
+problem: competitive multiplayer simulations where two clients running the same inputs must produce bit-identical state,
+and where input latency is a design constraint at the substrate level. It is aimed at being developer friendsly,
+offering benefits like optional determinism, rollback, and low latency by default without sacrifices.
 
 ---
 
@@ -30,6 +33,8 @@ cmake --build cmake-build-debug
 ```
 
 **Key CMake options** (append to the configure step):
+
+|--------|---------|---------|
 | Option | Default | Purpose |
 |--------|---------|---------|
 | `ENABLE_TRACY=ON/OFF` | ON | Tracy profiler integration |
@@ -45,11 +50,15 @@ cmake --build cmake-build-debug
 
 Three interlocking design decisions define everything else:
 
-1. **Fixed 512Hz logic update.** Not configurable per-game. The simulation runs at one rate. This is a constraint, not a limitation — it is what makes deterministic rollback possible and what allows the input buffer, physics ratio, and GPU upload cadence to all be designed against a known constant.
+1. **Fixed 512Hz logic update.** This is a constraint, not a limitation — If we can't improve the internet itself, we
+   improve the software.
 
 2. **Tiered SoA storage with rollback as a first-class citizen.** Hot component data lives in SoA ring buffers (Temporal: N-frame rollback history, Volatile: triple-buffer no rollback). Cold data lives in archetype chunks. The tier is determined by the component macro, not by the entity. An entity's effective tier is the highest tier of any of its components.
 
-3. **OOP API over a data-oriented substrate.** Entity authors write `PlayerController`, `GameMode`, `GameState` — familiar concepts from Unreal. The engine decomposes those into SoA field arrays transparently. Developers don't need to understand the substrate to use it; they only need to understand it if they're extending it.
+3. **OOP API over a data-oriented substrate.** Entity authors write `PlayerController`, `GameMode`, `GameState` —
+   familiar concepts from Unreal. The engine decomposes those into SoA field arrays transparently. Developers need
+   minimal understanding of the substrate to use it--DoD and ECS concepts, not a working knowledge; they only need to
+   understand it if they're extending it.
 
 ---
 
@@ -57,7 +66,7 @@ Three interlocking design decisions define everything else:
 
 Three dedicated threads + a shared worker pool:
 
-- **Sentinel (main thread):** 1000Hz input polling, GPU resource management, frame pacing.
+- **Sentinel (main thread):** 1000Hz input polling, Engine static data management.
 - **Brain (logic thread):** 512Hz fixed-timestep coordinator. Submits `LogicQueue` jobs, then acts as a worker until jobs complete.
 - **Encoder (render thread):** Variable-rate render coordinator. Submits `RenderQueue` jobs, then acts as a worker.
 - **Worker pool:** The remaining cores pull from both queues (work-stealing).
@@ -234,12 +243,16 @@ Specific cleanup targets: duplicated state between Archetype and TemporalCompone
 
 ### Next Phase (in order)
 
-1. **Cleanup pass** — remove duplicated state, wire dirty-bit GPU upload, audit hot-path data structures
-2. **Editor (bare-bones)** — scene hierarchy, entity placement, reflected property inspection, save/load. JSON for development, binary for shipped games. Scope is explicitly limited to this definition.
-3. **Arena shooter test level** — simple arena shooter to prove all fundamental ideologies: high entity counts, physics, competitive input latency, rollback netcode
-4. **Data-driven spawn** — lambda + handshake model first (synchronous, proves the contract), deferred/batched variants after
-5. **Rollback netcode** — Jolt snapshot strategy already decided, Temporal slab rollback + dirty resimulation
-6. **Audio** — SDL3 thin wrapper first (handle-based for Anti-Event compatibility), custom layer later
+1. **Editor (bare-bones)** — scene hierarchy, entity placement, reflected property inspection, save/load. JSON for
+   development, binary for shipped games. Scope is explicitly limited to this definition.
+2. **Arena shooter test level** — simple arena shooter to prove all fundamental ideologies: high entity counts, physics,
+   competitive input latency, rollback netcode
+3. **Data-driven spawn** — lambda + handshake model first (synchronous, proves the contract), deferred/batched variants
+   after
+4. **Rollback netcode** — Jolt snapshot strategy already decided, Temporal slab rollback + dirty resimulation
+5. **Audio** — SDL3 thin wrapper first (handle-based for Anti-Event compatibility), custom layer later
+6. **Cleanup pass** — remove duplicated state, wire dirty-bit GPU upload, audit hot-path data structures, fix Jolt push
+   logic, archetype field allocation and meta storage
 
 ### Designed, Not Yet Implemented
 

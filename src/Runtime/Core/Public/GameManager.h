@@ -41,6 +41,13 @@ public:
 		return true;
 	}
 
+	/// Called from Run() after Logic, Render, and the job system are fully started.
+	/// Use this for runtime tests or setup that requires the engine loop to be active.
+	void PostStart(TrinyxEngine& engine)
+	{
+		(void)engine;
+	}
+
 	const char* GetWindowTitle() const { return "Trinyx Game"; }
 	int GetWindowWidth() const { return 1920; }
 	int GetWindowHeight() const { return 1080; }
@@ -74,7 +81,7 @@ protected:
 		                      TNX_PROJECT_DIR))                                           \
 		{                                                                                \
 			if (game.PostInitialize(engine))                                             \
-				engine.Run();                                                            \
+				engine.Run(game);                                                            \
 		}                                                                                \
 		return 0;                                                                        \
 	}

@@ -237,7 +237,10 @@ void JoltPhysics::Step(float dt)
 	// Jolt recommends 1 collision step per 1/60s. At 128Hz that's ~2 steps,
 	// but we're already substepping in the engine's accumulator loop, so
 	// each call here is exactly one fixed step.
-	constexpr int cCollisionSteps = 1;
+	//constexpr int cCollisionSteps = 1; // Leaving this at 1 even though the default fixed steps per physics is 8 so that physics is running at 64Hz
+
+	// manual calculation based on update rates.
+	static int cCollisionSteps = std::max(1, ConfigPtr->FixedUpdateHz / ConfigPtr->PhysicsUpdateInterval / 64);
 
 	PhysSystem->Update(dt, cCollisionSteps, TempAllocator.get(), JobSystem.get());
 }

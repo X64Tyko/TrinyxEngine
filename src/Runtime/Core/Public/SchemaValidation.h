@@ -45,7 +45,7 @@ namespace SchemaValidation
 	constexpr bool AllFieldProxyImpl(std::index_sequence<Is...>)
 	{
 		return (IsFieldProxy<typename MemberType<
-				std::tuple_element_t<Is, Tuple>>::Type>::value && ...);
+			std::tuple_element_t<Is, Tuple>>::Type>::value && ...);
 	}
 
 	template <typename Tuple>
@@ -60,7 +60,7 @@ namespace SchemaValidation
 	constexpr bool AllTriviallyCopyableImpl(std::index_sequence<Is...>)
 	{
 		return (std::is_trivially_copyable_v<typename MemberType<
-				std::tuple_element_t<Is, Tuple>>::Type> && ...);
+			std::tuple_element_t<Is, Tuple>>::Type> && ...);
 	}
 
 	template <typename Tuple>
@@ -89,8 +89,7 @@ namespace SchemaValidation
 
 		static constexpr bool value = []()
 		{
-			if constexpr (!has_fields)
-				return false;
+			if constexpr (!has_fields) return false;
 			return AllFieldProxyCheck<decltype(T::DefineFields())>();
 		}();
 	};
@@ -154,15 +153,14 @@ namespace SchemaValidation
         "\n" \
         "Components CANNOT have:\n" \
         "  - Virtual functions\n" \
-        "  - Non-trivial constructors/destructors\n" \
         "  - std::string, std::vector, or complex types\n" \
         "  - Heap-allocated pointers\n" \
         "\n" \
         "Use simple structs with raw data only:\n" \
         "\n" \
         "    struct Transform {\n" \
-        "        float PositionX, PositionY, PositionZ;\n" \
-        "        float RotationX, RotationY, RotationZ;\n" \
+        "        FloatProxy<WIDTH> PositionX, PositionY, PositionZ;\n" \
+        "        FloatProxy<WIDTH> RotationX, RotationY, RotationZ;\n" \
         "    };\n" \
         "\n" \
         "================================================================\n")

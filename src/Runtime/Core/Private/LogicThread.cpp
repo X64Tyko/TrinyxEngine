@@ -75,9 +75,16 @@ void LogicThread::ThreadMain()
 	{
 	}
 
+	// Stamp our thread ID so SpawnSync knows who the Logic thread is
+	TrinyxEngine::Get().GetSpawner().SetLogicThreadId(std::this_thread::get_id());
+
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
 		TNX_ZONE_NC("Logic Frame", TNX_COLOR_LOGIC);
+
+		// Sync point for deferred spawns — if any thread is waiting to
+		// spawn entities, freeze here and let it write to the current frame.
+		TrinyxEngine::Get().GetSpawner().SyncPoint();
 
 		// Measure delta time
 		const uint64_t frameStartCounter = SDL_GetPerformanceCounter();
@@ -284,8 +291,11 @@ void LogicThread::PublishCompletedFrame()
 	auto& V = header->ViewMatrix;
 	V.m[0]  = camRight.x;
 	V.m[1]  = camUp.x;
-	V.m[2]  = -camForward.x;   V.m[3] = 0.0f;
-	V.m[4]  = camRight.y;    V.m[5]   = camUp.y;    V.m[6]   = -camForward.y;
+	V.m[2]  = -camForward.x;
+	V.m[3]  = 0.0f;
+	V.m[4]  = camRight.y;
+	V.m[5]  = camUp.y;
+	V.m[6]  = -camForward.y;
 	V.m[7]  = 0.0f;
 	V.m[8]  = camRight.z;
 	V.m[9]  = camUp.z;

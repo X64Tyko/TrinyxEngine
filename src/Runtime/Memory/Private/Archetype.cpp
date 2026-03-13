@@ -1,6 +1,7 @@
 #include "../Public/Archetype.h"
 #include "Profiler.h"
 #include "TemporalComponentCache.h"
+#include "TemporalFlags.h"
 #include <cassert>
 #include <cstring>
 #include <FieldMeta.h>
@@ -328,6 +329,38 @@ void Archetype::RemoveEntity(size_t ChunkIndex, uint32_t LocalIndex, uint32_t Ar
 
 				memcpy(target, last, meta.Size);
 			}
+		}
+	}
+
+	// Mark entity as inactive+dirty in the Flags field so the GPU predicate stops drawing it.
+	// Find the TemporalFlags::Flags field in the layout and write to the current write frame.
+	{
+		Chunk* chunk            = Chunks[ChunkIndex];
+		const uint8_t flagsSlot = ComponentFieldRegistry::Get().GetCacheSlotIndex(TemporalFlags<>::StaticTypeID());
+
+		for (size_t i = 0; i < CachedFieldArrayLayout.size(); ++i)
+		{
+			const auto& desc = CachedFieldArrayLayout[i];
+			if (desc.componentID != flagsSlot) continue;
+			if (desc.Tier == CacheTier::None) break; // Flags should always be temporal
+
+			// Get the write frame pointer for the Flags field
+			uint32_t writeFrame = Reg->GetTemporalCache()->GetActiveWriteFrame();
+			uint32_t frameIdx   = writeFrame % desc.FieldFrames;
+			auto* flagsBase     = static_cast<int32_t*>(
+				static_cast<void*>(
+					static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(desc.SlotIndex))
+					+ frameIdx * desc.FrameStride));
+
+			// Clear Active, set Dirty so the renderer sees the removal
+			flagsBase[LocalIndex] = static_cast<int32_t>(TemporalFlagBits::Dirty);
+
+			// Also mark the entity dirty in the Registry's per-frame bitplane
+			size_t globalIdx    = chunk->Header.GlobalIndexStart + LocalIndex;
+			auto* dirtyBitplane = Reg->DirtyBitsFrame(writeFrame);
+			uint64_t& word      = (*dirtyBitplane)[globalIdx / 64];
+			word                |= uint64_t(1) << (globalIdx % 64);
+			break;
 		}
 	}
 
