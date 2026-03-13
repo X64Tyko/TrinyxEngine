@@ -9,7 +9,7 @@
 `FieldProxy<T, FieldWidth>` is the core component abstraction. Each proxy holds:
 
 - `WriteArray` — frame T+1 (next state, written during frame propagation)
-- `DirtyBits`— any timea field is written the entity is OR'ed in the dirty array.
+- `DirtyBits` — any time a field is written the entity is OR'ed in the dirty array.
 - `index` — current entity offset within the SoA arrays
 - `mask` — AVX2 mask for `WideMask` partial-lane writes (zero-size base for `Scalar` mode)
 

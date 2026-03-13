@@ -189,7 +189,7 @@ in the long run.
 
 ### Known Issues / Technical Debt
 
-2. **TemporalFrameStride duplicated on Archetype:** Should call `cache->GetFrameStride()` instead.
+1. **TemporalFrameStride duplicated on Archetype:** Should call `cache->GetFrameStride()` instead.
    Currently cached redundantly on every Archetype.
 
 ### Planned (Next Phase)
