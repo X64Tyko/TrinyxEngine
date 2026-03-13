@@ -22,14 +22,27 @@ GPU-driven rendering, lock-free communication) that are too risky to implement d
 
 ## Current Status (2026-03)
 
-**Performance (512Hz Logic / 64Hz Physics — 8× lockstep):**
+**Performance: ~Old Metrics~**
+- **Sentinel (Main):** 1.0ms per frame (1000 Hz) ✅
+- **Brain (Logic):** ~1.7ms per frame (target: 1.95ms @ 512Hz)
+- **Encoder (Render):** Orange cube rendering at full rate via BDA pipeline ✅
+- **100k entities:** ~0.1ms PrePhysics, ~0.7ms full logic frame
 
-- **Sentinel (Main):** 1.0ms per frame — lock-free double-buffered input at 1000Hz ✅
+**New Metrics:**
+
+- **Sentinel (Main):** 1.0ms per frame, input polling with lock free double buffered input.
 - **Brain (Logic):**
-    - **15-layer pyramid (1,240 cubes):** avg 1ms frame, 58μs physics, 105μs on Jolt pull frames — 7.37ms input→photon
-    - **25-layer pyramid (5,525 cubes):** avg 1ms (max 15.58ms under load), 1.16ms physics — 13.25ms input→photon (max 18.08ms)
-    - **100k entities (no physics):** ~0.1ms PrePhysics, ~0.3ms full frame with propagation
-- **Encoder (Render):** 0.73ms per frame (100k entities, no culling yet) ✅
+    - **15 layer Pyramid - 1240 cubes - 512Hz Logic / 8 Lock step Physics:**
+        - avg frame time: 1ms (capped at 1024 FPS)
+        - avg physics time: 58μs, 105μs on Jolt pull update frames
+        - avg jolt step time: 4.13ms
+        - avg input->photon: 7.37ms
+    - **25 layer Pyramid - 5525 cubes - 512Hz Logic / 8 Lock step Physics:**
+        - avg frame time: 1ms (capped at 1024 FPS), max 15.58ms under load
+        - avg physics time: 1.16ms, 2.44ms on Jolt pull update frames
+        - avg jolt step time: 12.58ms
+        - avg input->photon: 13.25ms, max 18.08ms under load
+- **Encoder (Render):** 0.73ms per frame
 
 **Architecture:**
 - ✅ Three-thread architecture (Sentinel/Brain/Encoder)
@@ -57,7 +70,8 @@ GPU-driven rendering, lock-free communication) that are too risky to implement d
 
 ### The Trinyx Trinity (Three-Thread Architecture)
 
-- **Sentinel (Main Thread):** 1000Hz input polling, window + Vulkan lifetime management. Frame pacing via busy-wait tail.
+- **Sentinel (Main Thread):** 1000Hz input polling, window + Vulkan lifetime management. Bit of a waste to do this all
+  on its own, probably something we can do to give it some work to do inbetween, simple jobs queue?
 - **Brain (Logic Thread):** 512Hz fixed-timestep coordinator. Dispatches per-chunk jobs, then steals work while waiting.
 - **Encoder (Render Thread):** Variable-rate render coordinator. Dispatches write jobs for new frame data to GPU
   buffers, steals render jobs while waiting. Pushes new command buffer with current data ptrs when swap is ready.
@@ -73,9 +87,9 @@ cores form the worker pool, giving ~6× effective parallelism for logic and rend
 
 Lock-free MPMC job dispatch with four priority queues:
 
-- **Logic Queue** — PrePhysics/PostPhysics per-chunk jobs (Brain produces, all consume)
+- **Physics Queue** — PrePhysics/PostPhysics per-chunk jobs (Brain produces, all consume)
 - **Render Queue** — GPU upload/compute dispatch (Encoder produces, all consume)
-- **Physics Queue** — Jolt solver jobs (Workers produce, workers consume)
+- **Physics Queue** — Jolt jobs (Worker produces, workers consume)
 - **General Queue** — Everything else + overflow from full queues
 
 Workers block via `std::atomic::wait()` (futex on Linux, WaitOnAddress on Windows) when idle —
@@ -178,8 +192,8 @@ and `WideMask` (tail-masked partial lanes for non-multiples of 8).
 1. **No virtual functions** in entities or components — compile-time enforced by `TNX_REGISTER_ENTITY`
     1. This constraint does not extend to the actual OOP side of the engine, GameModes, Pawns, Player Controllers, AI
        and State Management, etc.
-2. **FieldProxy-backed components only** — All components used with the SoA/DoD system must expose their fields as
-   `FieldProxy<T, WIDTH>` members; cold components use plain POD structs with `TNX_REGISTER_FIELDS`.
+2. **PoD Components only** — All components intended to be used with the DoD system must be comprised of FieldProxy<T,
+   WIDTH> structs.
 3. **Zero frame allocations** — no heap allocation in PrePhysics/PostPhysics/Render
 4. **Lock-free inter-thread communication** — atomics and lock-free structures only
 5. **GPU calls only on the Encoder thread** — maybe NVidia Reflex at some point, unnecessary ATM.
@@ -257,8 +271,6 @@ See [docs/PERFORMANCE_TARGETS.md](docs/PERFORMANCE_TARGETS.md) for detailed anal
 ---
 
 ## License
-
-MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 

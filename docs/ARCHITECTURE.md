@@ -70,18 +70,23 @@ iteration).
 Available in Pre/Post Physics and ScalarUpdate iteration. No rollback, changes are permanent.
 
 **Static** entities get a dedicated read-only SoA array. No rollback overhead. Physics and render include
-static data as a third dense pass after their partition ranges. Not yet implemented — pending asset import pipeline.
+static data as a third dense pass after their partition ranges. not implemented yet, want to get asset importing online
+first.
 
-**Volatile** entities use a 3-frame triple-buffer per field. One frame is being written by Logic, one is
-being read by the Encoder, and one is free. The renderer always has access to the latest complete frame
-without blocking the Logic thread. No rollback; these entities are not networked.
+**Volatile** entities use triple buffer per field. 3 frames so that renderer always has access to the latest written
+frame and Logic is not blocked if the renderer slows down. No rollback; these entities are not networked. **Old Model:**
+5 frames gives Logic/4 headroom between
+thread tick rates (4 frames = Logic/2 — tighter) used when it worked strictly as a ring buffer, now functions like a
+proper triple buffer. Changes made after determining that Logic and render no longer need access to 2 frames of data
+each.
 
 **Temporal** entities use an N-frame ring buffer where N = `max(8, rollback_depth_at_FixedUpdateHz)`.
-Full history for rollback netcode, lag compensation, and replay. Rollback interaction with Jolt Physics
-(which ticks at 1/PhysicsUpdateInterval of the Logic rate) is an open design problem.
+Full history for rollback netcode, lag compensation, and replay. Needs testing for rollback and dirty bit propagation as
+well as how Jolt interacts with rollback, particularly when it's ticking at 1/8th the Hz of the Logic thread.
 
-**Note:** If `TNX_ENABLE_ROLLBACK` is not defined, Temporal entities fall back to 3-frame triple-buffer
-(same as Volatile), saving significant memory for games that do not require rollback.
+**Valuable Note:** If TNX_ENABLE_ROLLBACK is disabled, the temporal tier is not instantiated, instead any Temporal
+component is treated as Volatile instead. This saves a ton of memory for any game that doesn't require rollback
+functionality.
 
 ---
 
@@ -647,7 +652,7 @@ Render can listen for a staticChange event and kick off an async worker to updat
 | Thread           | Reads                                        | Writes                                     |
 |------------------|----------------------------------------------|--------------------------------------------|
 | Logic (Brain)    | None, works with current state copied to T+1 | Frame T+1 (WriteArray)                     |
-| Render (Encoder) | Frame T (pre-seeded WriteArray from last tick) | GPU InstanceBuffer                         |
+| Render (Encoder) | Frame T (ReadArray)                          | GPU InstanceBuffer                         |
 | GPU              | Previous InstanceBuffer                      | Current InstanceBuffer (for interpolation) |
 | Network/Rollback | Historical frames from Temporal slab         | Corrected frame (triggers dirty resim)     |
 
