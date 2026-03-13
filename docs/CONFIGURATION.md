@@ -6,46 +6,55 @@
 
 ## EngineConfig Structure
 
-All engine timing, threading, and memory parameters are configured through `EngineConfig`:
+All engine timing, threading, and memory parameters are configured through `EngineConfig`
+(`src/Runtime/Core/Public/EngineConfig.h`):
 
 ```cpp
 struct EngineConfig
 {
     // === Timing Configuration ===
 
-    // Fixed Update Rate (Physics/Simulation)
-    // Runs at deterministic timestep regardless of frame rate.
+    // Render rate cap. 0 = uncapped. Cannot exceed FixedUpdateHz when set.
+    int TargetFPS = 0;
+
+    // Fixed Update Rate (Logic / Physics coordinator)
+    // Runs at deterministic timestep regardless of render frame rate.
     // Common values: 60, 128, 256, 512
     int FixedUpdateHz = 128;
 
-    // Input Polling Rate (Main Thread / Sentinel)
-    // How often Sentinel samples SDL input events.
-    int InputPollHz = 1000;
+    // Physics subdivisions per logic tick.
+    // PhysicsHz = FixedUpdateHz / PhysicsUpdateInterval
+    // e.g. FixedUpdateHz=512, PhysicsUpdateInterval=8 → 64Hz physics
+    int PhysicsUpdateInterval = 8;
 
     // Network Tick Rate
     // How often to send/receive network packets.
     int NetworkUpdateHz = 30;
 
+    // Input Polling Rate (Main Thread / Sentinel)
+    // How often Sentinel samples SDL input events.
+    int InputPollHz = 1000;
+
     // === Entity Budget Configuration ===
     //
     // Two fixed-size arenas, each with a dual-ended allocator:
     //
-    //   Arena 1: Physics  [0 .. MaxPhysicsEntities)
-    //     PHYS  (→) from 0             — physics-only bodies, triggers
-    //     DUAL  (←) from MaxPhysics    — physics + render (players, props)
+    //   Arena 1: Physics  [0 .. MAX_PHYSICS_ENTITIES)
+    //     PHYS  (→) from 0                — physics-only bodies, triggers
+    //     DUAL  (←) from MAX_PHYSICS      — physics + render (players, props)
     //
-    //   Arena 2: Cached  [MaxPhysicsEntities .. MaxCachedEntities)
-    //     RENDER (→) from MaxPhysics   — render-only (particles, decals)
-    //     LOGIC  (←) from MaxCached    — logic/rollback-only entities
+    //   Arena 2: Cached  [MAX_PHYSICS_ENTITIES .. MAX_CACHED_ENTITIES)
+    //     RENDER (→) from MAX_PHYSICS     — render-only (particles, decals)
+    //     LOGIC  (←) from MAX_CACHED      — logic/rollback-only entities
     //
-    // Constraints (validated at startup):
-    //   MaxPhysicsEntities <= MaxCachedEntities
+    // Constraint (validated at startup):
+    //   MAX_PHYSICS_ENTITIES <= MAX_CACHED_ENTITIES
 
     // Total size of Arena 1 (Physics). PHYS + DUAL must fit within this.
-    int MaxPhysicsEntities = 50000;
+    int MAX_PHYSICS_ENTITIES = 11000;
 
-    // Total size of both arenas combined. Replaces MaxDynamicEntities.
-    int MaxCachedEntities  = 100000;
+    // Total size of both arenas combined.
+    int MAX_CACHED_ENTITIES = 25000;
 
     // === History / Frame Depth ===
 
@@ -58,50 +67,32 @@ struct EngineConfig
     //   16:  ~31.2ms  — client prediction window
     //   64:  ~125ms   — lag compensation, replay
     //   128: ~250ms   — GGPO-style full rollback
+    //
+    // When TNX_ENABLE_ROLLBACK is not defined, Temporal entities fall back to 3-frame
+    // triple-buffer (same as Volatile), saving significant memory.
     int TemporalFrameCount = 8;
 
-    // Number of frames stored in the Volatile tier ring buffer.
-    // Fixed at 5: gives Logic/4 headroom between thread tick rates.
-    // (4 frames = Logic/2 — tighter, not recommended)
-    // Not configurable — the math only works at 5.
-    static constexpr int VolatileFrameCount = 5;
-
-    // Number of GPU InstanceBuffers.
-    // 5 decouples the VSync clock from the logic thread.
-    // Chain broken: VSync → GPU buffer → CPU render blocks → slab lock → Logic stalls.
-    static constexpr int GpuInstanceBufferCount = 5;
-
-    // === Determinism Mode ===
-
-    // When true: all physics-authoritative fields use Fixed32 (int32 fixed-point).
-    //   - Simulation is bit-identical across all platforms and compilers.
-    //   - Required for rollback netcode, GGPO, or any multiplayer with authoritative state.
-    //   - Slight CPU overhead for multiply-shift vs native float (negligible with AVX2 int math).
-    //
-    // When false: fields use float32 directly (no Fixed32 wrapper).
-    //   - Faster to author (no FixedMul, familiar float arithmetic)
-    //   - Not cross-platform bit-identical, but fine for single-player, RPGs, offline games
-    //   - Can still use space partitioning and camera-relative rendering (precision benefits remain)
-    //
-    // This is a compile-time selection baked into FieldProxy<T> — you cannot switch at runtime
-    // without rebuilding component layouts.
-    bool DeterministicSimulation = false;
+    // Job queue pre-allocation size. Exceeding this limit will assert.
+    int JobCacheSize = 16 * 1024;
 
     // === Helper Functions ===
 
+    // Returns 0.0 when TargetFPS is 0 (uncapped).
+    double GetTargetFrameTime() const;
     double GetFixedStepTime() const { return 1.0 / FixedUpdateHz; }
-    double GetInputPollInterval() const { return 1.0 / InputPollHz; }
     double GetNetworkStepTime() const { return (NetworkUpdateHz > 0) ? 1.0 / NetworkUpdateHz : 0.0; }
-    double GetTemporalHistorySeconds() const { return (double)TemporalFrameCount / (double)FixedUpdateHz; }
-
-    int GetLogicPartitionSize() const
-    {
-        return MaxCachedEntities - MaxPhysicsEntities - MaxRenderEntities;
-    }
 };
 ```
 
----
+**Note on Volatile frame count:** The Volatile slab is always a 3-frame triple-buffer (hardcoded in
+`ComponentCache<CacheTier::Volatile>::GetFrameCount`). One frame is being written by Logic, one is
+being read by the Encoder, and one is free. This is not configurable.
+
+**Note on GPU instance buffers:** Five `PersistentMapped` GPU InstanceBuffers are maintained in flight
+by `VulkRender`. This count is hardcoded to decouple the VSync clock from the logic thread's slab
+locks and is not exposed through `EngineConfig`.
+
+
 
 ## Partition Size Rules
 
@@ -114,7 +105,7 @@ MaxPhysicsEntities + MaxRenderEntities <= MaxCachedEntities  // arenas fit in to
 
 Logic entities fill the remainder of Arena 2:
 ```
-MaxLogicEntities = MaxCachedEntities - MaxPhysicsEntities - MaxRenderEntities
+MaxLogicEntities = MAX_CACHED_ENTITIES - MAX_PHYSICS_ENTITIES - (render entities allocated so far)
 ```
 
 **Physics iterates Arena 1:** `PHYS[0..N_phys)` + `DUAL[MAX_PHYS-N_dual..MAX_PHYS)` + `STATIC`
@@ -127,20 +118,19 @@ failure.
 
 ## Configuration Presets
 
-### Single-Player / RPG (No Determinism Needed)
+### Single-Player / RPG
 
 ```cpp
 EngineConfig rpgConfig;
-rpgConfig.FixedUpdateHz           = 60;
-rpgConfig.MaxPhysicsEntities      = 50000;
-rpgConfig.MaxCachedEntities       = 100000;
-rpgConfig.TemporalFrameCount      = 8;
-rpgConfig.NetworkUpdateHz         = 0;
-rpgConfig.DeterministicSimulation = false;  // float32 fields, no fixed-point overhead
+rpgConfig.FixedUpdateHz        = 60;
+rpgConfig.PhysicsUpdateInterval = 4;     // 15Hz physics
+rpgConfig.MAX_PHYSICS_ENTITIES = 10000;
+rpgConfig.MAX_CACHED_ENTITIES  = 50000;
+rpgConfig.TemporalFrameCount   = 8;
+rpgConfig.NetworkUpdateHz      = 0;
 ```
 
-**Use Case:** Single-player RPGs, narrative games, offline simulations. Full engine feature set
-(space partitioning, GPU-driven rendering, tiered storage) without the determinism machinery.
+**Use Case:** Single-player RPGs, narrative games, offline simulations.
 
 ---
 
@@ -148,11 +138,11 @@ rpgConfig.DeterministicSimulation = false;  // float32 fields, no fixed-point ov
 
 ```cpp
 EngineConfig lightweightConfig;
-lightweightConfig.FixedUpdateHz      = 60;
-lightweightConfig.MaxPhysicsEntities = 25000;
-lightweightConfig.MaxCachedEntities  = 50000;
-lightweightConfig.TemporalFrameCount = 8;
-lightweightConfig.NetworkUpdateHz    = 0;
+lightweightConfig.FixedUpdateHz        = 60;
+lightweightConfig.MAX_PHYSICS_ENTITIES = 5000;
+lightweightConfig.MAX_CACHED_ENTITIES  = 25000;
+lightweightConfig.TemporalFrameCount   = 8;
+lightweightConfig.NetworkUpdateHz      = 0;
 ```
 
 **Use Case:** Single-player games, simple simulations, no networking.
@@ -163,32 +153,34 @@ lightweightConfig.NetworkUpdateHz    = 0;
 
 ```cpp
 EngineConfig balancedConfig;
-balancedConfig.FixedUpdateHz      = 128;
-balancedConfig.MaxPhysicsEntities = 50000;
-balancedConfig.MaxCachedEntities  = 100000;
-balancedConfig.TemporalFrameCount = 16;   // ~125ms history @ 128Hz
-balancedConfig.NetworkUpdateHz    = 30;
+balancedConfig.FixedUpdateHz        = 128;
+balancedConfig.PhysicsUpdateInterval = 2;   // 64Hz physics
+balancedConfig.MAX_PHYSICS_ENTITIES = 25000;
+balancedConfig.MAX_CACHED_ENTITIES  = 100000;
+balancedConfig.TemporalFrameCount   = 16;   // ~125ms history @ 128Hz
+balancedConfig.NetworkUpdateHz      = 30;
 ```
 
 **Use Case:** Most networked games, action games.
 
 ---
 
-### Competitive (High-Frequency, Full Determinism)
+### Competitive (High-Frequency)
 
 ```cpp
 EngineConfig competitiveConfig;
-competitiveConfig.FixedUpdateHz           = 512;
-competitiveConfig.DeterministicSimulation = true;  // Fixed32 fields, rollback-safe
-competitiveConfig.InputPollHz             = 1000;
-competitiveConfig.MaxPhysicsEntities      = 30000;
-competitiveConfig.MaxCachedEntities       = 50000;
-competitiveConfig.TemporalFrameCount      = 128;  // ~250ms history @ 512Hz
-competitiveConfig.NetworkUpdateHz         = 60;
+competitiveConfig.FixedUpdateHz        = 512;
+competitiveConfig.PhysicsUpdateInterval = 8;   // 64Hz physics
+competitiveConfig.InputPollHz          = 1000;
+competitiveConfig.MAX_PHYSICS_ENTITIES = 15000;
+competitiveConfig.MAX_CACHED_ENTITIES  = 25000;
+competitiveConfig.TemporalFrameCount   = 128;  // ~250ms history @ 512Hz
+competitiveConfig.NetworkUpdateHz      = 60;
 ```
 
 **Use Case:** Fighting games, competitive shooters, esports titles.
-Rollback depth = 250ms, enough for GGPO-style netcode at typical internet latency.
+Rollback depth = 250ms — enough for GGPO-style netcode at typical internet latency.
+Requires `TNX_ENABLE_ROLLBACK` defined; without it, Temporal falls back to 3-frame triple-buffer.
 
 ---
 
@@ -196,11 +188,11 @@ Rollback depth = 250ms, enough for GGPO-style netcode at typical internet latenc
 
 ```cpp
 EngineConfig simulationConfig;
-simulationConfig.FixedUpdateHz      = 60;
-simulationConfig.MaxPhysicsEntities = 100000;
-simulationConfig.MaxCachedEntities  = 250000;
-simulationConfig.TemporalFrameCount = 8;
-simulationConfig.NetworkUpdateHz    = 0;
+simulationConfig.FixedUpdateHz        = 60;
+simulationConfig.MAX_PHYSICS_ENTITIES = 50000;
+simulationConfig.MAX_CACHED_ENTITIES  = 250000;
+simulationConfig.TemporalFrameCount   = 8;
+simulationConfig.NetworkUpdateHz      = 0;
 ```
 
 **Use Case:** Strategy games, crowd simulations. Lower Hz compensates for higher entity count.
@@ -223,26 +215,27 @@ simulationConfig.NetworkUpdateHz    = 0;
 ### Volatile Slab Size
 
 ```
-VolatileSlab = MaxCachedEntities × HotBytesPerEntity × VolatileFrameCount (5)
-             = 100,000 × 92B × 5 ≈ 46 MB
+VolatileSlab = MAX_CACHED_ENTITIES × HotBytesPerEntity × VolatileFrameCount (3)
+             = 100,000 × 92B × 3 ≈ 27.6 MB
 ```
+
 
 ### Temporal Slab Size
 
 ```
-TemporalSlab = MaxCachedEntities × HotBytesPerEntity × TemporalFrameCount
+TemporalSlab = MAX_CACHED_ENTITIES × HotBytesPerEntity × TemporalFrameCount
              = 100,000 × 92B × 8  ≈ 73.6 MB   (TemporalFrameCount = 8)
              = 100,000 × 92B × 128 ≈ 1.18 GB  (TemporalFrameCount = 128)
 ```
 
-### Memory Table (MaxCachedEntities = 100k, 92 B/entity/frame)
+### Memory Table (MAX_CACHED_ENTITIES = 100k, 92 B/entity/frame)
 
-| TemporalFrameCount | Temporal Slab | + Volatile (5) | Total Hot RAM |
+| TemporalFrameCount | Temporal Slab | + Volatile (3) | Total Hot RAM |
 |-------------------|--------------|----------------|---------------|
-| 8 | 73.6 MB | 46 MB | ~120 MB |
-| 16 | 147 MB | 46 MB | ~193 MB |
-| 64 | 589 MB | 46 MB | ~635 MB |
-| 128 | 1.18 GB | 46 MB | ~1.22 GB |
+| 8 | 73.6 MB | 27.6 MB | ~101 MB |
+| 16 | 147 MB | 27.6 MB | ~175 MB |
+| 64 | 589 MB | 27.6 MB | ~617 MB |
+| 128 | 1.18 GB | 27.6 MB | ~1.21 GB |
 
 Add ~100 MB for cold components in archetype chunks + ECS metadata.
 
@@ -250,9 +243,9 @@ Add ~100 MB for cold components in archetype chunks + ECS metadata.
 
 | Buffer | Size (100k entities) |
 |--------|----------------------|
-| InstanceBuffer × 5 | 5 × (MaxDynamic × FieldStride) ≈ 5 × 12 MB = 60 MB |
+| InstanceBuffer × 5 | 5 × (MAX_CACHED_ENTITIES × FieldStride) ≈ 5 × 12 MB = 60 MB |
 | Static Buffer | Static entity count × FieldStride ≈ few MB |
-| Cumulative Dirty Bit Array | MaxDynamic / 8 × 2 (double-buffered) ≈ 25 KB |
+| Cumulative Dirty Bit Array | MAX_CACHED_ENTITIES / 8 × 2 (double-buffered) ≈ 25 KB |
 
 ---
 
@@ -298,16 +291,16 @@ The `TNX_IMPLEMENT_GAME` macro generates `main()`, initializes the engine with t
 ```ini
 FixedUpdateHz = 512
 TemporalFrameCount = 128
-MaxPhysicsEntities = 50000
-MaxCachedEntities = 100000
+MAX_PHYSICS_ENTITIES = 15000
+MAX_CACHED_ENTITIES = 25000
 InputPollHz = 1000
-JobCacheSize = 1024
+JobCacheSize = 16384
 ```
 
 ### What Can Change at Runtime
 
 **Safe to adjust:** Nothing size-related — all partition and tier sizes are baked into slab allocations at startup.
-The logic thread rate can be re-targeted by modifying FixedUpdateHz before calling Run(), but changing
+The logic thread rate can be re-targeted by modifying `FixedUpdateHz` before calling `Run()`, but changing
 it mid-simulation would break the temporal history interpretation.
 
 ---

@@ -56,15 +56,15 @@ Brain and Encoder are **coordinators, not dedicated workers**. On an 8-core CPU 
 
 The ECS is archetype-based. Entities of the same component signature share an **Archetype**, whose data lives in 64 KB **Chunks** (`src/Runtime/Memory/`).
 
-Hot components (those marked `TNX_TEMPORAL_FIELDS`) are decomposed into Structure-of-Arrays and placed in the **TemporalComponentCache** (`TemporalComponentCache.h/cpp`). This is the current implementation of the dual-buffer (ReadArray/WriteArray) system that will eventually migrate to the full History Slab.
+Hot components (those marked `TNX_TEMPORAL_FIELDS`) are decomposed into Structure-of-Arrays and placed in the **TemporalComponentCache** (`TemporalComponentCache.h/cpp`). This is the current implementation of the tiered SoA slab system (proto-History Slab). Each tick, `PropagateFrame` memcpy-seeds the new write frame from the previous frame before dispatch, so FieldProxy authors read and write through a single `WriteArray` pointer rather than separate read/write arrays.
 
 Cold components (no `TNX_TEMPORAL_FIELDS`) live only in Archetype chunks.
 
 ### FieldProxy — SoA with OOP Syntax
 
 `FieldProxy<T, FieldWidth>` (`src/Runtime/Core/Public/FieldProxy.h`) is the core abstraction. Each field proxy holds:
-- `ReadArray` — frame T (current simulation state, read-only during update)
-- `WriteArray` — frame T+1 (next state, written during update)
+- `WriteArray` — the current write-frame SoA array (pre-seeded with the previous frame's values by `PropagateFrame` before each dispatch; entity authors read and write through this single pointer)
+- `DirtyBits` — byte-plane dirty tracker; any write ORs the entity's slot, driving GPU upload and rollback blast-radius
 - `index` — current entity offset within the SoA arrays
 - `mask` — AVX2 mask for `WideMask` mode partial-lane writes
 
@@ -73,7 +73,7 @@ Cold components (no `TNX_TEMPORAL_FIELDS`) live only in Archetype chunks.
 - `Wide` — 8 entities per AVX2 instruction (maximum throughput)
 - `WideMask` — like `Wide` but with a tail mask for non-multiple-of-8 counts
 
-`Bind()` copies from ReadArray→WriteArray and caches the index. `Advance(step)` increments the index and propagates the copy. All arithmetic operators (`+=`, `-=`, `*=`, etc.) write to `WriteArray` and read from `WriteArray` for the accumulate path.
+`Bind()` sets the `WriteArray` and `DirtyBits` pointers and caches the starting index. `Advance(step)` increments the index. All arithmetic operators (`+=`, `-=`, `*=`, etc.) read from and write to `WriteArray` (the accumulate path) and mark the entity dirty via `DirtyBits`.
 
 ### Entity Definition Pattern
 

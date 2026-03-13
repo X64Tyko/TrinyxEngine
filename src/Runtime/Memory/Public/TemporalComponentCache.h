@@ -243,7 +243,7 @@ protected:
 // RenderThread use the ComponentCacheBase* pointer.
 //
 // The 3 CRTP overrides that differ between tiers:
-//   GetFrameCount  — Volatile: 5 (fixed), Temporal: Config->TemporalFrameCount
+//   GetFrameCount  — Volatile: 3 (fixed, triple-buffer), Temporal: Config->TemporalFrameCount
 //   GetCacheTier   — returns the CacheTier enum value
 //   GetLabel       — "Volatile" or "Temporal" for logging
 // ─────────────────────────────────────────────────────────────────────────────

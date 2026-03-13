@@ -187,7 +187,7 @@ public:
 	// Build interleaved dual field array table (read T, write T+1) for FieldProxy::Bind()
 	// Output layout: [read0, write0, read1, write1, read2, write2, ...]
 	// absoluteFrame: raw monotonic frame counter — each SoA field computes its own
-	// modular read/write indices from its FrameCount, so Volatile (5-frame) and
+	// modular read/write indices from its FrameCount, so Volatile (3-frame triple-buffer) and
 	// Temporal (N-frame) fields in the same archetype work correctly.
 	void BuildFieldDualArrayTable(Chunk* chunk, void** outDualArrayTable, uint32_t absoluteFrame, uint32_t VolatileAbsoluteFrame) const
 	{
