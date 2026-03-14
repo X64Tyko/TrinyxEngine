@@ -7,7 +7,7 @@ if(MSVC OR CMAKE_GENERATOR MATCHES "Visual Studio")
 endif()
 
 # Solution/Workspace level project
-project(TrinyxSolution VERSION 0.1 LANGUAGES CXX)
+project(TrinyxSolution VERSION 0.1 LANGUAGES C CXX)
 
 # -----------------------------------------------------------------------------
 # 1. STANDARDS & COMPILER SETTINGS
@@ -28,6 +28,14 @@ option(ENABLE_AVX2 "Enable AVX2 instruction set" ON)
 option(TNX_ALIGN_64 "Use 64-byte alignment for field arrays (zero cache line splits, more memory)" OFF)
 option(TNX_ENABLE_ROLLBACK "Enable N-frame rollback history. Off = TNX_TEMPORAL_FIELDS components use Volatile (5-frame) storage." OFF)
 option(TNX_DETAILED_METRICS "Log per-frame latency breakdown (Buffer/Pipeline/Scanout). Noisy." OFF)
+option(TNX_ENABLE_EDITOR "Enable editor UI (ImGui integration). Adds editor panels and overlay." OFF)
+
+if (TNX_ENABLE_EDITOR)
+    add_compile_definitions(TNX_ENABLE_EDITOR)
+    message(STATUS "Editor UI: ENABLED (ImGui)")
+else ()
+    message(STATUS "Editor UI: DISABLED")
+endif ()
 
 if (TNX_ENABLE_ROLLBACK)
     add_compile_definitions(TNX_ENABLE_ROLLBACK)
@@ -45,6 +53,8 @@ set(VOLK_PATH  "${CMAKE_SOURCE_DIR}/libs/volk")
 set(VMA_PATH   "${CMAKE_SOURCE_DIR}/libs/vma")
 set(SLANG_PATH "${CMAKE_SOURCE_DIR}/libs/slang")
 set(JOLT_PATH "${CMAKE_SOURCE_DIR}/libs/jolt")
+set(IMGUI_PATH "${CMAKE_SOURCE_DIR}/libs/imgui")
+set(GNS_PATH "${CMAKE_SOURCE_DIR}/libs/gns")
 
 # Slang runtime API — headers + importable library target.
 # Nothing in the engine links it yet; the target exists so rendering code can
@@ -179,7 +189,28 @@ if (NOT MSVC)
 endif ()
 
 # -----------------------------------------------------------------------------
-# 7. SUBDIRECTORIES (Projects in Solution)
+# 7. GAMENETWORKINGSOCKETS (vendored, built from source)
+# -----------------------------------------------------------------------------
+# Static lib only — we link it into Trinyx, don't ship a shared lib.
+set(BUILD_STATIC_LIB ON CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(ENABLE_ICE OFF CACHE BOOL "" FORCE)
+set(USE_STEAMWEBRTC OFF CACHE BOOL "" FORCE)
+set(Protobuf_USE_STATIC_LIBS OFF CACHE BOOL "" FORCE)
+set(LTO OFF CACHE BOOL "" FORCE)
+
+add_subdirectory("${GNS_PATH}" gns-build)
+
+# Suppress all warnings on GNS (third-party code).
+if (TARGET GameNetworkingSockets_s AND NOT MSVC)
+    target_compile_options(GameNetworkingSockets_s PRIVATE -w)
+endif ()
+
+# -----------------------------------------------------------------------------
+# 8. SUBDIRECTORIES (Projects in Solution)
 # -----------------------------------------------------------------------------
 add_subdirectory(Trinyx)
 add_subdirectory(Testbed)

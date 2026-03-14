@@ -12,6 +12,12 @@ class LogicThread;
 struct EngineConfig;
 struct SDL_Window;
 
+#if TNX_ENABLE_EDITOR
+union SDL_Event;
+class EditorContext;
+struct ImGuiEventQueue;
+#endif
+
 // -----------------------------------------------------------------------
 // VulkRender  (next-generation Encoder)
 //
@@ -94,6 +100,11 @@ public:
 	void Join();
 	bool IsRunning() const { return bIsRunning.load(std::memory_order_relaxed); }
 
+#if TNX_ENABLE_EDITOR
+	/// Feed an SDL event to ImGui from the main thread. Thread-safe.
+	void PushImGuiEvent(const SDL_Event& event);
+#endif
+
 private:
 	void ThreadMain();
 	int RenderFrame();
@@ -110,6 +121,14 @@ private:
 	void RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex);
 	void TrackFPS();
 	void OnSwapchainResize();
+
+#if TNX_ENABLE_EDITOR
+	// ---- ImGui ----
+	bool InitImGui();
+	void ShutdownImGui();
+	void DrainImGuiEvents();
+	void BuildImGuiFrame();
+#endif
 
 	// ---- References (non-owning) ----
 	Registry* RegistryPtr         = nullptr;
@@ -181,5 +200,15 @@ private:
 	double LatencyAccumMs   = 0.0;
 	uint32_t LatencySamples = 0;
 	double DisplayRefreshMs = 0.0;
+#endif
+
+#if TNX_ENABLE_EDITOR
+	// ---- ImGui / Editor ----
+	// Raw pointers — lifetime managed by InitImGui/ShutdownImGui.
+	// Avoids unique_ptr<incomplete type> forcing constructor/destructor out-of-line.
+	VkDescriptorPool ImGuiDescriptorPool = VK_NULL_HANDLE;
+	bool bImGuiInitialized               = false;
+	ImGuiEventQueue* EventQueue          = nullptr;
+	EditorContext* Editor                = nullptr;
 #endif
 };

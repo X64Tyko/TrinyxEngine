@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <mutex>
 #include <vector>
 
 #include <SDL3/SDL.h>
@@ -22,6 +23,46 @@
 #include "LogicThread.h"
 #include "TrinyxEngine.h"
 #include "../../Core/Private/ThreadPinning.h"
+
+#if TNX_ENABLE_EDITOR
+#include "imgui.h"
+#include "imgui_impl_sdl3.h"
+#include "imgui_impl_vulkan.h"
+#include "EditorContext.h"
+
+// -----------------------------------------------------------------------
+// ImGuiEventQueue — ring buffer for cross-thread SDL event forwarding.
+// Defined here to keep SDL_Event out of VulkRender.h.
+// -----------------------------------------------------------------------
+struct ImGuiEventQueue
+{
+	static constexpr uint32_t kCapacity = 64;
+	SDL_Event Events[kCapacity]{};
+	uint32_t Head = 0; // write index (main thread writes under lock)
+	uint32_t Tail = 0; // read index (render thread reads under lock)
+	std::mutex Mutex;
+
+	void Push(const SDL_Event& e)
+	{
+		std::lock_guard lock(Mutex);
+		Events[Head] = e;
+		Head         = (Head + 1) % kCapacity;
+		if (Head == Tail) Tail = (Tail + 1) % kCapacity; // overwrite oldest on overflow
+	}
+
+	// Drain all pending events into ImGui. Called on render thread.
+	void DrainIntoImGui()
+	{
+		std::lock_guard lock(Mutex);
+		while (Tail != Head)
+		{
+			ImGui_ImplSDL3_ProcessEvent(&Events[Tail]);
+			Tail = (Tail + 1) % kCapacity;
+		}
+	}
+};
+#endif // TNX_ENABLE_EDITOR
+
 // -----------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------
@@ -136,6 +177,13 @@ void VulkRender::Start()
 	}
 #endif
 
+#if TNX_ENABLE_EDITOR
+	if (!InitImGui())
+	{
+		LOG_ERROR("[VulkRender] ImGui initialization failed; editor disabled");
+	}
+#endif
+
 	bIsRunning.store(true, std::memory_order_release);
 	Thread = std::thread(&VulkRender::ThreadMain, this);
 	TrinyxThreading::PinThread(Thread);
@@ -157,16 +205,151 @@ void VulkRender::Join()
 	}
 
 	// GPU must be fully idle before sync objects, images, and pipelines are destroyed.
-	if (VkCtx && VkCtx
-		->
-		GetDevice() != VK_NULL_HANDLE
+	if (VkCtx&& VkCtx
+		
+	->
+	GetDevice() != VK_NULL_HANDLE
 	)
 	{
 		vkDeviceWaitIdle(VkCtx->GetDevice());
 	}
 
 	DestroyShaders();
+
+#if TNX_ENABLE_EDITOR
+	ShutdownImGui();
+#endif
 }
+
+// -----------------------------------------------------------------------
+// ImGui integration (editor builds only)
+// -----------------------------------------------------------------------
+
+#if TNX_ENABLE_EDITOR
+
+bool VulkRender::InitImGui()
+{
+	// Descriptor pool for ImGui's internal textures (font atlas, etc.)
+	VkDescriptorPoolSize poolSizes[] = {
+		{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16},
+	};
+
+	VkDescriptorPoolCreateInfo poolCI{};
+	poolCI.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	poolCI.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	poolCI.maxSets       = 16;
+	poolCI.poolSizeCount = 1;
+	poolCI.pPoolSizes    = poolSizes;
+
+	if (vkCreateDescriptorPool(device, &poolCI, nullptr, &ImGuiDescriptorPool) != VK_SUCCESS)
+	{
+		LOG_ERROR("[VulkRender] Failed to create ImGui descriptor pool");
+		return false;
+	}
+
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+
+	ImGuiIO& io    = ImGui::GetIO();
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+	ImGui::StyleColorsDark();
+
+	// SDL3 backend — processes input events forwarded from Sentinel thread.
+	ImGui_ImplSDL3_InitForVulkan(WindowPtr);
+
+	// Vulkan backend — dynamic rendering, no VkRenderPass.
+	const VulkanSwapchain& swap = VkCtx->GetSwapchain();
+	VkFormat colorFormat        = static_cast<VkFormat>(swap.Format);
+
+	ImGui_ImplVulkan_InitInfo initInfo{};
+	initInfo.ApiVersion          = VK_API_VERSION_1_4;
+	initInfo.Instance            = VkCtx->GetInstance();
+	initInfo.PhysicalDevice      = VkCtx->GetPhysicalDevice();
+	initInfo.Device              = device;
+	initInfo.QueueFamily         = VkCtx->GetQueues().GraphicsFamily;
+	initInfo.Queue               = static_cast<VkQueue>(VkCtx->GetQueues().Graphics);
+	initInfo.DescriptorPool      = ImGuiDescriptorPool;
+	initInfo.MinImageCount       = static_cast<uint32_t>(swap.Images.size());
+	initInfo.ImageCount          = static_cast<uint32_t>(swap.Images.size());
+	initInfo.UseDynamicRendering = true;
+	initInfo.MinAllocationSize   = 1024 * 1024;
+
+	// Dynamic rendering pipeline info — must match the format used by RecordCommandBuffer.
+	initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+	initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount    = 1;
+	initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &colorFormat;
+	initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.depthAttachmentFormat   = DepthFormat;
+
+	if (!ImGui_ImplVulkan_Init(&initInfo))
+	{
+		LOG_ERROR("[VulkRender] ImGui_ImplVulkan_Init failed");
+		return false;
+	}
+
+	// Event queue for cross-thread SDL event forwarding.
+	EventQueue = new ImGuiEventQueue();
+
+	// Editor context for panel drawing.
+	Editor = new EditorContext();
+	Editor->Initialize(RegistryPtr, ConfigPtr);
+
+	bImGuiInitialized = true;
+	LOG_INFO("[VulkRender] ImGui initialized (dynamic rendering, docking enabled)");
+	return true;
+}
+
+void VulkRender::ShutdownImGui()
+{
+	if (!bImGuiInitialized) return;
+
+	vkDeviceWaitIdle(device);
+
+	delete Editor;
+	Editor = nullptr;
+	delete EventQueue;
+	EventQueue = nullptr;
+
+	ImGui_ImplVulkan_Shutdown();
+	ImGui_ImplSDL3_Shutdown();
+	ImGui::DestroyContext();
+
+	if (ImGuiDescriptorPool != VK_NULL_HANDLE)
+	{
+		vkDestroyDescriptorPool(device, ImGuiDescriptorPool, nullptr);
+		ImGuiDescriptorPool = VK_NULL_HANDLE;
+	}
+
+	bImGuiInitialized = false;
+	LOG_INFO("[VulkRender] ImGui shut down");
+}
+
+void VulkRender::PushImGuiEvent(const SDL_Event& event)
+{
+	if (EventQueue) EventQueue->Push(event);
+}
+
+void VulkRender::DrainImGuiEvents()
+{
+	if (EventQueue) EventQueue->DrainIntoImGui();
+}
+
+void VulkRender::BuildImGuiFrame()
+{
+	DrainImGuiEvents();
+
+	ImGui_ImplVulkan_NewFrame();
+	ImGui_ImplSDL3_NewFrame();
+	ImGui::NewFrame();
+
+	// Editor builds all panels.
+	if (Editor) Editor->BuildFrame();
+
+	ImGui::Render();
+}
+
+#endif // TNX_ENABLE_EDITOR
 
 // -----------------------------------------------------------------------
 // CreateFrameSync
@@ -754,7 +937,7 @@ void VulkRender::ThreadMain()
 			// Write frame data
 			WriteToFrameSlab();
 		}
-		
+
 		int8_t renderRes = RenderFrame();
 		if (renderRes < 0) break;
 		else if (renderRes == 0) continue; // This stops us counting FPS from failing to render.
@@ -813,6 +996,10 @@ int VulkRender::RenderFrame()
 	vkResetFences(device, 1, &fence);
 
 	FillGpuFrameData(frame);
+
+#if TNX_ENABLE_EDITOR
+	if (bImGuiInitialized) BuildImGuiFrame();
+#endif
 
 	{
 		TNX_ZONE_COARSE_NC("Render_Record", TNX_COLOR_RENDERING)
@@ -885,8 +1072,8 @@ int VulkRender::RenderFrame()
 		LatencyAccumMs += totalMs;
 		++LatencySamples;
 #if TNX_DEV_METRICS_DETAILED
-		LOG_DEBUG_F("[Latency] Pipeline: %.2fms | Scanout: %.2fms | Total: %.2fms",
-					pipelineMs, DisplayRefreshMs, totalMs);
+	LOG_DEBUG_F("[Latency] Pipeline: %.2fms | Scanout: %.2fms | Total: %.2fms",
+				pipelineMs, DisplayRefreshMs, totalMs);
 #endif
 	}
 #endif
@@ -1095,6 +1282,15 @@ void VulkRender::RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex)
 		VkBuffer drawBuf = static_cast<VkBuffer>(frame.DrawArgsBuffer.Buffer);
 		vkCmdDrawIndexedIndirect(cmd, drawBuf, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
 	}
+
+#if TNX_ENABLE_EDITOR
+	// ImGui draws on top of the scene within the same dynamic rendering pass.
+	// Its pipeline has depth test disabled — pure 2D overlay.
+	if (bImGuiInitialized)
+	{
+		ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+	}
+#endif
 
 	vkCmdEndRendering(cmd);
 

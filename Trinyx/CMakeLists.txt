@@ -11,12 +11,31 @@ find_package(Vulkan REQUIRED)
 # -----------------------------------------------------------------------------
 # SOURCE MANAGEMENT
 # -----------------------------------------------------------------------------
-# Gather all engine source files
-file(GLOB_RECURSE ENGINE_SOURCES "${CMAKE_SOURCE_DIR}/src/*.cpp")
-file(GLOB_RECURSE ENGINE_HEADERS "${CMAKE_SOURCE_DIR}/src/*.h")
+# Gather engine source files (Runtime only — Editor is added conditionally below).
+file(GLOB_RECURSE ENGINE_SOURCES "${CMAKE_SOURCE_DIR}/src/Runtime/*.cpp")
+file(GLOB_RECURSE ENGINE_HEADERS "${CMAKE_SOURCE_DIR}/src/Runtime/*.h")
 
-# volk.c provides the Vulkan function loader implementation (compiled once here).
-set(VOLK_SOURCES "${VOLK_PATH}/volk.c")
+# volk: VOLK_IMPLEMENTATION is defined in VulkanContext.cpp — no standalone volk.c needed.
+set(VOLK_SOURCES "")
+
+# Dear ImGui + Editor sources (editor builds only).
+if (TNX_ENABLE_EDITOR)
+    file(GLOB_RECURSE EDITOR_SOURCES "${CMAKE_SOURCE_DIR}/src/Editor/*.cpp")
+    file(GLOB_RECURSE EDITOR_HEADERS "${CMAKE_SOURCE_DIR}/src/Editor/*.h")
+    set(IMGUI_SOURCES
+            "${IMGUI_PATH}/imgui.cpp"
+            "${IMGUI_PATH}/imgui_demo.cpp"
+            "${IMGUI_PATH}/imgui_draw.cpp"
+            "${IMGUI_PATH}/imgui_tables.cpp"
+            "${IMGUI_PATH}/imgui_widgets.cpp"
+            "${IMGUI_PATH}/backends/imgui_impl_vulkan.cpp"
+            "${IMGUI_PATH}/backends/imgui_impl_sdl3.cpp"
+    )
+else ()
+    set(EDITOR_SOURCES "")
+    set(EDITOR_HEADERS "")
+    set(IMGUI_SOURCES "")
+endif ()
 
 # -----------------------------------------------------------------------------
 # LIBRARY DEFINITION
@@ -24,8 +43,11 @@ set(VOLK_SOURCES "${VOLK_PATH}/volk.c")
 add_library(${PROJECT_NAME} STATIC
     ${ENGINE_SOURCES}
     ${ENGINE_HEADERS}
+        ${EDITOR_SOURCES}
+        ${EDITOR_HEADERS}
     ${TRACY_SOURCES}
     ${VOLK_SOURCES}
+        ${IMGUI_SOURCES}
         ../src/Runtime/Core/Public/ComponentView.h
         ../src/Runtime/Core/Public/TrinyxJobs.h
 )
@@ -36,6 +58,13 @@ if(TRACY_SOURCES AND NOT MSVC)
         COMPILE_FLAGS "-w"
     )
 endif()
+
+# Suppress all warnings from Dear ImGui (third-party, not our code)
+if (TNX_ENABLE_EDITOR AND NOT MSVC)
+    set_source_files_properties(${IMGUI_SOURCES} PROPERTIES
+            COMPILE_FLAGS "-w"
+    )
+endif ()
 
 # -----------------------------------------------------------------------------
 # FORCE RELWITHDEBINFO FOR ENGINE
@@ -74,6 +103,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     "${CMAKE_SOURCE_DIR}/src/Runtime/Components/Public"
     "${CMAKE_SOURCE_DIR}/src/Runtime/Input/Public"
         "${CMAKE_SOURCE_DIR}/src/Runtime/Physics/Public"
+        "${CMAKE_SOURCE_DIR}/src/Editor/Public"
 )
 
 # B. SDL3 - Platform specific
@@ -97,24 +127,34 @@ target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
     "${VMA_PATH}"
     "${Vulkan_INCLUDE_DIRS}"
 )
+
+# E. Dear ImGui (editor builds only)
+if (TNX_ENABLE_EDITOR)
+    target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
+            "${IMGUI_PATH}"
+            "${IMGUI_PATH}/backends"
+    )
+endif ()
 target_link_libraries(${PROJECT_NAME} PUBLIC Vulkan::Vulkan)
 
 # D. Jolt Physics
 target_link_libraries(${PROJECT_NAME} PUBLIC Jolt)
 target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC "${JOLT_PATH}")
 
-# volk.c must not be compiled with -Werror (upstream code, not ours)
-if(NOT MSVC)
-    set_source_files_properties("${VOLK_PATH}/volk.c" PROPERTIES
-        COMPILE_FLAGS "-Wno-error"
-    )
+# F. GameNetworkingSockets (static)
+if (TARGET GameNetworkingSockets_s)
+    target_link_libraries(${PROJECT_NAME} PUBLIC GameNetworkingSockets_s)
+    target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC "${GNS_PATH}/include")
 endif()
+
+# volk: VOLK_IMPLEMENTATION lives in VulkanContext.cpp; no separate volk.c TU to flag.
 
 # Shader output directory baked into the binary as a compile-time constant.
 # vulkan.hpp: use dynamic dispatch (compatible with volk global function pointers).
 target_compile_definitions(${PROJECT_NAME} PUBLIC
     TNX_SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders"
     VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
+        $<$<BOOL:${TNX_ENABLE_EDITOR}>:IMGUI_IMPL_VULKAN_USE_VOLK>
         $<$<NOT:$<CONFIG:Release>>:TNX_DEV_METRICS=1>
         $<$<BOOL:${TNX_DETAILED_METRICS}>:TNX_DEV_METRICS_DETAILED=1>
 )

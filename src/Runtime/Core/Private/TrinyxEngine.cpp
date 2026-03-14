@@ -226,6 +226,11 @@ void TrinyxEngine::PumpEvents()
 	SDL_Event e;
 	while (SDL_PollEvent(&e))
 	{
+#if TNX_ENABLE_EDITOR
+		// Forward every event to ImGui before engine processing.
+		if (Render) Render->PushImGuiEvent(e);
+#endif
+
 		switch (e.type)
 		{
 			case SDL_EVENT_QUIT: bIsRunning.store(false, std::memory_order_release);
