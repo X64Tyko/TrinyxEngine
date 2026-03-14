@@ -206,7 +206,8 @@ void VulkRender::Join()
 
 	// GPU must be fully idle before sync objects, images, and pipelines are destroyed.
 	if (VkCtx&& VkCtx
-		
+
+	
 	->
 	GetDevice() != VK_NULL_HANDLE
 	)
@@ -293,7 +294,7 @@ bool VulkRender::InitImGui()
 
 	// Editor context for panel drawing.
 	Editor = new EditorContext();
-	Editor->Initialize(RegistryPtr, ConfigPtr);
+	Editor->Initialize(RegistryPtr, ConfigPtr, LogicPtr);
 
 	bImGuiInitialized = true;
 	LOG_INFO("[VulkRender] ImGui initialized (dynamic rendering, docking enabled)");
