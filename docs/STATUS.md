@@ -7,8 +7,47 @@
 ## Timeline Context
 
 **Project Start:** ~2026-02-01 (Week 1)
-**Current Date:** 2026-03-12
-**Phase:** Physics Integration + Render Pipeline Optimization
+**Current Date:** 2026-03-14
+**Phase:** Editor (Phase 1–6 of editor plan in progress)
+
+---
+
+## Roadmap
+
+The roadmap is organized into two stages: **Foundation** and **Hardening**. The foundation stage adds the remaining
+subsystems needed to build a real game. The hardening stage locks down the substrate before gameplay layer development
+begins.
+
+### Stage 1: Foundation (current)
+
+| # | Milestone               | Status      | Notes                                                                                                                   |
+|---|-------------------------|-------------|-------------------------------------------------------------------------------------------------------------------------|
+| 1 | **Editor (bare-bones)** | In progress | Scene hierarchy, entity inspection, reflected properties, save/load. ImGui docking, 6 panels. JSON serialization.       |
+| 2 | **Networking**          | Not started | GNS wrapper, client/server authority model, PIE loopback. Rollback netcode uses existing Temporal slab + Jolt snapshot. |
+| 3 | **Audio**               | Not started | SDL3 thin wrapper first (handle-based for Anti-Event compatibility). Minimal — just enough for gameplay feedback.       |
+
+### Stage 2: Hardening
+
+Once Editor + Networking + Audio are functional, the engine enters a dedicated cleanup, refactoring, and rewrite phase.
+The goal is to make the substrate as solid as possible before building the gameplay layer (Construct/View system,
+behavior trees, etc.) on top of it.
+
+**Hardening targets (non-exhaustive):**
+
+- Wire cumulative dirty bit array to GPU upload (currently full-slab copy)
+- Migrate `GetTemporalFieldWritePtr` from Archetype to TemporalComponentCache
+- Remove duplicated `TemporalFrameStride` from Archetype
+- Fixed-point coordinate system (`Fixed32`, `SimFloat` alias, Jolt bridge validation)
+- Audit hot-path data structures for cache efficiency
+- Archetype field allocation and meta storage cleanup
+- Jolt push logic fixes
+- ConstraintEntity system (constraint pool, rigid attachment pass, physics root determination)
+- Static entity tier (needs asset importing)
+- Evaluate reflection system robustness (static init ordering, precompile step)
+- Registration name strings strippable via build option (`TNX_STRIP_NAMES`) for shipping builds
+
+**After hardening:** Arena shooter test level to prove the full stack — high entity counts, physics, competitive input
+latency, rollback netcode, networked multiplayer.
 
 ---
 
@@ -180,6 +219,9 @@ in the long run.
 
 ### Designed, Not Yet Implemented
 
+- [ ] **Construct/View OOP layer** — `Construct<T>` (CRTP lifecycle owner), `Owned<T>` (composition), `ConstructBatch` (
+  type-erased tick dispatch), `TickGroup` enum, View family (Instance/Phys/Render/Logic), defrag listeners, spawn
+  handshake integration for registration
 - [ ] **Cumulative dirty bit array** — tracking functional, not yet wired to GPU upload path
 - [ ] **Fixed-point coordinate system** — `Fixed32` value type (1 unit = 0.1mm), `FieldProxy<Fixed32, WIDTH>`, render thread conversion to camera-relative float32 at upload, Jolt bridge (int32↔float32 at cell boundary)
 - [ ] **ConstraintEntity system** — constraint entities in LOGIC partition, `ConstraintType` enum (Rigid/Hinge/BallSocket/Prismatic/Distance/Spring), render thread rigid attachment pass (2-pass depth ordering), physics root determination

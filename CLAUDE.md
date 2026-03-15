@@ -55,10 +55,15 @@ Three interlocking design decisions define everything else:
 
 2. **Tiered SoA storage with rollback as a first-class citizen.** Hot component data lives in SoA ring buffers (Temporal: N-frame rollback history, Volatile: triple-buffer no rollback). Cold data lives in archetype chunks. The tier is determined by the component macro, not by the entity. An entity's effective tier is the highest tier of any of its components.
 
-3. **OOP API over a data-oriented substrate.** Entity authors write `PlayerController`, `GameMode`, `GameState` —
-   familiar concepts from Unreal. The engine decomposes those into SoA field arrays transparently. Developers need
-   minimal understanding of the substrate to use it--DoD and ECS concepts, not a working knowledge; they only need to
-   understand it if they're extending it.
+3. **OOP API over a data-oriented substrate.** The gameplay layer splits into two object types:
+    - **Constructs** — Singular complex OOP objects (`Construct<Player>`, `Construct<GameMode>`). Own Views into ECS
+      data, hold bespoke logic, auto-register ticks via C++20 concepts. Compose via `Owned<T>` members.
+    - **Entities** — Raw ECS data for high-count homogeneous objects (zombies, bullets, particles). No bespoke logic.
+      Engine sweeps them with wide SIMD.
+
+   Developers write familiar OOP patterns on Constructs; the engine decomposes Views into SoA field arrays
+   transparently. Developers need minimal understanding of the substrate to use it — DoD and ECS concepts, not a working
+   knowledge; they only need to understand it if they're extending it.
 
 ---
 
@@ -150,6 +155,100 @@ The active strip is scanned 64 entities at a time (one 64-bit word). A zero word
 
 ---
 
+## Gameplay Object Model — Constructs & Entities
+
+### Two Object Types
+
+**Constructs** are singular, complex scalar objects — the things that think. A Player, a GameMode, a TurretBase, an
+AIDirector. They inherit from `Construct<T>` (CRTP) and compose Views to access ECS data. Created via
+`Registry::CreateConstruct<T>()`.
+
+**Entities** are raw ECS data for the horde — zombies, bullets, debris, particles. No bespoke logic. The engine sweeps
+them with wide SIMD. Registered via `TNX_REGISTER_ENTITY`.
+
+### Construct<T>
+
+CRTP base that owns the full lifecycle. Auto-registers ticks via `if constexpr` concept detection — implement the
+method, get the tick. Don't implement it, pay nothing.
+
+```cpp
+class Player : public Construct<Player>, public InstanceView<Player> { ... };
+class Decal  : public Construct<Decal>,  public RenderView<Decal> { ... };
+```
+
+### Composition via Owned<T>
+
+Complex Constructs compose via `Owned<T>` value members — compile-time ownership, deterministic init/destroy order,
+automatic lifetime management:
+
+```cpp
+class Turret : public Construct<Turret>, public InstanceView<Turret>
+{
+    Owned<BarrelAssembly>  Barrel;    // has its own InstanceView, own tick
+    Owned<TargetingSystem> Targeting; // pure logic, LogicView only
+    Owned<AmmoFeed>        Ammo;     // StatsView, no physics
+};
+```
+
+Each owned Construct is exactly as heavy as it needs to be. `TargetingSystem` doesn't pay for a physics body. `AmmoFeed`
+doesn't tick unless it implements a tick method. C++20 concepts on `Owned<T>` enable compile-time interface contracts (
+`Targetable`, `Damageable`) — zero-cost replacement for runtime gameplay tag queries.
+
+### Views
+
+Views are CRTP lenses into ECS data. They hydrate FieldProxy cursors on initialization and register as defrag listeners
+so cursors stay valid if the allocator moves data.
+
+| View         | Components                          | Partition |
+|--------------|-------------------------------------|-----------|
+| InstanceView | Transform + PhysBody + SkeletalMesh | DUAL      |
+| PhysView     | Transform + PhysBody                | PHYS      |
+| RenderView   | Transform + SkeletalMesh            | RENDER    |
+| LogicView    | Transform only                      | LOGIC     |
+
+**Ownership chain:** Construct → Views → ECS Entities → Components → FieldArrays → FieldProxies
+
+### Tick Dispatch — ConstructBatch
+
+Constructs register into typed scalar batches on the Brain thread. Dispatch is type-erased and non-virtual:
+
+```cpp
+struct ConstructTickEntry { void* Object; void (*Fn)(void*); TickGroup Group; int16_t OrderWithinGroup; };
+```
+
+TickGroup is a fixed engine enum controlling execution order:
+
+```cpp
+enum class TickGroup : uint8_t { PreInput=0, Default=1, PostDefault=2, Camera=3, Late=4 };
+```
+
+Brain thread tick sequence:
+
+```
+PrePhysics wide sweep → ScalarPrePhysics batch (Constructs)
+  → Physics step →
+PostPhysics wide sweep → ScalarPostPhysics batch (Constructs)
+  → Entity ScalarUpdate (targeted writes from Constructs into entity fields)
+  → Construct ScalarUpdate batch (high-level OOP logic)
+  → Render publish
+```
+
+The Entity ScalarUpdate slot is the bridge point: an AIDirector Construct thinks once, then writes target positions into
+zombie entity fields. The zombie has no bespoke logic — it's swept by the wide PrePhysics pass.
+
+### Serialization
+
+Constructs do NOT serialize their own C++ members. Only View-owned ECS data is serialized. If a value is
+designer-authored (e.g., MaxAmmo), it belongs in a component so it serializes through the existing ECS path. No
+special-case codepath.
+
+### Thread Safety
+
+Tick registration follows the spawn handshake contract: the handshake window is the one safe place to mutate engine
+state. Registration outside the window is deferred to the next handshake. One pattern for all state mutation.
+
+---
+
 ## Entity Lifecycle
 
 ### Spawn
@@ -235,27 +334,32 @@ Anti-Events fade/decay over ~20ms rather than instant cull — visually continuo
 
 ## Roadmap
 
-### Current Phase: Foundation Completion + Cleanup
+Two stages: **Foundation** (add remaining subsystems) then **Hardening** (lock down the substrate). See `docs/STATUS.md`
+for the authoritative status tracker.
 
-The engine substrate is feature-complete for its stated goals. The cleanup pass is the gateway to the game layer — not an afterthought. Finish the foundation, clean the seams, then the OOP game layer becomes additive rather than surgical.
+### Stage 1: Foundation (current)
 
-Specific cleanup targets: duplicated state between Archetype and TemporalComponentCache (`GetTemporalFieldWritePtr`, `TemporalFrameStride`), wiring the cumulative dirty bit array to the GPU upload path, and the Fixed32 / SimFloat alias system.
+1. **Editor (bare-bones)** — In progress. Scene hierarchy, entity inspection, reflected properties, save/load. ImGui
+   docking, JSON serialization. Scope is explicitly limited to this definition.
+2. **Networking** — GNS wrapper, client/server authority model, PIE loopback. Rollback netcode uses existing Temporal
+   slab + Jolt snapshot.
+3. **Audio** — SDL3 thin wrapper first (handle-based for Anti-Event compatibility). Minimal — just enough for gameplay
+   feedback.
 
-### Next Phase (in order)
+### Stage 2: Hardening
 
-1. **Editor (bare-bones)** — scene hierarchy, entity placement, reflected property inspection, save/load. JSON for
-   development, binary for shipped games. Scope is explicitly limited to this definition.
-2. **Arena shooter test level** — simple arena shooter to prove all fundamental ideologies: high entity counts, physics,
-   competitive input latency, rollback netcode
-3. **Data-driven spawn** — lambda + handshake model first (synchronous, proves the contract), deferred/batched variants
-   after
-4. **Rollback netcode** — Jolt snapshot strategy already decided, Temporal slab rollback + dirty resimulation
-5. **Audio** — SDL3 thin wrapper first (handle-based for Anti-Event compatibility), custom layer later
-6. **Cleanup pass** — remove duplicated state, wire dirty-bit GPU upload, audit hot-path data structures, fix Jolt push
-   logic, archetype field allocation and meta storage
+Once Editor + Networking + Audio are functional, the engine enters a dedicated cleanup, refactoring, and rewrite phase.
+The goal is to make the substrate as solid as possible before building the gameplay layer (Construct/View system,
+behavior trees, etc.) on top of it.
+
+Targets include: dirty-bit GPU upload, Archetype/TemporalComponentCache deduplication, Fixed32/SimFloat, hot-path audit,
+constraint system, static entity tier, reflection robustness, `TNX_STRIP_NAMES` build option.
+
+**After hardening:** Arena shooter test level to prove the full stack.
 
 ### Designed, Not Yet Implemented
 
+- Construct/View OOP layer (Construct<T>, Owned<T>, ConstructBatch, TickGroup, View family, defrag listeners)
 - Cumulative dirty bit array wired to GPU upload
 - `GetTemporalFieldWritePtr` migrated from Archetype to TemporalComponentCache
 - `TemporalFrameStride` removed from Archetype (duplicated state)
@@ -286,8 +390,12 @@ Specific cleanup targets: duplicated state between Archetype and TemporalCompone
 
 - **Do not suggest replacing fixed-update with variable timestep.** The 512Hz fixed rate is a load-bearing architectural constraint, not an oversight.
 - **Do not suggest using `std::map` or `std::unordered_map` in hot paths.** This codebase is latency-sensitive and data-oriented by design.
-- **The OOP layer is intentional.** `PlayerController`, `GameMode`, `GameState` etc. are first-class citizens, not a facade to be removed. Entity authors should not need to understand SoA decomposition.
+- **The OOP layer is intentional.** Constructs (`Construct<Player>`, `Construct<GameMode>`) are first-class citizens,
+  not a facade to be removed. Construct authors should not need to understand SoA decomposition. Views handle all ECS
+  interaction transparently.
 - **Jolt is a temporary physics backend.** The constraint system is designed to be solver-agnostic. Don't suggest architectural changes that couple more tightly to Jolt.
 - **The editor scope is intentionally limited.** Scene hierarchy + entity placement + reflected property inspection + save/load. Do not suggest expanding it.
-- **Serialization:** JSON for development/editor, binary for shipped games. This decision is final.
+- **Serialization:** JSON for all builds during R&D. Binary format will be introduced when it makes sense, not before.
+  The engine includes a minimal hand-rolled JSON parser (`Json.h`) — intentionally not a vendored library. Swap-ready
+  API if needs outgrow it.
 - **R&D codebase.** Some areas are highly optimized to test a theory; others are deliberately left rough pending the cleanup pass. The dichotomy is intentional.

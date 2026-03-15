@@ -50,6 +50,179 @@ Four priority queues with affinity rules:
 **Render Jobs:** GPU upload (dirty entity delta), compute dispatch (predicate/prefix_sum/scatter),
 frustum culling (planned), sort key generation (planned), command encoding
 
+### Brain Thread Tick Sequence
+
+The Brain thread runs the full fixed-timestep loop. Wide sweeps (per-archetype SIMD jobs) and Construct
+scalar batches interleave at defined points:
+
+```
+PrePhysics:
+  → Wide sweep (per-archetype SIMD jobs, dispatched to worker pool)
+  → ScalarPrePhysics batch (Construct hooks, scalar, sequential)
+
+Physics step
+
+PostPhysics:
+  → Wide sweep (per-archetype SIMD jobs)
+  → ScalarPostPhysics batch (Construct hooks)
+  → Entity ScalarUpdate batch (targeted writes from Constructs into entity field arrays)
+
+ScalarUpdate:
+  → Construct ScalarUpdate batch (high-level OOP logic)
+
+Render publish
+```
+
+Wide sweeps process Entities (the horde) via AVX2 8-wide SIMD. Construct batches process singular OOP
+objects (Player, GameMode, AIDirector) via scalar dispatch. The Entity ScalarUpdate slot is a bridge
+point: an `AIDirector` Construct thinks once per frame, then writes target positions into zombie entity
+fields through targeted scalar writes. The zombie follows the data in the wide PrePhysics sweep.
+
+---
+
+# Gameplay Object Model: Constructs & Entities
+
+## Two Object Types
+
+The gameplay layer splits cleanly into two categories:
+
+1. **Constructs** — Singular, complex scalar OOP objects. One Player, one GameMode, one TurretBase.
+   They own Views (CRTP lenses into ECS data), hold bespoke logic, and auto-register ticks via C++20
+   concept detection. Created via `Registry::CreateConstruct<T>()`.
+
+2. **Entities** — Raw ECS data for the horde. Zombies, bullets, debris, particles. No bespoke logic.
+   The engine sweeps them with wide SIMD. Registered via `TNX_REGISTER_ENTITY`.
+
+**Rule of thumb:** "Is this a singular object with bespoke logic, or a horde member?"
+Singular → Construct. Horde → Entity.
+
+## Construct<T>
+
+CRTP base that owns the full lifecycle. Auto-registers ticks via `if constexpr` — implement the method,
+get the tick. Don't implement it, pay nothing.
+
+```cpp
+class Player    : public Construct<Player>,    public InstanceView<Player> {};
+class Goblin    : public Construct<Goblin>,    public InstanceView<Goblin> {};
+class Trigger   : public Construct<Trigger>,   public PhysView<Trigger> {};
+class Decal     : public Construct<Decal>,     public RenderView<Decal> {};
+class GameMode  : public Construct<GameMode> {};  // no View needed — pure logic
+```
+
+```cpp
+template <typename Derived>
+class Construct
+{
+public:
+    void Initialize()
+    {
+        static_cast<Derived*>(this)->InitializeViews();
+
+        if constexpr (HasScalarPrePhysics<Derived>)
+            Engine::ScalarPrePhysicsBatch.Register<&Derived::PrePhysics>(this);
+        if constexpr (HasScalarPostPhysics<Derived>)
+            Engine::ScalarPostPhysicsBatch.Register<&Derived::PostPhysics>(this);
+        if constexpr (HasScalarUpdate<Derived>)
+            Engine::ScalarUpdateBatch.Register<&Derived::ScalarUpdate>(this);
+    }
+
+    ~Construct()
+    {
+        Engine::ScalarPrePhysicsBatch.Deregister(this);
+        Engine::ScalarPostPhysicsBatch.Deregister(this);
+        Engine::ScalarUpdateBatch.Deregister(this);
+    }
+};
+```
+
+## Views — CRTP Lenses into ECS
+
+Views hydrate FieldProxy cursors on initialization and register as defrag listeners so cursors stay
+valid if the allocator moves data:
+
+| View         | Components                          | Partition |
+|--------------|-------------------------------------|-----------|
+| InstanceView | Transform + PhysBody + SkeletalMesh | DUAL      |
+| PhysView     | Transform + PhysBody                | PHYS      |
+| RenderView   | Transform + SkeletalMesh            | RENDER    |
+| LogicView    | Transform only                      | LOGIC     |
+
+**Ownership chain:** Construct → Views → ECS Entities → Components → FieldArrays → FieldProxies
+
+## Composition via Owned<T>
+
+Complex Constructs compose via `Owned<T>` value members:
+
+```cpp
+class Turret : public Construct<Turret>, public InstanceView<Turret>
+{
+    Owned<BarrelAssembly>  Barrel;    // has its own InstanceView, own tick
+    Owned<TargetingSystem> Targeting; // pure logic, LogicView only
+    Owned<AmmoFeed>        Ammo;     // StatsView, no physics
+};
+```
+
+`Owned<T>` enforces:
+
+- **Lifetime** — child destroyed when parent destroyed. No orphans.
+- **Attachment** — constraint between parent/child set up during init, type known statically.
+- **Tick ordering** — parent ticks before children, deterministic by declaration order.
+- **Serialization** — parent `.def` declares `Owned<T>` members with component defaults.
+
+`static_assert(std::is_base_of_v<Construct<T>, T>)` in `Owned<T>`. C++20 concepts enable compile-time
+interface contracts (`Targetable`, `Damageable`) — zero-cost replacement for runtime gameplay tag queries.
+
+### Initialization Order
+
+Declaration order is the contract. No dependency graph.
+
+1. Parent Views hydrate (base class init)
+2. `Owned<T>` members construct in declaration order (language guarantee)
+3. Each `Owned<T>` recursively runs the same sequence (depth-first walk)
+4. `PostInitialize()` on parent — all children live, all Views hydrated
+
+## ConstructBatch — Type-Erased Tick Dispatch
+
+```cpp
+struct ConstructTickEntry
+{
+    void*       Object;
+    void      (*Fn)(void*);
+    TickGroup   Group;
+    int16_t     OrderWithinGroup;
+};
+
+enum class TickGroup : uint8_t
+{
+    PreInput    = 0,   // read input state before anything reacts
+    Default     = 1,   // standard gameplay logic
+    PostDefault = 2,   // things that depend on Default having run
+    Camera      = 3,   // camera always resolves after gameplay
+    Late        = 4,   // final adjustments, IK, procedural
+};
+```
+
+TickGroup is a fixed engine enum — not extensible by games. `ConstructBatch` sorts entries by
+Group + OrderWithinGroup only when dirty (`stable_sort` preserves registration order as tiebreaker).
+Most Constructs register at `Default` with Order 0.
+
+### Registration Thread Safety
+
+Registration follows the spawn handshake contract: the handshake window is the one safe place to
+mutate engine state. Registration outside the window defers to the next handshake. One pattern for
+all state mutation: spawning, despawning, tick registration, tick deregistration.
+
+## Serialization
+
+Constructs do NOT serialize their own scalar C++ members. Only View-owned ECS data is serialized.
+Designer-authored values (e.g. TurretBase::MaxAmmo) belong in components — serialized through
+the existing ECS path. No special-case codepath.
+
+This will likely have to be augmented, likely with some version of a DataAsset.
+
+On load: `CreateConstruct<T>()` → spawns Views → hydrates from serialized ECS data → re-derives
+transient state in `PostInitialize`.
+
 ---
 
 # Memory Model: Tiered Storage
@@ -741,6 +914,8 @@ dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
 
 ## Designed, Not Yet Implemented
 
+- [ ] **Construct/View OOP layer** — `Construct<T>`, `Owned<T>`, `ConstructBatch`, `TickGroup`, View family, defrag
+  listeners, spawn handshake registration
 - [ ] **Cumulative dirty bit array wired to GPU upload** (tracking functional, not yet driving upload path)
 - [ ] `GetTemporalFieldWritePtr` migrated from Archetype to TemporalComponentCache
 - [ ] `TemporalFrameStride` removed from Archetype (duplicated state — call cache->GetFrameStride())

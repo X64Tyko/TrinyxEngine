@@ -255,6 +255,97 @@ FORCE_INLINE void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, uint8_
 
 ---
 
+## Construct<T> — Singular OOP Objects
+
+`Construct<T>` is the CRTP base for singular complex gameplay objects — the things that think.
+One Player, one GameMode, one TurretBase. Constructs own Views into ECS data, hold bespoke logic,
+and auto-register ticks via C++20 concept detection.
+
+```cpp
+class Player : public Construct<Player>, public InstanceView<Player>
+{
+public:
+    void ScalarUpdate()
+    {
+        // bespoke logic — read/write ECS data through View cursors
+        transform.PosX += inputVelX * dt;
+    }
+};
+```
+
+Constructs compose via `Owned<T>` value members:
+
+```cpp
+class Vehicle : public Construct<Vehicle>, public InstanceView<Vehicle>
+{
+    Owned<Turret> turret;       // has its own InstanceView, own tick
+    Owned<Wheel>  wheels[4];   // each with PhysView
+};
+```
+
+`Owned<T>` guarantees:
+
+- Lifetime: child destroyed when parent destroyed
+- Init order: declaration order (Views hydrate first, then Owned members, depth-first)
+- Tick order: parent before children
+- `static_assert(std::is_base_of_v<Construct<T>, T>)` enforced
+
+### Views — CRTP Lenses into ECS
+
+Views hydrate FieldProxy cursors on initialization and register as defrag listeners:
+
+| View         | Components                          | Partition |
+|--------------|-------------------------------------|-----------|
+| InstanceView | Transform + PhysBody + SkeletalMesh | DUAL      |
+| PhysView     | Transform + PhysBody                | PHYS      |
+| RenderView   | Transform + SkeletalMesh            | RENDER    |
+| LogicView    | Transform only                      | LOGIC     |
+
+The View type determines which partition the entity lands in — maps directly to the SystemGroup
+auto-derivation from component tags.
+
+### ConstructBatch — Type-Erased Tick Dispatch
+
+```cpp
+struct ConstructTickEntry
+{
+    void*       Object;
+    void      (*Fn)(void*);      // type-erased: [](void* o){ static_cast<T*>(o)->*MemberFn(); }
+    TickGroup   Group;
+    int16_t     OrderWithinGroup; // tiebreaker, default 0
+};
+
+enum class TickGroup : uint8_t
+{
+    PreInput    = 0,
+    Default     = 1,
+    PostDefault = 2,
+    Camera      = 3,
+    Late        = 4,
+};
+```
+
+`ConstructBatch` sorts entries only when dirty. `stable_sort` preserves registration order as
+tiebreaker — deterministic without requiring explicit numbers from every Construct.
+
+### Serialization
+
+Constructs do NOT serialize their own C++ members. Only View-owned ECS data is serialized.
+Designer-authored values (e.g. MaxAmmo) belong in cold components. On load:
+`CreateConstruct<T>()` → spawns Views → hydrates from serialized ECS → re-derives transient state.
+
+### Entities vs Constructs
+
+|          | Construct                          | Entity                            |
+|----------|------------------------------------|-----------------------------------|
+| Count    | Singular (1 Player, 1 GameMode)    | Horde (10K zombies, 50K bullets)  |
+| Logic    | Bespoke (ScalarUpdate, PrePhysics) | None or wide SIMD sweep           |
+| Dispatch | Type-erased ConstructBatch         | Per-archetype SIMD job            |
+| API      | `Construct<T>`, Views, `Owned<T>`  | `TNX_REGISTER_ENTITY`, EntityView |
+| Tick     | Scalar, sequential                 | 8-wide AVX2, parallel             |
+
+---
+
 ## SimFloat / FloatProxy — Determinism Alias
 
 The determinism mode switch lives in one place. Entity authors never touch it:
