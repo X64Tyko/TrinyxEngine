@@ -72,6 +72,10 @@ public:
 	SpawnSync& GetSpawner() { return Spawner; }
 
 private:
+#ifdef TNX_ENABLE_EDITOR
+	friend class EditorContext;
+#endif
+
 	// Sentinel Tasks (Main Thread)
 	void StartThreadsAndJobs();
 	void RunMainLoop();

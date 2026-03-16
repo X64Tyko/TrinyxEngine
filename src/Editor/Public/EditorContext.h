@@ -3,6 +3,7 @@
 #error "EditorContext.h requires TNX_ENABLE_EDITOR"
 #endif
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -31,6 +32,10 @@ public:
 	/// after ImGui::NewFrame(), before ImGui::Render().
 	void BuildFrame();
 
+	/// Load a scene file: reset registry, spawn entities, update editor state.
+	/// If bReset is false, skips ResetRegistry (used for initial load into an empty world).
+	void LoadScene(const std::string& path, bool bReset = true);
+
 	/// Register a panel. EditorContext takes ownership.
 	template <typename T, typename... Args>
 	T* AddPanel(Args&&... args)
@@ -55,6 +60,33 @@ private:
 
 	void DrawFileDialog();
 	void DrawUnsavedWarning();
+
+	// --- Play/Stop scene snapshot ---
+	// On Play: snapshot all field data so Stop can restore it.
+	// On Stop: write snapshot back into the slab (sim is paused, safe to write directly).
+	void SnapshotScene();
+	void RestoreSnapshot();
+
+	// Per-archetype snapshot: field data for all chunks + entity count at snapshot time.
+	struct ArchetypeSnapshot
+	{
+		ClassID ArchClassID;
+		uint32_t TotalEntityCount; // Entity count at snapshot time
+
+		// Per-chunk field data: [chunk0 fields][chunk1 fields]...
+		// Each chunk block is: [field0 * entityCount][field1 * entityCount]...
+		struct ChunkData
+		{
+			void* Chunk;          // Pointer identity (not ownership)
+			uint32_t EntityCount; // Per-chunk count at snapshot time
+			std::vector<uint8_t> FieldData;
+		};
+
+		std::vector<ChunkData> Chunks;
+	};
+
+	std::vector<ArchetypeSnapshot> PlaySnapshot;
+	bool bHasSnapshot = false;
 
 	enum class PendingActionType : uint8_t { None, OpenScene };
 

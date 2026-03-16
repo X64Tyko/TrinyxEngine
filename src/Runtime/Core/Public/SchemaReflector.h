@@ -91,6 +91,19 @@ static void RegisterFieldsImpl(std::index_sequence<Is...>)
 	ComponentFieldRegistry::Get().RegisterFields(typeID, Derived::ComponentTypeName, std::move(fieldMetas), Tier, Derived::StaticTemporalIndex());
 }
 
+// Compile-time C++ type → FieldValueType mapping.
+template <typename T>
+constexpr FieldValueType DeduceFieldValueType()
+{
+	if constexpr (std::is_same_v<T, float>) return FieldValueType::Float32;
+	else if constexpr (std::is_same_v<T, double>) return FieldValueType::Float64;
+	else if constexpr (std::is_same_v<T, int32_t>) return FieldValueType::Int32;
+	else if constexpr (std::is_same_v<T, uint32_t>) return FieldValueType::Uint32;
+	else if constexpr (std::is_same_v<T, int64_t>) return FieldValueType::Int64;
+	else if constexpr (std::is_same_v<T, uint64_t>) return FieldValueType::Uint64;
+	else return FieldValueType::Unknown;
+}
+
 // Extract metadata from a member pointer
 template <typename Derived, size_t Index, template <typename, FieldWidth> class FieldType, typename Type, FieldWidth WIDTH>
 static FieldMeta ExtractFieldMeta(FieldType<Type, WIDTH> Derived::* member)
@@ -106,7 +119,8 @@ static FieldMeta ExtractFieldMeta(FieldType<Type, WIDTH> Derived::* member)
 		FIELD_ARRAY_ALIGNMENT, // 32 or 64 bytes depending on CMake option
 		offset,
 		0, // OffsetInChunk computed later by Archetype::BuildLayout
-		name
+		name,
+		DeduceFieldValueType<Type>()
 	};
 }
 

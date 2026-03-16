@@ -1,11 +1,9 @@
 #include "Panels/ContentBrowserPanel.h"
 #include "AssetDatabase.h"
 #include "AssetTypes.h"
+#include "EditorContext.h"
 #include "EditorState.h"
-#include "EntityBuilder.h"
 #include "EngineConfig.h"
-#include "Registry.h"
-#include "TrinyxEngine.h"
 #include "imgui.h"
 
 #include <filesystem>
@@ -63,21 +61,11 @@ void ContentBrowserPanel::Draw(EditorState& state)
 		// Double-click: load scenes
 		if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
 		{
-			if (entry.Type == AssetType::Level && state.EnginePtr && state.ConfigPtr)
+			if (entry.Type == AssetType::Level && state.EditorCtx && state.ConfigPtr)
 			{
 				std::string absPath = std::string(state.ConfigPtr->ProjectDir)
 					+ "/content/" + entry.Path;
-				std::string sceneName = std::filesystem::path(entry.Path).stem().string();
-
-				state.EnginePtr->Spawn([absPath](Registry* reg)
-				{
-					reg->ResetRegistry();
-					EntityBuilder::SpawnFromFile(reg, absPath.c_str());
-				});
-
-				state.CurrentScenePath = absPath;
-				state.CurrentSceneName = sceneName;
-				state.bSceneDirty      = false;
+				state.EditorCtx->LoadScene(absPath);
 			}
 		}
 

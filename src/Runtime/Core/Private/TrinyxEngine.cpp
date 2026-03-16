@@ -132,6 +132,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 		std::cerr << "JoltPhysics::Initialize failed" << std::endl;
 		return false;
 	}
+	RegistryPtr->SetPhysics(Physics.get());
 
 	// ---- Threads ---------------------------------------------------------
 	Logic  = std::make_unique<LogicThread>();

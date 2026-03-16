@@ -5,10 +5,18 @@
 			"type": "CubeEntity",
 			"components": {
 				"TransRot": {
-					"PosX": -5.0,
+					"PosX": -50.0,
 					"PosY": 5.0,
 					"PosZ": -80.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
 					"RotQw": 1.0
+				},
+				"Velocity": {
+					"vX": 0.0,
+					"vY": 0.0,
+					"vZ": 0.0
 				},
 				"Scale": {
 					"ScaleX": 2.0,
@@ -17,19 +25,9 @@
 				},
 				"ColorData": {
 					"R": 1.0,
-					"G": 0.3,
-					"B": 0.1,
+					"G": 0.30000001192092896,
+					"B": 0.10000000149011612,
 					"A": 1.0
-				},
-				"JoltBody": {
-					"Shape": 0,
-					"HalfExtentX": 1.0,
-					"HalfExtentY": 1.0,
-					"HalfExtentZ": 1.0,
-					"Motion": 2,
-					"Mass": 1.0,
-					"Friction": 0.5,
-					"Restitution": 0.3
 				}
 			}
 		},
@@ -40,7 +38,15 @@
 					"PosX": 5.0,
 					"PosY": 5.0,
 					"PosZ": -80.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
 					"RotQw": 1.0
+				},
+				"Velocity": {
+					"vX": 0.0,
+					"vY": 0.0,
+					"vZ": 0.0
 				},
 				"Scale": {
 					"ScaleX": 2.0,
@@ -48,20 +54,10 @@
 					"ScaleZ": 2.0
 				},
 				"ColorData": {
-					"R": 0.1,
-					"G": 0.3,
+					"R": 0.10000000149011612,
+					"G": 0.30000001192092896,
 					"B": 1.0,
 					"A": 1.0
-				},
-				"JoltBody": {
-					"Shape": 0,
-					"HalfExtentX": 1.0,
-					"HalfExtentY": 1.0,
-					"HalfExtentZ": 1.0,
-					"Motion": 2,
-					"Mass": 1.0,
-					"Friction": 0.5,
-					"Restitution": 0.3
 				}
 			}
 		},
@@ -72,7 +68,15 @@
 					"PosX": 0.0,
 					"PosY": -1.0,
 					"PosZ": -80.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
 					"RotQw": 1.0
+				},
+				"Velocity": {
+					"vX": 0.0,
+					"vY": 0.0,
+					"vZ": 0.0
 				},
 				"Scale": {
 					"ScaleX": 100.0,
@@ -80,20 +84,10 @@
 					"ScaleZ": 100.0
 				},
 				"ColorData": {
-					"R": 0.3,
-					"G": 0.3,
-					"B": 0.3,
+					"R": 0.30000001192092896,
+					"G": 0.30000001192092896,
+					"B": 0.30000001192092896,
 					"A": 1.0
-				},
-				"JoltBody": {
-					"Shape": 0,
-					"HalfExtentX": 50.0,
-					"HalfExtentY": 1.0,
-					"HalfExtentZ": 50.0,
-					"Motion": 0,
-					"Mass": 0.0,
-					"Friction": 0.5,
-					"Restitution": 0.3
 				}
 			}
 		}

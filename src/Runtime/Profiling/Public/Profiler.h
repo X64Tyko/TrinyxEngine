@@ -116,3 +116,4 @@
 #define TNX_COLOR_NETWORK   0xF38181  // Pink
 #define TNX_COLOR_AUDIO     0x6600FF  // Purple
 #define TNX_COLOR_WORKER    0x45B7D1  // Steel Blue
+#define TNX_COLOR_JOLT      0xFF8040  // Orange

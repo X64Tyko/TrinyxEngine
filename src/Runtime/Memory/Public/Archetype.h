@@ -146,6 +146,7 @@ public:
 		size_t Size;
 		bool isDecomposed;
 		CacheTier Tier;
+		FieldValueType ValueType = FieldValueType::Unknown;
 	};
 
 	std::vector<FieldArrayDescriptor> CachedFieldArrayLayout;
@@ -314,6 +315,10 @@ private:
 
 	// Chunk allocation
 	Chunk* AllocateChunk();
+
+	// Free all chunks (used by ResetRegistry so re-spawn goes through AllocateChunk
+	// which properly re-allocates slab field arrays with correct allocator offsets).
+	void FreeAllChunks();
 };
 
 struct ArchetypeKeyHash

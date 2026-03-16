@@ -103,6 +103,7 @@ public:
 	size_t AdvanceAllocator(SystemID EntitySystemID, size_t entityCount, size_t fieldSize);
 
 	void ResetAllocators();
+	void ClearFrameData();
 
 	// Get the stride between frames (for calculating frame N from frame 0 pointer)
 	FORCE_INLINE size_t GetFrameStride() const { return sizeof(TemporalFrameHeader) + FrameDataCapacity; }

@@ -4,6 +4,19 @@
 #include "MemoryDefines.h"
 #include "Types.h"
 
+// Runtime type tag for editor display and serialization.
+enum class FieldValueType : uint8_t
+{
+	Unknown = 0,
+	Float32,
+	Float64,
+	Int32,
+	Uint32,
+	Int64,
+	Uint64,
+	Fixed32,
+};
+
 // Field metadata for SoA decomposition
 struct FieldMeta
 {
@@ -12,6 +25,7 @@ struct FieldMeta
 	size_t OffsetInStruct; // offsetof(Component, field) - for validation
 	size_t OffsetInChunk;  // Where this field array starts in the chunk (computed by BuildLayout)
 	const char* Name;      // Field name for debugging
+	FieldValueType ValueType = FieldValueType::Unknown;
 };
 
 // Enhanced component metadata with field decomposition support

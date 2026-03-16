@@ -1,4 +1,5 @@
 #include "Registry.h"
+#include "JoltPhysics.h"
 #include "Profiler.h"
 #include <cassert>
 #include <ranges>
@@ -180,7 +181,7 @@ std::vector<EntityID> Registry::CreateByClassID(ClassID classID, size_t count)
 	Archetype* arch = GetOrCreateArchetype(sig, classID);
 
 	std::vector<Archetype::EntitySlot> Slots(count);
-	EntityIndex.reserve(EntityIndex.size() + count);
+	EntityIndex.resize(1 + EntityIndex.size() + count - FreeIndices.size());
 	arch->PushEntities(Slots, count);
 
 	std::vector<EntityID> Entities(count);
@@ -192,10 +193,6 @@ std::vector<EntityID> Registry::CreateByClassID(ClassID classID, size_t count)
 		Id = AllocateEntityID(classID);
 
 		uint32_t Index = Id.GetIndex();
-		if (Index >= EntityIndex.size())
-		{
-			EntityIndex.resize(Index + 1024);
-		}
 
 		EntityRecord& Record = EntityIndex[Index];
 		Record.Arch          = arch;
@@ -366,12 +363,20 @@ void Registry::ResetRegistry()
 	PendingDestructions.clear();
 	NextEntityIndex = 1;
 
+	if (PhysicsPtr) PhysicsPtr->ResetAllBodies();
 
 #ifdef TNX_ENABLE_ROLLBACK
 	HistorySlab.ResetAllocators();
+	HistorySlab.ClearFrameData();
 #endif
-	//UniversalSlab.ResetAllocators();
 	VolatileSlab.ResetAllocators();
+	VolatileSlab.ClearFrameData();
+
+	for (auto& arch : Archetypes) arch.second->FreeAllChunks();
+
+	// Zero all dirty bit arrays so stale entities don't leak to the GPU
+	for (auto& bits : EntityDirtyBits) std::fill(bits.begin(), bits.end(), 0ULL);
+	std::fill(EntityActiveBits.begin(), EntityActiveBits.end(), 0ULL);
 }
 
 uint32_t Registry::GetTotalChunkCount() const

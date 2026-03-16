@@ -49,7 +49,7 @@ public:
 	// Scan entities with JoltBody components that have no Jolt body yet.
 	// Creates bodies from component settings + initial transform, stores mapping.
 	// Called once per physics tick (returns immediately if nothing pending).
-	void FlushPendingBodies(Registry* reg, uint32_t writeFrame, uint32_t volWriteFrame);
+	void FlushPendingBodies(Registry* reg);
 
 	// Write transforms from awake Jolt bodies back into SoA WriteArrays.
 	// Called after Step(), before PostPhysics.
@@ -57,6 +57,9 @@ public:
 
 	// Remove a body when its entity is destroyed.
 	void DestroyBody(uint32_t entityIndex);
+
+	// Remove all bodies and clear all mapping arrays. Called during scene reset.
+	void ResetAllBodies();
 
 	// --- Mapping ---
 
@@ -87,6 +90,7 @@ private:
 	static constexpr uint32_t kInvalidEntityIndex = UINT32_MAX;
 
 	const EngineConfig* ConfigPtr = nullptr;
+	std::vector<uint64_t> LiveEntityBits; // Bitplane: 1 bit per entity index, reused across FlushPendingBodies calls
 	alignas(16) std::vector<float> fieldScratch[7];
 	TrinyxJobs::JobCounter JoltPhysCounter;
 

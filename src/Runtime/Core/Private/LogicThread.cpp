@@ -102,8 +102,8 @@ void LogicThread::ThreadMain()
 		if (bSimPaused.load(std::memory_order_acquire))
 		{
 			ProcessInput(dt);
-			RegistryPtr->PropagateFrame(FrameNumber);
 			PublishCompletedFrame();
+			RegistryPtr->PropagateFrame(FrameNumber++);
 
 			if (ConfigPtr->TargetFPS > 0) WaitForTiming(frameStartCounter, perfFrequency);
 			continue;
@@ -129,22 +129,18 @@ void LogicThread::ThreadMain()
 				ProcessInput(fixedStepTime);
 				PrePhysics(fixedStepTime);
 
-				// Flush any entities that have a JoltBody component but no Jolt body yet
 				if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
 				{
-					uint32_t wf  = TemporalCache->GetActiveWriteFrame();
-					uint32_t vwf = RegistryPtr->GetVolatileCache()->GetActiveWriteFrame();
-					PhysicsPtr->FlushPendingBodies(RegistryPtr, wf, vwf);
-
 					TrinyxJobs::Dispatch([this, fixedStepTime](uint32_t)
 					{
 						PhysicsPtr->Step(static_cast<float>(fixedStepTime * PhysicsDivizor));
 					}, PhysicsPtr->GetJoltPhysCounter(), TrinyxJobs::Queue::Physics);
 				}
 
-				// Pull awake body transforms from Jolt back into SoA
+				// Flush changes, then pull new transforms. This order means we remove orphans before pulling
 				if (FrameNumber % PhysicsDivizor == PhysicsDivizor - 1) [[unlikely]]
 				{
+					PhysicsPtr->FlushPendingBodies(RegistryPtr);
 					PhysicsPtr->PullActiveTransforms(RegistryPtr);
 				}
 
@@ -155,8 +151,8 @@ void LogicThread::ThreadMain()
 				SimulationTime += fixedStepTime;
 
 				// Publish completed frame to RenderThread
-				RegistryPtr->PropagateFrame(FrameNumber);
 				PublishCompletedFrame();
+				RegistryPtr->PropagateFrame(FrameNumber++);
 			}
 			TrackFPS();
 			continue; // don't do the scalar update immediately.
@@ -339,7 +335,7 @@ void LogicThread::PublishCompletedFrame()
 	header->AmbientIntensity = 0.2f;
 
 	// Publish frame number atomically - RenderThread can now read this frame
-	LastCompletedFrame.store(FrameNumber++, std::memory_order_release);
+	LastCompletedFrame.store(FrameNumber, std::memory_order_release);
 }
 
 void LogicThread::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)

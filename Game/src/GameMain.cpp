@@ -23,13 +23,22 @@ public:
 
 	void PostStart(TrinyxEngine& engine)
 	{
-		std::string scenePath = std::string(TNX_PROJECT_DIR) + "/content/TestScene.tnxscene";
-		LOG_INFO_F("Loading scene: %s", scenePath.c_str());
-
-		engine.Spawn([&scenePath](Registry* reg)
+#if !TNX_ENABLE_EDITOR
+		// Non-editor builds load the default scene from config.
+		// Editor builds load it via EditorContext which also tracks the path.
+		const EngineConfig* cfg = engine.GetConfig();
+		if (cfg->InitialGameScene[0] != '\0' && cfg->ProjectDir[0] != '\0')
 		{
-			EntityBuilder::SpawnFromFile(reg, scenePath.c_str());
-		});
+			std::string scenePath = std::string(cfg->ProjectDir) + "/content/" + cfg->InitialGameScene;
+			LOG_INFO_F("Loading scene: %s", scenePath.c_str());
+			engine.Spawn([scenePath](Registry* reg)
+			{
+				EntityBuilder::SpawnFromFile(reg, scenePath.c_str());
+			});
+		}
+#else
+		(void)engine;
+#endif
 	}
 };
 

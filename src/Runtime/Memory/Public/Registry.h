@@ -14,6 +14,8 @@
 #include "Types.h"
 
 struct EngineConfig;
+class JoltPhysics;
+
 // Registry - Central entity management system
 // Handles entity creation, destruction, and component access
 class Registry
@@ -85,6 +87,8 @@ public:
 	// Editor: read-only archetype iteration
 	const auto& GetArchetypes() const { return Archetypes; }
 
+	void SetPhysics(JoltPhysics* physics) { PhysicsPtr = physics; }
+
 	// Resets the registry to default, useful after tests.
 	// TODO: this needs to not be public.
 	void ResetRegistry();
@@ -148,6 +152,7 @@ private:
 	TemporalComponentCache HistorySlab; // N frames (Config->TemporalFrameCount), rollback-capable
 #endif
 	VolatileComponentCache VolatileSlab; // 3 frames, no rollback
+	JoltPhysics* PhysicsPtr = nullptr;
 
 	// Pre-allocated dual array table used by all Invoke* methods.
 	// Avoids a large VLA on the stack each call.  Sized by MAX_FIELDS_PER_ARCHETYPE

@@ -8,6 +8,7 @@
 
 class Archetype;
 class AssetDatabase;
+class EditorContext;
 class Registry;
 class LogicThread;
 class TrinyxEngine;
@@ -56,5 +57,6 @@ struct EditorState
 	TrinyxEngine* EnginePtr = nullptr;
 
 	// --- Asset database (editor only, set by EditorContext) ---
-	AssetDatabase* AssetDB = nullptr;
+	AssetDatabase* AssetDB   = nullptr;
+	EditorContext* EditorCtx = nullptr;
 };

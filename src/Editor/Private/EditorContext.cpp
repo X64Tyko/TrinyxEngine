@@ -1,12 +1,14 @@
 #include "EditorContext.h"
 #include "EditorPanel.h"
 #include "EntityBuilder.h"
+#include "JoltPhysics.h"
 #include "TrinyxEngine.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "Logger.h"
 #include "LogicThread.h"
 #include "Registry.h"
+#include <cstring>
 
 // Panel headers
 #include "Panels/WorldOutlinerPanel.h"
@@ -28,6 +30,7 @@ void EditorContext::Initialize(TrinyxEngine* engine, LogicThread* logic)
 	State.RegistryPtr = engine->GetRegistry();
 	State.ConfigPtr   = engine->GetConfig();
 	State.LogicPtr    = logic;
+	State.EditorCtx   = this;
 
 	// Initialize asset database from project content directory
 	const EngineConfig* cfg = engine->GetConfig();
@@ -38,6 +41,13 @@ void EditorContext::Initialize(TrinyxEngine* engine, LogicThread* logic)
 		State.AssetDB = &AssetDB;
 	}
 
+	// Load default scene if configured
+	if (cfg->DefaultScene[0] != '\0' && cfg->ProjectDir[0] != '\0')
+	{
+		std::string scenePath = std::string(cfg->ProjectDir) + "/content/" + cfg->DefaultScene;
+		LoadScene(scenePath, false);
+	}
+
 	// Register all panels
 	AddPanel<WorldOutlinerPanel>();
 	AddPanel<DetailsPanel>();
@@ -46,6 +56,24 @@ void EditorContext::Initialize(TrinyxEngine* engine, LogicThread* logic)
 	AddPanel<ContentBrowserPanel>();
 
 	LOG_INFO_F("[Editor] Initialized with %zu panels", Panels.size());
+}
+
+void EditorContext::LoadScene(const std::string& path, bool bReset)
+{
+	EnginePtr->Spawn([path, bReset](Registry* reg)
+	{
+		if (bReset) reg->ResetRegistry();
+		EntityBuilder::SpawnFromFile(reg, path.c_str());
+	});
+
+	State.CurrentScenePath = path;
+	State.CurrentSceneName = path;
+	size_t lastSlash       = State.CurrentSceneName.find_last_of('/');
+	if (lastSlash != std::string::npos) State.CurrentSceneName = State.CurrentSceneName.substr(lastSlash + 1);
+	size_t dot = State.CurrentSceneName.find_last_of('.');
+	if (dot != std::string::npos) State.CurrentSceneName = State.CurrentSceneName.substr(0, dot);
+	State.bSceneDirty = false;
+	State.ClearSelection();
 }
 
 void EditorContext::BuildFrame()
@@ -204,15 +232,24 @@ void EditorContext::BuildMenuBar()
 
 	if (ImGui::BeginMenu("Play"))
 	{
-		bool simulating = LogicPtr && !LogicPtr->IsSimPaused();
+		bool simPaused = !LogicPtr || LogicPtr->IsSimPaused();
 
-		if (ImGui::MenuItem("Play", nullptr, false, !simulating))
+		if (ImGui::MenuItem("Play", nullptr, false, simPaused))
 		{
-			if (LogicPtr) LogicPtr->SetSimPaused(false);
+			if (LogicPtr)
+			{
+				if (!bHasSnapshot) SnapshotScene();
+				LogicPtr->SetSimPaused(false);
+			}
 		}
-		if (ImGui::MenuItem("Stop", nullptr, false, simulating))
+		if (ImGui::MenuItem("Pause", nullptr, false, !simPaused))
 		{
 			if (LogicPtr) LogicPtr->SetSimPaused(true);
+		}
+		if (ImGui::MenuItem("Stop", nullptr, false, bHasSnapshot))
+		{
+			if (LogicPtr) LogicPtr->SetSimPaused(true);
+			RestoreSnapshot();
 		}
 		ImGui::EndMenu();
 	}
@@ -281,23 +318,7 @@ void EditorContext::DrawFileDialog()
 			}
 			else
 			{
-				// Clear existing scene, then load new one through spawn handshake
-				std::string path = FileDialogPath;
-				EnginePtr->Spawn([path](Registry* reg)
-				{
-					reg->ResetRegistry();
-					EntityBuilder::SpawnFromFile(reg, path.c_str());
-				});
-
-				std::string name = FileDialogPath;
-				size_t lastSlash = name.find_last_of('/');
-				if (lastSlash != std::string::npos) name = name.substr(lastSlash + 1);
-				size_t dot = name.find_last_of('.');
-				if (dot != std::string::npos) name = name.substr(0, dot);
-
-				State.CurrentScenePath = FileDialogPath;
-				State.CurrentSceneName = name;
-				State.bSceneDirty      = false;
+				LoadScene(FileDialogPath);
 			}
 
 			bShowFileDialog = false;
@@ -313,6 +334,203 @@ void EditorContext::DrawFileDialog()
 
 		ImGui::EndPopup();
 	}
+}
+
+void EditorContext::SnapshotScene()
+{
+	PlaySnapshot.clear();
+
+	Registry* reg = State.RegistryPtr;
+	if (!reg) return;
+
+	uint32_t temporalFrame = reg->GetTemporalCache()->GetActiveWriteFrame();
+	uint32_t volatileFrame = reg->GetVolatileCache()->GetActiveWriteFrame();
+
+	for (auto& [key, arch] : reg->GetArchetypes())
+	{
+		size_t fieldCount = arch->CachedFieldArrayLayout.size();
+		if (fieldCount == 0) continue;
+
+		ArchetypeSnapshot archSnap;
+		archSnap.ArchClassID      = arch->ArchClassID;
+		archSnap.TotalEntityCount = arch->TotalEntityCount;
+
+		for (size_t ci = 0; ci < arch->Chunks.size(); ++ci)
+		{
+			Chunk* chunk         = arch->Chunks[ci];
+			uint32_t entityCount = arch->GetChunkCount(ci);
+			if (entityCount == 0) continue;
+
+			void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+			arch->BuildFieldArrayTable(chunk, fieldArrayTable, temporalFrame, volatileFrame);
+
+			// Calculate total bytes needed for all decomposed fields in this chunk
+			size_t totalBytes = 0;
+			for (size_t i = 0; i < fieldCount; ++i)
+			{
+				const auto& desc = arch->CachedFieldArrayLayout[i];
+				if (desc.isDecomposed && fieldArrayTable[i]) totalBytes += desc.Size * entityCount;
+			}
+
+			ArchetypeSnapshot::ChunkData chunkData;
+			chunkData.Chunk       = chunk;
+			chunkData.EntityCount = entityCount;
+			chunkData.FieldData.resize(totalBytes);
+
+			// Copy field data into snapshot
+			size_t offset = 0;
+			for (size_t i = 0; i < fieldCount; ++i)
+			{
+				const auto& desc = arch->CachedFieldArrayLayout[i];
+				if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
+
+				size_t bytes = desc.Size * entityCount;
+				std::memcpy(chunkData.FieldData.data() + offset, fieldArrayTable[i], bytes);
+				offset += bytes;
+			}
+
+			archSnap.Chunks.push_back(std::move(chunkData));
+		}
+
+		if (!archSnap.Chunks.empty()) PlaySnapshot.push_back(std::move(archSnap));
+	}
+
+	bHasSnapshot = true;
+	LOG_INFO("[Editor] Scene snapshot taken for Play session");
+}
+
+void EditorContext::RestoreSnapshot()
+{
+	if (!bHasSnapshot) return;
+
+	EnginePtr->Spawn([this](Registry* reg)
+	{
+		if (!reg) return;
+
+		// Reset all Jolt bodies — Play may have created bodies that don't exist in the snapshot.
+		// FlushPendingBodies will recreate them from the restored field data on the next physics tick.
+		if (EnginePtr->Physics) EnginePtr->Physics->ResetAllBodies();
+
+		uint32_t temporalFrame = reg->GetTemporalCache()->GetActiveWriteFrame();
+		uint32_t volatileFrame = reg->GetVolatileCache()->GetActiveWriteFrame();
+
+		for (auto& archSnap : PlaySnapshot)
+		{
+			// Find the archetype by ClassID
+			Archetype* ownerArch = nullptr;
+			for (auto& [key, arch] : reg->GetArchetypes())
+			{
+				if (arch->ArchClassID == archSnap.ArchClassID)
+				{
+					ownerArch = arch;
+					break;
+				}
+			}
+
+			if (!ownerArch) continue;
+
+			size_t fieldCount = ownerArch->CachedFieldArrayLayout.size();
+
+			// Restore per-chunk field data
+			for (auto& chunkSnap : archSnap.Chunks)
+			{
+				Chunk* chunk = static_cast<Chunk*>(chunkSnap.Chunk);
+
+				void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+				ownerArch->BuildFieldArrayTable(chunk, fieldArrayTable, temporalFrame, volatileFrame);
+
+				// Restore field data — only for the entity count we snapshotted.
+				// If the chunk now has more entities (spawned during Play), the snapshot
+				// data covers only the original ones; extras get their Active flag cleared below.
+				size_t offset = 0;
+				for (size_t i = 0; i < fieldCount; ++i)
+				{
+					const auto& desc = ownerArch->CachedFieldArrayLayout[i];
+					if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
+
+					size_t bytes = desc.Size * chunkSnap.EntityCount;
+					std::memcpy(fieldArrayTable[i], chunkSnap.FieldData.data() + offset, bytes);
+					offset += bytes;
+				}
+
+				// Mark all snapshotted entities dirty so the GPU picks up the restore
+				size_t cacheStart = chunk->Header.CacheIndexStart;
+				auto* dirtyBits   = reg->DirtyBitsFrame(temporalFrame);
+				for (uint32_t e = 0; e < chunkSnap.EntityCount; ++e)
+				{
+					size_t idx     = cacheStart + e;
+					uint64_t& word = (*dirtyBits)[idx / 64];
+					word           |= uint64_t(1) << (idx % 64);
+				}
+			}
+
+			// Handle entities created during Play: tombstone them by clearing Active flag.
+			// The snapshot restores the original field data (including Active flags for original
+			// entities). Entities beyond the snapshot count need to be deactivated.
+			if (ownerArch->TotalEntityCount > archSnap.TotalEntityCount)
+			{
+				uint32_t extraCount = ownerArch->TotalEntityCount - archSnap.TotalEntityCount;
+				LOG_INFO_F("[Editor] Tombstoning %u entities created during Play in archetype %u",
+						   extraCount, archSnap.ArchClassID);
+
+				// Find the TemporalFlags field (Active flag is bit 31 of TemporalFlags::Flags).
+				// Walk entities beyond the snapshot count and clear their Active flag.
+				uint32_t entityIdx = archSnap.TotalEntityCount;
+				while (entityIdx < ownerArch->TotalEntityCount)
+				{
+					uint32_t chunkIdx = entityIdx / ownerArch->EntitiesPerChunk;
+					uint32_t localIdx = entityIdx % ownerArch->EntitiesPerChunk;
+
+					if (chunkIdx < ownerArch->Chunks.size())
+					{
+						Chunk* chunk = ownerArch->Chunks[chunkIdx];
+
+						// Find the Flags field in the layout and clear the Active bit
+						void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+						ownerArch->BuildFieldArrayTable(chunk, fieldArrayTable, temporalFrame, volatileFrame);
+
+						for (size_t i = 0; i < fieldCount; ++i)
+						{
+							const auto& desc = ownerArch->CachedFieldArrayLayout[i];
+							if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
+
+							// TemporalFlags::Flags is an int32 field — check by ValueType + Size
+							if (desc.ValueType == FieldValueType::Int32 && desc.Size == sizeof(int32_t))
+							{
+								int32_t* flags  = static_cast<int32_t*>(fieldArrayTable[i]);
+								flags[localIdx] &= ~static_cast<int32_t>(1u << 31); // Clear Active bit
+							}
+						}
+
+						// Mark dirty for GPU
+						size_t cacheStart = chunk->Header.CacheIndexStart;
+						auto* dirtyBits   = reg->DirtyBitsFrame(temporalFrame);
+						size_t idx        = cacheStart + localIdx;
+						uint64_t& word    = (*dirtyBits)[idx / 64];
+						word              |= uint64_t(1) << (idx % 64);
+					}
+
+					entityIdx++;
+				}
+			}
+			else if (ownerArch->TotalEntityCount < archSnap.TotalEntityCount)
+			{
+				// Entities were deleted during Play (swap-and-pop). Field data for surviving
+				// entities has been restored, but the deleted ones can't be reconstructed without
+				// full entity records. This will be properly solved by PIE world duplication.
+				LOG_INFO_F("[Editor] Warning: %u entities were deleted during Play in archetype %u — "
+						   "deleted entities cannot be restored (PIE world duplication needed)",
+						   archSnap.TotalEntityCount - ownerArch->TotalEntityCount, archSnap.ArchClassID);
+			}
+		}
+	});
+
+	// Clear selection since entity indices may have changed
+	State.ClearSelection();
+
+	PlaySnapshot.clear();
+	bHasSnapshot = false;
+	LOG_INFO("[Editor] Scene restored from snapshot");
 }
 
 void EditorContext::DrawUnsavedWarning()

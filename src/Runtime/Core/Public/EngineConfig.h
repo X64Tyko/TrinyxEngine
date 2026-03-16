@@ -44,6 +44,12 @@ struct EngineConfig
 	// Used by the editor's Content Browser to locate assets.
 	char ProjectDir[512] = "";
 
+	// Editor: default scene to load on startup (relative to ProjectDir/content/).
+	char DefaultScene[256] = "";
+
+	// Non-editor: initial game scene to load on startup (relative to ProjectDir/content/).
+	char InitialGameScene[256] = "";
+
 	// --- Helpers ---
 	double GetTargetFrameTime() const
 	{

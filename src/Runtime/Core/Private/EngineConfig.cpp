@@ -26,7 +26,9 @@ static void WriteDefaults(const char* path, const EngineConfig& cfg)
 		<< "MaxCachedEntities=" << cfg.MAX_CACHED_ENTITIES << "\n"
 		<< "TemporalFrameCount=" << cfg.TemporalFrameCount << "\n"
 		<< "jobCacheSize=" << cfg.JobCacheSize << "\n"
-		<< "PhysicsUpdateInterval=" << cfg.PhysicsUpdateInterval << "\n";
+		<< "PhysicsUpdateInterval=" << cfg.PhysicsUpdateInterval << "\n"
+		<< "DefaultScene=" << cfg.DefaultScene << "\n"
+		<< "InitialGameScene=" << cfg.InitialGameScene << "\n";
 }
 
 // Apply key=value pairs from a single INI file onto an existing config.
@@ -61,6 +63,8 @@ static void ApplyFromFile(const char* path, EngineConfig& cfg)
 		else if (key == "TemporalFrameCount") cfg.TemporalFrameCount = std::stoi(val);
 		else if (key == "JobCacheSize") cfg.JobCacheSize = std::stoi(val);
 		else if (key == "PhysicsUpdateInterval") cfg.PhysicsUpdateInterval = std::stoi(val);
+		else if (key == "DefaultScene") snprintf(cfg.DefaultScene, sizeof(cfg.DefaultScene), "%s", val.c_str());
+		else if (key == "InitialGameScene") snprintf(cfg.InitialGameScene, sizeof(cfg.InitialGameScene), "%s", val.c_str());
 	}
 }
 

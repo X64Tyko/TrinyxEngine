@@ -143,54 +143,60 @@ EntityID EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJson)
 
 	// Build field array table for the write frame
 	void* fieldArrayTable[MAX_FIELD_ARRAYS];
+
+	auto WriteEntity = [&]
+	{
+		// Zero-initialize all decomposed fields for this entity.
+		// Fields omitted from JSON must not contain garbage — an unnormalized
+		// quaternion (NaN/denorm) will crash Jolt's multiply operator.
+		for (size_t i = 0; i < arch->CachedFieldArrayLayout.size(); ++i)
+		{
+			const auto& desc = arch->CachedFieldArrayLayout[i];
+			if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
+
+			auto* base = static_cast<uint8_t*>(fieldArrayTable[i]);
+			std::memset(base + localIndex * desc.Size, 0, desc.Size);
+		}
+
+		// Set the Active flag (first field is always TemporalFlags::Flags)
+		const FieldLookup* flagsField = FindField(fieldMap, "Flags");
+		if (flagsField)
+		{
+			auto* flagsArr       = static_cast<int32_t*>(fieldArrayTable[flagsField->ArrayIndex]);
+			flagsArr[localIndex] = static_cast<int32_t>(TemporalFlagBits::Active);
+		}
+
+		// Apply component field values from JSON
+		const JsonValue* components = entityJson.Find("components");
+		if (!components || !components->IsObject()) return;
+
+		for (const auto& [compName, compFields] : components->AsObject())
+		{
+			if (!compFields.IsObject()) continue;
+
+			// Walk each field in this component's JSON
+			for (const auto& [fieldName, fieldVal] : compFields.AsObject())
+			{
+				const FieldLookup* field = FindField(fieldMap, fieldName);
+				if (!field)
+				{
+					LOG_WARN_F("[EntityBuilder] Unknown field '%s.%s' on entity type '%s'",
+							   compName.c_str(), fieldName.c_str(), typeName.c_str());
+					continue;
+				}
+
+				// Write the value into the field array at the entity's local index
+				auto* base = static_cast<uint8_t*>(fieldArrayTable[field->ArrayIndex]);
+				WriteFieldValue(base + localIndex * field->Size, field->Size, fieldVal);
+			}
+		}
+	};
+
 	arch->BuildFieldArrayTable(chunk, fieldArrayTable,
 							   reg->GetTemporalCache()->GetActiveWriteFrame(),
 							   reg->GetVolatileCache()->GetActiveWriteFrame());
 
-	// Zero-initialize all decomposed fields for this entity.
-	// Fields omitted from JSON must not contain garbage — an unnormalized
-	// quaternion (NaN/denorm) will crash Jolt's multiply operator.
-	for (size_t i = 0; i < arch->CachedFieldArrayLayout.size(); ++i)
-	{
-		const auto& desc = arch->CachedFieldArrayLayout[i];
-		if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
-
-		auto* base = static_cast<uint8_t*>(fieldArrayTable[i]);
-		std::memset(base + localIndex * desc.Size, 0, desc.Size);
-	}
-
-	// Set the Active flag (first field is always TemporalFlags::Flags)
-	const FieldLookup* flagsField = FindField(fieldMap, "Flags");
-	if (flagsField)
-	{
-		auto* flagsArr       = static_cast<int32_t*>(fieldArrayTable[flagsField->ArrayIndex]);
-		flagsArr[localIndex] = static_cast<int32_t>(TemporalFlagBits::Active);
-	}
-
-	// Apply component field values from JSON
-	const JsonValue* components = entityJson.Find("components");
-	if (!components || !components->IsObject()) return id;
-
-	for (const auto& [compName, compFields] : components->AsObject())
-	{
-		if (!compFields.IsObject()) continue;
-
-		// Walk each field in this component's JSON
-		for (const auto& [fieldName, fieldVal] : compFields.AsObject())
-		{
-			const FieldLookup* field = FindField(fieldMap, fieldName);
-			if (!field)
-			{
-				LOG_WARN_F("[EntityBuilder] Unknown field '%s.%s' on entity type '%s'",
-						   compName.c_str(), fieldName.c_str(), typeName.c_str());
-				continue;
-			}
-
-			// Write the value into the field array at the entity's local index
-			auto* base = static_cast<uint8_t*>(fieldArrayTable[field->ArrayIndex]);
-			WriteFieldValue(base + localIndex * field->Size, field->Size, fieldVal);
-		}
-	}
+	WriteEntity();
 
 	return id;
 }

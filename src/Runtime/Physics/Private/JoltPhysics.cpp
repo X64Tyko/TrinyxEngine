@@ -232,7 +232,7 @@ void JoltPhysics::Shutdown()
 
 void JoltPhysics::Step(float dt)
 {
-	TNX_ZONE_NC("Jolt_Step", 0xFF4040FF);
+	TNX_ZONE_NC("Jolt_Step", TNX_COLOR_JOLT);
 
 	// Jolt recommends 1 collision step per 1/60s. At 128Hz that's ~2 steps,
 	// but we're already substepping in the engine's accumulator loop, so
@@ -249,9 +249,9 @@ void JoltPhysics::Step(float dt)
 // Body management
 // ---------------------------------------------------------------------------
 
-void JoltPhysics::FlushPendingBodies(Registry* reg, uint32_t writeFrame, uint32_t volWriteFrame)
+void JoltPhysics::FlushPendingBodies(Registry* reg)
 {
-	TNX_ZONE_NC("Jolt_FlushBodies", 0xFF8040FF);
+	TNX_ZONE_NC("Jolt_FlushBodies", TNX_COLOR_JOLT);
 
 	// Query archetypes that contain JoltBody
 	auto arches = reg->ComponentQuery<JoltBody<>>();
@@ -261,6 +261,11 @@ void JoltPhysics::FlushPendingBodies(Registry* reg, uint32_t writeFrame, uint32_
 
 	const ComponentTypeID bodyTypeID  = JoltBody<>::StaticTypeID();
 	const ComponentTypeID transTypeID = TransRot<>::StaticTypeID();
+
+	// Bitplane tracking which entity indices are alive (1 bit per entity).
+	const size_t bitplaneWords = (EntityToBody.size() + 63) / 64;
+	if (LiveEntityBits.size() < bitplaneWords) LiveEntityBits.resize(bitplaneWords);
+	std::fill(LiveEntityBits.begin(), LiveEntityBits.begin() + bitplaneWords, 0ULL);
 
 	uint32_t bodiesCreated = 0;
 
@@ -278,7 +283,7 @@ void JoltPhysics::FlushPendingBodies(Registry* reg, uint32_t writeFrame, uint32_
 			if (entityCount == 0) continue;
 
 			void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
-			arch->BuildFieldArrayTable(chunk, fieldArrayTable, writeFrame, volWriteFrame);
+			arch->BuildFieldArrayTable(chunk, fieldArrayTable, reg->GetTemporalCache()->GetActiveWriteFrame(), reg->GetVolatileCache()->GetActiveWriteFrame());
 
 			// Bind JoltBody fields at their offset in the table
 			JoltBody<> body;
@@ -292,6 +297,9 @@ void JoltPhysics::FlushPendingBodies(Registry* reg, uint32_t writeFrame, uint32_
 			for (uint32_t i = 0; i < entityCount; ++i)
 			{
 				uint32_t cacheIdx = chunk->Header.CacheIndexStart + i;
+
+				// Mark this entity as alive
+				if (cacheIdx < EntityToBody.size()) LiveEntityBits[cacheIdx / 64] |= (1ULL << (cacheIdx % 64));
 
 				// Skip if body already exists for this entity
 				if (cacheIdx < EntityToBody.size() && !EntityToBody[cacheIdx].IsInvalid())
@@ -373,15 +381,41 @@ void JoltPhysics::FlushPendingBodies(Registry* reg, uint32_t writeFrame, uint32_
 		}
 	}
 
-	if (bodiesCreated > 0)
+	// Destroy orphaned Jolt bodies — any mapped body whose entity wasn't visited above.
+	uint32_t bodiesDestroyed = 0;
+	for (size_t word = 0; word < bitplaneWords; ++word)
 	{
-		LOG_INFO_F("[JoltPhysics] Created %u bodies", bodiesCreated);
+		// Invert: bits that are 0 in liveBits are candidates for orphan cleanup.
+		// Scan 64 entities at a time — skip entire words where all entities are alive.
+		uint64_t deadMask = ~LiveEntityBits[word];
+		while (deadMask)
+		{
+			uint32_t bit = __builtin_ctzll(deadMask);
+			uint32_t idx = static_cast<uint32_t>(word * 64 + bit);
+			deadMask     &= deadMask - 1; // clear lowest set bit
+
+			if (idx >= EntityToBody.size()) break;
+			if (EntityToBody[idx].IsInvalid()) continue;
+
+			bodyInterface.RemoveBody(EntityToBody[idx]);
+			bodyInterface.DestroyBody(EntityToBody[idx]);
+
+			uint32_t bodyIdx = EntityToBody[idx].GetIndex();
+			if (bodyIdx < BodyToEntity.size()) BodyToEntity[bodyIdx] = kInvalidEntityIndex;
+			EntityToBody[idx] = JPH::BodyID();
+			bodiesDestroyed++;
+		}
+	}
+
+	if (bodiesCreated > 0 || bodiesDestroyed > 0)
+	{
+		LOG_INFO_F("[JoltPhysics] Created %u bodies, destroyed %u orphans", bodiesCreated, bodiesDestroyed);
 	}
 }
 
 void JoltPhysics::PullActiveTransforms(Registry* reg)
 {
-	TNX_ZONE_NC("Jolt_PullTransforms", 0xFF8040FF);
+	TNX_ZONE_NC("Jolt_PullTransforms", TNX_COLOR_JOLT);
 	TrinyxJobs::WaitForCounter(&JoltPhysCounter, TrinyxJobs::Queue::Physics);
 
 	JPH::BodyIDVector activeIDs;
@@ -494,6 +528,31 @@ void JoltPhysics::DestroyBody(uint32_t entityIndex)
 	uint32_t bodyIdx = bodyID.GetIndex();
 	if (bodyIdx < BodyToEntity.size()) BodyToEntity[bodyIdx] = kInvalidEntityIndex;
 	EntityToBody[entityIndex] = JPH::BodyID();
+}
+
+void JoltPhysics::ResetAllBodies()
+{
+	TNX_ZONE_NC("Jolt_ResetAllBodies", TNX_COLOR_JOLT);
+
+	JPH::BodyInterface& bodyInterface = PhysSystem->GetBodyInterface();
+
+	uint32_t bodiesDestroyed = 0;
+	for (uint32_t idx = 0; idx < EntityToBody.size(); ++idx)
+	{
+		if (EntityToBody[idx].IsInvalid()) continue;
+
+		bodyInterface.RemoveBody(EntityToBody[idx]);
+		bodyInterface.DestroyBody(EntityToBody[idx]);
+		bodiesDestroyed++;
+	}
+
+	std::fill(EntityToBody.begin(), EntityToBody.end(), JPH::BodyID());
+	std::fill(BodyToEntity.begin(), BodyToEntity.end(), kInvalidEntityIndex);
+
+	if (bodiesDestroyed > 0)
+	{
+		LOG_INFO_F("[JoltPhysics] Reset: destroyed %u bodies", bodiesDestroyed);
+	}
 }
 
 // ---------------------------------------------------------------------------

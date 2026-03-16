@@ -162,8 +162,6 @@ void ComponentCacheBase::InitializeInternal(const EngineConfig* Config, uint32_t
 		currentFramePtr += frameStride;
 	}
 
-	// ValidFields was populated above alongside FieldAllocations — no 16k scan needed.
-
 	LOG_INFO_F("Initialized %s ComponentCache: %zu fields, %zu frames × %zu bytes = %zu total bytes",
 			   Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal",
 			   ValidFields.size(), TemporalFrameCount, frameStride, TotalSlabSize);
@@ -248,6 +246,15 @@ void ComponentCacheBase::ResetAllocators()
 	RenderOffset = 0;
 	DualOffset   = 0;
 	LogicOffset  = 0;
+}
+
+void ComponentCacheBase::ClearFrameData()
+{
+	for (size_t i = 0; i < TemporalFrameCount; ++i)
+	{
+		TemporalFrameHeader* Header = FrameHeaders[i];
+		std::memset(reinterpret_cast<uint8_t*>(Header) + sizeof(TemporalFrameHeader), 0, FrameDataCapacity);
+	}
 }
 
 void* ComponentCacheBase::GetFieldData(TemporalFrameHeader* header, ComponentTypeID compType,
