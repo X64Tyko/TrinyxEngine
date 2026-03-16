@@ -29,12 +29,31 @@ option(TNX_ALIGN_64 "Use 64-byte alignment for field arrays (zero cache line spl
 option(TNX_ENABLE_ROLLBACK "Enable N-frame rollback history. Off = TNX_TEMPORAL_FIELDS components use Volatile (5-frame) storage." OFF)
 option(TNX_DETAILED_METRICS "Log per-frame latency breakdown (Buffer/Pipeline/Scanout). Noisy." OFF)
 option(TNX_ENABLE_EDITOR "Enable editor UI (ImGui integration). Adds editor panels and overlay." OFF)
+option(TNX_GPU_PICKING "Enable GPU entity picking (click-to-select in viewport). On-demand, one-frame latency." OFF)
+option(TNX_GPU_PICKING_FAST "Always render pick buffer + readback mouse pixel every frame. Implies TNX_GPU_PICKING." OFF)
 
 if (TNX_ENABLE_EDITOR)
     add_compile_definitions(TNX_ENABLE_EDITOR)
+    set(TNX_GPU_PICKING_FAST ON CACHE BOOL "" FORCE)
     message(STATUS "Editor UI: ENABLED (ImGui)")
 else ()
     message(STATUS "Editor UI: DISABLED")
+endif ()
+
+# FAST implies base PICKING
+if (TNX_GPU_PICKING_FAST)
+    set(TNX_GPU_PICKING ON CACHE BOOL "" FORCE)
+    add_compile_definitions(TNX_GPU_PICKING_FAST)
+    message(STATUS "GPU Picking: FAST (always-hot)")
+endif ()
+
+if (TNX_GPU_PICKING)
+    add_compile_definitions(TNX_GPU_PICKING)
+    if (NOT TNX_GPU_PICKING_FAST)
+        message(STATUS "GPU Picking: ON-DEMAND")
+    endif ()
+else ()
+    message(STATUS "GPU Picking: DISABLED")
 endif ()
 
 if (TNX_ENABLE_ROLLBACK)

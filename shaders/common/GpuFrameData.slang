@@ -1,7 +1,7 @@
 // GpuFrameData.slang — shared GPU frame data struct.
-// Included by all compute and graphics shaders via #include "GpuFrameData.slang".
+// Included by all compute and graphics shaders via #include "common/GpuFrameData.slang".
 //
-// Layout mirrors C++ GpuFrameData in RenderThread.h exactly.
+// Layout mirrors C++ GpuFrameData in GpuFrameData.h exactly.
 // Accessed via a single uint64_t push constant (buffer device address).
 
 #pragma once
@@ -16,6 +16,14 @@ static const uint kSemPosX    = 2;  static const uint kSemPosY    = 3;  static c
 static const uint kSemRotQx   = 5;  static const uint kSemRotQy   = 6;  static const uint kSemRotQz   = 7;  static const uint kSemRotQw = 8;
 static const uint kSemScaleX  = 9;  static const uint kSemScaleY  = 10; static const uint kSemScaleZ  = 11;
 static const uint kSemColorR  = 12; static const uint kSemColorG  = 13; static const uint kSemColorB  = 14; static const uint kSemColorA = 15;
+
+// Under TNX_GPU_PICKING, scatter writes the entity's cache index into this
+// output SoA slot so the vertex/fragment pipeline can forward it to a uint
+// pick attachment. The CPU resolves cache index → EntityRecord on readback.
+#ifdef TNX_GPU_PICKING
+static const uint kGpuPickFieldCount = 16; // kGpuOutFieldCount + 1 (EntityCacheIdx)
+static const uint kSemEntityCacheIdx = 16;
+#endif
 
 // Persistently-mapped per-frame GPU struct.
 // A single 8-byte push constant holds its device address.

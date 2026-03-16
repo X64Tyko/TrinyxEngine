@@ -22,6 +22,7 @@ set(VOLK_SOURCES "")
 if (TNX_ENABLE_EDITOR)
     file(GLOB_RECURSE EDITOR_SOURCES "${CMAKE_SOURCE_DIR}/src/Editor/*.cpp")
     file(GLOB_RECURSE EDITOR_HEADERS "${CMAKE_SOURCE_DIR}/src/Editor/*.h")
+    set(GUIZMO_PATH "${CMAKE_SOURCE_DIR}/libs/guizmo")
     set(IMGUI_SOURCES
             "${IMGUI_PATH}/imgui.cpp"
             "${IMGUI_PATH}/imgui_demo.cpp"
@@ -30,6 +31,7 @@ if (TNX_ENABLE_EDITOR)
             "${IMGUI_PATH}/imgui_widgets.cpp"
             "${IMGUI_PATH}/backends/imgui_impl_vulkan.cpp"
             "${IMGUI_PATH}/backends/imgui_impl_sdl3.cpp"
+            "${GUIZMO_PATH}/ImGuizmo.cpp"
     )
 else ()
     set(EDITOR_SOURCES "")
@@ -133,6 +135,7 @@ if (TNX_ENABLE_EDITOR)
     target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
             "${IMGUI_PATH}"
             "${IMGUI_PATH}/backends"
+            "${GUIZMO_PATH}"
     )
 endif ()
 target_link_libraries(${PROJECT_NAME} PUBLIC Vulkan::Vulkan)
@@ -168,28 +171,36 @@ else()
     set(SLANGC "${CMAKE_SOURCE_DIR}/libs/slang/bin/slangc")
 endif()
 
-# List every .slang shader source here.  Each entry produces a .spv in
-# ${CMAKE_SOURCE_DIR}/shaders/ using the same base name.
+# ---------------------------------------------------------------------------
+# Shader sources — organized into subdirectories.
+# Each entry produces a .spv in the corresponding output subdirectory.
+# ---------------------------------------------------------------------------
 set(SLANG_SHADER_SOURCES
-    "${CMAKE_SOURCE_DIR}/shaders/predicate.slang"
-    "${CMAKE_SOURCE_DIR}/shaders/prefix_sum.slang"
-    "${CMAKE_SOURCE_DIR}/shaders/scatter.slang"
-    "${CMAKE_SOURCE_DIR}/shaders/cube.vert.slang"
-    "${CMAKE_SOURCE_DIR}/shaders/cube.frag.slang"
+        "${CMAKE_SOURCE_DIR}/shaders/compute/predicate.slang"
+        "${CMAKE_SOURCE_DIR}/shaders/compute/prefix_sum.slang"
+        "${CMAKE_SOURCE_DIR}/shaders/compute/scatter.slang"
+        "${CMAKE_SOURCE_DIR}/shaders/graphics/cube.vert.slang"
+        "${CMAKE_SOURCE_DIR}/shaders/graphics/cube.frag.slang"
 )
 
 # Shared header that all shaders include — listed in DEPENDS so any shader
 # rebuilds automatically when GpuFrameData.slang changes.
-set(SLANG_COMMON_HEADERS "${CMAKE_SOURCE_DIR}/shaders/GpuFrameData.slang")
+set(SLANG_COMMON_HEADERS "${CMAKE_SOURCE_DIR}/shaders/common/GpuFrameData.slang")
 
-set(SLANG_SPIRV_OUTPUTS "")
-foreach(SLANG_SRC ${SLANG_SHADER_SOURCES})
-    get_filename_component(SHADER_NAME "${SLANG_SRC}" NAME_WE)
-    get_filename_component(SHADER_EXT  "${SLANG_SRC}" EXT)       # e.g. .slang or .vert.slang
-    # Strip the .slang suffix to get the real extension (e.g. .vert, .frag, empty for compute)
+# Helper: compile a .slang source to .spv with optional extra defines.
+function(compile_slang SLANG_SRC EXTRA_DEFINES SPV_OUTPUT_LIST)
     string(REGEX REPLACE "\\.slang$" "" SHADER_STEM "${SLANG_SRC}")
     get_filename_component(FINAL_NAME "${SHADER_STEM}" NAME)     # e.g. cube.vert, predicate
-    set(SPV_OUT "${CMAKE_SOURCE_DIR}/shaders/${FINAL_NAME}.spv")
+    get_filename_component(SHADER_DIR "${SLANG_SRC}" DIRECTORY)   # e.g. .../shaders/compute
+    get_filename_component(SUBDIR "${SHADER_DIR}" NAME)       # e.g. compute, graphics
+
+    # Suffix for picking variants
+    set(VARIANT_SUFFIX "")
+    if (EXTRA_DEFINES)
+        set(VARIANT_SUFFIX "_pick")
+    endif ()
+
+    set(SPV_OUT "${CMAKE_SOURCE_DIR}/shaders/${SUBDIR}/${FINAL_NAME}${VARIANT_SUFFIX}.spv")
 
     # Determine the Slang stage from the file name suffix.
     if("${FINAL_NAME}" MATCHES "\\.vert$")
@@ -202,6 +213,12 @@ foreach(SLANG_SRC ${SLANG_SHADER_SOURCES})
 
     separate_arguments(SLANG_STAGE_ARGS UNIX_COMMAND "${SLANG_STAGE}")
 
+    # Build define flags
+    set(DEFINE_FLAGS "")
+    foreach (DEF ${EXTRA_DEFINES})
+        list(APPEND DEFINE_FLAGS "-D${DEF}")
+    endforeach ()
+
     add_custom_command(
         OUTPUT  "${SPV_OUT}"
         COMMAND "${SLANGC}"
@@ -209,14 +226,35 @@ foreach(SLANG_SRC ${SLANG_SHADER_SOURCES})
                 -target spirv
                 -emit-spirv-directly
                 -I "${CMAKE_SOURCE_DIR}/shaders"
+            ${DEFINE_FLAGS}
                 -o "${SPV_OUT}"
                 "${SLANG_SRC}"
         DEPENDS "${SLANG_SRC}" ${SLANG_COMMON_HEADERS}
-        COMMENT "slangc ${FINAL_NAME}.slang → ${FINAL_NAME}.spv"
+            COMMENT "slangc ${FINAL_NAME}${VARIANT_SUFFIX}.slang → ${SUBDIR}/${FINAL_NAME}${VARIANT_SUFFIX}.spv"
         VERBATIM
     )
-    list(APPEND SLANG_SPIRV_OUTPUTS "${SPV_OUT}")
+
+    # Propagate to parent scope
+    set(${SPV_OUTPUT_LIST} "${${SPV_OUTPUT_LIST}};${SPV_OUT}" PARENT_SCOPE)
+endfunction()
+
+# --- Base shader compilation (no picking) ---
+set(SLANG_SPIRV_OUTPUTS "")
+foreach (SLANG_SRC ${SLANG_SHADER_SOURCES})
+    compile_slang("${SLANG_SRC}" "" SLANG_SPIRV_OUTPUTS)
 endforeach()
+
+# --- TNX_GPU_PICKING variants (scatter writes cache index, vert/frag have pick output) ---
+if (TNX_GPU_PICKING)
+    set(PICK_SHADER_SOURCES
+            "${CMAKE_SOURCE_DIR}/shaders/compute/scatter.slang"
+            "${CMAKE_SOURCE_DIR}/shaders/graphics/cube.vert.slang"
+            "${CMAKE_SOURCE_DIR}/shaders/graphics/cube.frag.slang"
+    )
+    foreach (SLANG_SRC ${PICK_SHADER_SOURCES})
+        compile_slang("${SLANG_SRC}" "TNX_GPU_PICKING" SLANG_SPIRV_OUTPUTS)
+    endforeach ()
+endif ()
 
 add_custom_target(TrinyxShaders ALL DEPENDS ${SLANG_SPIRV_OUTPUTS})
 add_dependencies(${PROJECT_NAME} TrinyxShaders)

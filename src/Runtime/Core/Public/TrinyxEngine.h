@@ -15,8 +15,16 @@ class RenderThread;
 // Forward declarations
 class Registry;
 class LogicThread;
-class VulkRender;
 class JoltPhysics;
+
+// Compile-time renderer selection: EditorRenderer (ImGui overlay) or GameplayRenderer (no-op overlay).
+#if TNX_ENABLE_EDITOR
+class EditorRenderer;
+using RendererType = EditorRenderer;
+#else
+class GameplayRenderer;
+using RendererType = GameplayRenderer;
+#endif
 
 /**
  * TrinyxEngine: The Sentinel (Main Thread)
@@ -107,7 +115,7 @@ private:
 	// --- Thread Modules ---
 	std::unique_ptr<JoltPhysics> Physics;
 	std::unique_ptr<LogicThread> Logic;
-	std::unique_ptr<VulkRender> Render;
+	std::unique_ptr<RendererType> Render;
 
 	// --- Input ---
 	InputBuffer Input;

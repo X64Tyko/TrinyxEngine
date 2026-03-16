@@ -187,9 +187,9 @@ void DetailsPanel::Draw(EditorState& state)
 						if (simPaused)
 						{
 							bool edited = EditFieldValue(
-								fieldName, desc.Size, fieldArrayTable[i],
+								fieldName, desc.size, fieldArrayTable[i],
 								state.SelectedLocalIndex,
-								static_cast<uint8_t>(desc.ValueType));
+								static_cast<uint8_t>(desc.valueType));
 
 							if (edited)
 							{
@@ -207,9 +207,9 @@ void DetailsPanel::Draw(EditorState& state)
 						{
 							// Read-only display when sim is running
 							uint8_t* base      = static_cast<uint8_t*>(fieldArrayTable[i]);
-							const void* valPtr = base + state.SelectedLocalIndex * desc.Size;
+							const void* valPtr = base + state.SelectedLocalIndex * desc.size;
 
-							switch (desc.ValueType)
+							switch (desc.valueType)
 							{
 								case FieldValueType::Float32: ImGui::Text("%.4f", *static_cast<const float*>(valPtr));
 									break;
@@ -219,8 +219,7 @@ void DetailsPanel::Draw(EditorState& state)
 									break;
 								case FieldValueType::Uint32: ImGui::Text("%u", *static_cast<const uint32_t*>(valPtr));
 									break;
-								default:
-									ImGui::Text("%zu bytes", desc.Size);
+								default: ImGui::Text("%zu bytes", desc.size);
 									break;
 							}
 						}

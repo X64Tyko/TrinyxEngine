@@ -69,7 +69,7 @@ static std::vector<std::pair<const char*, FieldLookup>> BuildFieldMap(const Arch
 		const char* name = arch->FieldArrayTemplateCache[i].debugName;
 		if (name)
 		{
-			map.push_back({name, {i, arch->CachedFieldArrayLayout[i].Size}});
+			map.push_back({name, {i, arch->CachedFieldArrayLayout[i].size}});
 		}
 	}
 	return map;
@@ -155,7 +155,7 @@ EntityID EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJson)
 			if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
 
 			auto* base = static_cast<uint8_t*>(fieldArrayTable[i]);
-			std::memset(base + localIndex * desc.Size, 0, desc.Size);
+			std::memset(base + localIndex * desc.size, 0, desc.size);
 		}
 
 		// Set the Active flag (first field is always TemporalFlags::Flags)
@@ -356,7 +356,7 @@ JsonValue EntityBuilder::SerializeEntity(Registry* reg, Archetype* arch, size_t 
 
 		// Read field value
 		const auto* base          = static_cast<const uint8_t*>(fieldArrayTable[i]);
-		(*currentComp)[fieldName] = ReadFieldValue(base + localIndex * desc.Size, desc.Size);
+		(*currentComp)[fieldName] = ReadFieldValue(base + localIndex * desc.size, desc.size);
 	}
 
 	entity["components"] = std::move(components);

@@ -60,6 +60,8 @@ private:
 
 	void DrawFileDialog();
 	void DrawUnsavedWarning();
+	void DrawGizmo();
+	void ConsumePick();
 
 	// --- Play/Stop scene snapshot ---
 	// On Play: snapshot all field data so Stop can restore it.

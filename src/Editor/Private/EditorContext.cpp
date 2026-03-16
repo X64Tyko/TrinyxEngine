@@ -3,11 +3,15 @@
 #include "EntityBuilder.h"
 #include "JoltPhysics.h"
 #include "TrinyxEngine.h"
+#include "EditorRenderer.h"
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "ImGuizmo.h"
 #include "Logger.h"
 #include "LogicThread.h"
 #include "Registry.h"
+#include "TemporalComponentCache.h"
+#include <cmath>
 #include <cstring>
 
 // Panel headers
@@ -76,15 +80,280 @@ void EditorContext::LoadScene(const std::string& path, bool bReset)
 	State.ClearSelection();
 }
 
+// -----------------------------------------------------------------------
+// Gizmo helpers — build model matrix from entity fields, write back after manipulation
+// -----------------------------------------------------------------------
+
+/// Find a float field pointer by debug name in an archetype's field array table.
+static float* FindFieldFloat(Archetype* arch, void** fieldArrayTable, const char* name, uint32_t localIndex)
+{
+	for (size_t i = 0; i < arch->CachedFieldArrayLayout.size(); ++i)
+	{
+		const auto& desc = arch->CachedFieldArrayLayout[i];
+		if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
+		if (desc.valueType != FieldValueType::Float32) continue;
+
+		const char* fieldName = arch->FieldArrayTemplateCache[i].debugName;
+		if (std::strcmp(fieldName, name) == 0)
+		{
+			return static_cast<float*>(fieldArrayTable[i]) + localIndex;
+		}
+	}
+	return nullptr;
+}
+
+/// Build a column-major 4x4 model matrix from position, quaternion rotation, and scale.
+static void BuildModelMatrix(float* m, float px, float py, float pz,
+							 float qx, float qy, float qz, float qw,
+							 float sx, float sy, float sz)
+{
+	// Quaternion to rotation matrix (column-major)
+	float xx = qx * qx, yy = qy * qy, zz = qz * qz;
+	float xy = qx * qy, xz = qx * qz, yz = qy * qz;
+	float wx = qw * qx, wy = qw * qy, wz = qw * qz;
+
+	m[0] = (1.0f - 2.0f * (yy + zz)) * sx;
+	m[1] = (2.0f * (xy + wz)) * sx;
+	m[2] = (2.0f * (xz - wy)) * sx;
+	m[3] = 0.0f;
+
+	m[4] = (2.0f * (xy - wz)) * sy;
+	m[5] = (1.0f - 2.0f * (xx + zz)) * sy;
+	m[6] = (2.0f * (yz + wx)) * sy;
+	m[7] = 0.0f;
+
+	m[8]  = (2.0f * (xz + wy)) * sz;
+	m[9]  = (2.0f * (yz - wx)) * sz;
+	m[10] = (1.0f - 2.0f * (xx + yy)) * sz;
+	m[11] = 0.0f;
+
+	m[12] = px;
+	m[13] = py;
+	m[14] = pz;
+	m[15] = 1.0f;
+}
+
+void EditorContext::DrawGizmo()
+{
+	// Only draw gizmo when an entity is selected
+	if (State.Selection != EditorState::SelectionType::Entity) return;
+	if (!State.SelectedArchetype || !State.SelectedChunk) return;
+	if (!State.RegistryPtr) return;
+
+	Archetype* arch = State.SelectedArchetype;
+
+	// Get view and projection matrices from the frame header
+	ComponentCacheBase* tc   = State.RegistryPtr->GetTemporalCache();
+	TemporalFrameHeader* hdr = tc->GetFrameHeader();
+	if (!hdr) return;
+
+	// Build field array table for the selected entity's chunk
+	uint32_t temporalFrame = tc->GetActiveWriteFrame();
+	uint32_t volatileFrame = State.RegistryPtr->GetVolatileCache()->GetActiveWriteFrame();
+
+	void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+	arch->BuildFieldArrayTable(State.SelectedChunk, fieldArrayTable, temporalFrame, volatileFrame);
+
+	uint32_t li = State.SelectedLocalIndex;
+
+	// Read transform fields
+	float* pPosX = FindFieldFloat(arch, fieldArrayTable, "PosX", li);
+	float* pPosY = FindFieldFloat(arch, fieldArrayTable, "PosY", li);
+	float* pPosZ = FindFieldFloat(arch, fieldArrayTable, "PosZ", li);
+	if (!pPosX || !pPosY || !pPosZ) return; // No position — can't place gizmo
+
+	float* pRotQx = FindFieldFloat(arch, fieldArrayTable, "RotQx", li);
+	float* pRotQy = FindFieldFloat(arch, fieldArrayTable, "RotQy", li);
+	float* pRotQz = FindFieldFloat(arch, fieldArrayTable, "RotQz", li);
+	float* pRotQw = FindFieldFloat(arch, fieldArrayTable, "RotQw", li);
+
+	float* pScaleX = FindFieldFloat(arch, fieldArrayTable, "ScaleX", li);
+	float* pScaleY = FindFieldFloat(arch, fieldArrayTable, "ScaleY", li);
+	float* pScaleZ = FindFieldFloat(arch, fieldArrayTable, "ScaleZ", li);
+
+	// Safe defaults
+	float qx = pRotQx ? *pRotQx : 0.0f;
+	float qy = pRotQy ? *pRotQy : 0.0f;
+	float qz = pRotQz ? *pRotQz : 0.0f;
+	float qw = pRotQw ? *pRotQw : 1.0f;
+	float sx = pScaleX ? *pScaleX : 1.0f;
+	float sy = pScaleY ? *pScaleY : 1.0f;
+	float sz = pScaleZ ? *pScaleZ : 1.0f;
+
+	float modelMatrix[16];
+	BuildModelMatrix(modelMatrix, *pPosX, *pPosY, *pPosZ, qx, qy, qz, qw, sx, sy, sz);
+
+	// Set ImGuizmo to cover the full viewport
+	const ImGuiIO& io = ImGui::GetIO();
+	ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
+	ImGuizmo::SetOrthographic(false);
+
+	// ImGuizmo expects OpenGL-style projection (Y-up). Vulkan's projection has
+	// m[5] negated for Y-down NDC. Undo the flip for the gizmo.
+	float projFixup[16];
+	std::memcpy(projFixup, hdr->ProjectionMatrix.m, sizeof(projFixup));
+	projFixup[5] = -projFixup[5];
+
+	// Map our enum to ImGuizmo operation
+	ImGuizmo::OPERATION op;
+	switch (State.CurrentGizmoOp)
+	{
+		case EditorState::GizmoOp::Translate: op = ImGuizmo::TRANSLATE;
+			break;
+		case EditorState::GizmoOp::Rotate: op = ImGuizmo::ROTATE;
+			break;
+		case EditorState::GizmoOp::Scale: op = ImGuizmo::SCALE;
+			break;
+	}
+
+	ImGuizmo::MODE mode = State.bGizmoWorldMode ? ImGuizmo::WORLD : ImGuizmo::LOCAL;
+
+	// Snap values
+	float snapValues[3]  = {};
+	const float* snapPtr = nullptr;
+	if (State.bGizmoSnap)
+	{
+		float snapVal = 0.0f;
+		switch (State.CurrentGizmoOp)
+		{
+			case EditorState::GizmoOp::Translate: snapVal = State.GizmoSnapTranslate;
+				break;
+			case EditorState::GizmoOp::Rotate: snapVal = State.GizmoSnapRotate;
+				break;
+			case EditorState::GizmoOp::Scale: snapVal = State.GizmoSnapScale;
+				break;
+		}
+		snapValues[0] = snapValues[1] = snapValues[2] = snapVal;
+		snapPtr       = snapValues;
+	}
+
+	// Manipulate — modifies modelMatrix in-place if the user drags
+	bool manipulated = ImGuizmo::Manipulate(
+		hdr->ViewMatrix.m, projFixup,
+		op, mode, modelMatrix, nullptr, snapPtr);
+
+	if (manipulated)
+	{
+		// Decompose the modified matrix back into components
+		float translation[3], rotation[3], scale[3];
+		ImGuizmo::DecomposeMatrixToComponents(modelMatrix, translation, rotation, scale);
+
+		// Write position back
+		*pPosX = translation[0];
+		*pPosY = translation[1];
+		*pPosZ = translation[2];
+
+		// Convert Euler angles (degrees) back to quaternion
+		if (pRotQx && pRotQy && pRotQz && pRotQw)
+		{
+			float rx = rotation[0] * (3.14159265358979f / 180.0f) * 0.5f;
+			float ry = rotation[1] * (3.14159265358979f / 180.0f) * 0.5f;
+			float rz = rotation[2] * (3.14159265358979f / 180.0f) * 0.5f;
+
+			float cx = std::cos(rx), sx2 = std::sin(rx);
+			float cy = std::cos(ry), sy2 = std::sin(ry);
+			float cz = std::cos(rz), sz2 = std::sin(rz);
+
+			*pRotQw = cx * cy * cz + sx2 * sy2 * sz2;
+			*pRotQx = sx2 * cy * cz - cx * sy2 * sz2;
+			*pRotQy = cx * sy2 * cz + sx2 * cy * sz2;
+			*pRotQz = cx * cy * sz2 - sx2 * sy2 * cz;
+		}
+
+		// Write scale back
+		if (pScaleX) *pScaleX = scale[0];
+		if (pScaleY) *pScaleY = scale[1];
+		if (pScaleZ) *pScaleZ = scale[2];
+
+		State.bSceneDirty = true;
+
+		// Mark entity dirty for GPU upload
+		size_t cacheIdx = State.SelectedChunk->Header.CacheIndexStart + State.SelectedLocalIndex;
+		auto* dirtyBits = State.RegistryPtr->DirtyBitsFrame(temporalFrame);
+		uint64_t& word  = (*dirtyBits)[cacheIdx / 64];
+		word            |= uint64_t(1) << (cacheIdx % 64);
+	}
+}
+
+void EditorContext::ConsumePick()
+{
+#ifdef TNX_GPU_PICKING
+	uint32_t cacheIdx = 0;
+	if (!EnginePtr || !EnginePtr->Render) return;
+	if (!EnginePtr->Render->ConsumePickResult(cacheIdx)) return;
+
+	// UINT32_MAX = no entity hit (background)
+	if (cacheIdx == UINT32_MAX)
+	{
+		// Only clear on explicit click (not passive mouse movement in FAST mode).
+		// In FAST mode the result updates every frame — only act on left-click.
+		if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetIO().WantCaptureMouse
+			&& !ImGuizmo::IsOver())
+		{
+			State.ClearSelection();
+		}
+		return;
+	}
+
+	// Only select on left-click, not passive hover
+	if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left)) return;
+	if (ImGui::GetIO().WantCaptureMouse) return;
+	if (ImGuizmo::IsOver()) return;
+
+	// Resolve cache index → archetype + chunk + local index
+	// This is temporary until the EntityID refactoring goes in
+	Registry* reg = State.RegistryPtr;
+	if (!reg) return;
+
+	for (auto& [key, arch] : reg->GetArchetypes())
+	{
+		if (!arch) continue;
+
+		for (size_t ci = 0; ci < arch->Chunks.size(); ++ci)
+		{
+			Chunk* chunk         = arch->Chunks[ci];
+			uint32_t entityCount = arch->GetChunkCount(ci);
+			uint32_t start       = static_cast<uint32_t>(chunk->Header.CacheIndexStart);
+
+			if (cacheIdx >= start && cacheIdx < start + entityCount)
+			{
+				State.ClearSelection();
+				State.Selection          = EditorState::SelectionType::Entity;
+				State.SelectedClassID    = key.ID;
+				State.SelectedArchetype  = arch;
+				State.SelectedChunk      = chunk;
+				State.SelectedLocalIndex = static_cast<uint16_t>(cacheIdx - start);
+				State.SelectedCacheIndex = cacheIdx;
+				return;
+			}
+		}
+	}
+#endif
+}
+
 void EditorContext::BuildFrame()
 {
 	BuildDockspace();
+
+	// Consume GPU pick results and update selection
+	ConsumePick();
 
 	// Draw all panels
 	for (auto& panel : Panels)
 	{
 		panel->Tick(State);
 	}
+
+	// Gizmo hotkeys (W=Translate, E=Rotate, R=Scale) — only when editor owns keyboard
+	if (!ImGui::GetIO().WantTextInput)
+	{
+		if (ImGui::IsKeyPressed(ImGuiKey_W)) State.CurrentGizmoOp = EditorState::GizmoOp::Translate;
+		if (ImGui::IsKeyPressed(ImGuiKey_E)) State.CurrentGizmoOp = EditorState::GizmoOp::Rotate;
+		if (ImGui::IsKeyPressed(ImGuiKey_R)) State.CurrentGizmoOp = EditorState::GizmoOp::Scale;
+	}
+
+	// Gizmo overlay on selected entity
+	DrawGizmo();
 
 	// Modals / overlays
 	DrawFileDialog();
@@ -93,6 +362,13 @@ void EditorContext::BuildFrame()
 	// Debug windows
 	if (bShowDemoWindow) ImGui::ShowDemoWindow(&bShowDemoWindow);
 	if (bShowMetrics) ImGui::ShowMetricsWindow(&bShowMetrics);
+
+	// Tell Sentinel whether the engine should own input.
+	// Engine gets input when: right-click held in viewport, or Play is running.
+	const ImGuiIO& io         = ImGui::GetIO();
+	bool rightClickInViewport = ImGui::IsMouseDown(ImGuiMouseButton_Right) && !io.WantCaptureMouse;
+	bool playing              = LogicPtr && !LogicPtr->IsSimPaused() && bHasSnapshot;
+	EnginePtr->Render->SetEditorOwnsKeyboard(!rightClickInViewport && !playing);
 }
 
 void EditorContext::BuildDockspace()
@@ -213,6 +489,20 @@ void EditorContext::BuildMenuBar()
 	{
 		ImGui::MenuItem("Undo", "Ctrl+Z", false, false);
 		ImGui::MenuItem("Redo", "Ctrl+Y", false, false);
+		ImGui::Separator();
+
+		bool isTranslate = State.CurrentGizmoOp == EditorState::GizmoOp::Translate;
+		bool isRotate    = State.CurrentGizmoOp == EditorState::GizmoOp::Rotate;
+		bool isScale     = State.CurrentGizmoOp == EditorState::GizmoOp::Scale;
+
+		if (ImGui::MenuItem("Translate", "W", isTranslate)) State.CurrentGizmoOp = EditorState::GizmoOp::Translate;
+		if (ImGui::MenuItem("Rotate", "E", isRotate)) State.CurrentGizmoOp = EditorState::GizmoOp::Rotate;
+		if (ImGui::MenuItem("Scale", "R", isScale)) State.CurrentGizmoOp = EditorState::GizmoOp::Scale;
+
+		ImGui::Separator();
+		ImGui::MenuItem("World Space", nullptr, &State.bGizmoWorldMode);
+		ImGui::MenuItem("Snap", nullptr, &State.bGizmoSnap);
+
 		ImGui::EndMenu();
 	}
 
@@ -369,7 +659,7 @@ void EditorContext::SnapshotScene()
 			for (size_t i = 0; i < fieldCount; ++i)
 			{
 				const auto& desc = arch->CachedFieldArrayLayout[i];
-				if (desc.isDecomposed && fieldArrayTable[i]) totalBytes += desc.Size * entityCount;
+				if (desc.isDecomposed && fieldArrayTable[i]) totalBytes += desc.size * entityCount;
 			}
 
 			ArchetypeSnapshot::ChunkData chunkData;
@@ -384,7 +674,7 @@ void EditorContext::SnapshotScene()
 				const auto& desc = arch->CachedFieldArrayLayout[i];
 				if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
 
-				size_t bytes = desc.Size * entityCount;
+				size_t bytes = desc.size * entityCount;
 				std::memcpy(chunkData.FieldData.data() + offset, fieldArrayTable[i], bytes);
 				offset += bytes;
 			}
@@ -448,7 +738,7 @@ void EditorContext::RestoreSnapshot()
 					const auto& desc = ownerArch->CachedFieldArrayLayout[i];
 					if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
 
-					size_t bytes = desc.Size * chunkSnap.EntityCount;
+					size_t bytes = desc.size * chunkSnap.EntityCount;
 					std::memcpy(fieldArrayTable[i], chunkSnap.FieldData.data() + offset, bytes);
 					offset += bytes;
 				}
@@ -495,7 +785,7 @@ void EditorContext::RestoreSnapshot()
 							if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
 
 							// TemporalFlags::Flags is an int32 field — check by ValueType + Size
-							if (desc.ValueType == FieldValueType::Int32 && desc.Size == sizeof(int32_t))
+							if (desc.valueType == FieldValueType::Int32 && desc.size == sizeof(int32_t))
 							{
 								int32_t* flags  = static_cast<int32_t*>(fieldArrayTable[i]);
 								flags[localIdx] &= ~static_cast<int32_t>(1u << 31); // Clear Active bit

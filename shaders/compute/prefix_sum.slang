@@ -17,7 +17,7 @@
 //
 // This gives ~1563 atomicAdds for 100 k entities vs 100 k with per-entity atomic.
 
-#include "GpuFrameData.slang"
+#include "common/GpuFrameData.slang"
 
 [[vk::push_constant]]
 cbuffer PushConstants { uint64_t gFrameDataAddr; }

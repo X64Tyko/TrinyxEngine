@@ -132,15 +132,16 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& C
 
 				// Add to cached layout
 				CachedFieldArrayLayout.push_back({
-					cacheSlotID,
-					static_cast<uint32_t>(fieldIdx),
-					slotIdx,
-					fieldFrames,
-					frameStride,
-					field.Size,
-					true,
-					temporalTier,
-					field.ValueType
+					cacheSlotID,                     //Component Cache slot index
+					comp.TypeID,                     // Component Type ID
+					static_cast<uint32_t>(fieldIdx), // Component Offset
+					slotIdx,                         // Temporal field offset
+					fieldFrames,                     // Number of frames in the cache
+					frameStride,                     // frame stride of the cache
+					field.Size,                      // size of the field
+					true,                            // decomposed
+					temporalTier,                    // Cache tier field lives in
+					field.ValueType                  // Field Type
 				});
 
 				// Add to template cache (stores start offset, not end)
@@ -173,12 +174,16 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& C
 
 			// Add to cached layout as single array
 			CachedFieldArrayLayout.push_back({
-				typeID,
-				0,
-				1,
-				0,
-				comp.Size,
-				false
+				comp.CacheSlotIndex,    // componentSlotIndex
+				typeID,                 // componentID
+				0,                      // fieldIndex
+				0,                      // FieldSlotIndex
+				1,                      // fieldFrames
+				0,                      // frameStride
+				comp.Size,              // size
+				false,                  // isDecomposed
+				CacheTier::None,        // tier
+				FieldValueType::Unknown // valueType
 			});
 
 			// Add to template cache
@@ -309,14 +314,14 @@ void Archetype::RemoveEntity(size_t ChunkIndex, uint32_t LocalIndex, uint32_t Ar
 				uint8_t* lastFrame0   = static_cast<uint8_t*>(LastChunk->GetTemporalFieldPointer(desc.fieldIndex));
 
 				// Swap across all temporal frames — use the cached scalar, no cache call needed.
-				for (size_t frameIdx = 0; frameIdx < desc.FieldFrames; ++frameIdx)
+				for (size_t frameIdx = 0; frameIdx < desc.fieldFrames; ++frameIdx)
 				{
-					size_t frameOffset = frameIdx * desc.FrameStride;
+					size_t frameOffset = frameIdx * desc.frameStride;
 
-					char* target = reinterpret_cast<char*>(targetFrame0 + frameOffset) + (LocalIndex * desc.Size);
-					char* last   = reinterpret_cast<char*>(lastFrame0 + frameOffset) + (LastLocalIndex * desc.Size);
+					char* target = reinterpret_cast<char*>(targetFrame0 + frameOffset) + (LocalIndex * desc.size);
+					char* last   = reinterpret_cast<char*>(lastFrame0 + frameOffset) + (LastLocalIndex * desc.size);
 
-					memcpy(target, last, desc.Size);
+					memcpy(target, last, desc.size);
 				}
 			}
 
@@ -343,15 +348,15 @@ void Archetype::RemoveEntity(size_t ChunkIndex, uint32_t LocalIndex, uint32_t Ar
 		for (size_t i = 0; i < CachedFieldArrayLayout.size(); ++i)
 		{
 			const auto& desc = CachedFieldArrayLayout[i];
-			if (desc.componentID != flagsSlot) continue;
+			if (desc.componentSlotIndex != flagsSlot) continue;
 			//if (desc.Tier == CacheTier::None) break; // Flags should always be temporal
 
 			// Get the write frame pointer for the Flags field
 			uint32_t writeFrame = Reg->GetTemporalCache()->GetActiveWriteFrame();
 			auto* flagsBase     = static_cast<int32_t*>(
 				static_cast<void*>(
-					static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(desc.SlotIndex))
-					+ writeFrame * desc.FrameStride));
+					static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(desc.FieldSlotIndex))
+					+ writeFrame * desc.frameStride));
 
 			// Clear Active, set Dirty so the renderer sees the removal
 			flagsBase[LocalIndex] = static_cast<int32_t>(TemporalFlagBits::Dirty);

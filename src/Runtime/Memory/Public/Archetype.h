@@ -138,15 +138,16 @@ public:
 	// This stores the field array count and layout order
 	struct FieldArrayDescriptor
 	{
+		uint8_t componentSlotIndex;
 		ComponentTypeID componentID;
 		uint32_t fieldIndex;
-		uint8_t SlotIndex;
-		size_t FieldFrames;
-		size_t FrameStride;
-		size_t Size;
+		uint8_t FieldSlotIndex;
+		size_t fieldFrames;
+		size_t frameStride;
+		size_t size;
 		bool isDecomposed;
-		CacheTier Tier;
-		FieldValueType ValueType = FieldValueType::Unknown;
+		CacheTier tier;
+		FieldValueType valueType = FieldValueType::Unknown;
 	};
 
 	std::vector<FieldArrayDescriptor> CachedFieldArrayLayout;
@@ -200,7 +201,7 @@ public:
 			const auto& desc = CachedFieldArrayLayout[i];
 			if (desc.isDecomposed)
 			{
-				if (desc.Tier == CacheTier::None)
+				if (desc.tier == CacheTier::None)
 				{
 					// Cold decomposed — single-frame, read and write are the same pointer
 					void* ptr                    = chunkBase + FieldArrayTemplateCache[i].offsetInChunk;
@@ -210,11 +211,11 @@ public:
 				else
 				{
 					uint8_t* frame0Ptr = static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(desc.fieldIndex));
-					uint32_t readIdx   = (desc.Tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame) % desc.FieldFrames;
-					uint32_t writeIdx  = ((desc.Tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame) + 1) % desc.FieldFrames;
+					uint32_t readIdx   = (desc.tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame) % desc.fieldFrames;
+					uint32_t writeIdx  = ((desc.tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame) + 1) % desc.fieldFrames;
 
-					outDualArrayTable[i * 2]     = frame0Ptr + readIdx * desc.FrameStride;  // Read T
-					outDualArrayTable[i * 2 + 1] = frame0Ptr + writeIdx * desc.FrameStride; // Write T+1
+					outDualArrayTable[i * 2]     = frame0Ptr + readIdx * desc.frameStride;  // Read T
+					outDualArrayTable[i * 2 + 1] = frame0Ptr + writeIdx * desc.frameStride; // Write T+1
 				}
 			}
 			else
@@ -235,7 +236,7 @@ public:
 
 			if (desc.isDecomposed)
 			{
-				if (desc.Tier == CacheTier::None)
+				if (desc.tier == CacheTier::None)
 				{
 					// Cold decomposed — single-frame SoA array in chunk data
 					outFieldArrayTable[i] = chunk->Data + FieldArrayTemplateCache[i].offsetInChunk;
@@ -243,8 +244,8 @@ public:
 				else
 				{
 					// Temporal/Volatile — multi-frame SoA in slab
-					size_t frameIdx       = ((desc.Tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame) % desc.FieldFrames) * desc.FrameStride;
-					outFieldArrayTable[i] = static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(desc.SlotIndex)) + frameIdx;
+					size_t frameIdx       = ((desc.tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame) % desc.fieldFrames) * desc.frameStride;
+					outFieldArrayTable[i] = static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(desc.FieldSlotIndex)) + frameIdx;
 				}
 			}
 			else

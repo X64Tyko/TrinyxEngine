@@ -13,7 +13,7 @@
 // SoA read for instance instIdx:
 //   field k = semantic - 1;  value = InstancesAddr[ k * OutFieldStride + instIdx ]
 
-#include "GpuFrameData.slang"
+#include "common/GpuFrameData.slang"
 
 [[vk::push_constant]]
 cbuffer PushConstants { uint64_t gFrameDataAddr; }
@@ -29,6 +29,9 @@ struct VSOut
 {
     float4 pos   : SV_Position;
     float4 color : COLOR0;
+#ifdef TNX_GPU_PICKING
+    nointerpolation uint entityCacheIdx : ENTITYID0;
+#endif
 };
 
 // Build a TRS model matrix from translation t, unit quaternion q (x,y,z,w),
@@ -130,5 +133,9 @@ VSOut main(uint vertIdx : SV_VertexID, uint instIdx : SV_InstanceID)
     VSOut o;
     o.pos   = clipPos;
     o.color = color;
+#ifdef TNX_GPU_PICKING
+    // Read cache index written by scatter as asfloat(uint) — reinterpret back.
+    o.entityCacheIdx = asuint(inst[(kSemEntityCacheIdx - 1u) * stride + instIdx]);
+#endif
     return o;
 }

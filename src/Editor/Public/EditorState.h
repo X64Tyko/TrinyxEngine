@@ -48,6 +48,16 @@ struct EditorState
 		SelectedCacheIndex = 0;
 	}
 
+	// --- Gizmo ---
+	enum class GizmoOp : uint8_t { Translate, Rotate, Scale };
+
+	GizmoOp CurrentGizmoOp   = GizmoOp::Translate;
+	bool bGizmoWorldMode     = true; // true = WORLD, false = LOCAL
+	bool bGizmoSnap          = false;
+	float GizmoSnapTranslate = 0.5f;
+	float GizmoSnapRotate    = 15.0f;
+	float GizmoSnapScale     = 0.25f;
+
 	// --- Scene file ---
 	std::string CurrentScenePath; // Full path to the loaded .tnxscene file (empty = untitled)
 	std::string CurrentSceneName = "Untitled";

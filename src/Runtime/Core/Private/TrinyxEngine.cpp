@@ -13,7 +13,11 @@
 #include "RenderThread.h"
 #include "ThreadPinning.h"
 #include "TrinyxJobs.h"
-#include "VulkRender.h"
+#if TNX_ENABLE_EDITOR
+#include "EditorRenderer.h"
+#else
+#include "GameplayRenderer.h"
+#endif
 #include "JoltPhysics.h"
 
 // Define global component/class counters (declared in Types.h / SchemaReflector.h)
@@ -136,13 +140,12 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 
 	// ---- Threads ---------------------------------------------------------
 	Logic  = std::make_unique<LogicThread>();
-	Render = std::make_unique<VulkRender>();
+	Render = std::make_unique<RendererType>();
 
 	Logic->Initialize(RegistryPtr.get(), &Config, Physics.get(), &Input, width, height);
 #if TNX_ENABLE_EDITOR
 	Logic->SetSimPaused(true); // Editor starts paused — press Play to simulate
 #endif
-	//Render->Initialize(RegistryPtr.get(), Logic.get(), &Config, GpuDevice, EngineWindow);
 
 	Render->Initialize(RegistryPtr.get(), Logic.get(), &Config, &VkCtx, &VkMem, EngineWindow);
 #if TNX_ENABLE_EDITOR
@@ -243,6 +246,15 @@ void TrinyxEngine::PumpEvents()
 {
 	TNX_ZONE_N("Input_Poll");
 
+#if TNX_ENABLE_EDITOR
+	// The render thread owns the decision of whether the engine gets input.
+	// Sentinel just reacts to the atomic flag each pump cycle.
+	bool engineOwnsInput = Render && !Render->EditorOwnsKeyboard();
+
+	// Sync SDL relative mouse mode with the render thread's decision.
+	if (SDL_GetWindowRelativeMouseMode(EngineWindow) != engineOwnsInput) SDL_SetWindowRelativeMouseMode(EngineWindow, engineOwnsInput);
+#endif
+
 	SDL_Event e;
 	while (SDL_PollEvent(&e))
 	{
@@ -261,32 +273,29 @@ void TrinyxEngine::PumpEvents()
 					bIsRunning.store(false, std::memory_order_release);
 					break;
 				}
+#if TNX_ENABLE_EDITOR
+				if (!engineOwnsInput) break;
+#endif
 				if (!e.key.repeat) Input.PushKey(e.key.scancode, true);
 				break;
 
-			case SDL_EVENT_KEY_UP: Input.PushKey(e.key.scancode, false);
+			case SDL_EVENT_KEY_UP:
+#if TNX_ENABLE_EDITOR
+				if (!engineOwnsInput) break;
+#endif
+				Input.PushKey(e.key.scancode, false);
 				break;
 
 			case SDL_EVENT_MOUSE_MOTION:
 #if TNX_ENABLE_EDITOR
-				// Only feed mouse delta to camera when right-click is held (relative mode active)
-				if (SDL_GetWindowRelativeMouseMode(EngineWindow))
+				if (!engineOwnsInput) break;
 #endif
 				Input.AddMouseDelta(e.motion.xrel, e.motion.yrel);
 				break;
 
+#if !TNX_ENABLE_EDITOR
 			case SDL_EVENT_MOUSE_BUTTON_DOWN:
-#if TNX_ENABLE_EDITOR
-				// Editor: only capture mouse on right-click (viewport camera).
-				// Left-click is reserved for ImGui panel interaction.
-				if (e.button.button == SDL_BUTTON_RIGHT) SDL_SetWindowRelativeMouseMode(EngineWindow, true);
-#else
 				SDL_SetWindowRelativeMouseMode(EngineWindow, true);
-#endif
-				break;
-
-#if TNX_ENABLE_EDITOR
-			case SDL_EVENT_MOUSE_BUTTON_UP: if (e.button.button == SDL_BUTTON_RIGHT) SDL_SetWindowRelativeMouseMode(EngineWindow, false);
 				break;
 #endif
 

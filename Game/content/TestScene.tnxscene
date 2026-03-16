@@ -4,10 +4,13 @@
 		{
 			"type": "CubeEntity",
 			"components": {
+				"TemporalFlags": {
+					"Flags": -0.0
+				},
 				"TransRot": {
-					"PosX": -50.0,
-					"PosY": 5.0,
-					"PosZ": -80.0,
+					"PosX": -17.596714019775391,
+					"PosY": 8.515380859375,
+					"PosZ": -79.623023986816406,
 					"RotQx": 0.0,
 					"RotQy": 0.0,
 					"RotQz": 0.0,
@@ -28,15 +31,28 @@
 					"G": 0.30000001192092896,
 					"B": 0.10000000149011612,
 					"A": 1.0
+				},
+				"JoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 1.0,
+					"HalfExtentY": 1.0,
+					"HalfExtentZ": 1.0,
+					"Motion": 2.0,
+					"Mass": 5.0,
+					"Friction": 0.5,
+					"Restitution": 0.40000000596046448
 				}
 			}
 		},
 		{
 			"type": "CubeEntity",
 			"components": {
+				"TemporalFlags": {
+					"Flags": -0.0
+				},
 				"TransRot": {
 					"PosX": 5.0,
-					"PosY": 5.0,
+					"PosY": 33.96307373046875,
 					"PosZ": -80.0,
 					"RotQx": 0.0,
 					"RotQy": 0.0,
@@ -58,12 +74,25 @@
 					"G": 0.30000001192092896,
 					"B": 1.0,
 					"A": 1.0
+				},
+				"JoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 1.0,
+					"HalfExtentY": 1.0,
+					"HalfExtentZ": 1.0,
+					"Motion": 2.0,
+					"Mass": 5.0,
+					"Friction": 0.5,
+					"Restitution": 0.40000000596046448
 				}
 			}
 		},
 		{
 			"type": "CubeEntity",
 			"components": {
+				"TemporalFlags": {
+					"Flags": -0.0
+				},
 				"TransRot": {
 					"PosX": 0.0,
 					"PosY": -1.0,
@@ -88,6 +117,16 @@
 					"G": 0.30000001192092896,
 					"B": 0.30000001192092896,
 					"A": 1.0
+				},
+				"JoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 50.0,
+					"HalfExtentY": 1.0,
+					"HalfExtentZ": 50.0,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.80000001192092896,
+					"Restitution": 0.10000000149011612
 				}
 			}
 		}

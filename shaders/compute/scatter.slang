@@ -16,7 +16,7 @@
 // interpolation drift.  This is cheaper than slerp and sufficient
 // for consecutive frames at 512Hz.
 
-#include "GpuFrameData.slang"
+#include "common/GpuFrameData.slang"
 
 [[vk::push_constant]]
 cbuffer PushConstants { uint64_t gFrameDataAddr; }
@@ -75,4 +75,12 @@ void main(uint3 gid : SV_DispatchThreadID)
         // Field slot = semantic - 1  (PosX semantic 1 → slot 0, ColorA semantic 13 → slot 12)
         outBuf[(sem - 1u) * stride + outIdx] = lerped;
     }
+
+#ifdef TNX_GPU_PICKING
+    // Write the entity's cache index (i) into the pick output slot.
+    // This is a uint reinterpreted as float in the SoA buffer; the vertex
+    // shader reads it back as uint via asuint(). CPU resolves cache index
+    // to EntityRecord on readback.
+    outBuf[(kSemEntityCacheIdx - 1u) * stride + outIdx] = asfloat(i);
+#endif
 }

@@ -122,7 +122,7 @@ static int FindComponentFieldOffset(const Archetype* arch, ComponentTypeID typeI
 
 	for (size_t i = 0; i < layout.size(); ++i)
 	{
-		if (layout[i].componentID == targetSlot) return static_cast<int>(i);
+		if (layout[i].componentSlotIndex == targetSlot) return static_cast<int>(i);
 	}
 	return -1;
 }

@@ -8,7 +8,7 @@
 // Flags are read from CurrFieldAddrs[0] (the field slab slot with kSemFlags
 // semantic, always at field index 0 by convention).
 
-#include "GpuFrameData.slang"
+#include "common/GpuFrameData.slang"
 
 [[vk::push_constant]]
 cbuffer PushConstants { uint64_t gFrameDataAddr; }
