@@ -1,6 +1,7 @@
 #pragma once
 #include <functional>
 #include <Logger.h>
+#include <string_view>
 #include <tuple>
 
 #include "FieldMeta.h"
@@ -29,7 +30,8 @@ using UpdateFunc = void(*)(double, void**, uint8_t*, uint32_t);
 
 struct EntityMeta
 {
-	size_t ViewSize = 0;
+	const char* Name = nullptr; // Stringified entity type name (from registration macro)
+	size_t ViewSize  = 0;
 
 	UpdateFunc PrePhys      = nullptr;
 	UpdateFunc PostPhys     = nullptr;
@@ -139,11 +141,24 @@ public:
 	std::unordered_map<ClassID, SystemID> ClassSystemID;
 	EntityMeta EntityGetters[4096];
 
+	// Reverse lookup: entity name → ClassID. Returns 0 if not found.
+	[[nodiscard]] ClassID GetEntityByName(std::string_view name) const
+	{
+		auto it = NameToClassID.find(name);
+		return it != NameToClassID.end() ? it->second : 0;
+	}
+
 	template <typename T>
 	void RegisterPrefab()
 	{
 		const ClassID ID           = T::StaticClassID();
 		EntityGetters[ID].ViewSize = sizeof(T);
+
+		if constexpr (requires { T::EntityTypeName; })
+		{
+			EntityGetters[ID].Name                             = T::EntityTypeName;
+			NameToClassID[std::string_view(T::EntityTypeName)] = ID;
+		}
 
 		if constexpr (HasScalarUpdate<T>)
 		{
@@ -193,6 +208,9 @@ public:
 			//ComponentFieldRegistry::Get().SetCacheSlotIndex(TypeID, T::StaticTemporalIndex());
 		}
 	}
+
+private:
+	std::unordered_map<std::string_view, ClassID> NameToClassID;
 };
 
 // The container for member pointers

@@ -160,6 +160,7 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& C
 
 			ComponentLayout[typeID] = ComponentMetaEx{
 				typeID,
+				comp.Name,
 				comp.Size,
 				comp.Alignment,
 				currentOffset,
@@ -253,9 +254,9 @@ void Archetype::PushEntities(std::vector<EntitySlot>& outSlots, size_t count)
 		{
 			Slot.TargetChunk = Chunks[ChunkIndex];
 			Slot.LocalIndex  = LocalIndex;
-			Slot.GlobalIndex = TotalEntityCount;
+			Slot.CacheIndex  = TotalEntityCount;
 		}
-		ActiveEntitySlots[Slot.GlobalIndex] = Slot;
+		ActiveEntitySlots[Slot.CacheIndex] = Slot;
 
 		TotalEntityCount++;
 	}
@@ -356,10 +357,10 @@ void Archetype::RemoveEntity(size_t ChunkIndex, uint32_t LocalIndex, uint32_t Ar
 			flagsBase[LocalIndex] = static_cast<int32_t>(TemporalFlagBits::Dirty);
 
 			// Also mark the entity dirty in the Registry's per-frame bitplane
-			size_t globalIdx    = chunk->Header.GlobalIndexStart + LocalIndex;
+			size_t cacheIdx     = chunk->Header.CacheIndexStart + LocalIndex;
 			auto* dirtyBitplane = Reg->DirtyBitsFrame(writeFrame);
-			uint64_t& word      = (*dirtyBitplane)[globalIdx / 64];
-			word                |= uint64_t(1) << (globalIdx % 64);
+			uint64_t& word      = (*dirtyBitplane)[cacheIdx / 64];
+			word                |= uint64_t(1) << (cacheIdx % 64);
 			break;
 		}
 	}
@@ -458,9 +459,9 @@ Chunk* Archetype::AllocateChunk()
 		LOG_TRACE_F("Allocated %zu temporal field arrays for chunk", TemporalFieldIndices.size());
 	}
 
-	for (auto& cache : UsedCaches) NewChunk->Header.GlobalIndexStart = cache->AdvanceAllocator(ArchSystemID, EntitiesPerChunk, largestSize);
+	for (auto& cache : UsedCaches) NewChunk->Header.CacheIndexStart = cache->AdvanceAllocator(ArchSystemID, EntitiesPerChunk, largestSize);
 
-	LOG_INFO_F("Allocated chunk with %i entities at global index %zi", EntitiesPerChunk, NewChunk->Header.GlobalIndexStart);
+	LOG_INFO_F("Allocated chunk with %i entities at cache index %zi", EntitiesPerChunk, NewChunk->Header.CacheIndexStart);
 
 	// Debug: Track virtual memory fragmentation
 	// This helps answer: "Why is 'spanned' so much larger than 'used'?"

@@ -80,6 +80,32 @@ fields through targeted scalar writes. The zombie follows the data in the wide P
 
 ---
 
+### Mental Model: The Global Cache (“Spreadsheet” Model)
+
+TrinyxEngine’s core storage model is easiest to reason about as a single global cache with a shared entity coordinate.
+
+Think of the engine’s SoA data as a **spreadsheet**:
+
+- **Columns = Entities**. The column index is `EntityCacheIndex`.
+- **Rows = Fields**. Each FieldProxy field (`Transform.PosX`, `Health.Value`, etc.) is one row: a contiguous SoA array.
+- **Cells = Values**. The value for entity `i` in field `Transform.PosX` is the cell at (row = `Transform.PosX`,
+  column = `i`).
+
+Volatile and Temporal are not separate “entity spaces”. They are different **row ranges** (field sets / history buffers)
+in the same global model. Cold/mirror chunk storage can be thought of as additional rows that live outside the main slab
+row ranges, but they still index entities by the same `EntityCacheIndex` coordinate.
+
+Chunks allocate entities by claiming **contiguous ranges of columns** sized by `EntitiesPerChunk`. If one chunk claims
+columns `[0..255]`, the next chunk claims the next range after that, etc. This makes indexing fast and uniform: every
+field array in every tier can use the same `EntityCacheIndex` to find “the cell for this entity”.
+
+**Consequence:** `EntityCacheIndex` is a stable identity coordinate *when the engine chooses to keep it stable*. Any
+operation that relocates a chunk’s claimed column range changes `EntityCacheIndex` for the entities in that chunk, and
+therefore requires rehydration of Views/FieldProxy cursors. Determinism builds can disable identity-changing moves to
+ensure stable indices across rollback windows.
+
+---
+
 # Gameplay Object Model: Constructs & Entities
 
 ## Two Object Types

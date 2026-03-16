@@ -257,6 +257,26 @@ bool VulkRender::InitImGui()
 
 	ImGui::StyleColorsDark();
 
+	// Query DPI scale: physical pixels / logical pixels.
+	int logicalW = 0, physicalW = 0;
+	SDL_GetWindowSize(WindowPtr, &logicalW, nullptr);
+	SDL_GetWindowSizeInPixels(WindowPtr, &physicalW, nullptr);
+	float dpiScale = (logicalW > 0) ? static_cast<float>(physicalW) / static_cast<float>(logicalW) : 1.0f;
+
+	// Scale ImGui style and configure font atlas at native resolution
+	// so text is crisp instead of bilinear-filtered from 1x.
+	// Font must be configured before ImGui_ImplVulkan_Init — the backend
+	// uploads the atlas texture automatically (RendererHasTextures).
+	if (dpiScale > 1.01f)
+	{
+		ImGui::GetStyle().ScaleAllSizes(dpiScale);
+		ImFontConfig fontCfg;
+		fontCfg.SizePixels  = 13.0f * dpiScale;
+		fontCfg.OversampleH = 2;
+		fontCfg.OversampleV = 2;
+		io.Fonts->AddFontDefault(&fontCfg);
+	}
+
 	// SDL3 backend — processes input events forwarded from Sentinel thread.
 	ImGui_ImplSDL3_InitForVulkan(WindowPtr);
 
@@ -294,7 +314,7 @@ bool VulkRender::InitImGui()
 
 	// Editor context for panel drawing.
 	Editor = new EditorContext();
-	Editor->Initialize(RegistryPtr, ConfigPtr, LogicPtr);
+	Editor->Initialize(EnginePtr, LogicPtr);
 
 	bImGuiInitialized = true;
 	LOG_INFO("[VulkRender] ImGui initialized (dynamic rendering, docking enabled)");
@@ -959,11 +979,26 @@ int VulkRender::RenderFrame()
 	VkFence fence    = *frame.Fence;
 
 	{
-		TNX_ZONE_COARSE_NC("Render_FenceCheck", TNX_COLOR_RENDERING)
-		if (vkGetFenceStatus(device, fence) == VK_NOT_READY)
+		TNX_ZONE_COARSE_NC("Render_FenceWait", TNX_COLOR_RENDERING)
+		// Block until the previous submission using this frame slot completes.
+		// A 2ms timeout provides backpressure without hard-stalling: if the GPU
+		// is behind, we yield rather than busy-spinning or reusing in-flight resources.
+		VkResult fenceResult = vkWaitForFences(device, 1, &fence, VK_TRUE, 2'000);
+		if (fenceResult == VK_TIMEOUT)
 		{
 			return 0;
 		}
+		if (fenceResult != VK_SUCCESS)
+		{
+			LOG_ERROR_F("[VulkRender] vkWaitForFences failed: %d", fenceResult);
+			return -1;
+		}
+	}
+
+	// Handle resize requested by the main thread (SDL window resize event).
+	if (bResizeRequested.exchange(false, std::memory_order_acq_rel))
+	{
+		OnSwapchainResize();
 	}
 
 	uint32_t imageIndex = 0;
@@ -1321,6 +1356,10 @@ void VulkRender::RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex)
 
 void VulkRender::OnSwapchainResize()
 {
+	// Must wait for all in-flight GPU work before destroying depth images
+	// and recreating the swapchain — otherwise we destroy resources the GPU
+	// is still rendering into.
+	vkDeviceWaitIdle(device);
 	VkCtx->RecreateSwapchain(WindowPtr);
 	CreateDepthImage();
 }

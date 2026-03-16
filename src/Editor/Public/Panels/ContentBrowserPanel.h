@@ -10,4 +10,8 @@ public:
 	}
 
 	void Draw(EditorState& state) override;
+
+private:
+	// Filter state
+	int TypeFilter = 0; // 0 = All, maps to AssetType values
 };

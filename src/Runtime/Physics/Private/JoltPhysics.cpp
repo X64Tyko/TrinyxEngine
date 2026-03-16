@@ -291,10 +291,10 @@ void JoltPhysics::FlushPendingBodies(Registry* reg, uint32_t writeFrame, uint32_
 
 			for (uint32_t i = 0; i < entityCount; ++i)
 			{
-				uint32_t globalIdx = chunk->Header.GlobalIndexStart + i;
+				uint32_t cacheIdx = chunk->Header.CacheIndexStart + i;
 
 				// Skip if body already exists for this entity
-				if (globalIdx < EntityToBody.size() && !EntityToBody[globalIdx].IsInvalid())
+				if (cacheIdx < EntityToBody.size() && !EntityToBody[cacheIdx].IsInvalid())
 				{
 					body.Advance(1);
 					if (hasTrans) trans.Advance(1);
@@ -325,6 +325,11 @@ void JoltPhysics::FlushPendingBodies(Registry* reg, uint32_t writeFrame, uint32_
 						FieldMath::Read(trans.RotQy),
 						FieldMath::Read(trans.RotQz),
 						FieldMath::Read(trans.RotQw));
+
+					// Guard against zero/denorm quaternions (zero-initialized fields
+					// or imprecise scene file values). Jolt asserts on unnormalized quats.
+					if (rot.LengthSq() < 1.0e-6f) rot = JPH::Quat::sIdentity();
+					else rot                          = rot.Normalized();
 				}
 
 				// Create shape
@@ -352,12 +357,12 @@ void JoltPhysics::FlushPendingBodies(Registry* reg, uint32_t writeFrame, uint32_
 					bodyInterface.AddBody(bodyID, JPH::EActivation::Activate);
 
 					// Store mapping
-					if (globalIdx >= EntityToBody.size()) EntityToBody.resize(globalIdx + 1024, JPH::BodyID());
-					EntityToBody[globalIdx] = bodyID;
+					if (cacheIdx >= EntityToBody.size()) EntityToBody.resize(cacheIdx + 1024, JPH::BodyID());
+					EntityToBody[cacheIdx] = bodyID;
 
 					uint32_t bodyIdx = bodyID.GetIndex();
 					if (bodyIdx >= BodyToEntity.size()) BodyToEntity.resize(bodyIdx + 1024, kInvalidEntityIndex);
-					BodyToEntity[bodyIdx] = globalIdx;
+					BodyToEntity[bodyIdx] = cacheIdx;
 
 					bodiesCreated++;
 				}

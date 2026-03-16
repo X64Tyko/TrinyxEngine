@@ -1,0 +1,158 @@
+{
+	"name": "PhysicsPlayground",
+	"entities": [
+		{
+			"type": "CubeEntity",
+			"components": {
+				"TransRot": { "PosX": 0.0, "PosY": -2.0, "PosZ": -80.0, "RotQw": 1.0 },
+				"Scale": { "ScaleX": 200.0, "ScaleY": 2.0, "ScaleZ": 200.0 },
+				"ColorData": { "R": 0.15, "G": 0.15, "B": 0.18, "A": 1.0 },
+				"JoltBody": {
+					"Shape": 0, "HalfExtentX": 100.0, "HalfExtentY": 1.0, "HalfExtentZ": 100.0,
+					"Motion": 0, "Mass": 0.0, "Friction": 0.8, "Restitution": 0.1
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"TransRot": { "PosX": -8.0, "PosY": 15.0, "PosZ": -80.0, "RotQw": 0.9238795, "RotQx": 0.0, "RotQy": 0.0, "RotQz": 0.3826834 },
+				"Scale": { "ScaleX": 30.0, "ScaleY": 1.0, "ScaleZ": 10.0 },
+				"ColorData": { "R": 0.4, "G": 0.25, "B": 0.1, "A": 1.0 },
+				"JoltBody": {
+					"Shape": 0, "HalfExtentX": 15.0, "HalfExtentY": 0.5, "HalfExtentZ": 5.0,
+					"Motion": 0, "Mass": 0.0, "Friction": 0.3, "Restitution": 0.2
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"TransRot": { "PosX": 8.0, "PosY": 8.0, "PosZ": -80.0, "RotQw": 0.9238795, "RotQx": 0.0, "RotQy": 0.0, "RotQz": -0.3826834 },
+				"Scale": { "ScaleX": 30.0, "ScaleY": 1.0, "ScaleZ": 10.0 },
+				"ColorData": { "R": 0.4, "G": 0.25, "B": 0.1, "A": 1.0 },
+				"JoltBody": {
+					"Shape": 0, "HalfExtentX": 15.0, "HalfExtentY": 0.5, "HalfExtentZ": 5.0,
+					"Motion": 0, "Mass": 0.0, "Friction": 0.3, "Restitution": 0.2
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"TransRot": { "PosX": -12.0, "PosY": 25.0, "PosZ": -80.0, "RotQw": 1.0 },
+				"Scale": { "ScaleX": 2.0, "ScaleY": 2.0, "ScaleZ": 2.0 },
+				"ColorData": { "R": 0.9, "G": 0.2, "B": 0.1, "A": 1.0 },
+				"JoltBody": {
+					"Shape": 0, "HalfExtentX": 1.0, "HalfExtentY": 1.0, "HalfExtentZ": 1.0,
+					"Motion": 2, "Mass": 5.0, "Friction": 0.5, "Restitution": 0.6
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"TransRot": { "PosX": -10.0, "PosY": 28.0, "PosZ": -80.0, "RotQw": 1.0 },
+				"Scale": { "ScaleX": 1.5, "ScaleY": 1.5, "ScaleZ": 1.5 },
+				"ColorData": { "R": 0.1, "G": 0.6, "B": 0.9, "A": 1.0 },
+				"JoltBody": {
+					"Shape": 0, "HalfExtentX": 0.75, "HalfExtentY": 0.75, "HalfExtentZ": 0.75,
+					"Motion": 2, "Mass": 2.0, "Friction": 0.5, "Restitution": 0.8
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"TransRot": { "PosX": -14.0, "PosY": 30.0, "PosZ": -79.0, "RotQw": 1.0 },
+				"Scale": { "ScaleX": 1.0, "ScaleY": 1.0, "ScaleZ": 1.0 },
+				"ColorData": { "R": 0.2, "G": 0.9, "B": 0.3, "A": 1.0 },
+				"JoltBody": {
+					"Shape": 0, "HalfExtentX": 0.5, "HalfExtentY": 0.5, "HalfExtentZ": 0.5,
+					"Motion": 2, "Mass": 1.0, "Friction": 0.4, "Restitution": 0.9
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"TransRot": { "PosX": 0.0, "PosY": 1.0, "PosZ": -60.0, "RotQw": 1.0 },
+				"Scale": { "ScaleX": 3.0, "ScaleY": 6.0, "ScaleZ": 3.0 },
+				"ColorData": { "R": 0.7, "G": 0.7, "B": 0.7, "A": 1.0 },
+				"JoltBody": {
+					"Shape": 0, "HalfExtentX": 1.5, "HalfExtentY": 3.0, "HalfExtentZ": 1.5,
+					"Motion": 0, "Mass": 0.0, "Friction": 0.5, "Restitution": 0.3
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"TransRot": { "PosX": -3.5, "PosY": 1.0, "PosZ": -60.0, "RotQw": 1.0 },
+				"Scale": { "ScaleX": 3.0, "ScaleY": 6.0, "ScaleZ": 3.0 },
+				"ColorData": { "R": 0.7, "G": 0.7, "B": 0.7, "A": 1.0 },
+				"JoltBody": {
+					"Shape": 0, "HalfExtentX": 1.5, "HalfExtentY": 3.0, "HalfExtentZ": 1.5,
+					"Motion": 0, "Mass": 0.0, "Friction": 0.5, "Restitution": 0.3
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"TransRot": { "PosX": 3.5, "PosY": 1.0, "PosZ": -60.0, "RotQw": 1.0 },
+				"Scale": { "ScaleX": 3.0, "ScaleY": 6.0, "ScaleZ": 3.0 },
+				"ColorData": { "R": 0.7, "G": 0.7, "B": 0.7, "A": 1.0 },
+				"JoltBody": {
+					"Shape": 0, "HalfExtentX": 1.5, "HalfExtentY": 3.0, "HalfExtentZ": 1.5,
+					"Motion": 0, "Mass": 0.0, "Friction": 0.5, "Restitution": 0.3
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"TransRot": { "PosX": 0.0, "PosY": 7.0, "PosZ": -60.0, "RotQw": 1.0 },
+				"Scale": { "ScaleX": 12.0, "ScaleY": 1.0, "ScaleZ": 3.0 },
+				"ColorData": { "R": 0.5, "G": 0.5, "B": 0.55, "A": 1.0 },
+				"JoltBody": {
+					"Shape": 0, "HalfExtentX": 6.0, "HalfExtentY": 0.5, "HalfExtentZ": 1.5,
+					"Motion": 0, "Mass": 0.0, "Friction": 0.5, "Restitution": 0.3
+				}
+			}
+		},
+		{
+			"type": "SuperCube",
+			"components": {
+				"TransRot": { "PosX": 0.0, "PosY": 12.0, "PosZ": -60.0, "RotQw": 1.0 },
+				"Scale": { "ScaleX": 4.0, "ScaleY": 4.0, "ScaleZ": 4.0 },
+				"ColorData": { "R": 1.0, "G": 0.85, "B": 0.0, "A": 1.0 },
+				"Velocity": { "vX": 0.0, "vY": 0.0, "vZ": 0.0 }
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"TransRot": { "PosX": 20.0, "PosY": 40.0, "PosZ": -80.0, "RotQw": 0.7071068, "RotQx": 0.7071068, "RotQy": 0.0, "RotQz": 0.0 },
+				"Scale": { "ScaleX": 3.0, "ScaleY": 3.0, "ScaleZ": 3.0 },
+				"ColorData": { "R": 0.8, "G": 0.1, "B": 0.8, "A": 1.0 },
+				"JoltBody": {
+					"Shape": 0, "HalfExtentX": 1.5, "HalfExtentY": 1.5, "HalfExtentZ": 1.5,
+					"Motion": 2, "Mass": 8.0, "Friction": 0.2, "Restitution": 0.95
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"TransRot": { "PosX": -20.0, "PosY": 50.0, "PosZ": -80.0, "RotQw": 1.0 },
+				"Scale": { "ScaleX": 1.0, "ScaleY": 1.0, "ScaleZ": 1.0 },
+				"ColorData": { "R": 1.0, "G": 1.0, "B": 1.0, "A": 1.0 },
+				"JoltBody": {
+					"Shape": 0, "HalfExtentX": 0.5, "HalfExtentY": 0.5, "HalfExtentZ": 0.5,
+					"Motion": 2, "Mass": 0.5, "Friction": 0.1, "Restitution": 0.99
+				}
+			}
+		}
+	]
+}

@@ -1,4 +1,5 @@
 #pragma once
+#include <string_view>
 #include <vector>
 #include "MemoryDefines.h"
 #include "Types.h"
@@ -17,6 +18,7 @@ struct FieldMeta
 struct ComponentMetaEx
 {
 	ComponentTypeID TypeID;        // Numeric ID (0-255) for this component type
+	const char* Name = nullptr;    // Stringified component type name (from registration macro)
 	size_t Size;                   // sizeof(Component) - total struct size
 	size_t Alignment;              // alignof(Component)
 	size_t OffsetInChunk;          // Where this component's data starts in the chunk
@@ -40,17 +42,20 @@ public:
 	}
 
 	// Register field decomposition for a component type
-	void RegisterFields(ComponentTypeID typeID, std::vector<FieldMeta>&& fields, CacheTier inTier, uint8_t slot)
+	void RegisterFields(ComponentTypeID typeID, const char* name, std::vector<FieldMeta>&& fields, CacheTier inTier, uint8_t slot)
 	{
 		ComponentMetaEx& meta = ComponentData[typeID];
 		if (meta.Fields.size() != 0) return;
 
 		meta.TypeID            = typeID;
+		meta.Name              = name;
 		meta.IsFieldDecomposed = true;
 		meta.TemporalTier      = inTier;
 		meta.Fields            = std::move(fields);
 		meta.CacheSlotIndex    = slot;
 		for (const auto& field : meta.Fields) meta.Size += field.Size;
+
+		NameToComponentID[std::string_view(name)] = typeID;
 	}
 
 	// Get field layout for a component
@@ -91,8 +96,16 @@ public:
 	const ComponentMetaEx& GetComponentMeta(ComponentTypeID typeID) const { return ComponentData.at(typeID); }
 	uint8_t GetCacheSlotIndex(ComponentTypeID typeID) const { return ComponentData.at(typeID).CacheSlotIndex; }
 
+	// Reverse lookup: component name → TypeID. Returns 0 if not found.
+	[[nodiscard]] ComponentTypeID GetComponentByName(std::string_view name) const
+	{
+		auto it = NameToComponentID.find(name);
+		return it != NameToComponentID.end() ? it->second : 0;
+	}
+
 private:
 	std::unordered_map<ComponentTypeID, ComponentMetaEx> ComponentData;
+	std::unordered_map<std::string_view, ComponentTypeID> NameToComponentID;
 };
 
 // Hash specialization for std::unordered_set

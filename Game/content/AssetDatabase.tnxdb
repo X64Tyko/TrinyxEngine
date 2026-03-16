@@ -1,0 +1,22 @@
+{
+	"assets": [
+		{
+			"uuid": 250561460025856.0,
+			"path": "SuperCube.prefab",
+			"type": 9.0,
+			"contentHash": 8.7755457743843297e+18
+		},
+		{
+			"uuid": 103459177478656.0,
+			"path": "TestScene.tnxscene",
+			"type": 8.0,
+			"contentHash": 3.4638594589136189e+18
+		},
+		{
+			"uuid": 244158004430592.0,
+			"path": "PhysicsPlayground.tnxscene",
+			"type": 8.0,
+			"contentHash": 1.1496185340112259e+18
+		}
+	]
+}

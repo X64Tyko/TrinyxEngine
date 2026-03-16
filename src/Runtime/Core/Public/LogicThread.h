@@ -33,6 +33,11 @@ public:
 
 	bool IsRunning() const { return bIsRunning.load(std::memory_order_relaxed); }
 
+	// Simulation pause — when paused, camera/input/frame publishing still run
+	// but PrePhysics/PostPhysics/ScalarUpdate/physics are skipped.
+	void SetSimPaused(bool paused) { bSimPaused.store(paused, std::memory_order_release); }
+	bool IsSimPaused() const { return bSimPaused.load(std::memory_order_acquire); }
+
 	// Mailbox access for RenderThread - returns the last completed frame number
 	uint32_t GetLastCompletedFrame() const { return LastCompletedFrame.load(std::memory_order_acquire); }
 
@@ -41,6 +46,13 @@ public:
 	// interpolation error and is far preferable to synchronization overhead.
 	double GetAccumulator() const { return Accumulator.load(std::memory_order_relaxed); }
 	double GetFixedAlpha() const;
+
+	// Editor-readable FPS snapshots (updated once per second by TrackFPS).
+	// Relaxed loads — a stale value is harmless for a stats display.
+	float GetLogicFPS() const { return LogicFPS.load(std::memory_order_relaxed); }
+	float GetLogicFrameMs() const { return LogicFrameMs.load(std::memory_order_relaxed); }
+	float GetFixedFPS() const { return FixedFPS.load(std::memory_order_relaxed); }
+	float GetFixedFrameMs() const { return FixedFrameMs.load(std::memory_order_relaxed); }
 
 private:
 	void ThreadMain(); // Thread entry point
@@ -78,6 +90,7 @@ private:
 	// Threading
 	std::thread Thread;
 	std::atomic<bool> bIsRunning{false};
+	std::atomic<bool> bSimPaused{false};
 
 	// Timing — atomic to allow safe relaxed reads from the RenderThread
 	std::atomic<double> Accumulator{0.0};
@@ -87,14 +100,18 @@ private:
 	int WindowWidth         = 1920;
 	int WindowHeight        = 1080;
 
-	// FPS tracking
+	// FPS tracking (Brain thread writes, editor reads via atomics)
 	uint32_t FpsFrameCount = 0;
 	double FpsTimer        = 0.0;
-
-	// FPS tracking
 	uint32_t FpsFixedCount = 0;
 	double FpsFixedTimer   = 0.0;
 	double LastFPSCheck    = 0.0;
+
+	// Snapshot values published for editor consumption
+	std::atomic<float> LogicFPS{0.0f};
+	std::atomic<float> LogicFrameMs{0.0f};
+	std::atomic<float> FixedFPS{0.0f};
+	std::atomic<float> FixedFrameMs{0.0f};
 };
 
 inline void LogicThread::PrePhysics(double dt)

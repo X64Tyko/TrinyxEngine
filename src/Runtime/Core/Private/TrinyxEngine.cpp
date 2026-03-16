@@ -62,7 +62,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	// }
 	// SDL_WINDOW_VULKAN lets SDL register the window for Vulkan surface creation.
 	EngineWindow = SDL_CreateWindow(title, width, height,
-									SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN);
+									SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
 	if (!EngineWindow)
 	{
 		std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << std::endl;
@@ -107,8 +107,21 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	// using straight Vulkan is... a bit more difficult than SDL lol.
 
 	// ---- Core systems ----------------------------------------------------
-	if (projectDir && projectDir[0] != '\0') Config = EngineConfig::LoadFromDirectory(projectDir);
-	else Config                                     = EngineConfig::LoadFromFile("TrinyxDefaults.ini");
+	if (projectDir && projectDir[0] != '\0')
+	{
+		Config = EngineConfig::LoadFromDirectory(projectDir);
+		snprintf(Config.ProjectDir, sizeof(Config.ProjectDir), "%s", projectDir);
+	}
+	else
+	{
+		Config = EngineConfig::LoadFromFile("TrinyxDefaults.ini");
+	}
+#if TNX_ENABLE_EDITOR && defined(TNX_ENABLE_ROLLBACK)
+	// Editor's edit-mode world uses Volatile-equivalent frame count to save RAM.
+	// PIE will create its own Registry with the user's original TemporalFrameCount.
+	EditorTemporalFrameCount  = Config.TemporalFrameCount; // Stash for PIE
+	Config.TemporalFrameCount = 3;
+#endif
 	RegistryPtr = std::make_unique<Registry>(&Config);
 	Pacer.Initialize(GpuDevice);
 
@@ -125,9 +138,15 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	Render = std::make_unique<VulkRender>();
 
 	Logic->Initialize(RegistryPtr.get(), &Config, Physics.get(), &Input, width, height);
+#if TNX_ENABLE_EDITOR
+	Logic->SetSimPaused(true); // Editor starts paused — press Play to simulate
+#endif
 	//Render->Initialize(RegistryPtr.get(), Logic.get(), &Config, GpuDevice, EngineWindow);
 
 	Render->Initialize(RegistryPtr.get(), Logic.get(), &Config, &VkCtx, &VkMem, EngineWindow);
+#if TNX_ENABLE_EDITOR
+	Render->SetEngine(this);
+#endif
 
 	LOG_INFO("TrinyxEngine initialization complete");
 	return true;
@@ -247,12 +266,31 @@ void TrinyxEngine::PumpEvents()
 			case SDL_EVENT_KEY_UP: Input.PushKey(e.key.scancode, false);
 				break;
 
-			case SDL_EVENT_MOUSE_MOTION: Input.AddMouseDelta(e.motion.xrel, e.motion.yrel);
+			case SDL_EVENT_MOUSE_MOTION:
+#if TNX_ENABLE_EDITOR
+				// Only feed mouse delta to camera when right-click is held (relative mode active)
+				if (SDL_GetWindowRelativeMouseMode(EngineWindow))
+#endif
+				Input.AddMouseDelta(e.motion.xrel, e.motion.yrel);
 				break;
 
 			case SDL_EVENT_MOUSE_BUTTON_DOWN:
-				// Click to capture mouse
+#if TNX_ENABLE_EDITOR
+				// Editor: only capture mouse on right-click (viewport camera).
+				// Left-click is reserved for ImGui panel interaction.
+				if (e.button.button == SDL_BUTTON_RIGHT) SDL_SetWindowRelativeMouseMode(EngineWindow, true);
+#else
 				SDL_SetWindowRelativeMouseMode(EngineWindow, true);
+#endif
+				break;
+
+#if TNX_ENABLE_EDITOR
+			case SDL_EVENT_MOUSE_BUTTON_UP: if (e.button.button == SDL_BUTTON_RIGHT) SDL_SetWindowRelativeMouseMode(EngineWindow, false);
+				break;
+#endif
+
+			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+			case SDL_EVENT_WINDOW_RESIZED: if (Render) Render->NotifyResize();
 				break;
 
 			default: break;

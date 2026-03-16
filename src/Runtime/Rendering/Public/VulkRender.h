@@ -15,6 +15,7 @@ struct SDL_Window;
 #if TNX_ENABLE_EDITOR
 union SDL_Event;
 class EditorContext;
+class TrinyxEngine;
 struct ImGuiEventQueue;
 #endif
 
@@ -100,7 +101,14 @@ public:
 	void Join();
 	bool IsRunning() const { return bIsRunning.load(std::memory_order_relaxed); }
 
+	/// Signal from Sentinel that the window was resized. Render thread picks
+	/// this up at the top of its next frame and recreates the swapchain.
+	void NotifyResize() { bResizeRequested.store(true, std::memory_order_release); }
+
 #if TNX_ENABLE_EDITOR
+	/// Set the engine pointer for editor use (spawn handshake, scene load, etc.)
+	void SetEngine(TrinyxEngine* engine) { EnginePtr = engine; }
+
 	/// Feed an SDL event to ImGui from the main thread. Thread-safe.
 	void PushImGuiEvent(const SDL_Event& event);
 #endif
@@ -143,6 +151,7 @@ private:
 	// ---- Thread lifecycle ----
 	std::thread Thread;
 	std::atomic<bool> bIsRunning{false};
+	std::atomic<bool> bResizeRequested{false};
 
 	// ---- Thread-owned Vulkan resources ----
 	VkFormat DepthFormat = VK_FORMAT_UNDEFINED; // selected in CreateDepthImage, read by CreatePipeline
@@ -210,5 +219,6 @@ private:
 	bool bImGuiInitialized               = false;
 	ImGuiEventQueue* EventQueue          = nullptr;
 	EditorContext* Editor                = nullptr;
+	TrinyxEngine* EnginePtr              = nullptr;
 #endif
 };

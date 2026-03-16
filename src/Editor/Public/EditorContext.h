@@ -1,13 +1,18 @@
 #pragma once
+#if !defined(TNX_ENABLE_EDITOR)
+#error "EditorContext.h requires TNX_ENABLE_EDITOR"
+#endif
+
 #include <memory>
+#include <string>
 #include <vector>
 
+#include "AssetDatabase.h"
 #include "EditorState.h"
 
 class EditorPanel;
-class Registry;
 class LogicThread;
-struct EngineConfig;
+class TrinyxEngine;
 
 /// EditorContext — owns all editor UI state and panel drawing.
 ///
@@ -20,7 +25,7 @@ public:
 	EditorContext();
 	~EditorContext();
 
-	void Initialize(Registry* registry, const EngineConfig* config, LogicThread* logic);
+	void Initialize(TrinyxEngine* engine, LogicThread* logic);
 
 	/// Build the editor UI for this frame.  Called on the render thread
 	/// after ImGui::NewFrame(), before ImGui::Render().
@@ -41,14 +46,24 @@ private:
 	void BuildMenuBar();
 	void ApplyDefaultLayout(unsigned int dockspaceID);
 
-	Registry* RegistryPtr         = nullptr;
-	const EngineConfig* ConfigPtr = nullptr;
-	LogicThread* LogicPtr         = nullptr;
+	TrinyxEngine* EnginePtr = nullptr;
+	LogicThread* LogicPtr   = nullptr;
 
 	EditorState State;
+	AssetDatabase AssetDB;
 	std::vector<std::unique_ptr<EditorPanel>> Panels;
 
-	bool bShowDemoWindow = false;
-	bool bShowMetrics    = false;
-	bool bFirstFrame     = true;
+	void DrawFileDialog();
+	void DrawUnsavedWarning();
+
+	enum class PendingActionType : uint8_t { None, OpenScene };
+
+	bool bShowDemoWindow            = false;
+	bool bShowMetrics               = false;
+	bool bFirstFrame                = true;
+	bool bShowFileDialog            = false;
+	bool bFileDialogForSave         = false;
+	bool bShowUnsavedWarning        = false;
+	PendingActionType PendingAction = PendingActionType::None;
+	std::string FileDialogPath;
 };

@@ -96,6 +96,20 @@ void LogicThread::ThreadMain()
 		// Spiral of death cap
 		if (dt > kMaxDt) dt = kMaxDt;
 
+#if TNX_ENABLE_EDITOR
+		// When paused: still process input (camera) and publish frames
+		// so the scene is visible, but skip all simulation.
+		if (bSimPaused.load(std::memory_order_acquire))
+		{
+			ProcessInput(dt);
+			RegistryPtr->PropagateFrame(FrameNumber);
+			PublishCompletedFrame();
+
+			if (ConfigPtr->TargetFPS > 0) WaitForTiming(frameStartCounter, perfFrequency);
+			continue;
+		}
+#endif
+
 		double acc = Accumulator.load(std::memory_order_relaxed) + dt;
 		if (acc > kMaxAccumulatedTime) acc = kMaxAccumulatedTime;
 		Accumulator.store(acc, std::memory_order_relaxed);
@@ -367,18 +381,22 @@ void LogicThread::TrackFPS()
 
 	if (FpsTimer >= 1.0) [[unlikely]]
 	{
-		LOG_DEBUG_F("Logic FPS: %d | Frame: %.2fms",
-					static_cast<int>(FpsFrameCount / FpsTimer),
-					(FpsTimer / FpsFrameCount) * 1000.0);
+		float fps = static_cast<float>(FpsFrameCount / FpsTimer);
+		float ms  = static_cast<float>((FpsTimer / FpsFrameCount) * 1000.0);
+		LogicFPS.store(fps, std::memory_order_relaxed);
+		LogicFrameMs.store(ms, std::memory_order_relaxed);
+		LOG_DEBUG_F("Logic FPS: %d | Frame: %.2fms", static_cast<int>(fps), static_cast<double>(ms));
 		FpsFrameCount = 0;
 		FpsTimer      = 0.0;
 	}
 
 	if (FpsFixedTimer >= 1.0) [[unlikely]]
 	{
-		LOG_DEBUG_F("Fixed FPS: %d | Frame: %.2fms",
-					static_cast<int>(FpsFixedCount / FpsFixedTimer),
-					(FpsFixedTimer / FpsFixedCount) * 1000.0);
+		float ffps = static_cast<float>(FpsFixedCount / FpsFixedTimer);
+		float fms  = static_cast<float>((FpsFixedTimer / FpsFixedCount) * 1000.0);
+		FixedFPS.store(ffps, std::memory_order_relaxed);
+		FixedFrameMs.store(fms, std::memory_order_relaxed);
+		LOG_DEBUG_F("Fixed FPS: %d | Frame: %.2fms", static_cast<int>(ffps), static_cast<double>(fms));
 		FpsFixedCount = 0;
 		FpsFixedTimer = 0.0;
 	}

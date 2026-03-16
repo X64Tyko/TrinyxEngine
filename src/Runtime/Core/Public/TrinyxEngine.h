@@ -57,6 +57,7 @@ public:
 	}
 
 	Registry* GetRegistry() const { return RegistryPtr.get(); }
+	const EngineConfig* GetConfig() const { return &Config; }
 	bool GetJobsInitialized() const { return bJobsInitialized.load(std::memory_order_relaxed); }
 
 	/// Spawn entities from any thread. Blocks until the work completes at a
@@ -95,6 +96,9 @@ private:
 	// --- Core Systems ---
 	std::unique_ptr<Registry> RegistryPtr;
 	EngineConfig Config;
+#if TNX_ENABLE_EDITOR && defined(TNX_ENABLE_ROLLBACK)
+	int EditorTemporalFrameCount = 8; // User's original value, stashed for PIE worlds
+#endif
 
 	// --- Thread Modules ---
 	std::unique_ptr<JoltPhysics> Physics;

@@ -68,6 +68,25 @@ GPU-driven rendering, lock-free communication) that are too risky to implement d
 
 ## Core Features
 
+### Mental Model: Global Cache + `EntityCacheIndex`
+
+TrinyxEngine stores gameplay data in SoA slabs. A simple way to visualize the cache is a spreadsheet:
+
+- **Columns** are entities, indexed by `EntityCacheIndex`.
+- **Rows** are fields (SoA arrays) generated from components (`Transform.PosX`, `Transform.PosY`, `Health.Value`, …).
+- **Cell** `(field, EntityCacheIndex)` is the value for that entity in that field.
+
+Volatile and Temporal are different row ranges in the same global model (different tiers / history buffers), not
+separate
+entity spaces. Chunk allocation claims contiguous column ranges based on `EntitiesPerChunk`, which is why
+`EntityCacheIndex`
+is globally valid across tiers and makes direct slab iteration fast.
+
+Even if you only interact with the engine through `Construct<T>` and Views, understanding that your data ultimately
+lives
+in field rows indexed by `EntityCacheIndex` helps you reason about performance, determinism, and what “moving entities”
+or “defrag” actually means.
+
 ### The Trinyx Trinity (Three-Thread Architecture)
 
 - **Sentinel (Main Thread):** 1000Hz input polling, window + Vulkan lifetime management. Bit of a waste to do this all
@@ -217,6 +236,10 @@ and `WideMask` (tail-masked partial lanes for non-multiples of 8).
 - **[Configuration Guide](docs/CONFIGURATION.md)** — EngineConfig presets and tuning
 - **[Current Status](docs/STATUS.md)** — Progress log, roadmap, next milestones
 - **[Build Options](docs/BUILD_OPTIONS.md)** — CMake configuration, Tracy profiling, vectorization
+- **[Defragmentation](docs/DEFRAGMENTATION.md)** — Entity slot defrag, chunk mirror compaction, View rehydration
+  contract
+- **[Determinism](docs/DETERMINISM.md)** — Deterministic simulation rules, EntityCacheIndex stability, networking
+  contract
 - **[Schema Error Examples](docs/SCHEMA_ERROR_EXAMPLES.md)** — Reflection system mistakes and fixes
 - **[GPU-Driven Rendering Design](docs/GPU_Driven_Rendering_Design.md)** — GPU pipeline design doc
 

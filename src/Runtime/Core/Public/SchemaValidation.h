@@ -1,5 +1,6 @@
 #pragma once
 #include <type_traits>
+#include "Types.h"
 
 // Schema Validation - Provides better compile-time error messages for common mistakes
 
@@ -59,8 +60,11 @@ namespace SchemaValidation
 	template <typename Tuple, size_t... Is>
 	constexpr bool AllTriviallyCopyableImpl(std::index_sequence<Is...>)
 	{
-		return (std::is_trivially_copyable_v<typename MemberType<
-			std::tuple_element_t<Is, Tuple>>::Type> && ...);
+		return (std::is_trivially_copyable_v < typename MemberType<
+			std::tuple_element_t<Is, Tuple>>::Type > &&
+		...
+		)
+		;
 	}
 
 	template <typename Tuple>

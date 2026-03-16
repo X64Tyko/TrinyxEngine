@@ -20,6 +20,13 @@ enum class LogLevel
 	Always = 0xFF
 };
 
+/// Ring buffer entry for editor log panel consumption.
+struct LogEntry
+{
+	LogLevel Level = LogLevel::Debug;
+	char Message[256];
+};
+
 // Singleton logger with thread-safe file writing
 class Logger
 {
@@ -42,6 +49,14 @@ public:
 	// Core logging function
 	void Log(LogLevel Level, const char* File, int Line, const std::string& Message);
 
+	// --- Editor log ring buffer ---
+	static constexpr uint32_t kLogRingSize = 1024;
+
+	// Returns pointer to ring buffer and current write head.
+	// Reader should snapshot Head, then read entries [Head-kLogRingSize .. Head-1] (mod kLogRingSize).
+	const LogEntry* GetLogRing() const { return LogRing; }
+	uint32_t GetLogHead() const { return LogHead; }
+
 private:
 	Logger() = default;
 	~Logger() { Shutdown(); }
@@ -57,6 +72,10 @@ private:
 	std::mutex Mutex;
 	LogLevel MinLevel = LogLevel::Debug;
 	bool bInitialized = false;
+
+	// Ring buffer for editor consumption (written under Mutex)
+	LogEntry LogRing[kLogRingSize]{};
+	uint32_t LogHead = 0;
 };
 
 // Convenience macros for logging

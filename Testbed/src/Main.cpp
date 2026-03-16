@@ -85,12 +85,12 @@ TEST(DirtyBits_SetAfterPrePhys)
 	ASSERT(!arches.empty());
 	Chunk* chunk = arches[0]->Chunks[0];
 
-	size_t gsi = chunk->Header.GlobalIndexStart;
+	size_t gsi = chunk->Header.CacheIndexStart;
 	Reg->InvokePrePhys(1.0 / 128.0, 0);
 
 	uint8_t* dirtyBytes = reinterpret_cast<uint8_t*>(Reg->DirtyBitsFrame(0)->data()) + (gsi / 8);
 
-	LOG_INFO_F("[DirtyBits] GlobalIndexStart=%zu  byteOffset=%zu", gsi, gsi / 8);
+	LOG_INFO_F("[DirtyBits] CacheIndexStart=%zu  byteOffset=%zu", gsi, gsi / 8);
 	for (int b = 0; b < (kCount + 7) / 8; ++b)
 		LOG_INFO_F("[DirtyBits]   byte[%d] = 0x%02X  (expected 0xFF)", b, dirtyBytes[b]);
 
@@ -134,7 +134,7 @@ static void WriteCubeSetups(Registry* reg, const std::vector<CubeSetup>& setups,
 			void* fieldArrayTable[MAX_FIELD_ARRAYS];
 			arch->BuildFieldArrayTable(chunk, fieldArrayTable, reg->GetTemporalCache()->GetActiveWriteFrame(), reg->GetVolatileCache()->GetActiveWriteFrame());
 			cube.Hydrate(fieldArrayTable, reinterpret_cast<uint8_t*>(reg->DirtyBitsFrame(0)->data())
-						 + (chunk->Header.GlobalIndexStart / 8));
+						 + (chunk->Header.CacheIndexStart / 8));
 
 			for (uint32_t i = 0; i < chunkEntityCount; ++i, cube.Advance(1))
 			{
@@ -199,7 +199,7 @@ static void WriteProjectileSetups(Registry* reg, const std::vector<ProjectileSet
 			void* fieldArrayTable[MAX_FIELD_ARRAYS];
 			arch->BuildFieldArrayTable(chunk, fieldArrayTable, reg->GetTemporalCache()->GetActiveWriteFrame(), reg->GetVolatileCache()->GetActiveWriteFrame());
 			proj.Hydrate(fieldArrayTable, reinterpret_cast<uint8_t*>(reg->DirtyBitsFrame(0)->data())
-						 + (chunk->Header.GlobalIndexStart / 8));
+						 + (chunk->Header.CacheIndexStart / 8));
 
 			for (uint32_t i = 0; i < chunkEntityCount; ++i, proj.Advance(1))
 			{
@@ -245,7 +245,7 @@ static void WriteSuperCubeSetups(Registry* reg, const std::vector<CubeSetup>& se
 			void* fieldArrayTable[MAX_FIELD_ARRAYS];
 			arch->BuildFieldArrayTable(chunk, fieldArrayTable, reg->GetTemporalCache()->GetActiveWriteFrame(), reg->GetVolatileCache()->GetActiveWriteFrame());
 			cube.Hydrate(fieldArrayTable, reinterpret_cast<uint8_t*>(reg->DirtyBitsFrame(0)->data())
-						 + (chunk->Header.GlobalIndexStart / 8));
+						 + (chunk->Header.CacheIndexStart / 8));
 
 			for (uint32_t i = 0; i < chunkEntityCount; ++i, cube.Advance(1))
 			{
@@ -283,7 +283,7 @@ static std::vector<EntityID> gPyramidIds;
 static std::vector<EntityID> gSuperCubeIds;
 static std::vector<EntityID> gProjectileIds;
 
-RUNTIME_TEST(Runtime_JobsInitialized)
+RUNTIME_TEST (Runtime_JobsInitialized)
 {
 	ASSERT(Engine.GetJobsInitialized());
 }
@@ -294,7 +294,7 @@ RUNTIME_TEST(Runtime_JobsInitialized)
 //            transform pull-back, GPU predicate/scatter with Active flags.
 // Persistent — stays up for the duration of the session.
 // ---------------------------------------------------------------------------
-RUNTIME_TEST(Spawn_JoltPyramid)
+RUNTIME_TEST (Spawn_JoltPyramid)
 {
 	std::random_device rd;
 	std::mt19937 gen(rd());
@@ -353,7 +353,7 @@ RUNTIME_TEST(Spawn_JoltPyramid)
 // Exercises: high entity count, ScalarUpdate color animation, no Jolt overhead.
 // Self-destructs after 30 seconds.
 // ---------------------------------------------------------------------------
-RUNTIME_TEST(Spawn_SuperCubeGrid)
+RUNTIME_TEST (Spawn_SuperCubeGrid)
 {
 	std::random_device rd;
 	std::mt19937 gen(rd());
@@ -417,7 +417,7 @@ RUNTIME_TEST(Spawn_SuperCubeGrid)
 //            alpha fade, AVX2 wide-path throughput.
 // Self-destructs after 30 seconds.
 // ---------------------------------------------------------------------------
-RUNTIME_TEST(Spawn_ProjectileBurst)
+RUNTIME_TEST (Spawn_ProjectileBurst)
 {
 	std::random_device rd;
 	std::mt19937 gen(rd());
@@ -466,7 +466,7 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 	}).detach();
 }
 
-RUNTIME_TEST(Runtime_EntityCountValid)
+RUNTIME_TEST (Runtime_EntityCountValid)
 {
 	Registry* Reg        = Engine.GetRegistry();
 	size_t totalEntities = Reg->GetTotalEntityCount();

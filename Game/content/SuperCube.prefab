@@ -1,0 +1,30 @@
+{
+	"type": "SuperCube",
+	"components": {
+		"TransRot": {
+			"PosX": 0.0,
+			"PosY": 10.0,
+			"PosZ": -80.0,
+			"RotQw": 1.0,
+			"RotQx": 0.0,
+			"RotQy": 0.0,
+			"RotQz": 0.0
+		},
+		"Velocity": {
+			"vX": 0.0,
+			"vY": 0.0,
+			"vZ": 0.0
+		},
+		"Scale": {
+			"ScaleX": 3.0,
+			"ScaleY": 3.0,
+			"ScaleZ": 3.0
+		},
+		"ColorData": {
+			"R": 0.2,
+			"G": 0.8,
+			"B": 1.0,
+			"A": 1.0
+		}
+	}
+}

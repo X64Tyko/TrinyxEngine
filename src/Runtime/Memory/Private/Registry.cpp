@@ -91,6 +91,7 @@ Archetype* Registry::GetOrCreateArchetype(const Signature& Sig, const ClassID& I
 
 			Components.push_back(ComponentMetaEx{
 				compTypeID,
+				isDecomposed ? CFR.GetComponentMeta(compTypeID).Name : nullptr,
 				componentSize,
 				FIELD_ARRAY_ALIGNMENT,
 				0, // OffsetInChunk computed by BuildLayout
@@ -158,6 +159,55 @@ void Registry::FreeEntityID(EntityID Id)
 	EntityIndex[Index].TargetChunk = nullptr;
 }
 
+std::vector<EntityID> Registry::CreateByClassID(ClassID classID, size_t count)
+{
+	TNX_ZONE_C(TNX_COLOR_MEMORY);
+
+	MetaRegistry& MR = MetaRegistry::Get();
+	Signature sig    = MR.ClassToArchetype[classID];
+
+#ifdef _DEBUG
+	if (MR.ClassToArchetype.find(classID) == MR.ClassToArchetype.end())
+	{
+		const char* name = (classID < 4096) ? MR.EntityGetters[classID].Name : nullptr;
+		LOG_ERROR_F("CreateByClassID: ClassID %u ('%s') not registered",
+					classID, name ? name : "unknown");
+		assert(false && "Entity ClassID not registered");
+		return {};
+	}
+#endif
+
+	Archetype* arch = GetOrCreateArchetype(sig, classID);
+
+	std::vector<Archetype::EntitySlot> Slots(count);
+	EntityIndex.reserve(EntityIndex.size() + count);
+	arch->PushEntities(Slots, count);
+
+	std::vector<EntityID> Entities(count);
+	for (size_t i = 0; i < count; ++i)
+	{
+		EntityID& Id               = Entities[i];
+		Archetype::EntitySlot Slot = Slots[i];
+
+		Id = AllocateEntityID(classID);
+
+		uint32_t Index = Id.GetIndex();
+		if (Index >= EntityIndex.size())
+		{
+			EntityIndex.resize(Index + 1024);
+		}
+
+		EntityRecord& Record = EntityIndex[Index];
+		Record.Arch          = arch;
+		Record.TargetChunk   = Slot.TargetChunk;
+		Record.Index         = static_cast<uint16_t>(Slot.LocalIndex);
+		Record.ArchetypeIdx  = Slot.CacheIndex;
+		Record.Generation    = Id.GetGeneration();
+	}
+
+	return Entities;
+}
+
 void Registry::Destroy(EntityID Id)
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
@@ -190,9 +240,9 @@ bool Registry::DestroyRecord(EntityRecord& Record)
 	}
 
 	// Calculate where the last entity is BEFORE removal
-	uint32_t lastEntityGlobalIndex = arch->TotalEntityCount - 1;
-	uint32_t lastChunkIndex        = lastEntityGlobalIndex / arch->EntitiesPerChunk;
-	uint32_t lastLocalIndex        = lastEntityGlobalIndex % arch->EntitiesPerChunk;
+	uint32_t lastEntityCacheIndex = arch->TotalEntityCount - 1;
+	uint32_t lastChunkIndex       = lastEntityCacheIndex / arch->EntitiesPerChunk;
+	uint32_t lastLocalIndex       = lastEntityCacheIndex % arch->EntitiesPerChunk;
 
 	// Check if we're actually swapping (not removing the last entity)
 	bool willSwap = false; //(chunkIndex != lastChunkIndex || Record.Index != lastLocalIndex);

@@ -31,6 +31,10 @@ public:
 	template <typename T>
 	std::vector<EntityID> Create(size_t count);
 
+	// Non-template create — for data-driven spawning where the type is known only at runtime.
+	// ClassID obtained via MetaRegistry::Get().GetEntityByName("TypeName").
+	std::vector<EntityID> CreateByClassID(ClassID classID, size_t count);
+
 	// Destroy an entity (deferred until end of frame)
 	void Destroy(EntityID Id);
 
@@ -77,6 +81,9 @@ public:
 	// Memory diagnostics
 	uint32_t GetTotalChunkCount() const;
 	uint32_t GetTotalEntityCount() const;
+
+	// Editor: read-only archetype iteration
+	const auto& GetArchetypes() const { return Archetypes; }
 
 	// Resets the registry to default, useful after tests.
 	// TODO: this needs to not be public.
@@ -140,7 +147,7 @@ private:
 #ifdef TNX_ENABLE_ROLLBACK
 	TemporalComponentCache HistorySlab; // N frames (Config->TemporalFrameCount), rollback-capable
 #endif
-	VolatileComponentCache VolatileSlab;   // 3 frames, no rollback
+	VolatileComponentCache VolatileSlab; // 3 frames, no rollback
 
 	// Pre-allocated dual array table used by all Invoke* methods.
 	// Avoids a large VLA on the stack each call.  Sized by MAX_FIELDS_PER_ARCHETYPE
@@ -168,72 +175,7 @@ EntityID Registry::Create()
 template <typename T>
 std::vector<EntityID> Registry::Create(size_t count)
 {
-	// Static local caching - archetype is calculated once per type T
-	static Archetype* CachedArchetype = nullptr;
-	static bool Initialized           = false;
-
-	if (!Initialized)
-	{
-		ClassID classID  = T::StaticClassID();
-		MetaRegistry& MR = MetaRegistry::Get();
-
-#ifdef _DEBUG // || _WITH_EDITOR
-		// Runtime guard: Check if entity type was registered with TNX_REGISTER_ENTITY
-		if (MR.ClassToArchetype.find(classID) == MR.ClassToArchetype.end())
-		{
-			// FATAL: Entity type not registered
-			const char* typeName = typeid(T).name();
-			LOG_ERROR_F("FATAL: Entity type '%s' not registered! Did you forget TNX_REGISTER_ENTITY(%s)?",
-						typeName, typeName);
-
-		// In debug builds, assert. In release, fail gracefully
-#ifdef _DEBUG
-		assert(false && "Entity type not registered - add TNX_REGISTER_ENTITY macro");
-#endif
-
-		// Return invalid entity ID
-		return std::vector<EntityID>{ EntityID{} };
-        }
-#endif
-
-		Signature Sig = MR.ClassToArchetype[classID];
-
-		CachedArchetype = GetOrCreateArchetype(Sig, classID);
-		Initialized     = true;
-	}
-
-
-	// Allocate slot in archetype
-	std::vector<Archetype::EntitySlot> Slots;
-	Slots.resize(count);
-	EntityIndex.reserve(EntityIndex.size() + count);
-	CachedArchetype->PushEntities(Slots, count);
-
-	// Allocate entity ID
-	std::vector<EntityID> Entities(count);
-	for (size_t i = 0; i < count; ++i)
-	{
-		EntityID& Id               = Entities[i];
-		Archetype::EntitySlot Slot = Slots[i];
-
-		Id = AllocateEntityID(T::StaticClassID());
-
-		// Update EntityIndex
-		uint32_t Index = Id.GetIndex();
-		if (Index >= EntityIndex.size())
-		{
-			EntityIndex.resize(Index + 1024);
-		}
-
-		EntityRecord& Record = EntityIndex[Index];
-		Record.Arch          = CachedArchetype;
-		Record.TargetChunk   = Slot.TargetChunk;
-		Record.Index         = static_cast<uint16_t>(Slot.LocalIndex);
-		Record.ArchetypeIdx  = Slot.GlobalIndex;
-		Record.Generation    = Id.GetGeneration();
-	}
-
-	return Entities;
+	return CreateByClassID(T::StaticClassID(), count);
 }
 
 template <typename T>
@@ -371,7 +313,7 @@ inline void Registry::InvokeScalarUpdate(double dt)
 					arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
 					uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(
 							this->DirtyBitsFrame(hisWrite)->data())
-						+ (chunk->Header.GlobalIndexStart / 8);
+						+ (chunk->Header.CacheIndexStart / 8);
 					ScalarUpdate(dt, fieldArrayTable, chunkDirtyBits, entityCount);
 				},
 				&ScalarUpdateCounter, TrinyxJobs::Queue::Logic);
@@ -431,7 +373,7 @@ inline void Registry::InvokePrePhys(double dt)
 					arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
 					uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(
 							this->DirtyBitsFrame(hisWrite)->data())
-						+ (chunk->Header.GlobalIndexStart / 8);
+						+ (chunk->Header.CacheIndexStart / 8);
 					prePhys(dt, fieldArrayTable, chunkDirtyBits, entityCount);
 				},
 				&prePhysCounter, TrinyxJobs::Queue::Logic);
@@ -467,7 +409,7 @@ inline void Registry::InvokePostPhys(double dt)
 #endif
 		return;
 	}
-	
+
 	TrinyxJobs::JobCounter postPhysCounter;
 
 	for (auto& [sig, arch] : Archetypes)
@@ -490,7 +432,7 @@ inline void Registry::InvokePostPhys(double dt)
 					arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
 					uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(
 							this->DirtyBitsFrame(hisWrite)->data())
-						+ (chunk->Header.GlobalIndexStart / 8);
+						+ (chunk->Header.CacheIndexStart / 8);
 					PostPhys(dt, fieldArrayTable, chunkDirtyBits, entityCount);
 				},
 				&postPhysCounter, TrinyxJobs::Queue::Logic);

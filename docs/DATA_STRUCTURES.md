@@ -53,6 +53,26 @@ struct FieldProxy : FieldProxyMask<WIDTH>
 - `Advance()` increments the shared index (or 8 for Wide mode)
 - Users write `transform.PositionX += velocity.VelocityX * dt` — looks like OOP, runs as SoA
 
+### Mental Model Tie-In: FieldProxy is a Row in the Global Cache
+
+If you use the “global spreadsheet” mental model (see `docs/ARCHITECTURE.md`), then a `FieldProxy<T, WIDTH>`
+corresponds to **one row**: a contiguous SoA array of `T` values.
+
+- The field itself (e.g. `Transform.PositionX`) is the row identity.
+- `EntityCacheIndex` is the **column** identity across the entire engine.
+- `FieldProxy::Bind(writePtr, idx)` sets the cursor so that reads/writes go to the cell at
+  (row = this field, column = the current entity index).
+- `Advance(step)` moves the cursor to the next column(s): `+1` for scalar, `+8` for wide AVX2 iteration.
+
+During per-chunk iteration, Views/hydration bind each FieldProxy to the correct underlying field array
+for that component and frame, then advance the shared entity cursor across the chunk’s contiguous
+`EntityCacheIndex` range. This is why code that *looks* OOP:
+
+`transform.PosX += velocity.VelX * dt;`
+
+can compile down to direct SoA loads/stores to the underlying row arrays with no virtual dispatch and
+no per-entity map lookups.
+
 ---
 
 ## Component Definition Patterns

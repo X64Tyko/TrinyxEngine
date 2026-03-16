@@ -67,7 +67,7 @@ public:
 	{
 		Chunk* TargetChunk;
 		uint32_t LocalIndex;
-		uint32_t GlobalIndex; // Index across all chunks
+		uint32_t CacheIndex; // Index across all chunks
 	};
 
 	std::vector<EntitySlot> ActiveEntitySlots;

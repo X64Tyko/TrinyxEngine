@@ -40,6 +40,10 @@ struct EngineConfig
 	// number of jobs to preallocate the job queues to hold. exceeding this value will assert
 	int JobCacheSize = 16 * 1024;
 
+	// Project root directory (set from TNX_PROJECT_DIR or Initialize() argument).
+	// Used by the editor's Content Browser to locate assets.
+	char ProjectDir[512] = "";
+
 	// --- Helpers ---
 	double GetTargetFrameTime() const
 	{

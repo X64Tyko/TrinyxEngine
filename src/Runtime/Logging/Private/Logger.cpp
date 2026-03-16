@@ -84,6 +84,12 @@ void Logger::Log(LogLevel Level, const char* File, int Line, const std::string& 
 		LogFile << logEntry << std::endl;
 		LogFile.flush();
 	}
+
+	// Ring buffer for editor panel
+	LogEntry& entry = LogRing[LogHead % kLogRingSize];
+	entry.Level     = Level;
+	snprintf(entry.Message, sizeof(entry.Message), "%s", Message.c_str());
+	LogHead++;
 }
 
 std::string Logger::GetTimestamp()

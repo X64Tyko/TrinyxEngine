@@ -40,6 +40,9 @@ endif ()
 if (TNX_ENABLE_ROLLBACK)
     add_compile_definitions(TNX_ENABLE_ROLLBACK)
     message(STATUS "Rollback history: ENABLED")
+    # Note: in editor mode, rollback is compiled in but the edit-mode world
+    # does not simulate (paused). PIE WorldInstances will use rollback when
+    # they create their own Registry with temporal history enabled.
 else ()
     message(STATUS "Rollback history: DISABLED (Temporal fields stored in Volatile slab)")
 endif ()
@@ -62,7 +65,8 @@ set(GNS_PATH "${CMAKE_SOURCE_DIR}/libs/gns")
 add_library(Slang::Compiler SHARED IMPORTED GLOBAL
         src/Runtime/Core/Public/TrinyxJobs.h
         src/Runtime/Core/Private/ThreadPinning.h
-        src/Runtime/Core/Public/TrinyxRingBuffer.h)
+        src/Runtime/Core/Public/TrinyxRingBuffer.h
+        src/Runtime/Memory/Public/PagedMap.h)
 set_target_properties(Slang::Compiler PROPERTIES
     IMPORTED_LOCATION             "${SLANG_PATH}/lib/libslang-compiler.so"
     INTERFACE_INCLUDE_DIRECTORIES "${SLANG_PATH}/include"
@@ -87,8 +91,12 @@ if(ENABLE_TRACY)
     # Add Tracy include directory globally as SYSTEM (silences warnings)
     include_directories(SYSTEM "${TRACY_PATH}/public")
 
-    # Enable Tracy profiling and disable ROCm support
+    # Enable Tracy profiling and disable ROCm support.
+    # TRACY_ON_DEMAND: only buffer zone data when a profiler is connected.
+    # Without this, Tracy accumulates events in RAM indefinitely — at high
+    # tick rates (512Hz+) this eats gigabytes in seconds and OOM-kills the process.
     add_compile_definitions(TRACY_ENABLE)
+    add_compile_definitions(TRACY_ON_DEMAND)
     add_compile_definitions(TRACY_PROFILE_LEVEL=${TRACY_PROFILE_LEVEL})
     add_compile_definitions(TRACY_NO_ROCTRACER=1)
     add_compile_definitions(TRACY_NO_ROCPROF=1)

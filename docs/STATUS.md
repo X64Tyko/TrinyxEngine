@@ -129,7 +129,7 @@ in the long run.
 - PullActiveTransforms: writes pos+rot from awake bodies back into SoA WriteArrays
 - Physics loop: PrePhysics → (FlushPendingBodies → Jolt Step -- phystick % 0) → (PullActiveTransforms -- phystick %
   phystick - 1) → PostPhysics
-- BodyID↔EntityGlobalIndex bidirectional lookup (EntityToBody, BodyToEntity vectors)
+- BodyID↔EntityCacheIndex bidirectional lookup (EntityToBody, BodyToEntity vectors)
 
 **Input System:**
 

@@ -76,7 +76,7 @@ static void RegisterFieldsImpl(std::index_sequence<Is...>)
 	fieldMetas.reserve(sizeof...(Is));
 
 	// Extract field metadata for each member pointer
-	(..., fieldMetas.push_back(ExtractFieldMeta<Derived, Is>(std::get<Is>(fields))));
+	(..., fieldMetas.push_back(ExtractFieldMeta<Derived, Is>(std::get < Is > (fields))));
 
 	// Register with global registry
 	ComponentTypeID typeID = Derived::StaticTypeID();
@@ -88,7 +88,7 @@ static void RegisterFieldsImpl(std::index_sequence<Is...>)
 		if (Tier == CacheTier::Temporal) Tier = CacheTier::Volatile;
 #endif
 	}
-	ComponentFieldRegistry::Get().RegisterFields(typeID, std::move(fieldMetas), Tier, Derived::StaticTemporalIndex());
+	ComponentFieldRegistry::Get().RegisterFields(typeID, Derived::ComponentTypeName, std::move(fieldMetas), Tier, Derived::StaticTemporalIndex());
 }
 
 // Extract metadata from a member pointer
@@ -128,10 +128,11 @@ static constexpr size_t GetFieldCount()
 template <typename Derived>
 static bool RegisterFieldsStatic()
 {
-	RegisterFieldsImpl<Derived>(std::make_index_sequence<GetFieldCount<Derived>()>
-		{
-		}
-	);
+	RegisterFieldsImpl<Derived>(std::make_index_sequence < GetFieldCount<Derived>() >
+	{
+	}
+	)
+	;
 	return true;
 }
 
@@ -161,7 +162,7 @@ FORCE_INLINE void ForEachField(Func&& func)
 	constexpr auto fields = T::DefineFields();
 	[&]<size_t... Is>(std::index_sequence<Is...>)
 	{
-		(func(std::get<Is>(fields), Is), ...);
+		(func(std::get < Is > (fields), Is), ...);
 	}(std::make_index_sequence<std::tuple_size_v<decltype(fields)>>{});
 }
 
@@ -175,6 +176,7 @@ FORCE_INLINE void ForEachField(Func&& func)
     }
 #define TNX_REGISTER_SCHEMA(CLASS, SUPER, ...) \
     public: \
+    static constexpr const char* EntityTypeName = #CLASS; \
     static constexpr auto DefineSchema() \
     { \
         return SUPER<CLASS, WIDTH>::DefineSchema().Extend(__VA_OPT__(TNX_MAP_LIST(TNX_GET_PTR, CLASS, __VA_ARGS__))); \
@@ -273,6 +275,7 @@ FORCE_INLINE void ForEachField(Func&& func)
 
 // Handles creating the field definition, debug field names, Bind function, and Registering the struct component
 #define TNX_REGISTER_FIELDS(ComponentType, ...) \
+    static constexpr const char* ComponentTypeName = #ComponentType; \
     static constexpr auto DefineFields() \
     { /* Use the map bindings and __VA_OPT__ to create our Field Definitions for each item passed to the macro */ \
         return std::make_tuple(__VA_OPT__(TNX_MAP_LIST(TNX_GET_PTR, ComponentType, __VA_ARGS__))); \
