@@ -12,6 +12,27 @@
 #define FORCE_INLINE inline __attribute__((always_inline))
 #endif
 
+// Cross-platform bit scan intrinsics
+#ifdef _MSC_VER
+#include <intrin.h>
+// Count trailing zeros (32-bit)
+#define TNX_CTZ32(x) ([](uint32_t val) -> uint32_t { \
+	unsigned long idx; \
+	_BitScanForward(&idx, val); \
+	return static_cast<uint32_t>(idx); \
+}(x))
+// Count trailing zeros (64-bit)
+#define TNX_CTZ64(x) ([](uint64_t val) -> uint32_t { \
+	unsigned long idx; \
+	_BitScanForward64(&idx, val); \
+	return static_cast<uint32_t>(idx); \
+}(x))
+#else
+// GCC/Clang builtins
+#define TNX_CTZ32(x) __builtin_ctz(x)
+#define TNX_CTZ64(x) __builtin_ctzll(x)
+#endif
+
 // Disable MSVC warning for anonymous structs in unions (C++11 standard feature)
 #ifdef _MSC_VER
 #pragma warning(push)

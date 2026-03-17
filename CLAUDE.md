@@ -17,8 +17,22 @@ offering benefits like optional determinism, rollback, and low latency by defaul
 
 ## Build Commands
 
-**Requirements (Linux):** CMake 3.20+, C++20 compiler, SDL3 system package (`libsdl3-dev`), Tracy submodule (`libs/tracy`).
+**Requirements:**
+- CMake 3.20+
+- C++20 compiler (GCC 10+, Clang 12+, MSVC 2022+)
+- Git submodules: Jolt Physics, Tracy, Dear ImGui (docking branch), ImGuizmo, GameNetworkingSockets, OpenSSL, Protobuf
+- Vendored libraries: SDL3, Volk, VMA, Slang (already included in repo)
 
+**First-time setup:**
+```bash
+# Clone with submodules
+git clone --recursive https://github.com/YourRepo/TrinyxEngine.git
+
+# Or if already cloned, initialize submodules
+git submodule update --init --recursive
+```
+
+**Build:**
 ```bash
 # Standard development build (RelWithDebInfo recommended for profiling)
 cmake -B cmake-build-relwithdebinfo -DCMAKE_BUILD_TYPE=RelWithDebInfo
@@ -30,19 +44,36 @@ cmake --build cmake-build-relwithdebinfo
 # Debug build
 cmake -B cmake-build-debug -DCMAKE_BUILD_TYPE=Debug
 cmake --build cmake-build-debug
+
+# Windows (Visual Studio)
+cmake -B cmake-build-relwithdebinfo-visual-studio -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build cmake-build-relwithdebinfo-visual-studio --config RelWithDebInfo
 ```
 
 **Key CMake options** (append to the configure step):
 
-|--------|---------|---------|
 | Option | Default | Purpose |
 |--------|---------|---------|
+| `TNX_ENABLE_EDITOR=ON/OFF` | OFF | Enable editor UI (ImGui + GPU picking) |
+| `TNX_ENABLE_ROLLBACK=ON/OFF` | OFF | Enable N-frame rollback history for netcode |
 | `ENABLE_TRACY=ON/OFF` | ON | Tracy profiler integration |
 | `TRACY_PROFILE_LEVEL=1/2/3` | 3 | 1=coarse (~1%), 2=medium (~5%), 3=per-entity (~50%+ overhead) |
 | `ENABLE_AVX2=ON/OFF` | ON | `-march=native` on GCC/Clang |
 | `GENERATE_ASSEMBLY=ON/OFF` | OFF | Emit `.s` files for vectorization inspection |
 | `VECTORIZATION_REPORTS=ON/OFF` | OFF | Compiler loop-vectorization diagnostics |
 | `TNX_ALIGN_64=ON/OFF` | OFF | 64-byte vs 32-byte field array alignment |
+| `TNX_DETAILED_METRICS=ON/OFF` | OFF | Per-frame latency breakdown logging |
+
+**Example builds:**
+```bash
+# Editor build (automatically enables GPU picking)
+cmake -B build-editor -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTNX_ENABLE_EDITOR=ON
+cmake --build build-editor
+
+# Networked build with rollback
+cmake -B build-netcode -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTNX_ENABLE_ROLLBACK=ON
+cmake --build build-netcode
+```
 
 ---
 

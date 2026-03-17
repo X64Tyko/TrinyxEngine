@@ -211,12 +211,12 @@ void RendererCore<Derived>::ThreadMain()
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
 		// if we detect a change in temporal data OR logic frame, upd
-		uint32_t newTemporalFrame = RegistryPtr->GetTemporalCache()->GetActiveReadFrame();
-		uint32_t newVolatileFrame = RegistryPtr->GetVolatileCache()->GetActiveReadFrame();
 		uint32_t LogicFrame       = LogicPtr->GetLastCompletedFrame();
-		if (LastRenderedFrame < LogicFrame || (newVolatileFrame != LastVolatileFrame && newTemporalFrame != LastTemporalFrame))
+		if (LastRenderedFrame < LogicFrame)// || (newVolatileFrame != LastVolatileFrame && newTemporalFrame != LastTemporalFrame))
 		{
 			LastRenderedFrame = LogicFrame;
+			uint32_t newTemporalFrame = RegistryPtr->GetTemporalCache()->GetActiveReadFrame();
+			uint32_t newVolatileFrame = RegistryPtr->GetVolatileCache()->GetActiveReadFrame();
 			LastVolatileFrame = newVolatileFrame;
 			LastTemporalFrame = newTemporalFrame;
 			WriteToFrameSlab();
@@ -422,6 +422,15 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 	const float dpiScale = (logicalW > 0) ? static_cast<float>(physicalW) / static_cast<float>(logicalW) : 1.0f;
 	const int32_t pickX  = static_cast<int32_t>(mx * dpiScale);
 	const int32_t pickY  = static_cast<int32_t>(my * dpiScale);
+
+	// Debug logging (every 60 frames to avoid spam)
+	static uint32_t pickDebugFrameCounter = 0;
+	if (++pickDebugFrameCounter >= 60)
+	{
+		LOG_INFO_F("[Picking] Mouse: (%.1f, %.1f) logical, (%d, %d) physical, DPI scale: %.2f, extent: %ux%u",
+				   mx, my, pickX, pickY, dpiScale, ext.width, ext.height);
+		pickDebugFrameCounter = 0;
+	}
 #elif defined(TNX_GPU_PICKING)
 	// On-demand: only pick when requested.
 	const bool bDoPick = bPickRequested.load(std::memory_order_acquire);

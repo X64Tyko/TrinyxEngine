@@ -247,21 +247,69 @@ and `WideMask` (tail-masked partial lanes for non-multiples of 8).
 
 ## Building
 
-**Requirements (Linux):**
-- C++20 compiler (GCC or Clang)
-- CMake 3.20+
-- SDL3 system package (`sudo apt install libsdl3-dev` or distro equivalent)
-- Slang compiler binary (`libs/slang/bin/slangc`) — vendored
-- Git submodules: Tracy (`libs/tracy`) and Jolt Physics (`libs/jolt`) — run `git submodule update --init --recursive`
-  after cloning
+### Prerequisites
 
+**System Requirements:**
+- **CMake:** 3.20+
+- **Compiler:** GCC 10+ / Clang 12+ (Linux), MSVC 2022+ (Windows)
+- **C++ Standard:** C++20
+
+**Git Submodules (required):**
 ```bash
-cmake -B cmake-build-relwithdebinfo -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build cmake-build-relwithdebinfo
-./cmake-build-relwithdebinfo/Testbed/Testbed
+# Clone with submodules
+git clone --recursive https://github.com/YourRepo/TrinyxEngine.git
+
+# Or if already cloned, initialize submodules
+git submodule update --init --recursive
 ```
 
-See [docs/BUILD_OPTIONS.md](docs/BUILD_OPTIONS.md) for advanced configuration.
+**Submodules include:**
+- Jolt Physics v5.5.0 — Physics simulation
+- Tracy v0.13.1 — Profiler
+- Dear ImGui (docking branch) — Editor UI
+- ImGuizmo — 3D gizmo manipulation
+- GameNetworkingSockets — Networking layer
+- OpenSSL 3.3.3 — Crypto for networking
+- Protocol Buffers 3.29.2 — Serialization
+
+**Note:** Submodule download is ~1.8GB. First build will take 10-20 minutes due to OpenSSL and Protobuf compilation.
+
+### Quick Start
+
+```bash
+# Standard build
+cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build
+./build/Testbed/Testbed
+
+# Editor build (recommended for development)
+cmake -B build-editor -DTNX_ENABLE_EDITOR=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build-editor
+./build-editor/Testbed/Testbed
+
+# Windows (Visual Studio)
+cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build --config RelWithDebInfo
+.\build\Testbed\RelWithDebInfo\Testbed.exe
+```
+
+### Build Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `TNX_ENABLE_EDITOR` | OFF | Enable ImGui editor with GPU picking |
+| `TNX_ENABLE_ROLLBACK` | OFF | Enable N-frame rollback for netcode |
+| `ENABLE_TRACY` | ON | Tracy profiler integration |
+| `ENABLE_AVX2` | ON | AVX2 SIMD instructions |
+
+**Example:**
+```bash
+# Editor build with profiling
+cmake -B build -DTNX_ENABLE_EDITOR=ON -DENABLE_TRACY=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build
+```
+
+See [docs/BUILD_OPTIONS.md](docs/BUILD_OPTIONS.md) for complete configuration reference.
 
 ---
 

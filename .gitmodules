@@ -4,3 +4,19 @@
 [submodule "libs/tracy"]
 	path = libs/tracy
 	url = https://github.com/wolfpld/tracy.git
+[submodule "libs/imgui"]
+	path = libs/imgui
+	url = https://github.com/ocornut/imgui.git
+	branch = docking
+[submodule "libs/guizmo"]
+	path = libs/guizmo
+	url = https://github.com/CedricGuillemet/ImGuizmo.git
+[submodule "libs/gns"]
+	path = libs/gns
+	url = https://github.com/ValveSoftware/GameNetworkingSockets.git
+[submodule "libs/openssl"]
+	path = libs/openssl
+	url = https://github.com/openssl/openssl.git
+[submodule "libs/protobuf"]
+	path = libs/protobuf
+	url = https://github.com/protocolbuffers/protobuf.git

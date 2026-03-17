@@ -29,41 +29,34 @@ option(TNX_ALIGN_64 "Use 64-byte alignment for field arrays (zero cache line spl
 option(TNX_ENABLE_ROLLBACK "Enable N-frame rollback history. Off = TNX_TEMPORAL_FIELDS components use Volatile (5-frame) storage." OFF)
 option(TNX_DETAILED_METRICS "Log per-frame latency breakdown (Buffer/Pipeline/Scanout). Noisy." OFF)
 option(TNX_ENABLE_EDITOR "Enable editor UI (ImGui integration). Adds editor panels and overlay." OFF)
-option(TNX_GPU_PICKING "Enable GPU entity picking (click-to-select in viewport). On-demand, one-frame latency." OFF)
-option(TNX_GPU_PICKING_FAST "Always render pick buffer + readback mouse pixel every frame. Implies TNX_GPU_PICKING." OFF)
+option(TNX_GPU_PICKING "Enable GPU-based entity picking (click-to-select). Requires editor." OFF)
+option(TNX_GPU_PICKING_FAST "Enable fast GPU picking mode (picks every frame at mouse cursor). Requires TNX_GPU_PICKING." OFF)
 
 if (TNX_ENABLE_EDITOR)
     add_compile_definitions(TNX_ENABLE_EDITOR)
-    set(TNX_GPU_PICKING_FAST ON CACHE BOOL "" FORCE)
     message(STATUS "Editor UI: ENABLED (ImGui)")
 else ()
     message(STATUS "Editor UI: DISABLED")
 endif ()
 
-# FAST implies base PICKING
-if (TNX_GPU_PICKING_FAST)
-    set(TNX_GPU_PICKING ON CACHE BOOL "" FORCE)
-    add_compile_definitions(TNX_GPU_PICKING_FAST)
-    message(STATUS "GPU Picking: FAST (always-hot)")
-endif ()
-
-if (TNX_GPU_PICKING)
-    add_compile_definitions(TNX_GPU_PICKING)
-    if (NOT TNX_GPU_PICKING_FAST)
-        message(STATUS "GPU Picking: ON-DEMAND")
-    endif ()
-else ()
-    message(STATUS "GPU Picking: DISABLED")
-endif ()
-
 if (TNX_ENABLE_ROLLBACK)
     add_compile_definitions(TNX_ENABLE_ROLLBACK)
     message(STATUS "Rollback history: ENABLED")
-    # Note: in editor mode, rollback is compiled in but the edit-mode world
-    # does not simulate (paused). PIE WorldInstances will use rollback when
-    # they create their own Registry with temporal history enabled.
 else ()
     message(STATUS "Rollback history: DISABLED (Temporal fields stored in Volatile slab)")
+endif ()
+
+if (TNX_ENABLE_EDITOR)
+    # Editor always uses GPU picking in FAST mode
+    set(TNX_GPU_PICKING ON)
+    set(TNX_GPU_PICKING_FAST ON)
+    add_compile_definitions(TNX_GPU_PICKING)
+    add_compile_definitions(TNX_GPU_PICKING_FAST)
+    message(STATUS "GPU Picking: ENABLED (FAST mode - required for editor)")
+elseif (TNX_GPU_PICKING)
+    set(TNX_GPU_PICKING OFF CACHE BOOL "" FORCE)
+else ()
+    message(STATUS "GPU Picking: DISABLED")
 endif ()
 
 # -----------------------------------------------------------------------------
@@ -84,11 +77,10 @@ set(GNS_PATH "${CMAKE_SOURCE_DIR}/libs/gns")
 add_library(Slang::Compiler SHARED IMPORTED GLOBAL
         src/Runtime/Core/Public/TrinyxJobs.h
         src/Runtime/Core/Private/ThreadPinning.h
-        src/Runtime/Core/Public/TrinyxRingBuffer.h
-        src/Runtime/Memory/Public/PagedMap.h)
+        src/Runtime/Core/Public/TrinyxRingBuffer.h)
 set_target_properties(Slang::Compiler PROPERTIES
-    IMPORTED_LOCATION             "${SLANG_PATH}/lib/libslang-compiler.so"
-    INTERFACE_INCLUDE_DIRECTORIES "${SLANG_PATH}/include"
+        IMPORTED_LOCATION             "${SLANG_PATH}/lib/libslang-compiler.so"
+        INTERFACE_INCLUDE_DIRECTORIES "${SLANG_PATH}/include"
 )
 
 # -----------------------------------------------------------------------------
@@ -104,18 +96,14 @@ if(ENABLE_TRACY)
 
     # Tracy requires these source files
     set(TRACY_SOURCES
-        "${TRACY_PATH}/public/TracyClient.cpp"
+            "${TRACY_PATH}/public/TracyClient.cpp"
     )
 
     # Add Tracy include directory globally as SYSTEM (silences warnings)
     include_directories(SYSTEM "${TRACY_PATH}/public")
 
-    # Enable Tracy profiling and disable ROCm support.
-    # TRACY_ON_DEMAND: only buffer zone data when a profiler is connected.
-    # Without this, Tracy accumulates events in RAM indefinitely — at high
-    # tick rates (512Hz+) this eats gigabytes in seconds and OOM-kills the process.
+    # Enable Tracy profiling and disable ROCm support
     add_compile_definitions(TRACY_ENABLE)
-    add_compile_definitions(TRACY_ON_DEMAND)
     add_compile_definitions(TRACY_PROFILE_LEVEL=${TRACY_PROFILE_LEVEL})
     add_compile_definitions(TRACY_NO_ROCTRACER=1)
     add_compile_definitions(TRACY_NO_ROCPROF=1)

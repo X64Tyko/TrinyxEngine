@@ -390,7 +390,7 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 		uint64_t deadMask = ~LiveEntityBits[word];
 		while (deadMask)
 		{
-			uint32_t bit = __builtin_ctzll(deadMask);
+			uint32_t bit = TNX_CTZ64(deadMask);
 			uint32_t idx = static_cast<uint32_t>(word * 64 + bit);
 			deadMask     &= deadMask - 1; // clear lowest set bit
 

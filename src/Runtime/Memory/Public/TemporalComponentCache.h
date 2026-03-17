@@ -76,9 +76,9 @@ public:
 	~ComponentCacheBase();
 
 	// O(1) frame header access - external systems manage locking
-	TemporalFrameHeader* GetFrameHeader(uint32_t frameNum = -1) const
+	TemporalFrameHeader* GetFrameHeader(int32_t frameNum = -1) const
 	{
-		frameNum = static_cast<int32_t>(frameNum) == -1 ? ActiveWriteFrame : frameNum;
+		frameNum = frameNum == -1 ? ActiveWriteFrame : frameNum;
 		return FrameHeaders[frameNum % TemporalFrameCount];
 	}
 

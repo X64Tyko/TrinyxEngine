@@ -13,6 +13,7 @@
 #include "TemporalComponentCache.h"
 #include <cmath>
 #include <cstring>
+#include <SDL3/SDL.h>
 
 // Panel headers
 #include "Panels/WorldOutlinerPanel.h"
@@ -278,8 +279,29 @@ void EditorContext::DrawGizmo()
 void EditorContext::ConsumePick()
 {
 #ifdef TNX_GPU_PICKING
-	uint32_t cacheIdx = 0;
 	if (!EnginePtr || !EnginePtr->Render) return;
+
+#ifndef TNX_GPU_PICKING_FAST
+	// On-demand mode: request a pick when the user clicks in the viewport
+	if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetIO().WantCaptureMouse
+		&& !ImGuizmo::IsOver())
+	{
+		ImVec2 mousePos = ImGui::GetMousePos();
+
+		// Scale to physical pixels for DPI
+		int logicalW = 0, physicalW = 0;
+		SDL_GetWindowSize(EnginePtr->GetWindow(), &logicalW, nullptr);
+		SDL_GetWindowSizeInPixels(EnginePtr->GetWindow(), &physicalW, nullptr);
+		const float dpiScale = (logicalW > 0) ? static_cast<float>(physicalW) / static_cast<float>(logicalW) : 1.0f;
+
+		int32_t pickX = static_cast<int32_t>(mousePos.x * dpiScale);
+		int32_t pickY = static_cast<int32_t>(mousePos.y * dpiScale);
+
+		EnginePtr->Render->RequestPick(pickX, pickY);
+	}
+#endif
+
+	uint32_t cacheIdx = 0;
 	if (!EnginePtr->Render->ConsumePickResult(cacheIdx)) return;
 
 	// UINT32_MAX = no entity hit (background)
@@ -387,7 +409,7 @@ void EditorContext::BuildDockspace()
 	const ImGuiViewport* viewport = ImGui::GetMainViewport();
 	ImGui::SetNextWindowPos(viewport->WorkPos);
 	ImGui::SetNextWindowSize(viewport->WorkSize);
-	ImGui::SetNextWindowViewport(viewport->ID);
+	// SetNextWindowViewport removed in ImGui 1.90+ - windows auto-attach to correct viewport
 
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);

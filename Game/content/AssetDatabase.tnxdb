@@ -4,19 +4,19 @@
 			"uuid": 250561460025856.0,
 			"path": "SuperCube.prefab",
 			"type": 9.0,
-			"contentHash": 8.7755457743843297e+18
+			"contentHash": 1.4712376527175553e+19
 		},
 		{
 			"uuid": 103459177478656.0,
 			"path": "TestScene.tnxscene",
 			"type": 8.0,
-			"contentHash": 4.0069706255639624e+18
+			"contentHash": 1.2160089514954877e+19
 		},
 		{
 			"uuid": 244158004430592.0,
 			"path": "PhysicsPlayground.tnxscene",
 			"type": 8.0,
-			"contentHash": 1.1496185340112259e+18
+			"contentHash": 1.5819611441617074e+19
 		}
 	]
 }
