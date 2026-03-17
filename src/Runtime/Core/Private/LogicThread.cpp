@@ -14,12 +14,13 @@
 #include "JoltPhysics.h"
 
 void LogicThread::Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
-							 InputBuffer* input, int windowWidth, int windowHeight)
+							 InputBuffer* simInput, InputBuffer* vizInput, int windowWidth, int windowHeight)
 {
 	RegistryPtr    = registry;
 	ConfigPtr      = config;
 	PhysicsPtr     = physics;
-	Input          = input;
+	SimInput       = simInput;
+	VizInput       = vizInput;
 	TemporalCache  = registry->GetTemporalCache();
 	WindowWidth    = windowWidth;
 	WindowHeight   = windowHeight;
@@ -55,7 +56,7 @@ void LogicThread::Join()
 
 double LogicThread::GetFixedAlpha() const
 {
-	return Accumulator.load(std::memory_order_relaxed) / ConfigPtr->GetFixedStepTime();
+	return (ConfigPtr->GetFixedStepTime() - Accumulator.load(std::memory_order_relaxed)) / ConfigPtr->GetFixedStepTime();
 }
 
 void LogicThread::ThreadMain()
@@ -68,7 +69,7 @@ void LogicThread::ThreadMain()
 
 	// Safety caps
 	constexpr double kMaxDt              = 0.25;
-	constexpr double kMaxAccumulatedTime = 0.25;
+	constexpr double kMaxAccumulatedTime = -0.25;
 	constexpr int kMaxPhysSubSteps       = 8;
 
 	while (!TrinyxEngine::Get().GetJobsInitialized())
@@ -101,7 +102,8 @@ void LogicThread::ThreadMain()
 		// so the scene is visible, but skip all simulation.
 		if (bSimPaused.load(std::memory_order_acquire))
 		{
-			ProcessInput(dt);
+			ProcessSimInput(dt);
+			ProcessVizInput(dt);
 			PublishCompletedFrame();
 			RegistryPtr->PropagateFrame(FrameNumber++);
 
@@ -110,23 +112,23 @@ void LogicThread::ThreadMain()
 		}
 #endif
 
-		double acc = Accumulator.load(std::memory_order_relaxed) + dt;
-		if (acc > kMaxAccumulatedTime) acc = kMaxAccumulatedTime;
+		double acc = Accumulator.load(std::memory_order_relaxed) - dt;
+		if (acc < kMaxAccumulatedTime) acc = kMaxAccumulatedTime;
 		Accumulator.store(acc, std::memory_order_relaxed);
 
 		// Fixed update loop with substepping
-		if (Accumulator.load(std::memory_order_relaxed) >= fixedStepTime) [[unlikely]]
+		if (Accumulator.load(std::memory_order_relaxed) <= 0) [[unlikely]]
 		{
 			TNX_ZONE_NC("Physics Loop", TNX_COLOR_LOGIC);
 
 			int steps = 0;
-			while (Accumulator.load(std::memory_order_relaxed) >= fixedStepTime && steps < kMaxPhysSubSteps)
+			while (Accumulator.load(std::memory_order_relaxed) <= 0 && steps < kMaxPhysSubSteps)
 			{
 				// FPS tracking
 				FpsFixedCount++;
 				FpsFixedTimer += fixedStepTime;
 
-				ProcessInput(fixedStepTime);
+				ProcessSimInput(fixedStepTime);
 				PrePhysics(fixedStepTime);
 
 				if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
@@ -145,12 +147,13 @@ void LogicThread::ThreadMain()
 				}
 
 				PostPhysics(fixedStepTime);
-				Accumulator.store(Accumulator.load(std::memory_order_relaxed) - fixedStepTime,
+				Accumulator.store(Accumulator.load(std::memory_order_relaxed) + fixedStepTime,
 								  std::memory_order_relaxed);
 				++steps;
 				SimulationTime += fixedStepTime;
 
 				// Publish completed frame to RenderThread
+				ProcessVizInput(fixedStepTime);
 				PublishCompletedFrame();
 				RegistryPtr->PropagateFrame(FrameNumber++);
 			}
@@ -159,7 +162,7 @@ void LogicThread::ThreadMain()
 		}
 
 		// Scalar update only if we're pretty sure we have time.
-		if (fixedStepTime - dt > Accumulator.load(std::memory_order_relaxed)) [[likely]]
+		if (dt > Accumulator.load(std::memory_order_relaxed)) [[likely]]
 		{
 			ScalarUpdate(dt);
 			TrackFPS();
@@ -173,13 +176,18 @@ void LogicThread::ThreadMain()
 	}
 }
 
-void LogicThread::ProcessInput(double dt)
+void LogicThread::ProcessSimInput(double dt)
 {
-	Input->Swap();
+	SimInput->Swap();
+}
+
+void LogicThread::ProcessVizInput(double dt)
+{
+	VizInput->Swap();
 
 	// ── Mouse look ───────────────────────────────────────────────────────
-	CamYaw   += Input->GetMouseDX() * CamMouseSens;
-	CamPitch -= Input->GetMouseDY() * CamMouseSens;
+	CamYaw   += VizInput->GetMouseDX() * CamMouseSens;
+	CamPitch -= VizInput->GetMouseDY() * CamMouseSens;
 
 	// Clamp pitch to avoid gimbal lock at poles
 	constexpr float kMaxPitch = 1.5533f; // ~89 degrees
@@ -199,12 +207,12 @@ void LogicThread::ProcessInput(double dt)
 
 	Vector3 moveDir{0.0f, 0.0f, 0.0f};
 
-	if (Input->IsActionDown(Action::MoveForward)) moveDir = moveDir + forward;
-	if (Input->IsActionDown(Action::MoveBackward)) moveDir = moveDir - forward;
-	if (Input->IsActionDown(Action::MoveRight)) moveDir = moveDir + right;
-	if (Input->IsActionDown(Action::MoveLeft)) moveDir = moveDir - right;
-	if (Input->IsActionDown(Action::MoveUp)) moveDir = moveDir + up;
-	if (Input->IsActionDown(Action::MoveDown)) moveDir = moveDir - up;
+	if (VizInput->IsActionDown(Action::MoveForward)) moveDir = moveDir + forward;
+	if (VizInput->IsActionDown(Action::MoveBackward)) moveDir = moveDir - forward;
+	if (VizInput->IsActionDown(Action::MoveRight)) moveDir = moveDir + right;
+	if (VizInput->IsActionDown(Action::MoveLeft)) moveDir = moveDir - right;
+	if (VizInput->IsActionDown(Action::MoveUp)) moveDir = moveDir + up;
+	if (VizInput->IsActionDown(Action::MoveDown)) moveDir = moveDir - up;
 
 	// Normalize to prevent diagonal speed boost, then scale
 	float moveLen = moveDir.Length();
@@ -318,11 +326,11 @@ void LogicThread::PublishCompletedFrame()
 
 	header->CameraPosition = CamPos;
 #if TNX_DEV_METRICS
-	header->InputTimestamp = Input->GetSwapPerfCount();
+	header->InputTimestamp = VizInput->GetSwapPerfCount();
 #if TNX_DEV_METRICS_DETAILED
-	if (Input->GetSwapPerfCount() != 0)
+	if (VizInput->GetSwapPerfCount() != 0)
 	{
-		double bufferMs = static_cast<double>(Input->GetCurrentSwapTime() - Input->GetSwapPerfCount())
+		double bufferMs = static_cast<double>(VizInput->GetCurrentSwapTime() - VizInput->GetSwapPerfCount())
 			/ static_cast<double>(SDL_GetPerformanceFrequency()) * 1000.0;
 		LOG_DEBUG_F("[Latency] Buffer: %.2fms (input wait in swap buffer)", bufferMs);
 	}

@@ -6,7 +6,6 @@
 #include "EngineConfig.h"
 #include "SpawnSync.h"
 #include "Input.h"
-#include "RenderThread.h"
 #include "VulkanContext.h"
 #include "VulkanMemory.h"
 #include "../../Rendering/Private/FramePacer.h"
@@ -118,7 +117,8 @@ private:
 	std::unique_ptr<RendererType> Render;
 
 	// --- Input ---
-	InputBuffer Input;
+	InputBuffer SimInput;
+	InputBuffer VizInput;
 
 	// --- Spawn sync ---
 	SpawnSync Spawner;

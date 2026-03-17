@@ -207,15 +207,16 @@ void RendererCore<Derived>::ThreadMain()
 	}
 
 	graphicsQueue     = static_cast<VkQueue>(VkCtx->GetQueues().Graphics);
-	LastVolatileFrame = LogicPtr->GetLastCompletedFrame();
-	while (LastVolatileFrame < 1) { LastVolatileFrame = LogicPtr->GetLastCompletedFrame(); }
 
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
+		// if we detect a change in temporal data OR logic frame, upd
 		uint32_t newTemporalFrame = RegistryPtr->GetTemporalCache()->GetActiveReadFrame();
 		uint32_t newVolatileFrame = RegistryPtr->GetVolatileCache()->GetActiveReadFrame();
-		if (newVolatileFrame != LastVolatileFrame && newTemporalFrame != LastTemporalFrame)
+		uint32_t LogicFrame       = LogicPtr->GetLastCompletedFrame();
+		if (LastRenderedFrame < LogicFrame || (newVolatileFrame != LastVolatileFrame && newTemporalFrame != LastTemporalFrame))
 		{
+			LastRenderedFrame = LogicFrame;
 			LastVolatileFrame = newVolatileFrame;
 			LastTemporalFrame = newTemporalFrame;
 			WriteToFrameSlab();

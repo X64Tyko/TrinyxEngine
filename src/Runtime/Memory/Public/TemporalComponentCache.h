@@ -145,8 +145,8 @@ protected:
 	
 	// Called by ComponentCacheImpl::Initialize with the correct frame count for the tier.
 	void InitializeInternal(const EngineConfig* Config, uint32_t frameCount);
-	
-	// Internal Lock
+
+	// Internal Lock, still waits for it to be available, but allows us to lock any frame
 	bool LockFrameForWrite(uint32_t WriteFrame);
 
 	FnGetNextWriteFramePtr FnGetNextWriteFrame = nullptr;
@@ -326,7 +326,7 @@ public:
 					targetSlot = (base->ActiveWriteFrame + 1 + i) % base->GetTotalFrameCount();
 					if (targetSlot == base->ActiveWriteFrame) continue;
 
-					// Try to lock the frame
+					// Try to lock the write frame
 					bLocked = base->LockFrameForWrite(targetSlot);
 					if (bLocked) break;
 				}

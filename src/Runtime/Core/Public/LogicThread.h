@@ -26,7 +26,7 @@ public:
 	~LogicThread() = default;
 
 	void Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
-					InputBuffer* input, int windowWidth, int windowHeight);
+					InputBuffer* simInput, InputBuffer* vizInput, int windowWidth, int windowHeight);
 	void Start();
 	void Stop();
 	void Join();
@@ -58,10 +58,11 @@ private:
 	void ThreadMain(); // Thread entry point
 
 	// Lifecycle Methods
-	void ProcessInput(double dt); // Swap input buffer, update camera from WASD + mouse
-	void ScalarUpdate(double dt); // Variable update (runs every frame)
-	void PrePhysics(double dt);   // Fixed update at FixedUpdateHz
-	void PostPhysics(double dt);  // Fixed update at FixedUpdateHz
+	void ProcessSimInput(double dt); // Swap input buffer, update camera from WASD + mouse
+	void ProcessVizInput(double dt); // Swap FizInput buffer, update camera from WASD + mouse
+	void ScalarUpdate(double dt);    // Variable update (runs every frame)
+	void PrePhysics(double dt);      // Fixed update at FixedUpdateHz
+	void PostPhysics(double dt);     // Fixed update at FixedUpdateHz
 
 	void PublishCompletedFrame(); // Publish last written frame number to mailbox
 	void WaitForTiming(uint64_t frameStart, uint64_t perfFrequency);
@@ -74,7 +75,8 @@ private:
 	class ComponentCacheBase* TemporalCache = nullptr;
 
 	// Input
-	InputBuffer* Input = nullptr;
+	InputBuffer* SimInput = nullptr;
+	InputBuffer* VizInput = nullptr;
 
 	// Camera state (FPS-style: yaw around Y, pitch around X)
 	Vector3 CamPos{0.0f, 0.0f, 0.0f};

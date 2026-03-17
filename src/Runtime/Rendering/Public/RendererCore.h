@@ -100,6 +100,7 @@ protected:
 
 	FrameSync Frames[kMaxFramesInFlight];
 	uint32_t CurrentFrame      = 0;
+	uint32_t LastRenderedFrame = 0;
 	uint64_t LastVolatileFrame = 0;
 	uint64_t LastTemporalFrame = 0;
 

@@ -10,7 +10,6 @@
 #include "LogicThread.h"
 #include "Profiler.h"
 #include "Registry.h"
-#include "RenderThread.h"
 #include "ThreadPinning.h"
 #include "TrinyxJobs.h"
 #if TNX_ENABLE_EDITOR
@@ -142,7 +141,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	Logic  = std::make_unique<LogicThread>();
 	Render = std::make_unique<RendererType>();
 
-	Logic->Initialize(RegistryPtr.get(), &Config, Physics.get(), &Input, width, height);
+	Logic->Initialize(RegistryPtr.get(), &Config, Physics.get(), &SimInput, &VizInput, width, height);
 #if TNX_ENABLE_EDITOR
 	Logic->SetSimPaused(true); // Editor starts paused — press Play to simulate
 #endif
@@ -276,21 +275,27 @@ void TrinyxEngine::PumpEvents()
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				if (!e.key.repeat) Input.PushKey(e.key.scancode, true);
+				if (!e.key.repeat)
+				{
+					SimInput.PushKey(e.key.scancode, true);
+					VizInput.PushKey(e.key.scancode, true);
+				}
 				break;
 
 			case SDL_EVENT_KEY_UP:
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				Input.PushKey(e.key.scancode, false);
+				SimInput.PushKey(e.key.scancode, false);
+				VizInput.PushKey(e.key.scancode, false);
 				break;
 
 			case SDL_EVENT_MOUSE_MOTION:
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				Input.AddMouseDelta(e.motion.xrel, e.motion.yrel);
+				SimInput.AddMouseDelta(e.motion.xrel, e.motion.yrel);
+				VizInput.AddMouseDelta(e.motion.xrel, e.motion.yrel);
 				break;
 
 #if !TNX_ENABLE_EDITOR
