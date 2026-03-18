@@ -427,8 +427,8 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 	static uint32_t pickDebugFrameCounter = 0;
 	if (++pickDebugFrameCounter >= 60)
 	{
-		LOG_INFO_F("[Picking] Mouse: (%.1f, %.1f) logical, (%d, %d) physical, DPI scale: %.2f, extent: %ux%u",
-				   mx, my, pickX, pickY, dpiScale, ext.width, ext.height);
+		//LOG_INFO_F("[Picking] Mouse: (%.1f, %.1f) logical, (%d, %d) physical, DPI scale: %.2f, extent: %ux%u",
+		//		   mx, my, pickX, pickY, dpiScale, ext.width, ext.height);
 		pickDebugFrameCounter = 0;
 	}
 #elif defined(TNX_GPU_PICKING)

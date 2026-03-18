@@ -53,7 +53,13 @@ struct EngineConfig
 	// --- Helpers ---
 	double GetTargetFrameTime() const
 	{
-		return (TargetFPS > 0) ? 1.0 / std::min(TargetFPS, FixedUpdateHz) : 0.0;
+#ifdef TNX_ENABLE_EDITOR
+		return 1.0 / std::max(TargetFPS, FixedUpdateHz);
+#else
+		return (TargetFPS > 0) ?
+				   1.0 / std::min(TargetFPS, FixedUpdateHz)
+				   : 0.0;
+#endif
 	}
 
 	double GetFixedStepTime() const

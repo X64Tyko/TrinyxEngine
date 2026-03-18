@@ -107,7 +107,8 @@ void LogicThread::ThreadMain()
 			PublishCompletedFrame();
 			RegistryPtr->PropagateFrame(FrameNumber++);
 
-			if (ConfigPtr->TargetFPS > 0) WaitForTiming(frameStartCounter, perfFrequency);
+			WaitForTiming(frameStartCounter, perfFrequency);
+			TrackFPS();
 			continue;
 		}
 #endif
