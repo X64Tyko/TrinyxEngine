@@ -1,0 +1,173 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 30,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/cmake-build-${presetName}",
+      "cacheVariables": {
+        "ENABLE_TRACY": "ON",
+        "TRACY_PROFILE_LEVEL": "3",
+        "ENABLE_AVX2": "ON",
+        "GENERATE_ASSEMBLY": "OFF",
+        "VECTORIZATION_REPORTS": "OFF",
+        "TNX_ALIGN_64": "OFF",
+        "TNX_ENABLE_ROLLBACK": "OFF",
+        "TNX_DETAILED_METRICS": "OFF",
+        "TNX_ENABLE_EDITOR": "OFF",
+        "TNX_GPU_PICKING": "OFF",
+        "TNX_GPU_PICKING_FAST": "OFF"
+      }
+    },
+    {
+      "name": "linux",
+      "hidden": true,
+      "inherits": "base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "windows",
+      "hidden": true,
+      "inherits": "base",
+      "generator": "Visual Studio 17 2022",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "debug-linux",
+      "displayName": "Debug | Linux",
+      "inherits": "linux",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release-linux",
+      "displayName": "Release | Linux",
+      "inherits": "linux",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "debug-windows",
+      "displayName": "Debug | Windows",
+      "inherits": "windows",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release-windows",
+      "displayName": "Release | Windows",
+      "inherits": "windows",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug-testbed-linux",
+      "displayName": "Debug | Testbed | Linux",
+      "configurePreset": "debug-linux",
+      "targets": [
+        "Testbed"
+      ]
+    },
+    {
+      "name": "debug-game-linux",
+      "displayName": "Debug | Game | Linux",
+      "configurePreset": "debug-linux",
+      "targets": [
+        "Game"
+      ]
+    },
+    {
+      "name": "debug-all-linux",
+      "displayName": "Debug | All | Linux",
+      "configurePreset": "debug-linux"
+    },
+    {
+      "name": "release-testbed-linux",
+      "displayName": "Release | Testbed | Linux",
+      "configurePreset": "release-linux",
+      "targets": [
+        "Testbed"
+      ]
+    },
+    {
+      "name": "release-game-linux",
+      "displayName": "Release | Game | Linux",
+      "configurePreset": "release-linux",
+      "targets": [
+        "Game"
+      ]
+    },
+    {
+      "name": "release-all-linux",
+      "displayName": "Release | All | Linux",
+      "configurePreset": "release-linux"
+    },
+    {
+      "name": "debug-testbed-windows",
+      "displayName": "Debug | Testbed | Windows",
+      "configurePreset": "debug-windows",
+      "configuration": "Debug",
+      "targets": [
+        "Testbed"
+      ]
+    },
+    {
+      "name": "debug-game-windows",
+      "displayName": "Debug | Game | Windows",
+      "configurePreset": "debug-windows",
+      "configuration": "Debug",
+      "targets": [
+        "Game"
+      ]
+    },
+    {
+      "name": "debug-all-windows",
+      "displayName": "Debug | All | Windows",
+      "configurePreset": "debug-windows",
+      "configuration": "Debug"
+    },
+    {
+      "name": "release-testbed-windows",
+      "displayName": "Release | Testbed | Windows",
+      "configurePreset": "release-windows",
+      "configuration": "RelWithDebInfo",
+      "targets": [
+        "Testbed"
+      ]
+    },
+    {
+      "name": "release-game-windows",
+      "displayName": "Release | Game | Windows",
+      "configurePreset": "release-windows",
+      "configuration": "RelWithDebInfo",
+      "targets": [
+        "Game"
+      ]
+    },
+    {
+      "name": "release-all-windows",
+      "displayName": "Release | All | Windows",
+      "configurePreset": "release-windows",
+      "configuration": "RelWithDebInfo"
+    }
+  ]
+}

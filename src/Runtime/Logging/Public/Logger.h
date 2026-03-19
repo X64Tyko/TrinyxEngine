@@ -78,6 +78,35 @@ private:
 	uint32_t LogHead = 0;
 };
 
+// ---------- Debug break macros ----------
+
+// Platform-specific breakpoint intrinsic
+#if defined(_MSC_VER)
+#define TNX_BREAKPOINT() __debugbreak()
+#elif defined(__clang__) || defined(__GNUC__)
+#if defined(__x86_64__) || defined(__i386__)
+#define TNX_BREAKPOINT() __asm__ volatile("int3")
+#elif defined(__aarch64__)
+#define TNX_BREAKPOINT() __asm__ volatile("brk #0xF000")
+#else
+#define TNX_BREAKPOINT() __builtin_trap()
+#endif
+#else
+#define TNX_BREAKPOINT() __builtin_trap()
+#endif
+
+// TNX_DEBUG_BREAK() — breakpoint in debug builds, no-op in release.
+// Safe to scatter through code as development aids.
+#ifdef NDEBUG
+#define TNX_DEBUG_BREAK() ((void)0)
+#else
+#define TNX_DEBUG_BREAK() TNX_BREAKPOINT()
+#endif
+
+// TNX_FATAL_BREAK() — always fires. Breakpoint if debugger attached, crash if not.
+// Use for invariant violations that must never be silently ignored.
+#define TNX_FATAL_BREAK() TNX_BREAKPOINT()
+
 // Convenience macros for logging
 #define LOG_TRACE(msg) Logger::Get().Log(LogLevel::Trace, __FILE__, __LINE__, msg)
 #define LOG_DEBUG(msg) Logger::Get().Log(LogLevel::Debug, __FILE__, __LINE__, msg)
@@ -116,12 +145,14 @@ private:
     char StrigLogBuff[512]; \
     snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
     LOG_ERROR(StrigLogBuff); \
+    TNX_DEBUG_BREAK(); \
 } while(0)
 
 #define LOG_FATAL_F(fmt, ...) do { \
     char StrigLogBuff[512]; \
     snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
     LOG_FATAL(StrigLogBuff); \
+    TNX_FATAL_BREAK(); \
 } while(0)
 
 #define LOG_ALWAYS_F(fmt, ...) do { \

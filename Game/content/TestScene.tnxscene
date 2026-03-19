@@ -164,9 +164,9 @@
 					"RotQw": 1.0
 				},
 				"Scale": {
-					"ScaleX": 1.0,
-					"ScaleY": 1.0,
-					"ScaleZ": 1.0
+					"ScaleX": 5.0,
+					"ScaleY": 5.0,
+					"ScaleZ": 5.0
 				},
 				"ColorData": {
 					"R": 1.0,

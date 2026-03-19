@@ -880,7 +880,7 @@ void EditorContext::DeleteSelectedEntity()
 		EntityID id = reg->FindEntityByLocation(arch, chunk, localIndex);
 		if (!id.IsValid())
 		{
-			LOG_ERROR("[Editor] Could not find entity to delete");
+			LOG_WARN("[Editor] Could not find entity to delete");
 			return;
 		}
 		reg->Destroy(id);
