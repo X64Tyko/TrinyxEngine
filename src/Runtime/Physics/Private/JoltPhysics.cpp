@@ -5,6 +5,8 @@
 #include "Profiler.h"
 #include "TrinyxJobs.h"
 
+#include <cstdarg>
+
 #include <Jolt/Jolt.h>
 #include <Jolt/RegisterTypes.h>
 #include <Jolt/Core/Factory.h>

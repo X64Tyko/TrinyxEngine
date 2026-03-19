@@ -16,6 +16,7 @@
 #include "TemporalComponentCache.h"
 
 #include "ColorData.h"
+#include "MeshRef.h"
 #include "TransRot.h"
 #include "Scale.h"
 #include "TemporalFlags.h"
@@ -70,7 +71,7 @@ void RendererCore<Derived>::Initialize(Registry* registry,
 									   const EngineConfig* config,
 									   VulkanContext* vkCtx,
 									   VulkanMemory* vkMem,
-									   SDL_Window* window)
+									   SDL_Window* window, InputBuffer* vizInput)
 {
 	RegistryPtr = registry;
 	LogicPtr    = logic;
@@ -78,6 +79,7 @@ void RendererCore<Derived>::Initialize(Registry* registry,
 	VkCtx       = vkCtx;
 	VkMem       = vkMem;
 	WindowPtr   = window;
+	VizInputPtr = vizInput;
 
 	LOG_INFO("[Renderer] Initialized");
 }
@@ -210,13 +212,11 @@ void RendererCore<Derived>::ThreadMain()
 
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
-		// if we detect a change in temporal data OR logic frame, upd
-		uint32_t LogicFrame       = LogicPtr->GetLastCompletedFrame();
-		if (LastRenderedFrame < LogicFrame)// || (newVolatileFrame != LastVolatileFrame && newTemporalFrame != LastTemporalFrame))
+		uint32_t newTemporalFrame = RegistryPtr->GetTemporalCache()->GetActiveReadFrame();
+		uint32_t newVolatileFrame = RegistryPtr->GetVolatileCache()->GetActiveReadFrame();
+
+		if (newVolatileFrame != LastVolatileFrame && newTemporalFrame != LastTemporalFrame)
 		{
-			LastRenderedFrame = LogicFrame;
-			uint32_t newTemporalFrame = RegistryPtr->GetTemporalCache()->GetActiveReadFrame();
-			uint32_t newVolatileFrame = RegistryPtr->GetVolatileCache()->GetActiveReadFrame();
 			LastVolatileFrame = newVolatileFrame;
 			LastTemporalFrame = newTemporalFrame;
 			WriteToFrameSlab();
@@ -414,6 +414,8 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 	// FAST: always pick, read mouse position every frame.
 	// SDL_GetMouseState returns logical (window) coordinates; the pick attachment
 	// is at physical pixel resolution. Scale by the DPI ratio.
+
+	// TODO: if we're not in editor and determinism is enabled use VizInput mouse pos instead
 	float mx, my;
 	SDL_GetMouseState(&mx, &my);
 	int logicalW = 0, physicalW = 0;
@@ -544,7 +546,10 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 			vkCmdPipelineBarrier2(cmd, &d);
 		};
 
+		// Zero CompactCounter and MeshHistogram before compute passes
 		vkCmdFillBuffer(cmd, static_cast<VkBuffer>(frame.CompactCounterBuffer.Buffer), 0, sizeof(uint32_t), 0u);
+		vkCmdFillBuffer(cmd, static_cast<VkBuffer>(frame.MeshHistogramBuffer.Buffer), 0,
+						kMaxMeshSlots * sizeof(uint32_t), 0u);
 		{
 			VkMemoryBarrier2 mb{};
 			mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
@@ -580,20 +585,38 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ScatterPipeline);
 #endif
 		vkCmdDispatch(cmd, dispatchX, 1, 1);
+		ComputeBarrier(); // scatter → build_draws
 
-		VkMemoryBarrier2 scatterDone{};
-		scatterDone.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-		scatterDone.srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-		scatterDone.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-		scatterDone.dstStageMask  = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+		// Pass 4: build_draws — prefix-sum histogram → DrawArgs + MeshWriteIdx base offsets
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, BuildDrawsPipeline);
+		vkCmdDispatch(cmd, 1, 1, 1); // single workgroup, 256 threads
+		ComputeBarrier();            // build_draws → sort_instances
+
+		// Pass 5: sort_instances — reorder unsorted → sorted by MeshID
+#if defined(TNX_GPU_PICKING_FAST)
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, SortPickPipeline);
+#elif defined(TNX_GPU_PICKING)
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+						  bDoPick ? SortPickPipeline : SortInstancesPipeline);
+#else
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, SortInstancesPipeline);
+#endif
+		vkCmdDispatch(cmd, dispatchX, 1, 1);
+
+		// Final barrier: sorted instances + draw args → vertex shader + indirect draw
+		VkMemoryBarrier2 sortDone{};
+		sortDone.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+		sortDone.srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+		sortDone.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+		sortDone.dstStageMask  = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
 			VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
-		scatterDone.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+		sortDone.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
 			VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
-		VkDependencyInfo scatterDep{};
-		scatterDep.sType              = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-		scatterDep.memoryBarrierCount = 1;
-		scatterDep.pMemoryBarriers    = &scatterDone;
-		vkCmdPipelineBarrier2(cmd, &scatterDep);
+		VkDependencyInfo sortDep{};
+		sortDep.sType              = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+		sortDep.memoryBarrierCount = 1;
+		sortDep.pMemoryBarriers    = &sortDone;
+		vkCmdPipelineBarrier2(cmd, &sortDep);
 	}
 
 	// Begin rendering pass
@@ -714,11 +737,12 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, *Pipeline);
 #endif
 
-		VkBuffer indexBuf = static_cast<VkBuffer>(IndexBuffer.Buffer);
-		vkCmdBindIndexBuffer(cmd, indexBuf, 0, VK_INDEX_TYPE_UINT16);
+		VkBuffer indexBuf = Meshes.GetIndexBufferHandle();
+		vkCmdBindIndexBuffer(cmd, indexBuf, 0, VK_INDEX_TYPE_UINT32);
 
 		VkBuffer drawBuf = static_cast<VkBuffer>(frame.DrawArgsBuffer.Buffer);
-		vkCmdDrawIndexedIndirect(cmd, drawBuf, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+		vkCmdDrawIndexedIndirect(cmd, drawBuf, 0, Meshes.GetMeshCount(),
+								 sizeof(VkDrawIndexedIndirectCommand));
 	}
 
 	// End the scene render pass (which may have 2 color attachments for picking).
@@ -922,7 +946,9 @@ bool RendererCore<Derived>::CreateFrameSync()
 			return false;
 		}
 
-		Frames[i].DrawArgsBuffer = VkMem->AllocateBuffer(sizeof(VkDrawIndexedIndirectCommand),
+		// DrawArgs: one VkDrawIndexedIndirectCommand per mesh slot (256 max × 20 bytes = 5120 bytes)
+		constexpr VkDeviceSize kDrawArgsSize = kMaxMeshSlots * sizeof(VkDrawIndexedIndirectCommand);
+		Frames[i].DrawArgsBuffer             = VkMem->AllocateBuffer(kDrawArgsSize,
 														 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
 														 GpuMemoryDomain::PersistentMapped, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].DrawArgsBuffer.IsValid())
@@ -930,12 +956,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 			LOG_ERROR_F("[Renderer] DrawArgsBuffer alloc failed (slot %d)", i);
 			return false;
 		}
-		auto* drawArgs = static_cast<uint32_t*>(Frames[i].DrawArgsBuffer.MappedPtr);
-		drawArgs[0]    = static_cast<uint32_t>(CubeMesh::IndexCount);
-		drawArgs[1]    = 0;
-		drawArgs[2]    = 0;
-		drawArgs[3]    = 0;
-		drawArgs[4]    = 0;
+		std::memset(Frames[i].DrawArgsBuffer.MappedPtr, 0, kDrawArgsSize);
 
 #ifdef TNX_GPU_PICKING
 		constexpr uint32_t kInstanceFieldCount = kGpuOutFieldCount + 1; // +1 for entity cache index
@@ -949,6 +970,35 @@ bool RendererCore<Derived>::CreateFrameSync()
 		if (!Frames[i].InstancesBuffer.IsValid())
 		{
 			LOG_ERROR_F("[Renderer] InstancesBuffer alloc failed (slot %d)", i);
+			return false;
+		}
+
+		// Unsorted instances buffer (scatter output, pre-sort) — same size as sorted
+		Frames[i].UnsortedInstancesBuffer = VkMem->AllocateBuffer(kInstancesSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+																  GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+		if (!Frames[i].UnsortedInstancesBuffer.IsValid())
+		{
+			LOG_ERROR_F("[Renderer] UnsortedInstancesBuffer alloc failed (slot %d)", i);
+			return false;
+		}
+
+		// Mesh histogram + write index buffers (256 uint32 each = 1 KB)
+		constexpr VkDeviceSize kHistSize = kMaxMeshSlots * sizeof(uint32_t);
+		Frames[i].MeshHistogramBuffer    = VkMem->AllocateBuffer(kHistSize,
+															  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+															  GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+		if (!Frames[i].MeshHistogramBuffer.IsValid())
+		{
+			LOG_ERROR_F("[Renderer] MeshHistogramBuffer alloc failed (slot %d)", i);
+			return false;
+		}
+
+		Frames[i].MeshWriteIdxBuffer = VkMem->AllocateBuffer(kHistSize,
+															 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+															 GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+		if (!Frames[i].MeshWriteIdxBuffer.IsValid())
+		{
+			LOG_ERROR_F("[Renderer] MeshWriteIdxBuffer alloc failed (slot %d)", i);
 			return false;
 		}
 	}
@@ -1039,6 +1089,16 @@ void RendererCore<Derived>::DestroyShaders()
 		vkDestroyPipeline(device, ScatterPipeline, nullptr);
 		ScatterPipeline = VK_NULL_HANDLE;
 	}
+	if (BuildDrawsPipeline != VK_NULL_HANDLE)
+	{
+		vkDestroyPipeline(device, BuildDrawsPipeline, nullptr);
+		BuildDrawsPipeline = VK_NULL_HANDLE;
+	}
+	if (SortInstancesPipeline != VK_NULL_HANDLE)
+	{
+		vkDestroyPipeline(device, SortInstancesPipeline, nullptr);
+		SortInstancesPipeline = VK_NULL_HANDLE;
+	}
 	if (VertShader != VK_NULL_HANDLE)
 	{
 		vkDestroyShaderModule(device, VertShader, nullptr);
@@ -1054,14 +1114,19 @@ void RendererCore<Derived>::DestroyShaders()
 template <typename Derived>
 bool RendererCore<Derived>::CreateComputePipelines()
 {
-	const char* paths[3] = {
+	const char* paths[5] = {
 		TNX_SHADER_DIR "/compute/predicate.spv",
 		TNX_SHADER_DIR "/compute/prefix_sum.spv",
 		TNX_SHADER_DIR "/compute/scatter.spv",
+		TNX_SHADER_DIR "/compute/build_draws.spv",
+		TNX_SHADER_DIR "/compute/sort_instances.spv",
 	};
-	VkPipeline* targets[3] = {&PredicatePipeline, &PrefixSumPipeline, &ScatterPipeline};
+	VkPipeline* targets[5] = {
+		&PredicatePipeline, &PrefixSumPipeline, &ScatterPipeline,
+		&BuildDrawsPipeline, &SortInstancesPipeline
+	};
 
-	for (int i = 0; i < 3; ++i)
+	for (int i = 0; i < 5; ++i)
 	{
 		auto code = ReadSPIRV(paths[i]);
 		if (code.empty())
@@ -1103,41 +1168,27 @@ bool RendererCore<Derived>::CreateComputePipelines()
 		}
 	}
 
-	LOG_INFO("[Renderer] Compute pipelines created (predicate + prefix_sum + scatter)");
+	LOG_INFO("[Renderer] Compute pipelines created (predicate + prefix_sum + scatter + build_draws + sort_instances)");
 	return true;
 }
 
 template <typename Derived>
 bool RendererCore<Derived>::CreateMeshBuffers()
 {
-	VertexBuffer = VkMem->AllocateBuffer(
-		sizeof(CubeMesh::Vertices),
-		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-		GpuMemoryDomain::PersistentMapped,
-		/*requestDeviceAddress=*/ true);
-
-	if (!VertexBuffer.IsValid())
+	if (!Meshes.Initialize(VkMem))
 	{
-		LOG_ERROR("[Renderer] Vertex buffer allocation failed");
+		LOG_ERROR("[Renderer] MeshManager initialization failed");
 		return false;
 	}
-	std::memcpy(VertexBuffer.MappedPtr, CubeMesh::Vertices, sizeof(CubeMesh::Vertices));
 
-	IndexBuffer = VkMem->AllocateBuffer(
-		sizeof(CubeMesh::Indices),
-		VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-		GpuMemoryDomain::PersistentMapped,
-		/*requestDeviceAddress=*/ false);
-
-	if (!IndexBuffer.IsValid())
+	uint32_t cubeSlot = Meshes.RegisterBuiltinCube();
+	if (cubeSlot == UINT32_MAX)
 	{
-		LOG_ERROR("[Renderer] Index buffer allocation failed");
+		LOG_ERROR("[Renderer] Failed to register built-in cube mesh");
 		return false;
 	}
-	std::memcpy(IndexBuffer.MappedPtr, CubeMesh::Indices, sizeof(CubeMesh::Indices));
 
-	LOG_INFO_F("[Renderer] Mesh buffers uploaded (%zu verts, %zu indices)",
-			   CubeMesh::VertexCount, CubeMesh::IndexCount);
+	LOG_INFO_F("[Renderer] MeshManager ready — cube at slot %u", cubeSlot);
 	return true;
 }
 
@@ -1157,15 +1208,20 @@ void RendererCore<Derived>::FillGpuFrameData(FrameSync& frame)
 	TemporalFrameHeader* hdr = tc->GetFrameHeader();
 	MultMat4(FrameData->ViewProj, hdr->ProjectionMatrix.m, hdr->ViewMatrix.m);
 
-	FrameData->VerticesAddr       = VertexBuffer.DeviceAddr;
-	FrameData->InstancesAddr      = frame.InstancesBuffer.DeviceAddr;
-	FrameData->ScanAddr           = frame.ScanBuffer.DeviceAddr;
-	FrameData->CompactCounterAddr = frame.CompactCounterBuffer.DeviceAddr;
-	FrameData->DrawArgsAddr       = frame.DrawArgsBuffer.DeviceAddr;
-	FrameData->Alpha              = std::clamp(LogicPtr->GetFixedAlpha(), 0.0, 1.0);
-	FrameData->EntityCount        = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
-	FrameData->OutFieldStride     = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
-	FrameData->FieldCount         = kGpuOutFieldCount;
+	FrameData->VerticesAddr          = Meshes.GetVertexBufferAddr();
+	FrameData->InstancesAddr         = frame.InstancesBuffer.DeviceAddr;
+	FrameData->ScanAddr              = frame.ScanBuffer.DeviceAddr;
+	FrameData->CompactCounterAddr    = frame.CompactCounterBuffer.DeviceAddr;
+	FrameData->DrawArgsAddr          = frame.DrawArgsBuffer.DeviceAddr;
+	FrameData->Alpha                 = std::clamp(LogicPtr->GetFixedAlpha(), 0.0, 1.0);
+	FrameData->EntityCount           = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
+	FrameData->OutFieldStride        = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
+	FrameData->FieldCount            = kGpuOutFieldCount;
+	FrameData->UnsortedInstancesAddr = frame.UnsortedInstancesBuffer.DeviceAddr;
+	FrameData->MeshHistogramAddr     = frame.MeshHistogramBuffer.DeviceAddr;
+	FrameData->MeshWriteIdxAddr      = frame.MeshWriteIdxBuffer.DeviceAddr;
+	FrameData->MeshTableAddr         = Meshes.GetMeshTableAddr();
+	FrameData->MeshCount             = Meshes.GetMeshCount();
 
 	const uint32_t kFields[kGpuOutFieldCount] = {
 		kSemFlags,
@@ -1173,6 +1229,7 @@ void RendererCore<Derived>::FillGpuFrameData(FrameSync& frame)
 		kSemRotQx, kSemRotQy, kSemRotQz, kSemRotQw,
 		kSemScaleX, kSemScaleY, kSemScaleZ,
 		kSemColorR, kSemColorG, kSemColorB, kSemColorA,
+		kSemMeshID,
 	};
 
 	const VkDeviceSize fieldStride = static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
@@ -1227,19 +1284,17 @@ void RendererCore<Derived>::WriteToFrameSlab()
 	TemporalFrameHeader* temporalHdr = temporalCache->GetFrameHeader(LastTemporalFrame);
 	TemporalFrameHeader* volatileHdr = volatileCache->GetFrameHeader(LastVolatileFrame);
 
-	assert(temporalHdr->FrameNumber == volatileHdr->FrameNumber);
-
-	const ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
-	const uint8_t transformSlot       = CFR.GetCacheSlotIndex(TransRot<>::StaticTypeID());
-	const uint8_t scaleSlot           = CFR.GetCacheSlotIndex(Scale<>::StaticTypeID());
-	const uint8_t colorSlot           = CFR.GetCacheSlotIndex(ColorData<>::StaticTypeID());
-	const uint8_t flagsSlot           = CFR.GetCacheSlotIndex(TemporalFlags<>::StaticTypeID());
+	const ComponentTypeID transformSlot = TransRot<>::StaticTemporalIndex();
+	const ComponentTypeID scaleSlot     = Scale<>::StaticTemporalIndex();
+	const ComponentTypeID colorSlot     = ColorData<>::StaticTemporalIndex();
+	const ComponentTypeID flagsSlot     = TemporalFlags<>::StaticTemporalIndex();
+	const ComponentTypeID meshRefSlot   = MeshRef<>::StaticTemporalIndex();
 
 	struct FieldDescription
 	{
 		ComponentCacheBase* cache;
 		TemporalFrameHeader* hdr;
-		uint8_t slot;
+		ComponentTypeID slot;
 		size_t fi;
 		uint32_t sem;
 	};
@@ -1259,6 +1314,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 		{volatileCache, volatileHdr, colorSlot, 1, kSemColorG},
 		{volatileCache, volatileHdr, colorSlot, 2, kSemColorB},
 		{volatileCache, volatileHdr, colorSlot, 3, kSemColorA},
+		{volatileCache, volatileHdr, meshRefSlot, 0, kSemMeshID},
 	};
 
 	TrinyxJobs::JobCounter GPUTransferCounter;
@@ -1537,11 +1593,12 @@ bool RendererCore<Derived>::CreatePickImages()
 template <typename Derived>
 bool RendererCore<Derived>::LoadPickShaders()
 {
-	auto vert    = ReadSPIRV(TNX_SHADER_DIR "/graphics/cube.vert_pick.spv");
-	auto frag    = ReadSPIRV(TNX_SHADER_DIR "/graphics/cube.frag_pick.spv");
-	auto scatter = ReadSPIRV(TNX_SHADER_DIR "/compute/scatter_pick.spv");
+	auto vert     = ReadSPIRV(TNX_SHADER_DIR "/graphics/cube.vert_pick.spv");
+	auto frag     = ReadSPIRV(TNX_SHADER_DIR "/graphics/cube.frag_pick.spv");
+	auto scatter  = ReadSPIRV(TNX_SHADER_DIR "/compute/scatter_pick.spv");
+	auto sortInst = ReadSPIRV(TNX_SHADER_DIR "/compute/sort_instances_pick.spv");
 
-	if (vert.empty() || frag.empty() || scatter.empty())
+	if (vert.empty() || frag.empty() || scatter.empty() || sortInst.empty())
 	{
 		LOG_ERROR("[Renderer] Failed to read pick SPIR-V shaders");
 		return false;
@@ -1595,7 +1652,26 @@ bool RendererCore<Derived>::LoadPickShaders()
 		return false;
 	}
 
-	LOG_INFO("[Renderer] Pick shaders loaded (vert + frag + scatter_pick)");
+	// Sort instances pick compute pipeline
+	VkShaderModule sortMod = createModule(sortInst);
+	if (sortMod == VK_NULL_HANDLE)
+	{
+		LOG_ERROR("[Renderer] Failed to create sort_instances_pick shader module");
+		return false;
+	}
+
+	stageCI.module = sortMod;
+	pipeCI.stage   = stageCI;
+	result         = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeCI, nullptr, &SortPickPipeline);
+	vkDestroyShaderModule(device, sortMod, nullptr);
+
+	if (result != VK_SUCCESS)
+	{
+		LOG_ERROR_F("[Renderer] SortPickPipeline creation failed: %d", result);
+		return false;
+	}
+
+	LOG_INFO("[Renderer] Pick shaders loaded (vert + frag + scatter_pick + sort_pick)");
 	return true;
 }
 
@@ -1703,6 +1779,11 @@ void RendererCore<Derived>::DestroyPickShaders()
 	{
 		vkDestroyPipeline(device, ScatterPickPipeline, nullptr);
 		ScatterPickPipeline = VK_NULL_HANDLE;
+	}
+	if (SortPickPipeline != VK_NULL_HANDLE)
+	{
+		vkDestroyPipeline(device, SortPickPipeline, nullptr);
+		SortPickPipeline = VK_NULL_HANDLE;
 	}
 	if (PickVertShader != VK_NULL_HANDLE)
 	{

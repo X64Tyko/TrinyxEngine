@@ -3,7 +3,7 @@
 // All data arrives via buffer device address (BDA) — no vertex-attribute
 // bindings are used.  A single uint64_t push constant carries the address of
 // GpuFrameData, from which the shader obtains:
-//   - VerticesAddr   — packed Vertex[24]  (float4 pos + float4 normal, 32 B each)
+//   - VerticesAddr   — packed Vertex[N]  (32 bytes each, oct-encoded normals)
 //   - InstancesAddr  — SoA compact instances written by scatter.slang
 //   - ViewProj       — column-major view-projection matrix
 //
@@ -18,21 +18,43 @@
 [[vk::push_constant]]
 cbuffer PushConstants { uint64_t gFrameDataAddr; }
 
-// 32-byte vertex matching CubeMesh::Vertex in CubeMesh.h.
+// 32-byte vertex matching Vertex in VertexFormat.h.
+// float3 pos (12B) + oct normal uint32 (4B) + float2 UV (8B) +
+// oct tangent uint32 (4B) + uint16 mask (2B) + uint8 flags (1B) + uint8 pad (1B)
 struct Vertex
 {
-    float4 position;  // xyz + w=1
-    float4 normal;    // xyz + w=0
+    float3   pos;           // 12 bytes
+    uint     n_oct16x2;     //  4 bytes — octahedral-encoded normal
+    float2   uv;            //  8 bytes
+    uint     t_oct16x2;     //  4 bytes — octahedral-encoded tangent direction
+    uint     mask_flags;    //  4 bytes — mask(16) + flags(8) + pad(8)
 };
 
 struct VSOut
 {
-    float4 pos   : SV_Position;
-    float4 color : COLOR0;
+    float4 pos      : SV_Position;
+    float4 color    : COLOR0;
+    float3 worldNrm : NORMAL0;
 #ifdef TNX_GPU_PICKING
     nointerpolation uint entityCacheIdx : ENTITYID0;
 #endif
 };
+
+// Decode octahedral-encoded normal from packed uint32 (2× snorm16).
+float3 octDecode(uint packed)
+{
+    float2 e = float2(
+        float(int(packed << 16) >> 16) / 32767.0,
+        float(int(packed) >> 16) / 32767.0
+    );
+    float3 n = float3(e.x, e.y, 1.0 - abs(e.x) - abs(e.y));
+    if (n.z < 0.0)
+    {
+        float2 s = float2(n.x >= 0 ? 1 : -1, n.y >= 0 ? 1 : -1);
+        n.xy = (1.0 - abs(n.yx)) * s;
+    }
+    return normalize(n);
+}
 
 // Build a TRS model matrix from translation t, unit quaternion q (x,y,z,w),
 // and per-axis scale s.  Returns a row-major float4x4 (Slang M[row][col]).
@@ -93,12 +115,20 @@ float4x4 loadViewProj(GpuFrameData* fd)
 }
 
 [shader("vertex")]
-VSOut main(uint vertIdx : SV_VertexID, uint instIdx : SV_InstanceID)
+VSOut main(uint vertIdx : SV_VertexID, uint baseVert : SV_StartVertexLocation,
+           uint instIdx : SV_VulkanInstanceID)
 {
     GpuFrameData* fd = (GpuFrameData*)gFrameDataAddr;
 
     // --- Mesh vertex (BDA) ---
-    Vertex v = ((Vertex*)fd->VerticesAddr)[vertIdx];
+    // Slang's SV_VertexID = gl_VertexIndex - BaseVertex (DX12 convention).
+    // Since we index the mega-buffer via BDA, we need the full gl_VertexIndex
+    // which includes VertexOffset from the indirect draw command.
+    Vertex vtx = ((Vertex*)fd->VerticesAddr)[vertIdx + baseVert];
+
+    // Decode oct-encoded normal (unused in current color-only shader,
+    // but read here for future GBuffer / lighting passes).
+    float3 normal = octDecode(vtx.n_oct16x2);
 
     // --- Per-instance SoA data ---
     // Layout: slot k for instance i  =  InstancesAddr[ k * OutFieldStride + i ]
@@ -127,12 +157,16 @@ VSOut main(uint vertIdx : SV_VertexID, uint instIdx : SV_InstanceID)
     float4x4 model = buildModel(pos, rotQ, scale);
     float4x4 vp    = loadViewProj(fd);
 
-    float4 worldPos = mul(model, v.position);
+    float4 worldPos = mul(model, float4(vtx.pos, 1.0));
     float4 clipPos  = mul(vp, worldPos);
 
+    // Rotate normal by the instance quaternion (no scale — normals are unit vectors)
+    float3 worldNormal = normal + 2.0 * cross(rotQ.xyz, cross(rotQ.xyz, normal) + rotQ.w * normal);
+
     VSOut o;
-    o.pos   = clipPos;
-    o.color = color;
+    o.pos      = clipPos;
+    o.color    = color;
+    o.worldNrm = worldNormal;
 #ifdef TNX_GPU_PICKING
     // Read cache index written by scatter as asfloat(uint) — reinterpret back.
     o.entityCacheIdx = asuint(inst[(kSemEntityCacheIdx - 1u) * stride + instIdx]);

@@ -105,6 +105,7 @@ if(ENABLE_TRACY)
     # Enable Tracy profiling and disable ROCm support
     add_compile_definitions(TRACY_ENABLE)
     add_compile_definitions(TRACY_PROFILE_LEVEL=${TRACY_PROFILE_LEVEL})
+    add_compile_definitions(TRACY_ON_DEMAND)
     add_compile_definitions(TRACY_NO_ROCTRACER=1)
     add_compile_definitions(TRACY_NO_ROCPROF=1)
 

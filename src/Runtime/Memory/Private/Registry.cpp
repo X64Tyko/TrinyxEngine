@@ -274,7 +274,6 @@ void Registry::ProcessDeferredDestructions()
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
-	int pending = PendingDestructions.size();
 	for (EntityID Id : PendingDestructions)
 	{
 		if (!Id.IsValid()) continue;
@@ -299,8 +298,26 @@ void Registry::ProcessDeferredDestructions()
 	PendingDestructions.clear();
 
 	TNX_PLOT("PendingDestructions", static_cast<double>(PendingDestructions.size()));
+}
 
-	LOG_INFO_F("Processed %i deferred destructions. Existing Entities %u", pending, GetTotalEntityCount());
+EntityID Registry::FindEntityByLocation(Archetype* arch, Chunk* chunk, uint16_t localIndex) const
+{
+	for (size_t i = 0; i < EntityIndex.size(); ++i)
+	{
+		const EntityRecord& rec = EntityIndex[i];
+		if (rec.Arch == arch && rec.TargetChunk == chunk && rec.Index == localIndex)
+		{
+			EntityID id{};
+			id.Index      = i;
+			id.Generation = rec.Generation;
+			id.TypeID     = 0;
+			id.OwnerID    = 0;
+			id.IsStatic   = 0;
+			id.MetaFlags  = 0;
+			return id;
+		}
+	}
+	return EntityID::Invalid();
 }
 
 void Registry::InitializeArchetypes()

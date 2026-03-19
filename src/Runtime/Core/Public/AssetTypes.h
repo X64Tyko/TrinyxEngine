@@ -178,6 +178,11 @@ inline AssetType AssetTypeFromExtension(const char* ext)
 		(ext[0] == 'f' && ext[1] == 'b' && ext[2] == 'x' && ext[3] == '\0'))
 		return AssetType::StaticMesh;
 
+	// Engine binary mesh format
+	if (ext[0] == 't' && ext[1] == 'n' && ext[2] == 'x' && ext[3] == 'm'
+		&& ext[4] == 'e' && ext[5] == 's' && ext[6] == 'h' && ext[7] == '\0')
+		return AssetType::StaticMesh;
+
 	if ((ext[0] == 'w' && ext[1] == 'a' && ext[2] == 'v' && ext[3] == '\0') ||
 		(ext[0] == 'o' && ext[1] == 'g' && ext[2] == 'g' && ext[3] == '\0') ||
 		(ext[0] == 'm' && ext[1] == 'p' && ext[2] == '3' && ext[3] == '\0'))

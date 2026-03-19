@@ -20,6 +20,10 @@ GPU-driven rendering, lock-free communication) that are too risky to implement d
 
 ---
 
+Test meshes and rigs from https://www.3dfiggins.com/Store/
+
+---
+
 ## Current Status (2026-03)
 
 **Performance: ~Old Metrics~**

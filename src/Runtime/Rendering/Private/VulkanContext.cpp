@@ -386,6 +386,8 @@ bool VulkanContext::CreateLogicalDevice()
 
 		featureChain.get<vk::PhysicalDeviceFeatures2>()
 					.features.setSamplerAnisotropy(true)
+					.setMultiDrawIndirect(true)
+					.setDrawIndirectFirstInstance(true)
 					.setShaderInt64(true);
 
 		featureChain.get<vk::PhysicalDeviceVulkan11Features>()

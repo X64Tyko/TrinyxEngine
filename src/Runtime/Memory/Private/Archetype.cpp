@@ -427,7 +427,6 @@ Chunk* Archetype::AllocateChunk()
 	// This lets you see separate pools for Archetypes
 	TNX_ALLOC_N(NewChunk, newChunkSize, DebugName);
 
-	std::unordered_set<ComponentCacheBase*> UsedCaches(3);
 	size_t largestSize = 0;
 
 	// Allocate temporal field arrays for this chunk
@@ -439,7 +438,6 @@ Chunk* Archetype::AllocateChunk()
 			const std::vector<FieldMeta>* fields = CFR.GetFields(key.componentID);
 			const CacheTier temporalTier         = CFR.GetTemporalTier(key.componentID);
 			ComponentCacheBase* TemporalCache    = Reg->GetCache(temporalTier);
-			UsedCaches.insert(TemporalCache);
 
 			if (!fields || key.fieldIndex >= fields->size()) continue;
 
@@ -464,7 +462,14 @@ Chunk* Archetype::AllocateChunk()
 		LOG_TRACE_F("Allocated %zu temporal field arrays for chunk", TemporalFieldIndices.size());
 	}
 
-	for (auto& cache : UsedCaches) NewChunk->Header.CacheIndexStart = cache->AdvanceAllocator(ArchSystemID, EntitiesPerChunk, largestSize);
+	// Advance ALL caches so entityCacheIDs stay globally synchronized.
+	// An archetype may only store fields in one cache, but the allocator index
+	// must advance in every cache so that entityCacheID N refers to the same
+	// entity slot regardless of which cache you look at.
+	NewChunk->Header.CacheIndexStart = Reg->GetVolatileCache()->AdvanceAllocator(ArchSystemID, EntitiesPerChunk, largestSize);
+#ifdef TNX_ENABLE_ROLLBACK
+	Reg->GetTemporalCache()->AdvanceAllocator(ArchSystemID, EntitiesPerChunk, largestSize);
+#endif
 
 	LOG_INFO_F("Allocated chunk with %i entities at cache index %zi", EntitiesPerChunk, NewChunk->Header.CacheIndexStart);
 

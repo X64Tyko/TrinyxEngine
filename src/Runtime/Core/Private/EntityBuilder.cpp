@@ -15,39 +15,82 @@
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Write a numeric JSON value into a raw field pointer, dispatching on field size.
-static void WriteFieldValue(void* dst, size_t fieldSize, const JsonValue& val)
+// Write a numeric JSON value into a raw field pointer, using FieldValueType for
+// correct interpretation. Without this, uint32 fields (MeshID, Shape, Motion)
+// get written as float bit patterns, producing garbage values on the GPU.
+static void WriteFieldValue(void* dst, size_t fieldSize, FieldValueType valueType, const JsonValue& val)
 {
 	if (!val.IsNumber()) return;
 
-	switch (fieldSize)
+	switch (valueType)
 	{
-		case 4:
+		case FieldValueType::Float32:
 			{
 				float f = val.AsFloat();
 				std::memcpy(dst, &f, 4);
 				break;
 			}
-		case 8:
+		case FieldValueType::Float64:
 			{
 				double d = val.AsNumber();
 				std::memcpy(dst, &d, 8);
 				break;
 			}
-		case 2:
+		case FieldValueType::Int32:
 			{
-				auto v = static_cast<uint16_t>(val.AsInt());
-				std::memcpy(dst, &v, 2);
+				auto v = static_cast<int32_t>(val.AsInt());
+				std::memcpy(dst, &v, 4);
 				break;
 			}
-		case 1:
+		case FieldValueType::Uint32:
 			{
-				auto v = static_cast<uint8_t>(val.AsInt());
-				std::memcpy(dst, &v, 1);
+				auto v = static_cast<uint32_t>(val.AsInt());
+				std::memcpy(dst, &v, 4);
+				break;
+			}
+		case FieldValueType::Int64:
+			{
+				auto v = static_cast<int64_t>(val.AsNumber());
+				std::memcpy(dst, &v, 8);
+				break;
+			}
+		case FieldValueType::Uint64:
+			{
+				auto v = static_cast<uint64_t>(val.AsNumber());
+				std::memcpy(dst, &v, 8);
 				break;
 			}
 		default:
-			LOG_WARN_F("[EntityBuilder] Unsupported field size %zu, skipping", fieldSize);
+			// Fallback: dispatch on size (legacy behavior for Unknown types)
+			switch (fieldSize)
+			{
+				case 4:
+					{
+						float f = val.AsFloat();
+						std::memcpy(dst, &f, 4);
+						break;
+					}
+				case 8:
+					{
+						double d = val.AsNumber();
+						std::memcpy(dst, &d, 8);
+						break;
+					}
+				case 2:
+					{
+						auto v = static_cast<uint16_t>(val.AsInt());
+						std::memcpy(dst, &v, 2);
+						break;
+					}
+				case 1:
+					{
+						auto v = static_cast<uint8_t>(val.AsInt());
+						std::memcpy(dst, &v, 1);
+						break;
+					}
+				default: LOG_WARN_F("[EntityBuilder] Unsupported field size %zu, skipping", fieldSize);
+					break;
+			}
 			break;
 	}
 }
@@ -57,6 +100,7 @@ struct FieldLookup
 {
 	size_t ArrayIndex;
 	size_t Size;
+	FieldValueType ValueType;
 };
 
 static std::vector<std::pair<const char*, FieldLookup>> BuildFieldMap(const Archetype* arch)
@@ -69,7 +113,12 @@ static std::vector<std::pair<const char*, FieldLookup>> BuildFieldMap(const Arch
 		const char* name = arch->FieldArrayTemplateCache[i].debugName;
 		if (name)
 		{
-			map.push_back({name, {i, arch->CachedFieldArrayLayout[i].size}});
+			map.push_back({
+				name, {
+					i, arch->CachedFieldArrayLayout[i].size,
+					arch->CachedFieldArrayLayout[i].valueType
+				}
+			});
 		}
 	}
 	return map;
@@ -158,14 +207,6 @@ EntityID EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJson)
 			std::memset(base + localIndex * desc.size, 0, desc.size);
 		}
 
-		// Set the Active flag (first field is always TemporalFlags::Flags)
-		const FieldLookup* flagsField = FindField(fieldMap, "Flags");
-		if (flagsField)
-		{
-			auto* flagsArr       = static_cast<int32_t*>(fieldArrayTable[flagsField->ArrayIndex]);
-			flagsArr[localIndex] = static_cast<int32_t>(TemporalFlagBits::Active);
-		}
-
 		// Apply component field values from JSON
 		const JsonValue* components = entityJson.Find("components");
 		if (!components || !components->IsObject()) return;
@@ -187,8 +228,18 @@ EntityID EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJson)
 
 				// Write the value into the field array at the entity's local index
 				auto* base = static_cast<uint8_t*>(fieldArrayTable[field->ArrayIndex]);
-				WriteFieldValue(base + localIndex * field->Size, field->Size, fieldVal);
+				WriteFieldValue(base + localIndex * field->Size, field->Size, field->ValueType, fieldVal);
 			}
+		}
+
+		// Set the Active flag AFTER JSON fields — existing scenes stored Flags
+		// as float (-0.0 = 0x80000000) which breaks under type-aware deserialization.
+		// A spawned entity is always active; the flag is authoritative here.
+		const FieldLookup* flagsField = FindField(fieldMap, "Flags");
+		if (flagsField)
+		{
+			auto* flagsArr       = static_cast<int32_t*>(fieldArrayTable[flagsField->ArrayIndex]);
+			flagsArr[localIndex] = static_cast<int32_t>(TemporalFlagBits::Active);
 		}
 	};
 
@@ -264,35 +315,76 @@ size_t EntityBuilder::SpawnFromFile(Registry* reg, const char* filePath)
 // ---------------------------------------------------------------------------
 
 // Read a numeric value from a raw field pointer and return it as a JsonValue.
-static JsonValue ReadFieldValue(const void* src, size_t fieldSize)
+static JsonValue ReadFieldValue(const void* src, size_t fieldSize, FieldValueType valueType)
 {
-	switch (fieldSize)
+	switch (valueType)
 	{
-		case 4:
+		case FieldValueType::Float32:
 			{
 				float f;
 				std::memcpy(&f, src, 4);
 				return JsonValue::Number(static_cast<double>(f));
 			}
-		case 8:
+		case FieldValueType::Float64:
 			{
 				double d;
 				std::memcpy(&d, src, 8);
 				return JsonValue::Number(d);
 			}
-		case 2:
+		case FieldValueType::Int32:
 			{
-				uint16_t v;
-				std::memcpy(&v, src, 2);
+				int32_t v;
+				std::memcpy(&v, src, 4);
 				return JsonValue::Number(static_cast<double>(v));
 			}
-		case 1:
+		case FieldValueType::Uint32:
 			{
-				uint8_t v;
-				std::memcpy(&v, src, 1);
+				uint32_t v;
+				std::memcpy(&v, src, 4);
 				return JsonValue::Number(static_cast<double>(v));
 			}
-		default: return JsonValue::Number(0.0);
+		case FieldValueType::Int64:
+			{
+				int64_t v;
+				std::memcpy(&v, src, 8);
+				return JsonValue::Number(static_cast<double>(v));
+			}
+		case FieldValueType::Uint64:
+			{
+				uint64_t v;
+				std::memcpy(&v, src, 8);
+				return JsonValue::Number(static_cast<double>(v));
+			}
+		default:
+			// Fallback: dispatch on size
+			switch (fieldSize)
+			{
+				case 4:
+					{
+						float f;
+						std::memcpy(&f, src, 4);
+						return JsonValue::Number(static_cast<double>(f));
+					}
+				case 8:
+					{
+						double d;
+						std::memcpy(&d, src, 8);
+						return JsonValue::Number(d);
+					}
+				case 2:
+					{
+						uint16_t v;
+						std::memcpy(&v, src, 2);
+						return JsonValue::Number(static_cast<double>(v));
+					}
+				case 1:
+					{
+						uint8_t v;
+						std::memcpy(&v, src, 1);
+						return JsonValue::Number(static_cast<double>(v));
+					}
+				default: return JsonValue::Number(0.0);
+			}
 	}
 }
 
@@ -356,7 +448,7 @@ JsonValue EntityBuilder::SerializeEntity(Registry* reg, Archetype* arch, size_t 
 
 		// Read field value
 		const auto* base          = static_cast<const uint8_t*>(fieldArrayTable[i]);
-		(*currentComp)[fieldName] = ReadFieldValue(base + localIndex * desc.size, desc.size);
+		(*currentComp)[fieldName] = ReadFieldValue(base + localIndex * desc.size, desc.size, desc.valueType);
 	}
 
 	entity["components"] = std::move(components);

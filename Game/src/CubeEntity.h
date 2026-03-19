@@ -8,17 +8,19 @@
 #include "Schema.h"
 #include "SchemaReflector.h"
 #include "JoltBody.h"
+#include "MeshRef.h"
 
 template <template <FieldWidth> class T, FieldWidth WIDTH = FieldWidth::Scalar>
 class BaseCube : public EntityView<T, WIDTH>
 {
-	TNX_REGISTER_SUPER_SCHEMA(BaseCube, EntityView, transform, velocity, scale, color)
+	TNX_REGISTER_SUPER_SCHEMA(BaseCube, EntityView, transform, velocity, scale, color, mesh)
 
 public:
 	TransRot<WIDTH> transform;
 	Velocity<WIDTH> velocity;
 	Scale<WIDTH> scale;
 	ColorData<WIDTH> color;
+	MeshRef<WIDTH> mesh;
 
 	FORCE_INLINE void PrePhysics([[maybe_unused]] double dt)
 	{
@@ -48,6 +50,7 @@ public:
 	using Base::velocity;
 	using Base::scale;
 	using Base::color;
+	using Base::mesh;
 
 	// Logic
 	FORCE_INLINE void ScalarUpdate([[maybe_unused]] double dt)

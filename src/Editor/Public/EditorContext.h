@@ -13,6 +13,7 @@
 
 class EditorPanel;
 class LogicThread;
+class MeshManager;
 class TrinyxEngine;
 
 /// EditorContext — owns all editor UI state and panel drawing.
@@ -26,7 +27,7 @@ public:
 	EditorContext();
 	~EditorContext();
 
-	void Initialize(TrinyxEngine* engine, LogicThread* logic);
+	void Initialize(TrinyxEngine* engine, LogicThread* logic, MeshManager* meshMgr);
 
 	/// Build the editor UI for this frame.  Called on the render thread
 	/// after ImGui::NewFrame(), before ImGui::Render().
@@ -35,6 +36,22 @@ public:
 	/// Load a scene file: reset registry, spawn entities, update editor state.
 	/// If bReset is false, skips ResetRegistry (used for initial load into an empty world).
 	void LoadScene(const std::string& path, bool bReset = true);
+
+	/// Show the mesh import dialog (called from ContentBrowserPanel).
+	void ShowImportDialog()
+	{
+		bShowImportDialog = true;
+		ImportDialogPath.clear();
+	}
+
+	/// Handle a file dropped onto the window (called from EditorRenderer on render thread).
+	void HandleDroppedFile(const std::string& path);
+
+	/// Spawn a prefab into the current scene. Called from content browser drag-drop or double-click.
+	void SpawnPrefab(const std::string& prefabPath);
+
+	/// Delete the currently selected entity (deferred via Spawn handshake).
+	void DeleteSelectedEntity();
 
 	/// Register a panel. EditorContext takes ownership.
 	template <typename T, typename... Args>
@@ -59,9 +76,17 @@ private:
 	std::vector<std::unique_ptr<EditorPanel>> Panels;
 
 	void DrawFileDialog();
+	void DrawImportDialog();
 	void DrawUnsavedWarning();
 	void DrawGizmo();
 	void ConsumePick();
+
+	/// Import a glTF/glb file: convert to .tnxmesh in content/, register with
+	/// AssetDatabase and MeshManager. Returns the mesh slot or UINT32_MAX on failure.
+	uint32_t ImportMeshAsset(const std::string& gltfPath);
+
+	/// Load all .tnxmesh files from AssetDatabase into MeshManager at startup.
+	void LoadAllMeshAssets();
 
 	// --- Play/Stop scene snapshot ---
 	// On Play: snapshot all field data so Stop can restore it.
@@ -98,6 +123,10 @@ private:
 	bool bShowFileDialog            = false;
 	bool bFileDialogForSave         = false;
 	bool bShowUnsavedWarning        = false;
+	bool bShowImportDialog          = false;
 	PendingActionType PendingAction = PendingActionType::None;
 	std::string FileDialogPath;
+	std::string ImportDialogPath;
+
+	MeshManager* MeshMgr = nullptr;
 };

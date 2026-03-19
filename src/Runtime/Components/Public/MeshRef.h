@@ -12,10 +12,10 @@
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct MeshRef : ComponentView<MeshRef, WIDTH>
 {
-	UIntProxy<WIDTH> MeshID     = 0; // Asset system mesh handle
-	UIntProxy<WIDTH> MaterialID = 0; // Asset system material handle
-	UIntProxy<WIDTH> LODCount   = 1; // Number of LOD levels available
-	UIntProxy<WIDTH> CastShadow = 1; // 1 = participates in shadow passes
+	UIntProxy<WIDTH> MeshID{};     // Asset system mesh handle (default 0)
+	UIntProxy<WIDTH> MaterialID{}; // Asset system material handle (default 0)
+	UIntProxy<WIDTH> LODCount{};   // Number of LOD levels available
+	UIntProxy<WIDTH> CastShadow{}; // 1 = participates in shadow passes
 
 	TNX_VOLATILE_FIELDS(MeshRef, Render, MeshID, MaterialID, LODCount, CastShadow)
 };

@@ -9,10 +9,15 @@
 #include "ImGuizmo.h"
 #include "Logger.h"
 #include "LogicThread.h"
+#include "MeshAsset.h"
+#include "MeshImporter.h"
+#include "MeshManager.h"
 #include "Registry.h"
 #include "TemporalComponentCache.h"
+#include <cctype>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <SDL3/SDL.h>
 
 // Panel headers
@@ -25,10 +30,11 @@
 EditorContext::EditorContext()  = default;
 EditorContext::~EditorContext() = default;
 
-void EditorContext::Initialize(TrinyxEngine* engine, LogicThread* logic)
+void EditorContext::Initialize(TrinyxEngine* engine, LogicThread* logic, MeshManager* meshMgr)
 {
 	EnginePtr = engine;
 	LogicPtr  = logic;
+	MeshMgr   = meshMgr;
 
 	// Populate shared state pointers for panels
 	State.EnginePtr   = engine;
@@ -36,6 +42,7 @@ void EditorContext::Initialize(TrinyxEngine* engine, LogicThread* logic)
 	State.ConfigPtr   = engine->GetConfig();
 	State.LogicPtr    = logic;
 	State.EditorCtx   = this;
+	State.MeshMgrPtr  = meshMgr;
 
 	// Initialize asset database from project content directory
 	const EngineConfig* cfg = engine->GetConfig();
@@ -44,6 +51,9 @@ void EditorContext::Initialize(TrinyxEngine* engine, LogicThread* logic)
 		std::string contentDir = std::string(cfg->ProjectDir) + "/content";
 		AssetDB.Initialize(contentDir.c_str());
 		State.AssetDB = &AssetDB;
+
+		// Load all existing .tnxmesh files into MeshManager
+		LoadAllMeshAssets();
 	}
 
 	// Load default scene if configured
@@ -360,6 +370,29 @@ void EditorContext::BuildFrame()
 	// Consume GPU pick results and update selection
 	ConsumePick();
 
+	// Viewport drop target — accept prefab drags from content browser.
+	// Only shown while a drag-drop is active to avoid eating viewport clicks.
+	if (ImGui::GetDragDropPayload() != nullptr)
+	{
+		ImGuiID dockspaceID        = ImGui::GetID("EditorDockspace");
+		ImGuiDockNode* centralNode = ImGui::DockBuilderGetCentralNode(dockspaceID);
+		if (centralNode)
+		{
+			ImRect viewportRect(centralNode->Pos,
+								ImVec2(centralNode->Pos.x + centralNode->Size.x,
+									   centralNode->Pos.y + centralNode->Size.y));
+			if (ImGui::BeginDragDropTargetCustom(viewportRect, dockspaceID))
+			{
+				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("PREFAB_PATH"))
+				{
+					std::string prefabPath(static_cast<const char*>(payload->Data));
+					SpawnPrefab(prefabPath);
+				}
+				ImGui::EndDragDropTarget();
+			}
+		}
+	}
+
 	// Draw all panels
 	for (auto& panel : Panels)
 	{
@@ -379,6 +412,7 @@ void EditorContext::BuildFrame()
 
 	// Modals / overlays
 	DrawFileDialog();
+	DrawImportDialog();
 	DrawUnsavedWarning();
 
 	// Debug windows
@@ -501,6 +535,12 @@ void EditorContext::BuildMenuBar()
 			bShowFileDialog    = true;
 			bFileDialogForSave = true;
 			FileDialogPath     = State.CurrentScenePath;
+		}
+		ImGui::Separator();
+		if (ImGui::MenuItem("Import Mesh...", nullptr, false, MeshMgr != nullptr))
+		{
+			bShowImportDialog = true;
+			ImportDialogPath.clear();
 		}
 		ImGui::Separator();
 		ImGui::MenuItem("Exit", nullptr, false, false);
@@ -646,6 +686,208 @@ void EditorContext::DrawFileDialog()
 
 		ImGui::EndPopup();
 	}
+}
+
+void EditorContext::DrawImportDialog()
+{
+	if (!bShowImportDialog) return;
+
+	ImGui::OpenPopup("Import Mesh");
+
+	ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+	ImGui::SetNextWindowSize(ImVec2(500, 120), ImGuiCond_Appearing);
+
+	if (ImGui::BeginPopupModal("Import Mesh", &bShowImportDialog, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		char pathBuf[512]{};
+		snprintf(pathBuf, sizeof(pathBuf), "%s", ImportDialogPath.c_str());
+
+		ImGui::Text("Path to .gltf or .glb file:");
+		ImGui::SetNextItemWidth(-1);
+		if (ImGui::InputText("##importpath", pathBuf, sizeof(pathBuf))) ImportDialogPath = pathBuf;
+
+		ImGui::Separator();
+
+		if (ImGui::Button("Import", ImVec2(120, 0)))
+		{
+			uint32_t slot = ImportMeshAsset(ImportDialogPath);
+			if (slot != UINT32_MAX)
+				LOG_INFO_F("[Editor] Imported mesh → slot %u", slot);
+			else
+				LOG_ERROR_F("[Editor] Failed to import: %s", ImportDialogPath.c_str());
+
+			bShowImportDialog = false;
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel", ImVec2(120, 0)))
+		{
+			bShowImportDialog = false;
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::EndPopup();
+	}
+}
+
+uint32_t EditorContext::ImportMeshAsset(const std::string& gltfPath)
+{
+	if (!MeshMgr || !State.ConfigPtr) return UINT32_MAX;
+
+	// Derive output .tnxmesh path in content/
+	std::filesystem::path src(gltfPath);
+	std::string stem    = src.stem().string();
+	std::string outPath = std::string(State.ConfigPtr->ProjectDir)
+		+ "/content/" + stem + ".tnxmesh";
+
+	// Import glTF → .tnxmesh
+	if (!ImportGLTF(gltfPath, outPath))
+	{
+		LOG_ERROR_F("[Editor] ImportGLTF failed: %s", gltfPath.c_str());
+		return UINT32_MAX;
+	}
+
+	LOG_INFO_F("[Editor] Wrote %s", outPath.c_str());
+
+	// Reconcile AssetDatabase to pick up the new file
+	AssetDB.Reconcile();
+
+	// Load the .tnxmesh into MeshManager
+	MeshAsset asset;
+	if (!LoadMeshAsset(asset, outPath))
+	{
+		LOG_ERROR_F("[Editor] LoadMeshAsset failed: %s", outPath.c_str());
+		return UINT32_MAX;
+	}
+
+	uint32_t slot = MeshMgr->RegisterMesh(asset, stem);
+	if (slot != UINT32_MAX)
+		LOG_INFO_F("[Editor] Registered mesh '%s' at slot %u (%u verts, %u indices)",
+			   stem.c_str(), slot, static_cast<uint32_t>(asset.Vertices.size()),
+			   static_cast<uint32_t>(asset.Indices.size()));
+
+	return slot;
+}
+
+void EditorContext::LoadAllMeshAssets()
+{
+	if (!MeshMgr || !State.ConfigPtr) return;
+
+	const auto& entries     = AssetDB.GetEntries();
+	std::string contentBase = std::string(State.ConfigPtr->ProjectDir) + "/content/";
+
+	for (const auto& entry : entries)
+	{
+		if (entry.Type != AssetType::StaticMesh) continue;
+
+		// Only load .tnxmesh files (skip raw .gltf/.glb/.obj/.fbx source files)
+		if (entry.Path.size() < 8 || entry.Path.substr(entry.Path.size() - 8) != ".tnxmesh") continue;
+
+		std::string fullPath = contentBase + entry.Path;
+		MeshAsset asset;
+		if (!LoadMeshAsset(asset, fullPath))
+		{
+			LOG_WARN_F("[Editor] Failed to load mesh asset: %s", entry.Path.c_str());
+			continue;
+		}
+
+		// Derive name from filename stem (e.g. "helmet.tnxmesh" → "helmet")
+		std::string meshName = std::filesystem::path(entry.Path).stem().string();
+		uint32_t slot        = MeshMgr->RegisterMesh(asset, meshName);
+		if (slot != UINT32_MAX)
+			LOG_INFO_F("[Editor] Loaded mesh '%s' → slot %u", entry.Path.c_str(), slot);
+	}
+}
+
+void EditorContext::HandleDroppedFile(const std::string& path)
+{
+	// Check if it's a mesh file we can import
+	std::filesystem::path p(path);
+	std::string ext = p.extension().string();
+
+	// Convert extension to lowercase for comparison
+	for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+	if (ext == ".gltf" || ext == ".glb")
+	{
+		uint32_t slot = ImportMeshAsset(path);
+		if (slot != UINT32_MAX)
+			LOG_INFO_F("[Editor] Drag-and-drop imported mesh → slot %u", slot);
+		else
+			LOG_ERROR_F("[Editor] Failed to import dropped file: %s", path.c_str());
+	}
+	else if (ext == ".tnxmesh")
+	{
+		// Already in engine format — copy to content/ and load
+		if (MeshMgr && State.ConfigPtr)
+		{
+			std::string destPath = std::string(State.ConfigPtr->ProjectDir)
+				+ "/content/" + p.filename().string();
+			if (path != destPath) std::filesystem::copy_file(p, destPath, std::filesystem::copy_options::overwrite_existing);
+
+			AssetDB.Reconcile();
+
+			MeshAsset asset;
+			if (LoadMeshAsset(asset, destPath))
+			{
+				uint32_t slot = MeshMgr->RegisterMesh(asset);
+				if (slot != UINT32_MAX)
+					LOG_INFO_F("[Editor] Loaded dropped mesh → slot %u", slot);
+			}
+		}
+	}
+	else if (ext == ".prefab")
+	{
+		SpawnPrefab(path);
+	}
+	else
+	{
+		LOG_WARN_F("[Editor] Unsupported drop file type: %s", ext.c_str());
+	}
+}
+
+void EditorContext::SpawnPrefab(const std::string& prefabPath)
+{
+	EnginePtr->Spawn([prefabPath](Registry* reg)
+	{
+		size_t count = EntityBuilder::SpawnFromFile(reg, prefabPath.c_str());
+		if (count > 0)
+			LOG_INFO_F("[Editor] Spawned %zu entities from prefab: %s", count, prefabPath.c_str());
+		else
+			LOG_ERROR_F("[Editor] Failed to spawn prefab: %s", prefabPath.c_str());
+	});
+
+	State.bSceneDirty = true;
+}
+
+void EditorContext::DeleteSelectedEntity()
+{
+	if (State.Selection != EditorState::SelectionType::Entity) return;
+
+	// Capture selection data before clearing — Spawn lambda runs on Logic thread.
+	// NOTE: Temporary linear scan via FindEntityByLocation. Will be replaced with
+	// a direct EntityID lookup once entities store their ID in chunk metadata.
+	Archetype* arch     = State.SelectedArchetype;
+	Chunk* chunk        = State.SelectedChunk;
+	uint16_t localIndex = State.SelectedLocalIndex;
+
+	State.ClearSelection();
+
+	EnginePtr->Spawn([arch, chunk, localIndex](Registry* reg)
+	{
+		EntityID id = reg->FindEntityByLocation(arch, chunk, localIndex);
+		if (!id.IsValid())
+		{
+			LOG_ERROR("[Editor] Could not find entity to delete");
+			return;
+		}
+		reg->Destroy(id);
+		LOG_INFO_F("[Editor] Deleted entity (index %u)", id.GetIndex());
+	});
+
+	State.bSceneDirty = true;
 }
 
 void EditorContext::SnapshotScene()

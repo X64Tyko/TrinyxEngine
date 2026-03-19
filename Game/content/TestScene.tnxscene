@@ -5,7 +5,7 @@
 			"type": "CubeEntity",
 			"components": {
 				"TemporalFlags": {
-					"Flags": -0.0
+					"Flags": -2147483648.0
 				},
 				"TransRot": {
 					"PosX": -17.596714019775391,
@@ -32,6 +32,12 @@
 					"B": 0.10000000149011612,
 					"A": 1.0
 				},
+				"MeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
 				"JoltBody": {
 					"Shape": 0.0,
 					"HalfExtentX": 1.0,
@@ -48,11 +54,11 @@
 			"type": "CubeEntity",
 			"components": {
 				"TemporalFlags": {
-					"Flags": -0.0
+					"Flags": -2147483648.0
 				},
 				"TransRot": {
-					"PosX": 5.0,
-					"PosY": 33.96307373046875,
+					"PosX": 19.176078796386719,
+					"PosY": 6.212700366973877,
 					"PosZ": -80.0,
 					"RotQx": 0.0,
 					"RotQy": 0.0,
@@ -75,6 +81,12 @@
 					"B": 1.0,
 					"A": 1.0
 				},
+				"MeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
 				"JoltBody": {
 					"Shape": 0.0,
 					"HalfExtentX": 1.0,
@@ -91,7 +103,7 @@
 			"type": "CubeEntity",
 			"components": {
 				"TemporalFlags": {
-					"Flags": -0.0
+					"Flags": -2147483648.0
 				},
 				"TransRot": {
 					"PosX": 0.0,
@@ -118,6 +130,12 @@
 					"B": 0.30000001192092896,
 					"A": 1.0
 				},
+				"MeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
 				"JoltBody": {
 					"Shape": 0.0,
 					"HalfExtentX": 50.0,
@@ -127,6 +145,50 @@
 					"Mass": 0.0,
 					"Friction": 0.80000001192092896,
 					"Restitution": 0.10000000149011612
+				}
+			}
+		},
+		{
+			"type": "MeshProp",
+			"components": {
+				"TemporalFlags": {
+					"Flags": -2147483648.0
+				},
+				"TransRot": {
+					"PosX": 0.0,
+					"PosY": 14.31317138671875,
+					"PosZ": -80.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"Scale": {
+					"ScaleX": 1.0,
+					"ScaleY": 1.0,
+					"ScaleZ": 1.0
+				},
+				"ColorData": {
+					"R": 1.0,
+					"G": 1.0,
+					"B": 1.0,
+					"A": 1.0
+				},
+				"MeshRef": {
+					"MeshID": 2.0,
+					"MaterialID": 0.0,
+					"LODCount": 1.0,
+					"CastShadow": 1.0
+				},
+				"JoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 0.5,
+					"HalfExtentY": 0.5,
+					"HalfExtentZ": 0.5,
+					"Motion": 2.0,
+					"Mass": 1.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
 				}
 			}
 		}

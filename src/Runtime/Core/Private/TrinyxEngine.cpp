@@ -146,7 +146,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	Logic->SetSimPaused(true); // Editor starts paused — press Play to simulate
 #endif
 
-	Render->Initialize(RegistryPtr.get(), Logic.get(), &Config, &VkCtx, &VkMem, EngineWindow);
+	Render->Initialize(RegistryPtr.get(), Logic.get(), &Config, &VkCtx, &VkMem, EngineWindow, &VizInput);
 #if TNX_ENABLE_EDITOR
 	Render->SetEngine(this);
 #endif
@@ -299,8 +299,7 @@ void TrinyxEngine::PumpEvents()
 				break;
 
 #if !TNX_ENABLE_EDITOR
-			case SDL_EVENT_MOUSE_BUTTON_DOWN:
-				SDL_SetWindowRelativeMouseMode(EngineWindow, true);
+			case SDL_EVENT_MOUSE_BUTTON_DOWN: SDL_SetWindowRelativeMouseMode(EngineWindow, true);
 				break;
 #endif
 

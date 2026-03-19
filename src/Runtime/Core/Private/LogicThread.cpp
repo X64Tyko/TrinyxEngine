@@ -86,6 +86,7 @@ void LogicThread::ThreadMain()
 		// Sync point for deferred spawns — if any thread is waiting to
 		// spawn entities, freeze here and let it write to the current frame.
 		TrinyxEngine::Get().GetSpawner().SyncPoint();
+		RegistryPtr->ProcessDeferredDestructions();
 
 		// Measure delta time
 		const uint64_t frameStartCounter = SDL_GetPerformanceCounter();

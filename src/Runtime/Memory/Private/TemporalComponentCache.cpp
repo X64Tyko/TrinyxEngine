@@ -52,7 +52,7 @@ size_t ComponentCacheBase::AdvanceSystemAllocatorIndex(SystemID sysID, size_t si
 	}
 	else if (Equal(sysID, SystemID::Render))
 	{
-		retSize      = MaxPhysicsBoundary - RenderOffset;
+		retSize      = MaxPhysicsBoundary + RenderOffset;
 		RenderOffset += size;
 	}
 	else if (Equal(sysID, SystemID::Physics))

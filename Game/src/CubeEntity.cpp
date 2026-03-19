@@ -3,7 +3,10 @@
 // including the header is not enough. TNX_REGISTER_ENTITY creates a
 // file-scope static that calls PrefabReflector<T<>>::Register().
 #include "CubeEntity.h"
+#include "MeshProp.h"
 
-TNX_REGISTER_ENTITY(CubeEntity)
+TNX_REGISTER_ENTITY (CubeEntity)
 
-TNX_REGISTER_ENTITY(SuperCube)
+TNX_REGISTER_ENTITY (SuperCube)
+
+TNX_REGISTER_ENTITY (MeshProp)

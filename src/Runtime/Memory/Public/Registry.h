@@ -87,6 +87,9 @@ public:
 	// Editor: read-only archetype iteration
 	const auto& GetArchetypes() const { return Archetypes; }
 
+	// Find EntityID by its archetype location. Returns EntityID::Invalid() if not found.
+	EntityID FindEntityByLocation(Archetype* arch, Chunk* chunk, uint16_t localIndex) const;
+
 	void SetPhysics(JoltPhysics* physics) { PhysicsPtr = physics; }
 
 	// Resets the registry to default, useful after tests.

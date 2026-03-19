@@ -1,6 +1,7 @@
 #include "EditorRenderer.h"
 
 #include <mutex>
+#include <string>
 #include <SDL3/SDL.h>
 
 #include "imgui.h"
@@ -24,22 +25,32 @@ struct ImGuiEventQueue
 	uint32_t Tail = 0;
 	std::mutex Mutex;
 
+	// SDL3 drop.data is only valid during SDL_PollEvent — capture it immediately.
+	std::string PendingDropPath;
+
 	void Push(const SDL_Event& e)
 	{
 		std::lock_guard lock(Mutex);
+		if (e.type == SDL_EVENT_DROP_FILE && e.drop.data) PendingDropPath = e.drop.data;
 		Events[Head] = e;
 		Head         = (Head + 1) % kCapacity;
 		if (Head == Tail) Tail = (Tail + 1) % kCapacity;
 	}
 
-	void DrainIntoImGui()
+	// Drain events: feed to ImGui and collect any dropped file paths.
+	// Returns the last dropped file path (empty if none).
+	std::string DrainIntoImGui()
 	{
+		std::string droppedFile;
 		std::lock_guard lock(Mutex);
 		while (Tail != Head)
 		{
-			ImGui_ImplSDL3_ProcessEvent(&Events[Tail]);
+			SDL_Event& ev = Events[Tail];
+			ImGui_ImplSDL3_ProcessEvent(&ev);
+			if (ev.type == SDL_EVENT_DROP_FILE) droppedFile = std::move(PendingDropPath);
 			Tail = (Tail + 1) % kCapacity;
 		}
+		return droppedFile;
 	}
 };
 
@@ -152,7 +163,7 @@ bool EditorRenderer::InitImGui()
 	EventQueue = new ImGuiEventQueue();
 
 	Editor = new EditorContext();
-	Editor->Initialize(EnginePtr, LogicPtr);
+	Editor->Initialize(EnginePtr, LogicPtr, &Meshes);
 
 	bImGuiInitialized = true;
 	LOG_INFO("[EditorRenderer] ImGui initialized (dynamic rendering, docking enabled)");
@@ -191,7 +202,9 @@ void EditorRenderer::PushImGuiEvent(const SDL_Event& event)
 
 void EditorRenderer::DrainImGuiEvents()
 {
-	if (EventQueue) EventQueue->DrainIntoImGui();
+	if (!EventQueue) return;
+	std::string dropped = EventQueue->DrainIntoImGui();
+	if (!dropped.empty() && Editor) Editor->HandleDroppedFile(dropped);
 }
 
 void EditorRenderer::BuildImGuiFrame()

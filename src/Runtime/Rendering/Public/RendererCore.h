@@ -2,7 +2,10 @@
 #include <atomic>
 #include <thread>
 #include <vector>
+#include <SDL3/SDL_video.h>
 
+#include "Input.h"
+#include "MeshManager.h"
 #include "VulkanContext.h"
 #include "VulkanMemory.h"
 
@@ -30,8 +33,11 @@ struct FrameSync
 
 	VulkanBuffer ScanBuffer;
 	VulkanBuffer CompactCounterBuffer;
-	VulkanBuffer DrawArgsBuffer;
-	VulkanBuffer InstancesBuffer;
+	VulkanBuffer DrawArgsBuffer;          // MeshCount × VkDrawIndexedIndirectCommand
+	VulkanBuffer InstancesBuffer;         // Sorted instance SoA (draw reads from here)
+	VulkanBuffer UnsortedInstancesBuffer; // Scatter output (pre-sort)
+	VulkanBuffer MeshHistogramBuffer;     // uint[256] counting sort histogram
+	VulkanBuffer MeshWriteIdxBuffer;      // uint[256] atomic write indices for sort
 
 #ifdef TNX_GPU_PICKING
 	VulkanImage PickAttachment;      // R32_UINT color attachment for entity cache index
@@ -69,7 +75,7 @@ public:
 					const EngineConfig* config,
 					VulkanContext* vkCtx,
 					VulkanMemory* vkMem,
-					SDL_Window* window);
+					SDL_Window* window, InputBuffer* vizInput);
 	void Start();
 	void Stop();
 	void Join();
@@ -89,6 +95,7 @@ protected:
 	SDL_Window* WindowPtr         = nullptr;
 	VkDevice device               = nullptr;
 	VkQueue graphicsQueue         = nullptr;
+	InputBuffer* VizInputPtr      = nullptr;
 
 	// ---- Thread lifecycle ----
 	std::thread Thread;
@@ -116,15 +123,16 @@ protected:
 	uint32_t GPUActiveFrame = 0;
 	uint32_t GPUPrevFrame   = 0;
 
-	VulkanBuffer VertexBuffer;
-	VulkanBuffer IndexBuffer;
+	MeshManager Meshes;
 
 	vk::raii::PipelineLayout PipelineLayout{nullptr};
 	vk::raii::Pipeline Pipeline{nullptr};
 
-	VkPipeline PredicatePipeline = VK_NULL_HANDLE;
-	VkPipeline PrefixSumPipeline = VK_NULL_HANDLE;
-	VkPipeline ScatterPipeline   = VK_NULL_HANDLE;
+	VkPipeline PredicatePipeline     = VK_NULL_HANDLE;
+	VkPipeline PrefixSumPipeline     = VK_NULL_HANDLE;
+	VkPipeline ScatterPipeline       = VK_NULL_HANDLE;
+	VkPipeline BuildDrawsPipeline    = VK_NULL_HANDLE;
+	VkPipeline SortInstancesPipeline = VK_NULL_HANDLE;
 
 #ifdef TNX_GPU_PICKING
 	// Pick pipeline: same layout as main pipeline, but fragment shader outputs
@@ -132,6 +140,7 @@ protected:
 	VkShaderModule PickVertShader  = VK_NULL_HANDLE;
 	VkShaderModule PickFragShader  = VK_NULL_HANDLE;
 	VkPipeline ScatterPickPipeline = VK_NULL_HANDLE;
+	VkPipeline SortPickPipeline    = VK_NULL_HANDLE;
 	vk::raii::Pipeline PickPipeline{nullptr};
 
 	// On-demand pick request (TNX_GPU_PICKING without FAST).

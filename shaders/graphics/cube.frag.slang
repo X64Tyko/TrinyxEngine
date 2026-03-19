@@ -1,6 +1,5 @@
 // cube.frag.slang — Fragment shader.
-// Receives interpolated color from the vertex shader and outputs it directly.
-// Normal-based lighting can be added once camera setup is confirmed working.
+// Simple directional + ambient lighting using interpolated world-space normals.
 //
 // When TNX_GPU_PICKING is enabled, outputs to a second R32_UINT attachment
 // containing the entity's cache index for click-to-select resolution.
@@ -9,7 +8,8 @@
 
 struct FSIn
 {
-    float4 color : COLOR0;
+    float4 color    : COLOR0;
+    float3 worldNrm : NORMAL0;
 #ifdef TNX_GPU_PICKING
     nointerpolation uint entityCacheIdx : ENTITYID0;
 #endif
@@ -26,8 +26,19 @@ struct FSOut
 [shader("fragment")]
 FSOut main(FSIn i)
 {
+    // Hardcoded sun direction (top-right-forward, normalized)
+    static const float3 lightDir = normalize(float3(0.4, 0.7, -0.5));
+    static const float  ambient  = 0.15;
+
+    float3 N   = normalize(i.worldNrm);
+    float  NdL = saturate(dot(N, lightDir));
+
+    // Half-Lambert wrap for softer shadows
+    float  diffuse = NdL * 0.7 + 0.3;
+    float3 lit     = i.color.rgb * max(diffuse, ambient);
+
     FSOut o;
-    o.color = float4(i.color.rgb, 1.0f);
+    o.color = float4(lit, 1.0f);
 #ifdef TNX_GPU_PICKING
     o.entityIdx = i.entityCacheIdx;
 #endif

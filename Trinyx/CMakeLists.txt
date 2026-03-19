@@ -105,6 +105,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     "${CMAKE_SOURCE_DIR}/src/Runtime/Components/Public"
     "${CMAKE_SOURCE_DIR}/src/Runtime/Input/Public"
         "${CMAKE_SOURCE_DIR}/src/Runtime/Physics/Public"
+        "${CMAKE_SOURCE_DIR}/src/Runtime/Assets/Public"
         "${CMAKE_SOURCE_DIR}/src/Editor/Public"
 )
 
@@ -123,11 +124,12 @@ elseif(UNIX)
     target_link_libraries(${PROJECT_NAME} PUBLIC SDL3::SDL3)
 endif()
 
-# C. Vulkan + volk + VMA
+# C. Vulkan + volk + VMA + cgltf
 target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
     "${VOLK_PATH}"
     "${VMA_PATH}"
     "${Vulkan_INCLUDE_DIRS}"
+        "${CMAKE_SOURCE_DIR}/libs/cgltf"
 )
 
 # E. Dear ImGui (editor builds only)
@@ -179,6 +181,8 @@ set(SLANG_SHADER_SOURCES
         "${CMAKE_SOURCE_DIR}/shaders/compute/predicate.slang"
         "${CMAKE_SOURCE_DIR}/shaders/compute/prefix_sum.slang"
         "${CMAKE_SOURCE_DIR}/shaders/compute/scatter.slang"
+        "${CMAKE_SOURCE_DIR}/shaders/compute/build_draws.slang"
+        "${CMAKE_SOURCE_DIR}/shaders/compute/sort_instances.slang"
         "${CMAKE_SOURCE_DIR}/shaders/graphics/cube.vert.slang"
         "${CMAKE_SOURCE_DIR}/shaders/graphics/cube.frag.slang"
 )
@@ -248,6 +252,7 @@ endforeach()
 if (TNX_GPU_PICKING)
     set(PICK_SHADER_SOURCES
             "${CMAKE_SOURCE_DIR}/shaders/compute/scatter.slang"
+            "${CMAKE_SOURCE_DIR}/shaders/compute/sort_instances.slang"
             "${CMAKE_SOURCE_DIR}/shaders/graphics/cube.vert.slang"
             "${CMAKE_SOURCE_DIR}/shaders/graphics/cube.frag.slang"
     )
