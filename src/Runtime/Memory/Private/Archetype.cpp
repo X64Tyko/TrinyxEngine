@@ -1,7 +1,7 @@
 #include "../Public/Archetype.h"
 #include "Profiler.h"
 #include "TemporalComponentCache.h"
-#include "TemporalFlags.h"
+#include "CacheSlotMeta.h"
 #include <cassert>
 #include <cstring>
 #include <FieldMeta.h>
@@ -343,7 +343,7 @@ void Archetype::RemoveEntity(size_t ChunkIndex, uint32_t LocalIndex, uint32_t Ar
 	// Find the TemporalFlags::Flags field in the layout and write to the current write frame.
 	{
 		Chunk* chunk            = Chunks[ChunkIndex];
-		const uint8_t flagsSlot = ComponentFieldRegistry::Get().GetCacheSlotIndex(TemporalFlags<>::StaticTypeID());
+		const uint8_t flagsSlot = ComponentFieldRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID());
 
 		for (size_t i = 0; i < CachedFieldArrayLayout.size(); ++i)
 		{

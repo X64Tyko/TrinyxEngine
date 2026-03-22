@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "Registry.h"
-#include "TemporalFlags.h"
+#include "CacheSlotMeta.h"
 
 //#define SFlags this->Flags.Flags
 
@@ -18,10 +18,10 @@ class EntityView
 {
 public:
 	Registry* Reg      = nullptr;
-	EntityID ID        = {};
+	EntityHandle ID        = {};
 	uint32_t ViewIndex = 0;
 
-	TemporalFlags<WIDTH> Flags;
+	CacheSlotMeta<WIDTH> Flags;
 
 	static ClassID StaticClassID()
 	{

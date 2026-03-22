@@ -21,7 +21,6 @@ Registry::Registry(const EngineConfig* Config)
 	VolatileSlab.Initialize(Config); // Volatile: 5 frames, no rollback
 	//UniversalSlab.Initialize(Config);
 	// Reserve space for entity index
-	EntityIndex.reserve(Config->MAX_CACHED_ENTITIES);
 
 	ComponentAccessBits.resize(MAX_COMPONENTS);
 	for (auto& bitplane : ComponentAccessBits)
@@ -48,6 +47,36 @@ Registry::~Registry()
 		LOG_INFO("Archetype deleted successfully");
 	}
 	Archetypes.clear();
+}
+
+std::vector<EntityHandle> Registry::CreateByHandle(EntityHandle inHandle, size_t count)
+{
+	return CreateByClassID(inHandle.GetTypeID(), count);
+}
+
+void Registry::Recreate(EntityHandle& InHandle)
+{
+	if (GlobalEntityRegistry.IsHandleValid(InHandle)) Destroy(InHandle);
+
+	InHandle = CreateByHandle(InHandle, 1)[0];
+}
+
+void Registry::RecreateAs(EntityHandle& InHandle, ClassID newClassID)
+{
+	if (GlobalEntityRegistry.IsHandleValid(InHandle)) Destroy(InHandle);
+
+	if (newClassID > 0) [[unlikely]] InHandle = ReplaceTypeID(InHandle, newClassID);
+	InHandle = CreateByHandle(InHandle, 1)[0];
+}
+
+void Registry::RecreateAs(EntityHandle& InHandle, const EntityHandle& asHandle)
+{
+	if (GlobalEntityRegistry.IsHandleValid(InHandle)) Destroy(InHandle);
+
+	EntityHandle creationHandle = asHandle.GetTypeID() != InHandle.GetTypeID()
+									  ? ReplaceTypeID(InHandle, asHandle.GetTypeID())
+									  : InHandle;
+	InHandle = CreateByHandle(creationHandle, 1)[0];
 }
 
 Archetype* Registry::GetOrCreateArchetype(const Signature& Sig, const ClassID& ID)
@@ -110,11 +139,24 @@ Archetype* Registry::GetOrCreateArchetype(const Signature& Sig, const ClassID& I
 	return NewArchetype;
 }
 
-EntityID Registry::AllocateEntityID(uint16_t TypeID)
+EntityHandle Registry::ReplaceTypeID(EntityHandle InHandle, ClassID newClassID)
+{
+	if (MetaRegistry::Get().ClassToArchetype.find(newClassID) == MetaRegistry::Get().ClassToArchetype.end())
+	{
+		LOG_ERROR_F("ReplaceTypeID: ClassID %u not registered", newClassID);
+		return InHandle;
+	}
+
+	EntityHandle NewHandle(InHandle);
+	NewHandle.ClassType = newClassID;
+	return NewHandle;
+}
+
+GlobalEntityHandle Registry::AllocateEntityID()
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
-	EntityID Id;
+	GlobalEntityHandle Id;
 	Id.Value = 0;
 
 	// Try to reuse a free index
@@ -124,22 +166,25 @@ EntityID Registry::AllocateEntityID(uint16_t TypeID)
 		FreeIndices.pop();
 
 		// Increment generation for recycled index
-		uint16_t Generation = EntityIndex[Index].Generation + 1;
+		EntityRecord* Record = GlobalEntityRegistry.GetRecordPtr(Index);
+		if (!Record || !Record->IsValid())
+		{
+			LOG_ERROR_F("Invalid entity record at index %u", Index);
+			assert(false && "Invalid entity record");
+		}
+
+		uint16_t Generation = Record->GetGeneration() + 1;
 		if (Generation == 0) // Wrapped around
 			Generation = 1;  // Skip 0 (reserved for invalid)
 
 		Id.Index      = Index;
 		Id.Generation = Generation;
-		Id.TypeID     = TypeID;
-		Id.OwnerID    = 0; // Server-owned by default
 	}
 	else
 	{
 		// Allocate new index
 		Id.Index      = NextEntityIndex++;
 		Id.Generation = 1; // First generation
-		Id.TypeID     = TypeID;
-		Id.OwnerID    = 0;
 	}
 
 	return Id;
@@ -190,7 +235,7 @@ std::vector<EntityID> Registry::CreateByClassID(ClassID classID, size_t count)
 		EntityID& Id               = Entities[i];
 		Archetype::EntitySlot Slot = Slots[i];
 
-		Id = AllocateEntityID(classID);
+		Id = AllocateEntityID();
 
 		uint32_t Index = Id.GetIndex();
 

@@ -5,7 +5,7 @@
 #include "Logger.h"
 #include "Registry.h"
 #include "Schema.h"
-#include "TemporalFlags.h"
+#include "CacheSlotMeta.h"
 
 #include <cstring>
 #include <fstream>
@@ -140,14 +140,14 @@ static const FieldLookup* FindField(
 // EntityBuilder
 // ---------------------------------------------------------------------------
 
-EntityID EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJson)
+EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJson)
 {
 	// Read entity type name
 	const JsonValue* typeVal = entityJson.Find("type");
 	if (!typeVal || !typeVal->IsString())
 	{
 		LOG_ERROR("[EntityBuilder] Entity missing 'type' field");
-		return EntityID{};
+		return EntityHandle{};
 	}
 
 	const std::string& typeName = typeVal->AsString();
@@ -158,14 +158,14 @@ EntityID EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJson)
 	if (classID == 0)
 	{
 		LOG_ERROR_F("[EntityBuilder] Unknown entity type '%s'", typeName.c_str());
-		return EntityID{};
+		return EntityHandle{};
 	}
 
 	// Create the entity
-	std::vector<EntityID> ids = reg->CreateByClassID(classID, 1);
-	if (ids.empty()) return EntityID{};
+	std::vector<EntityHandle> ids = reg->CreateByClassID(classID, 1);
+	if (ids.empty()) return EntityHandle{};
 
-	EntityID id = ids[0];
+	EntityHandle id = ids[0];
 
 	// Find the archetype for this entity type
 	const auto& archetypes = reg->GetArchetypes();
@@ -264,7 +264,7 @@ size_t EntityBuilder::SpawnScene(Registry* reg, const JsonValue& sceneJson)
 	size_t count = 0;
 	for (const auto& entityJson : entities->AsArray())
 	{
-		EntityID id = SpawnEntity(reg, entityJson);
+		EntityHandle id = SpawnEntity(reg, entityJson);
 		if (id.IsValid()) ++count;
 	}
 
@@ -302,7 +302,7 @@ size_t EntityBuilder::SpawnFromFile(Registry* reg, const char* filePath)
 	}
 	else if (root.Find("type"))
 	{
-		EntityID id = SpawnEntity(reg, root);
+		EntityHandle id = SpawnEntity(reg, root);
 		return id.IsValid() ? 1 : 0;
 	}
 

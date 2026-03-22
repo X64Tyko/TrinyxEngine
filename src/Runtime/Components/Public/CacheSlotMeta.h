@@ -12,15 +12,15 @@ enum class TemporalFlagBits : int32_t
 // EntityFlags Component - Flags for entity behavior
 // Aligned to 32 bytes for GPU upload
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct TemporalFlags : ComponentView<TemporalFlags, WIDTH>
+struct CacheSlotMeta : ComponentView<CacheSlotMeta, WIDTH>
 {
-	TNX_TEMPORAL_FIELDS(TemporalFlags, Logic, Flags)
+	TNX_TEMPORAL_FIELDS(CacheSlotMeta, Logic, Flags)
 
 	IntProxy<WIDTH> Flags;
 
 	static uint8_t GetTemporalIndex() { return 0; }
 
-    FORCE_INLINE TemporalFlags& operator&=(TemporalFlagBits flag)
+    FORCE_INLINE CacheSlotMeta& operator&=(TemporalFlagBits flag)
 	{
 		if constexpr (WIDTH == FieldWidth::Scalar) Flags &= static_cast<int32_t>(flag);
 		else Flags                                       = _mm256_and_si256(Flags, _mm256_set1_epi32(static_cast<int32_t>(flag)));
@@ -29,4 +29,4 @@ struct TemporalFlags : ComponentView<TemporalFlags, WIDTH>
 	}
 };
 
-TNX_REGISTER_COMPONENT(TemporalFlags)
+TNX_REGISTER_COMPONENT(CacheSlotMeta)

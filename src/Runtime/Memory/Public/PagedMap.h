@@ -33,6 +33,9 @@ public:
 
 	PagedMap(const PagedMap&)            = delete;
 	PagedMap& operator=(const PagedMap&) = delete;
+	
+	FORCE_INLINE Value operator[](Key key) const { return get(key); }
+	FORCE_INLINE Value* operator[](Key key) { return try_get_ptr(key); }
 
 	FORCE_INLINE Value get(Key key) const
 	{

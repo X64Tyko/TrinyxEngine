@@ -4,12 +4,9 @@
 #include <vector>
 #include "Archetype.h"
 #include "EntityRecord.h"
-#include "FieldMeta.h"
 #include "Schema.h"
-#include "SchemaReflector.h"
 #include "Signature.h"
 #include "TemporalComponentCache.h"
-#include "TemporalFlags.h"
 #include "TrinyxJobs.h"
 #include "Types.h"
 
@@ -26,27 +23,28 @@ public:
 	~Registry();
 
 	// Entity creation, Reflection allows this to be extremely quick
-	// Usage: EntityID player = Registry::Get().Create<PlayerController>();
 	template <typename T>
-	EntityID Create();
-
+	EntityHandle Create();
 	template <typename T>
-	std::vector<EntityID> Create(size_t count);
-
-	// Non-template create — for data-driven spawning where the type is known only at runtime.
-	// ClassID obtained via MetaRegistry::Get().GetEntityByName("TypeName").
-	std::vector<EntityID> CreateByClassID(ClassID classID, size_t count);
+	std::vector<EntityHandle> Create(size_t count);
+	std::vector<EntityHandle> CreateByHandle(EntityHandle inHandle, size_t count);
+	
+	void Recreate(EntityHandle& InHandle);
+	
+	template <typename T>
+	void RecreateAs(EntityHandle& InHandle);
+	void RecreateAs(EntityHandle& InHandle, const EntityHandle& asHandle);
 
 	// Destroy an entity (deferred until end of frame)
-	void Destroy(EntityID Id);
+	void Destroy(EntityHandle Id);
 
 	// Get component from entity
 	template <typename T>
-	T* GetComponent(EntityID Id);
+	T* GetComponent(EntityHandle Id);
 
 	// Check if entity has component
 	template <typename T>
-	bool HasComponent(EntityID Id);
+	bool HasComponent(EntityHandle Id);
 
 	// Apply all pending destructions (called at end of frame)
 	void ProcessDeferredDestructions();
@@ -88,7 +86,7 @@ public:
 	const auto& GetArchetypes() const { return Archetypes; }
 
 	// Find EntityID by its archetype location. Returns EntityID::Invalid() if not found.
-	EntityID FindEntityByLocation(Archetype* arch, Chunk* chunk, uint16_t localIndex) const;
+	EntityHandle FindEntityByLocation(Archetype* arch, Chunk* chunk, uint16_t localIndex) const;
 
 	void SetPhysics(JoltPhysics* physics) { PhysicsPtr = physics; }
 
@@ -99,12 +97,21 @@ public:
 private:
 	friend class Archetype;
 	friend class LogicThread;
+	friend struct EntityRecord;
+	friend struct EntityArchive;
+
+	// Non-template create — for data-driven spawning where the type is known only at runtime.
+	// ClassID obtained via MetaRegistry::Get().GetEntityByName("TypeName").
+	std::vector<EntityHandle> CreateByClassID(ClassID classID, size_t count);
+	void RecreateAs(EntityHandle& InHandle, ClassID newClassID);
 
 	// Get or create archetype for a given signature — called from Create<T> and InitializeArchetypes.
 	Archetype* GetOrCreateArchetype(const Signature& Sig, const ClassID& ID);
 
 	// Immediately destroy an entity record (swap-and-pop) — called from ProcessDeferredDestructions and ResetRegistry.
-	bool DestroyRecord(EntityRecord& Record);
+	bool DestroyRecord(GlobalEntityHandle& RecordIdx);
+	
+	static EntityHandle ReplaceTypeID(EntityHandle InHandle, ClassID newClassID);
 
 	// Dispatch to the correct slab by tier.
 	// When TNX_ENABLE_ROLLBACK is off, Temporal falls back to the Volatile slab so
@@ -133,7 +140,7 @@ private:
 	void PropagateFrame(uint32_t currentFrame);
 
 	// Global entity lookup table (indexed by EntityID.GetIndex())
-	std::vector<EntityRecord> EntityIndex;
+	struct EntityArchive GlobalEntityRegistry;
 
 	// Free list for recycled entity indices
 	std::queue<uint32_t> FreeIndices;
@@ -149,7 +156,7 @@ private:
 	std::unordered_map<Archetype::ArchetypeKey, Archetype*, ArchetypeKeyHash> Archetypes;
 
 	// Pending destructions (processed at end of frame)
-	std::vector<EntityID> PendingDestructions;
+	std::vector<GlobalEntityHandle> PendingDestructions;
 
 #ifdef TNX_ENABLE_ROLLBACK
 	TemporalComponentCache HistorySlab; // N frames (Config->TemporalFrameCount), rollback-capable
@@ -164,56 +171,65 @@ private:
 	void* FieldBufferTable[MAX_FIELDS_PER_ARCHETYPE]{};
 
 	// Allocate a new EntityID
-	EntityID AllocateEntityID(uint16_t TypeID);
+	GlobalEntityHandle AllocateEntityID();
 
-	// Free an EntityID (returns index to free list)
-	void FreeEntityID(EntityID Id);
+	// Free an Entity (returns index to free list)
+	void FreeEntityID(GlobalEntityHandle RecordIdx);
 
 	// Helper: Build signature from component list
 	template <typename... Components>
 	Signature BuildSignature();
 };
 
+
 template <typename T>
-EntityID Registry::Create()
+EntityHandle Registry::Create()
 {
 	return Create<T>(1)[0];
 }
 
 template <typename T>
-std::vector<EntityID> Registry::Create(size_t count)
+void Registry::RecreateAs(EntityHandle& InHandle)
+{
+	if (GlobalEntityRegistry.IsHandleValid(InHandle)) Destroy(InHandle);
+	
+	constexpr ClassID TargetType = T::StaticClassID();
+
+	EntityHandle creationHandle = (TargetType > 0 && TargetType != InHandle.GetTypeID())
+									  ? ReplaceTypeID(InHandle, TargetType)
+									  : InHandle;
+	InHandle = CreateByHandle(creationHandle, 1)[0];
+}
+
+template <typename T>
+std::vector<EntityHandle> Registry::Create(size_t count)
 {
 	return CreateByClassID(T::StaticClassID(), count);
 }
 
 template <typename T>
-T* Registry::GetComponent(EntityID Id)
+T* Registry::GetComponent(EntityHandle Id)
 {
-	if (!Id.IsValid()) return nullptr;
+	// Validate the handle and generation first
+	if (!GlobalEntityRegistry.IsHandleValid(Id)) return nullptr;
 
-	uint32_t Index = Id.GetIndex();
-	if (Index >= EntityIndex.size()) return nullptr;
+	EntityRecord* Record = GlobalEntityRegistry.GetRecordPtr(Id);
 
-	EntityRecord& Record = EntityIndex[Index];
-
-	// Validate generation (detect use-after-free)
-	if (Record.Generation != Id.GetGeneration()) return nullptr;
-
-	if (!Record.IsValid()) return nullptr;
+	if (!Record->IsValid()) return nullptr;
 
 	// TODO: Get ComponentTypeID from reflection (Week 5)
 	ComponentTypeID TypeID = T::StaticTypeID();
 
 	// Get component array from archetype
-	T* ComponentArray = Record.Arch->GetComponentArray<T>(Record.TargetChunk, TypeID);
+	T* ComponentArray = Record->Arch->GetComponentArray<T>(Record->TargetChunk, TypeID);
 	if (!ComponentArray) return nullptr;
 
 	// Return pointer to this entity's component
-	return &ComponentArray[Record.Index];
+	return &ComponentArray[Record->ChunkIndex];
 }
 
 template <typename T>
-bool Registry::HasComponent(EntityID Id)
+bool Registry::HasComponent(EntityHandle Id)
 {
 	return GetComponent<T>(Id) != nullptr;
 }
