@@ -1,6 +1,5 @@
 #pragma once
 #include <cstdint>
-#include <cstring>
 #include <type_traits>
 #include <vector>
 #include <cassert>
@@ -10,8 +9,7 @@
 template <
 	uint32_t MaxKey, // e.g. 1u << 24
 	typename TValue,
-	uint32_t EntriesPerPage = 4096, // must be power of two
-	TValue InvalidValue = TValue{}  // override for sentinel values (e.g. 0xFFFFFFFF)
+	uint32_t EntriesPerPage = 4096 // must be power of two
 >
 class PagedMap
 {
@@ -39,11 +37,11 @@ public:
 
 	FORCE_INLINE Value get(Key key) const
 	{
-		if (key >= MaxKey) return InvalidValue;
+		if (key >= MaxKey) return TValue{};
 		const uint32_t p = page_index(key);
 		const uint32_t o = page_offset(key);
 		Value* page      = m_pages[p];
-		return page ? page[o] : InvalidValue;
+		return page ? page[o] : TValue{};
 	}
 
 	FORCE_INLINE Value* try_get_ptr(Key key)
@@ -79,7 +77,7 @@ public:
 		const uint32_t p = page_index(key);
 		Value* page      = m_pages[p];
 		if (!page) return;
-		page[page_offset(key)] = InvalidValue;
+		page[page_offset(key)] = TValue{};
 		// Optional: track emptiness and free page when all entries are invalid.
 	}
 
@@ -114,14 +112,7 @@ private:
 	{
 		Value* page = new Value[EntriesPerPage];
 		// Fill with sentinel invalid value
-		if constexpr (std::is_integral_v<Value> || std::is_enum_v<Value>)
-		{
-			for (uint32_t i = 0; i < EntriesPerPage; ++i) page[i] = InvalidValue;
-		}
-		else
-		{
-			std::memset(page, 0, sizeof(Value) * EntriesPerPage); // only safe if kInvalidValue==zero-ish POD
-		}
+		for (uint32_t i = 0; i < EntriesPerPage; ++i) page[i] = TValue{};
 		m_pages[pageIndex] = page;
 		return page;
 	}

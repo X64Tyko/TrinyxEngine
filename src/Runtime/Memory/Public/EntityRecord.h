@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <type_traits>
 
 #include "RegistryTypes.h"
 #include "Events.h"
@@ -67,8 +68,15 @@ protected:
 	};
 
 public:
-	GlobalEntityHandle()
+	constexpr GlobalEntityHandle()
 		: Value(0)
+	{
+	}
+
+	GlobalEntityHandle(uint32_t Index, uint32_t Generation, uint32_t PrefabIndex)
+		: Index(Index)
+		, Generation(Generation)
+		, PrefabIndex(PrefabIndex)
 	{
 	}
 
@@ -82,7 +90,7 @@ private:
 	friend struct EntityArchive;
 
 	// Private value constructor - only Registry can create handles with specific values
-	explicit GlobalEntityHandle(const uint64_t value)
+	explicit constexpr GlobalEntityHandle(const uint64_t value)
 		: Value(value)
 	{
 	}
@@ -94,16 +102,20 @@ static_assert(sizeof(GlobalEntityHandle) == 8, "GlobalEntityHandle must be 8 byt
 // Their location in cache, network, or Handle lists.
 struct EntityRecord
 {
-	EntityNetHandle NetworkID; // deterministic network replicated entity ID
-	EntityHandle Handle;       // Index into the entity Handle array
+	//uint32_t ArchiveKey  = 0; // This entities key in the Entity Archive
+	// Set up by the systems responsible for ECS<->OOP and ECS<->Network allocation
+	EntityNetHandle NetworkID{}; // deterministic network replicated entity ID
+	EntityHandle LHandle;        // Local handle — index into LocalToRecord (OOP land)
 
-	EntityCacheHandle CacheEntityIndex; // Cache slab index
-	EntitySlotMeta EntityInfo;
+	EntityCacheHandle CacheEntityIndex{}; // Cache slab index
+	EntitySlotMeta EntityInfo{};
 
-	Archetype* Arch     = nullptr; // Which archetype this entity belongs to
-	Chunk* TargetChunk  = nullptr; // Which chunk within that archetype
-	uint32_t ArchIndex  = 0;       // index at the archetype level
-	uint32_t ChunkIndex = 0;       // index at the chunk level
+	uint32_t ArchIndex  = 0; // index at the archetype level
+	uint32_t LocalIndex = 0; // chunk index in the archetype
+	uint32_t ChunkIndex = 0; // index at the chunk level
+
+	Archetype* Arch    = nullptr; // Which archetype this entity belongs to
+	Chunk* TargetChunk = nullptr; // Which chunk within that archetype
 
 	// Callback EntityViews register to so they can update their hydrated components with the correct index
 	EntityCacheSlotChange OnCacheSlotChange;
@@ -129,24 +141,24 @@ private:
 
 	// Private GetRecord - mutable access for Registry only
 	template <typename T>
-	EntityRecord* GetRecordPtr(T InHandle) requires (std::same_as<T, EntityHandle> || std::same_as<T, EntityNetHandle> || std::same_as<T, EntityCacheHandle>)
+	EntityRecord* GetRecordPtr(T InHandle) requires (std::same_as<std::remove_cvref_t<T>, EntityHandle> || std::same_as<std::remove_cvref_t<T>, EntityNetHandle> || std::same_as<std::remove_cvref_t<T>, EntityCacheHandle>)
 	{
 		if (!IsHandleValid(InHandle)) return nullptr;
 
 		const GlobalEntityHandle& GHandle = LookupGlobalHandle(InHandle);
-		return &Records[GHandle.GetIndex()];
+		return Records[GHandle.GetIndex()];
 	}
 
 	// Storage - fully private
-	PagedMap<1 << UniqueIndex_Bits, EntityRecord> Records;
-	PagedMap<1 << UniqueIndex_Bits, GlobalEntityHandle> NetToRecord;
-	PagedMap<1 << UniqueIndex_Bits, GlobalEntityHandle> CacheToRecord;
-	PagedMap<1 << UniqueIndex_Bits, GlobalEntityHandle> LocalToRecord;
+	PagedMap<1 << UniqueIndex_Bits, EntityRecord> Records{};
+	PagedMap<1 << UniqueIndex_Bits, GlobalEntityHandle> NetToRecord{};
+	PagedMap<1 << UniqueIndex_Bits, GlobalEntityHandle> CacheToRecord{};
+	PagedMap<1 << UniqueIndex_Bits, GlobalEntityHandle> LocalToRecord{};
 
 public:
 	// Public read-only API - returns record by value (can't modify internal state)
 	template <typename T>
-	EntityRecord GetRecord(T InHandle) const requires (std::same_as<T, EntityHandle> || std::same_as<T, EntityNetHandle> || std::same_as<T, EntityCacheHandle>)
+	EntityRecord GetRecord(T InHandle) const requires (std::same_as<std::remove_cvref_t<T>, EntityHandle> || std::same_as<std::remove_cvref_t<T>, EntityNetHandle> || std::same_as<std::remove_cvref_t<T>, EntityCacheHandle>)
 	{
 		const GlobalEntityHandle& GHandle = LookupGlobalHandle(InHandle);
 		return Records[GHandle.GetIndex()];
@@ -154,7 +166,7 @@ public:
 
 	// Public validation - read-only check
 	template <typename T>
-	bool IsHandleValid(T InHandle) const requires (std::same_as<T, EntityHandle> || std::same_as<T, EntityNetHandle> || std::same_as<T, EntityCacheHandle>)
+	bool IsHandleValid(T InHandle) const requires (std::same_as<std::remove_cvref_t<T>, EntityHandle> || std::same_as<std::remove_cvref_t<T>, EntityNetHandle> || std::same_as<std::remove_cvref_t<T>, EntityCacheHandle>)
 	{
 		const GlobalEntityHandle& GHandle = LookupGlobalHandle(InHandle);
 		return GHandle.GetGeneration() == Records[GHandle.GetIndex()].EntityInfo.GetGeneration();

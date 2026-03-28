@@ -1,6 +1,5 @@
 #pragma once
 #include "Types.h"
-#include <bitset>
 #include <functional>
 
 // Component signature for archetype matching
@@ -49,6 +48,11 @@ struct Signature
 		return Bits != Other.Bits;
 	}
 
+	inline bool operator<(const Signature& Other) const
+	{
+		return Bits < Other.Bits;
+	}
+
 	// Count number of components
 	inline size_t Count() const
 	{
@@ -64,8 +68,7 @@ namespace std
 	{
 		size_t operator()(const Signature& Sig) const noexcept
 		{
-			// Simple hash of bitset (can be improved if needed)
-			return hash<std::bitset<MAX_COMPONENTS>>()(Sig.Bits);
+			return Sig.Bits.hash();
 		}
 	};
 }

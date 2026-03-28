@@ -1,9 +1,11 @@
 #pragma once
 #include <queue>
+#include <span>
 #include <unordered_map>
 #include <vector>
 #include "Archetype.h"
 #include "EntityRecord.h"
+#include "FlatMap.h"
 #include "Schema.h"
 #include "Signature.h"
 #include "TemporalComponentCache.h"
@@ -13,8 +15,26 @@
 struct EngineConfig;
 class JoltPhysics;
 
-// Registry - Central entity management system
-// Handles entity creation, destruction, and component access
+// Registry — Central entity management system.
+//
+// Manages three independent handle/index spaces:
+//   GHandle  (GlobalEntityHandle) — internal record identity, indexes into Records[]
+//   LHandle  (EntityHandle)       — OOP/Construct-facing handle, indexes into LocalToRecord[]
+//   NetHandle (EntityNetHandle)   — network replication handle, indexes into NetToRecord[]
+//
+// Index 0 is reserved/invalid in all three spaces.
+//
+// Creation flow:
+//   CreateInternal(classID, span<GHandle>)  — allocates records + archetype slots
+//   MakeEntityHandle(GHandle, classID)      — allocates a local index, wires LocalToRecord
+//   Public API (Create<T>, CreateByClassID) — wraps the above, returns EntityHandle (LHandle)
+//
+// Destruction flow:
+//   Destroy(LHandle)            — defers GHandle to PendingDestructions
+//   ProcessDeferredDestructions — removes from archetype, calls FreeGlobalHandle
+//   FreeGlobalHandle            — reclaims record index, requests local/net handle recycling
+//   ConfirmLocalRecycles/ConfirmNetRecycles — moves pending → free (call after safety window)
+//
 class Registry
 {
 public:
@@ -22,55 +42,48 @@ public:
 	Registry(const EngineConfig* Config);
 	~Registry();
 
-	// Entity creation, Reflection allows this to be extremely quick
+	// --- Entity creation (public API returns LHandles for OOP land) ---
+
 	template <typename T>
 	EntityHandle Create();
 	template <typename T>
 	std::vector<EntityHandle> Create(size_t count);
-	std::vector<EntityHandle> CreateByHandle(EntityHandle inHandle, size_t count);
-	
+
+	// Destroy + recreate at the same ClassID, reusing the handle slot
 	void Recreate(EntityHandle& InHandle);
-	
+
+	// Destroy + recreate as a different type
 	template <typename T>
 	void RecreateAs(EntityHandle& InHandle);
 	void RecreateAs(EntityHandle& InHandle, const EntityHandle& asHandle);
 
-	// Destroy an entity (deferred until end of frame)
-	void Destroy(EntityHandle Id);
+	// --- Entity destruction (deferred until ProcessDeferredDestructions) ---
 
-	// Get component from entity
-	template <typename T>
-	T* GetComponent(EntityHandle Id);
-
-	// Check if entity has component
-	template <typename T>
-	bool HasComponent(EntityHandle Id);
-
-	// Apply all pending destructions (called at end of frame)
+	void Destroy(EntityHandle LHandle);
 	void ProcessDeferredDestructions();
+
+	// --- Component access ---
+
+	template <typename T>
+	T* GetComponent(EntityHandle LHandle);
+	template <typename T>
+	bool HasComponent(EntityHandle LHandle);
+
+	// --- Queries ---
 
 	template <typename... Components>
 	std::vector<Archetype*> ComponentQuery();
-
-	template <typename... Components>
-	std::vector<std::vector<uint64_t>*> ComponentBitsQuery();
-
 	template <typename... Classes>
 	std::vector<Archetype*> ClassQuery();
 
+	// --- Lifecycle dispatch (Brain thread) ---
 
-	std::vector<uint64_t>* DirtyBitsFrame(uint32_t inFrame)
-	{
-		return &EntityDirtyBits[inFrame % EntityDirtyBits.size()];
-	}
-
-	// Invoke all lifecycle functions of a specific type
-	// currentFrame: frame T (read from T, write to T+1)
 	void InvokeScalarUpdate(double dt);
 	void InvokePrePhys(double dt);
 	void InvokePostPhys(double dt);
 
-	// Slab accessors — used by LogicThread and RenderThread to get cache pointers at init time.
+	// --- Slab accessors (used by LogicThread/RenderThread at init time) ---
+
 	ComponentCache<CacheTier::Volatile>* GetVolatileCache() { return &VolatileSlab; }
 #ifdef TNX_ENABLE_ROLLBACK
 	ComponentCache<CacheTier::Temporal>* GetTemporalCache() { return &HistorySlab; }
@@ -78,44 +91,54 @@ public:
 	ComponentCache<CacheTier::Volatile>* GetTemporalCache() { return &VolatileSlab; }
 #endif
 
-	// Memory diagnostics
+	// --- Diagnostics ---
+
 	uint32_t GetTotalChunkCount() const;
 	uint32_t GetTotalEntityCount() const;
-
-	// Editor: read-only archetype iteration
 	const auto& GetArchetypes() const { return Archetypes; }
 
-	// Find EntityID by its archetype location. Returns EntityID::Invalid() if not found.
-	EntityHandle FindEntityByLocation(Archetype* arch, Chunk* chunk, uint16_t localIndex) const;
-
-	void SetPhysics(JoltPhysics* physics) { PhysicsPtr = physics; }
-
-	// Resets the registry to default, useful after tests.
-	// TODO: this needs to not be public.
-	void ResetRegistry();
+	// Reverse lookup: cache slot → GHandle. Returns default GlobalEntityHandle() if not found.
+	GlobalEntityHandle FindEntityByLocation(const EntityCacheHandle& CacheHandle) const;
 
 private:
 	friend class Archetype;
 	friend class LogicThread;
+	friend struct EntityBuilder;
 	friend struct EntityRecord;
 	friend struct EntityArchive;
 
-	// Non-template create — for data-driven spawning where the type is known only at runtime.
-	// ClassID obtained via MetaRegistry::Get().GetEntityByName("TypeName").
+	void SetPhysics(JoltPhysics* physics) { PhysicsPtr = physics; }
+	void ResetRegistry();
+
+	// --- Internal creation pipeline ---
+	// CreateInternal is the core: allocates GHandles + populates EntityRecords.
+	// CreateByClassID wraps it and stamps LHandles for callers who need EntityHandles.
+	// MakeEntityHandle bridges GHandle → LHandle: allocates a local index,
+	// wires LocalToRecord[localIdx] → GHandle, and stores LHandle on the record.
+
+	void CreateInternal(ClassID classID, std::span<GlobalEntityHandle> outHandles);
+	EntityHandle CreateByClassID(ClassID classID);
 	std::vector<EntityHandle> CreateByClassID(ClassID classID, size_t count);
+	EntityHandle MakeEntityHandle(GlobalEntityHandle GHandle, ClassID classID);
+
 	void RecreateAs(EntityHandle& InHandle, ClassID newClassID);
 
-	// Get or create archetype for a given signature — called from Create<T> and InitializeArchetypes.
+	// --- Archetype management ---
+
 	Archetype* GetOrCreateArchetype(const Signature& Sig, const ClassID& ID);
+	void InitializeArchetypes();
 
-	// Immediately destroy an entity record (swap-and-pop) — called from ProcessDeferredDestructions and ResetRegistry.
-	bool DestroyRecord(GlobalEntityHandle& RecordIdx);
-	
-	static EntityHandle ReplaceTypeID(EntityHandle InHandle, ClassID newClassID);
+	// --- Destruction internals ---
+	// DestroyRecord removes the entity from its archetype.
+	// FreeGlobalHandle reclaims the record index and requests local/net handle recycling.
 
-	// Dispatch to the correct slab by tier.
-	// When TNX_ENABLE_ROLLBACK is off, Temporal falls back to the Volatile slab so
-	// no HistorySlab member exists and no memory is wasted on an empty ring buffer.
+	bool DestroyRecord(GlobalEntityHandle& GHandle);
+	bool DestroyRecord(EntityRecord& Record);
+
+	// --- Slab tier dispatch ---
+	// When TNX_ENABLE_ROLLBACK is off, Temporal falls back to the Volatile slab
+	// so no HistorySlab member exists and no memory is wasted.
+
 	ComponentCacheBase* GetCache(CacheTier tier)
 	{
 #ifdef TNX_ENABLE_ROLLBACK
@@ -134,49 +157,60 @@ private:
 		return nullptr;
 	}
 
-	// Initialize archetypes with data from MetaRegistry
-	void InitializeArchetypes();
-
+	// Propagate SoA data from frame T to T+1
 	void PropagateFrame(uint32_t currentFrame);
 
-	// Global entity lookup table (indexed by EntityID.GetIndex())
-	struct EntityArchive GlobalEntityRegistry;
+	// =========================================================================
+	// Data members
+	// =========================================================================
 
-	// Free list for recycled entity indices
-	std::queue<uint32_t> FreeIndices;
+	EntityArchive GlobalEntityRegistry; // GHandle.GetIndex() → EntityRecord
 
-	// Next entity index to allocate (if free list is empty)
-	uint32_t NextEntityIndex = 0;
+	// --- Three independent index allocators (0 is invalid in all spaces) ---
+	//
+	// Record indices map 1:1 with GlobalEntityHandle.Index (the internal identity).
+	// Local indices map to EntityHandle.HandleIndex (OOP land references).
+	// Net indices map to EntityNetHandle.NetIndex (network replication references).
+	//
+	// On destruction, local/net indices enter pending recycle lists rather than
+	// returning directly to the free pool. This prevents ABA collisions where
+	// OOP code or a remote client still holds a stale handle that would alias
+	// a newly created entity. Call ConfirmLocalRecycles()/ConfirmNetRecycles()
+	// after the safety window (e.g., end of frame for local, network ack for net).
 
-	std::vector<std::vector<uint64_t>> ComponentAccessBits;
-	std::vector<std::vector<uint64_t>> EntityDirtyBits;
-	std::vector<uint64_t> EntityActiveBits;
+	std::queue<uint32_t> FreeRecordIndices;
+	uint32_t NextRecordIndex = 1;
 
-	// Archetype storage (pair<signature, classID> → archetype)
-	std::unordered_map<Archetype::ArchetypeKey, Archetype*, ArchetypeKeyHash> Archetypes;
+	std::queue<uint32_t> FreeLocalIndices;
+	uint32_t NextLocalIndex = 1;
+	std::vector<uint32_t> PendingLocalRecycles;
 
-	// Pending destructions (processed at end of frame)
+	std::queue<uint32_t> FreeNetIndices;
+	uint32_t NextNetIndex = 1;
+	std::vector<uint32_t> PendingNetRecycles;
+
+	FlatMap<Archetype::ArchetypeKey, Archetype*> Archetypes;
 	std::vector<GlobalEntityHandle> PendingDestructions;
 
 #ifdef TNX_ENABLE_ROLLBACK
-	TemporalComponentCache HistorySlab; // N frames (Config->TemporalFrameCount), rollback-capable
+	TemporalComponentCache HistorySlab;
 #endif
-	VolatileComponentCache VolatileSlab; // 3 frames, no rollback
+	VolatileComponentCache VolatileSlab;
 	JoltPhysics* PhysicsPtr = nullptr;
 
-	// Pre-allocated dual array table used by all Invoke* methods.
-	// Avoids a large VLA on the stack each call.  Sized by MAX_FIELDS_PER_ARCHETYPE
-	// (not the global MAX_FIELD_ARRAYS) because only one archetype is processed at a time.
-	// Safe to share because all three Invoke methods run serially on the Brain thread.
-	void* FieldBufferTable[MAX_FIELDS_PER_ARCHETYPE]{};
+	// --- Handle allocation/recycling methods ---
 
-	// Allocate a new EntityID
-	GlobalEntityHandle AllocateEntityID();
+	GlobalEntityHandle AllocateGlobalHandle();
+	void FreeGlobalHandle(GlobalEntityHandle GHandle);
 
-	// Free an Entity (returns index to free list)
-	void FreeEntityID(GlobalEntityHandle RecordIdx);
+	uint32_t AllocateLocalIndex();
+	uint32_t AllocateNetIndex();
 
-	// Helper: Build signature from component list
+	void RequestLocalRecycle(uint32_t localIndex);
+	void RequestNetRecycle(uint32_t netIndex);
+	void ConfirmLocalRecycles();
+	void ConfirmNetRecycles();
+
 	template <typename... Components>
 	Signature BuildSignature();
 };
@@ -185,20 +219,19 @@ private:
 template <typename T>
 EntityHandle Registry::Create()
 {
-	return Create<T>(1)[0];
+	constexpr ClassID classID = T::StaticClassID();
+	GlobalEntityHandle GHandle;
+	CreateInternal(classID, {&GHandle, 1});
+	return MakeEntityHandle(GHandle, classID);
 }
 
 template <typename T>
 void Registry::RecreateAs(EntityHandle& InHandle)
 {
 	if (GlobalEntityRegistry.IsHandleValid(InHandle)) Destroy(InHandle);
-	
-	constexpr ClassID TargetType = T::StaticClassID();
 
-	EntityHandle creationHandle = (TargetType > 0 && TargetType != InHandle.GetTypeID())
-									  ? ReplaceTypeID(InHandle, TargetType)
-									  : InHandle;
-	InHandle = CreateByHandle(creationHandle, 1)[0];
+	constexpr ClassID TargetType = T::StaticClassID();
+	InHandle                     = CreateByClassID(TargetType);
 }
 
 template <typename T>
@@ -208,30 +241,25 @@ std::vector<EntityHandle> Registry::Create(size_t count)
 }
 
 template <typename T>
-T* Registry::GetComponent(EntityHandle Id)
+T* Registry::GetComponent(EntityHandle LHandle)
 {
-	// Validate the handle and generation first
-	if (!GlobalEntityRegistry.IsHandleValid(Id)) return nullptr;
+	if (!GlobalEntityRegistry.IsHandleValid(LHandle)) return nullptr;
 
-	EntityRecord* Record = GlobalEntityRegistry.GetRecordPtr(Id);
-
+	EntityRecord* Record = GlobalEntityRegistry.GetRecordPtr(LHandle);
 	if (!Record->IsValid()) return nullptr;
 
-	// TODO: Get ComponentTypeID from reflection (Week 5)
 	ComponentTypeID TypeID = T::StaticTypeID();
 
-	// Get component array from archetype
 	T* ComponentArray = Record->Arch->GetComponentArray<T>(Record->TargetChunk, TypeID);
 	if (!ComponentArray) return nullptr;
 
-	// Return pointer to this entity's component
 	return &ComponentArray[Record->ChunkIndex];
 }
 
 template <typename T>
-bool Registry::HasComponent(EntityHandle Id)
+bool Registry::HasComponent(EntityHandle LHandle)
 {
-	return GetComponent<T>(Id) != nullptr;
+	return GetComponent<T>(LHandle) != nullptr;
 }
 
 template <typename... Components>
@@ -247,9 +275,9 @@ template <typename... Components>
 std::vector<Archetype*> Registry::ComponentQuery()
 {
 	std::vector<Archetype*> Results(Archetypes.size());
-	uint8_t ArchIdx = 0;
-	bool Valid      = false;
-	Signature Sig   = BuildSignature<Components...>();
+	uint32_t ArchIdx = 0;
+	bool Valid       = false;
+	Signature Sig    = BuildSignature<Components...>();
 	for (auto Arch : Archetypes)
 	{
 		Valid            = Arch.first.Sig.Contains(Sig);
@@ -261,27 +289,13 @@ std::vector<Archetype*> Registry::ComponentQuery()
 	return Results;
 }
 
-template <typename... Components>
-std::vector<std::vector<uint64_t>*> Registry::ComponentBitsQuery()
-{
-	std::vector<std::vector<uint64_t>*> Results(sizeof...(Components));
-	std::vector<uint32_t> ComponentIDs{Components::StaticTypeID()...};
-
-	int i = 0;
-	for (auto& ID : ComponentIDs)
-	{
-		Results[i++] = &ComponentAccessBits[ID];
-	}
-	return Results;
-}
-
 template <typename... Classes>
 std::vector<Archetype*> Registry::ClassQuery()
 {
 	std::vector<Archetype*> Results(Archetypes.size());
 	std::unordered_set<ClassID> ClassIDs{Classes::StaticClassID()...};
-	uint8_t ArchIdx = 0;
-	bool Valid      = false;
+	uint32_t ArchIdx = 0;
+	bool Valid       = false;
 	for (auto Arch : Archetypes)
 	{
 		Valid            = ClassIDs.contains(Arch.first.ID);
@@ -327,7 +341,7 @@ inline void Registry::InvokeScalarUpdate(double dt)
 		for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
 		{
 			TrinyxJobs::Dispatch(
-				[this, ScalarUpdate, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
+				[ScalarUpdate, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
 				{
 					Chunk* chunk         = arch->Chunks[chunkIdx];
 					uint32_t entityCount = arch->GetChunkCount(chunkIdx);
@@ -335,10 +349,8 @@ inline void Registry::InvokeScalarUpdate(double dt)
 
 					void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 					arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
-					uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(
-							this->DirtyBitsFrame(hisWrite)->data())
-						+ (chunk->Header.CacheIndexStart / 8);
-					ScalarUpdate(dt, fieldArrayTable, chunkDirtyBits, entityCount);
+
+					ScalarUpdate(dt, fieldArrayTable, nullptr, entityCount);
 				},
 				&ScalarUpdateCounter, TrinyxJobs::Queue::Logic);
 		}
@@ -387,7 +399,7 @@ inline void Registry::InvokePrePhys(double dt)
 		for (size_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx)
 		{
 			TrinyxJobs::Dispatch(
-				[this, prePhys, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
+				[prePhys, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
 				{
 					Chunk* chunk         = arch->Chunks[chunkIdx];
 					uint32_t entityCount = arch->GetChunkCount(chunkIdx);
@@ -395,10 +407,8 @@ inline void Registry::InvokePrePhys(double dt)
 
 					void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 					arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
-					uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(
-							this->DirtyBitsFrame(hisWrite)->data())
-						+ (chunk->Header.CacheIndexStart / 8);
-					prePhys(dt, fieldArrayTable, chunkDirtyBits, entityCount);
+
+					prePhys(dt, fieldArrayTable, nullptr, entityCount);
 				},
 				&prePhysCounter, TrinyxJobs::Queue::Logic);
 		}
@@ -446,7 +456,7 @@ inline void Registry::InvokePostPhys(double dt)
 		for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
 		{
 			TrinyxJobs::Dispatch(
-				[this, PostPhys, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
+				[PostPhys, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
 				{
 					Chunk* chunk         = arch->Chunks[chunkIdx];
 					uint32_t entityCount = arch->GetChunkCount(chunkIdx);
@@ -454,10 +464,8 @@ inline void Registry::InvokePostPhys(double dt)
 
 					void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 					arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
-					uint8_t* chunkDirtyBits = reinterpret_cast<uint8_t*>(
-							this->DirtyBitsFrame(hisWrite)->data())
-						+ (chunk->Header.CacheIndexStart / 8);
-					PostPhys(dt, fieldArrayTable, chunkDirtyBits, entityCount);
+
+					PostPhys(dt, fieldArrayTable, nullptr, entityCount);
 				},
 				&postPhysCounter, TrinyxJobs::Queue::Logic);
 		}

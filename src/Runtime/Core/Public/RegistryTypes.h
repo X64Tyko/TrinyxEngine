@@ -1,6 +1,16 @@
 #pragma once
 #include "PagedMap.h"
 
+// Disable MSVC warning for anonymous structs in unions (C++11 standard feature)
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4201) // nonstandard extension used: nameless struct/union
+#elif defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
+
+
 static constexpr size_t NetOwnerID_Bits  = 8;
 static constexpr size_t Generation_Bits  = 16;
 static constexpr size_t TypeKey_Bits     = 16;

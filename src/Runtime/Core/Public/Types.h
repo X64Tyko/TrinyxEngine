@@ -1,6 +1,6 @@
 #pragma once
 #include <array>
-#include <bitset>
+#include "FixedBitset.h"
 #include <cstdint>
 #include <functional>
 #include <cmath>
@@ -138,7 +138,7 @@ static constexpr size_t MAX_FIELD_ARRAYS                  = MAX_COMPONENTS * MAX
 // Upper bound on field arrays for any single archetype (temporal + non-temporal).
 // Chunk::MAX_TEMPORAL_FIELDS caps temporal fields at 64; this adds headroom for non-temporal.
 static constexpr size_t MAX_FIELDS_PER_ARCHETYPE = 64;
-using ComponentSignature                         = std::bitset<MAX_COMPONENTS>;
+using ComponentSignature                         = FixedBitset<MAX_COMPONENTS>;
 using ClassID                                    = uint16_t;
 static constexpr size_t MAX_CLASS_COUNT          = 4096; // based on size of TypeID in Entity header hardcoded for testing
 

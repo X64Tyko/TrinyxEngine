@@ -162,10 +162,8 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 	}
 
 	// Create the entity
-	std::vector<EntityHandle> ids = reg->CreateByClassID(classID, 1);
-	if (ids.empty()) return EntityHandle{};
-
-	EntityHandle id = ids[0];
+	EntityHandle id = reg->CreateByClassID(classID);
+	if (!id.IsValid()) return EntityHandle{};
 
 	// Find the archetype for this entity type
 	const auto& archetypes = reg->GetArchetypes();

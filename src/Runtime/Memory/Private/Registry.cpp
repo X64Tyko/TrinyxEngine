@@ -2,12 +2,14 @@
 #include "JoltPhysics.h"
 #include "Profiler.h"
 #include <cassert>
-#include <ranges>
+#include "Archetype.h"
 
 #include "SchemaReflector.h"
 
 Registry::Registry()
-	: NextEntityIndex(1) // Start at 1 (0 is reserved for Invalid)
+	: NextRecordIndex(1) // Start at 1 (0 is reserved for Invalid)
+	, NextLocalIndex(1)
+	, NextNetIndex(1)
 {
 	TNX_ZONE_N("Registry::Constructor");
 }
@@ -19,20 +21,6 @@ Registry::Registry(const EngineConfig* Config)
 	HistorySlab.Initialize(Config); // Temporal: Config->TemporalFrameCount frames, rollback-capable
 #endif
 	VolatileSlab.Initialize(Config); // Volatile: 5 frames, no rollback
-	//UniversalSlab.Initialize(Config);
-	// Reserve space for entity index
-
-	ComponentAccessBits.resize(MAX_COMPONENTS);
-	for (auto& bitplane : ComponentAccessBits)
-	{
-		bitplane.resize(Config->MAX_CACHED_ENTITIES / 64);
-	}
-	EntityDirtyBits.resize(Config->TemporalFrameCount);
-	for (auto& bitplane : EntityDirtyBits)
-	{
-		bitplane.resize(Config->MAX_CACHED_ENTITIES / 64);
-	}
-	EntityActiveBits.resize(Config->MAX_CACHED_ENTITIES / 64);
 	InitializeArchetypes();
 }
 
@@ -49,34 +37,59 @@ Registry::~Registry()
 	Archetypes.clear();
 }
 
-std::vector<EntityHandle> Registry::CreateByHandle(EntityHandle inHandle, size_t count)
+// Bridge GHandle → LHandle: allocates a local index from a separate index space,
+// wires LocalToRecord so LHandle can resolve back to the record, and stores the
+// LHandle on the record itself so the record knows its OOP-facing identity.
+EntityHandle Registry::MakeEntityHandle(GlobalEntityHandle GHandle, ClassID classID)
 {
-	return CreateByClassID(inHandle.GetTypeID(), count);
+	EntityHandle LHandle;
+	LHandle.HandleIndex = AllocateLocalIndex();
+	LHandle.ClassType   = classID;
+
+	GlobalEntityRegistry.LocalToRecord.set(LHandle.GetHandleIndex(), GHandle);
+
+	EntityRecord* Record = GlobalEntityRegistry.Records[GHandle.GetIndex()];
+	if (Record) Record->LHandle = LHandle;
+
+	return LHandle;
+}
+
+EntityHandle Registry::CreateByClassID(ClassID classID)
+{
+	GlobalEntityHandle GHandle;
+	CreateInternal(classID, {&GHandle, 1});
+	return MakeEntityHandle(GHandle, classID);
+}
+
+std::vector<EntityHandle> Registry::CreateByClassID(ClassID classID, size_t count)
+{
+	std::vector<GlobalEntityHandle> GHandles(count);
+	CreateInternal(classID, GHandles);
+
+	std::vector<EntityHandle> handles(count);
+	for (size_t i = 0; i < count; ++i) handles[i] = MakeEntityHandle(GHandles[i], classID);
+	return handles;
 }
 
 void Registry::Recreate(EntityHandle& InHandle)
 {
 	if (GlobalEntityRegistry.IsHandleValid(InHandle)) Destroy(InHandle);
-
-	InHandle = CreateByHandle(InHandle, 1)[0];
+	InHandle = CreateByClassID(InHandle.GetTypeID());
 }
 
 void Registry::RecreateAs(EntityHandle& InHandle, ClassID newClassID)
 {
 	if (GlobalEntityRegistry.IsHandleValid(InHandle)) Destroy(InHandle);
-
-	if (newClassID > 0) [[unlikely]] InHandle = ReplaceTypeID(InHandle, newClassID);
-	InHandle = CreateByHandle(InHandle, 1)[0];
+	InHandle = CreateByClassID(newClassID > 0 ? newClassID : InHandle.GetTypeID());
 }
 
 void Registry::RecreateAs(EntityHandle& InHandle, const EntityHandle& asHandle)
 {
 	if (GlobalEntityRegistry.IsHandleValid(InHandle)) Destroy(InHandle);
-
-	EntityHandle creationHandle = asHandle.GetTypeID() != InHandle.GetTypeID()
-									  ? ReplaceTypeID(InHandle, asHandle.GetTypeID())
-									  : InHandle;
-	InHandle = CreateByHandle(creationHandle, 1)[0];
+	ClassID classID = asHandle.GetTypeID() != InHandle.GetTypeID()
+						  ? asHandle.GetTypeID()
+						  : InHandle.GetTypeID();
+	InHandle = CreateByClassID(classID);
 }
 
 Archetype* Registry::GetOrCreateArchetype(const Signature& Sig, const ClassID& ID)
@@ -86,9 +99,9 @@ Archetype* Registry::GetOrCreateArchetype(const Signature& Sig, const ClassID& I
 
 	// Check if archetype already exists
 	auto It = Archetypes.find(key);
-	if (It != Archetypes.end())
+	if (It)
 	{
-		return It->second;
+		return *It;
 	}
 
 	// Create new archetype
@@ -105,31 +118,7 @@ Archetype* Registry::GetOrCreateArchetype(const Signature& Sig, const ClassID& I
 
 		for (ComponentTypeID compTypeID : compListIt->second)
 		{
-			const std::vector<FieldMeta>* fields = CFR.GetFields(compTypeID);
-			bool isDecomposed                    = (fields && !fields->empty());
-			CacheTier Tier                       = CFR.GetComponentMeta(compTypeID).TemporalTier;
-
-			size_t componentSize = 0;
-			if (isDecomposed)
-			{
-				for (const auto& field : *fields) componentSize += field.Size;
-			}
-			else
-			{
-				componentSize = CFR.GetComponentMeta(compTypeID).Size;
-			}
-
-			Components.push_back(ComponentMetaEx{
-				compTypeID,
-				isDecomposed ? CFR.GetComponentMeta(compTypeID).Name : nullptr,
-				componentSize,
-				FIELD_ARRAY_ALIGNMENT,
-				0, // OffsetInChunk computed by BuildLayout
-				isDecomposed,
-				Tier,
-				0,
-				isDecomposed ? *fields : std::vector<FieldMeta>()
-			});
+			Components.push_back(CFR.GetComponentMeta(compTypeID));
 		}
 	}
 
@@ -139,34 +128,34 @@ Archetype* Registry::GetOrCreateArchetype(const Signature& Sig, const ClassID& I
 	return NewArchetype;
 }
 
-EntityHandle Registry::ReplaceTypeID(EntityHandle InHandle, ClassID newClassID)
-{
-	if (MetaRegistry::Get().ClassToArchetype.find(newClassID) == MetaRegistry::Get().ClassToArchetype.end())
-	{
-		LOG_ERROR_F("ReplaceTypeID: ClassID %u not registered", newClassID);
-		return InHandle;
-	}
+// =============================================================================
+// Handle allocation and recycling
+// =============================================================================
+//
+// Three index spaces are managed independently:
+//   Record indices  — GHandle.Index, recycled immediately on free
+//   Local indices   — LHandle.HandleIndex, deferred via PendingLocalRecycles
+//   Net indices     — NetHandle.NetIndex, deferred via PendingNetRecycles
+//
+// Local/net indices use deferred recycling to prevent ABA problems:
+// a stale handle held by OOP code or a remote client could alias a newly
+// created entity if the index were reused immediately. The pending lists
+// hold freed indices until ConfirmLocalRecycles/ConfirmNetRecycles is called.
 
-	EntityHandle NewHandle(InHandle);
-	NewHandle.ClassType = newClassID;
-	return NewHandle;
-}
-
-GlobalEntityHandle Registry::AllocateEntityID()
+GlobalEntityHandle Registry::AllocateGlobalHandle()
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
-	GlobalEntityHandle Id;
-	Id.Value = 0;
+	GlobalEntityHandle GHandle;
+	GHandle.Value = 0;
 
-	// Try to reuse a free index
-	if (!FreeIndices.empty())
+	if (!FreeRecordIndices.empty())
 	{
-		uint32_t Index = FreeIndices.front();
-		FreeIndices.pop();
+		uint32_t Index = FreeRecordIndices.front();
+		FreeRecordIndices.pop();
 
-		// Increment generation for recycled index
-		EntityRecord* Record = GlobalEntityRegistry.GetRecordPtr(Index);
+		// Bump generation so stale GHandles from the previous occupant won't validate
+		EntityRecord* Record = GlobalEntityRegistry.Records[Index];
 		if (!Record || !Record->IsValid())
 		{
 			LOG_ERROR_F("Invalid entity record at index %u", Index);
@@ -174,202 +163,217 @@ GlobalEntityHandle Registry::AllocateEntityID()
 		}
 
 		uint16_t Generation = Record->GetGeneration() + 1;
-		if (Generation == 0) // Wrapped around
-			Generation = 1;  // Skip 0 (reserved for invalid)
+		if (Generation == 0) Generation = 1; // skip 0 (reserved for invalid)
 
-		Id.Index      = Index;
-		Id.Generation = Generation;
+		GHandle.Index      = Index;
+		GHandle.Generation = Generation;
 	}
 	else
 	{
-		// Allocate new index
-		Id.Index      = NextEntityIndex++;
-		Id.Generation = 1; // First generation
+		GHandle.Index      = NextRecordIndex++;
+		GHandle.Generation = 1;
 	}
 
-	return Id;
+	return GHandle;
 }
 
-void Registry::FreeEntityID(EntityID Id)
+void Registry::FreeGlobalHandle(GlobalEntityHandle GHandle)
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
-	uint32_t Index = Id.GetIndex();
-	if (Index >= EntityIndex.size()) return;
+	uint32_t Index = GHandle.GetIndex();
 
-	// Add to free list
-	FreeIndices.push(Index);
+	EntityRecord* Record = GlobalEntityRegistry.Records[Index];
+	if (!Record || !Record->IsValid())
+	{
+		LOG_WARN_F("Invalid entity record at index %u", Index);
+		return;
+	}
 
-	// Invalidate record
-	EntityIndex[Index].Arch        = nullptr;
-	EntityIndex[Index].TargetChunk = nullptr;
+	// Defer local/net index recycling — they stay in pending until confirmed safe
+	if (Record->LHandle.IsValid()) RequestLocalRecycle(Record->LHandle.GetHandleIndex());
+	if (Record->NetworkID.GetHandleIndex() > 0) RequestNetRecycle(Record->NetworkID.GetHandleIndex());
+
+	// Record index goes straight back to the free pool (generation bump prevents stale access)
+	FreeRecordIndices.push(Index);
+
+	Record->Arch                = nullptr;
+	Record->TargetChunk         = nullptr;
+	Record->EntityInfo.ValidBit = false;
 }
 
-std::vector<EntityID> Registry::CreateByClassID(ClassID classID, size_t count)
+// --- Local handle index allocation (OOP land) ---
+
+uint32_t Registry::AllocateLocalIndex()
+{
+	if (!FreeLocalIndices.empty())
+	{
+		uint32_t Index = FreeLocalIndices.front();
+		FreeLocalIndices.pop();
+		return Index;
+	}
+	return NextLocalIndex++;
+}
+
+void Registry::RequestLocalRecycle(uint32_t localIndex)
+{
+	PendingLocalRecycles.push_back(localIndex);
+}
+
+void Registry::ConfirmLocalRecycles()
+{
+	for (uint32_t Index : PendingLocalRecycles) FreeLocalIndices.push(Index);
+	PendingLocalRecycles.clear();
+}
+
+// --- Net handle index allocation ---
+
+uint32_t Registry::AllocateNetIndex()
+{
+	if (!FreeNetIndices.empty())
+	{
+		uint32_t Index = FreeNetIndices.front();
+		FreeNetIndices.pop();
+		return Index;
+	}
+	return NextNetIndex++;
+}
+
+void Registry::RequestNetRecycle(uint32_t netIndex)
+{
+	PendingNetRecycles.push_back(netIndex);
+}
+
+void Registry::ConfirmNetRecycles()
+{
+	for (uint32_t Index : PendingNetRecycles) FreeNetIndices.push(Index);
+	PendingNetRecycles.clear();
+}
+
+// Core creation: allocates GHandles and populates EntityRecords.
+// Does NOT allocate local or net handles — that's the caller's responsibility
+// via MakeEntityHandle (for local) or a future AssignNetHandle (for network).
+void Registry::CreateInternal(ClassID classID, std::span<GlobalEntityHandle> outHandles)
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
-	MetaRegistry& MR = MetaRegistry::Get();
-	Signature sig    = MR.ClassToArchetype[classID];
+	const size_t count = outHandles.size();
+	MetaRegistry& MR   = MetaRegistry::Get();
+	Signature sig      = MR.ClassToArchetype[classID];
 
 #ifdef _DEBUG
 	if (MR.ClassToArchetype.find(classID) == MR.ClassToArchetype.end())
 	{
 		const char* name = (classID < 4096) ? MR.EntityGetters[classID].Name : nullptr;
-		LOG_ERROR_F("CreateByClassID: ClassID %u ('%s') not registered",
+		LOG_ERROR_F("CreateInternal: ClassID %u ('%s') not registered",
 					classID, name ? name : "unknown");
 		assert(false && "Entity ClassID not registered");
-		return {};
+		return;
 	}
 #endif
 
 	Archetype* arch = GetOrCreateArchetype(sig, classID);
 
 	std::vector<Archetype::EntitySlot> Slots(count);
-	EntityIndex.resize(1 + EntityIndex.size() + count - FreeIndices.size());
 	arch->PushEntities(Slots, count);
 
-	std::vector<EntityID> Entities(count);
 	for (size_t i = 0; i < count; ++i)
 	{
-		EntityID& Id               = Entities[i];
 		Archetype::EntitySlot Slot = Slots[i];
+		GlobalEntityHandle GHandle = AllocateGlobalHandle();
 
-		Id = AllocateEntityID();
+		// Populate record
+		EntityRecord* Record          = GlobalEntityRegistry.Records[GHandle.GetIndex()];
+		Record->Arch                  = arch;
+		Record->TargetChunk           = Slot.TargetChunk;
+		Record->ArchIndex             = Slot.ArchIndex;
+		Record->LocalIndex            = Slot.LocalIndex;
+		Record->ChunkIndex            = Slot.ChunkIndex;
+		Record->EntityInfo.Generation = GHandle.GetGeneration();
+		Record->EntityInfo.ValidBit   = true;
 
-		uint32_t Index = Id.GetIndex();
+		// Cache index → global handle mapping
+		GlobalEntityRegistry.CacheToRecord.set(Slot.CacheIndex, GHandle);
 
-		EntityRecord& Record = EntityIndex[Index];
-		Record.Arch          = arch;
-		Record.TargetChunk   = Slot.TargetChunk;
-		Record.Index         = static_cast<uint16_t>(Slot.LocalIndex);
-		Record.ArchetypeIdx  = Slot.CacheIndex;
-		Record.Generation    = Id.GetGeneration();
+		outHandles[i] = GHandle;
 	}
-
-	return Entities;
 }
 
-void Registry::Destroy(EntityID Id)
+// Resolves LHandle → GHandle via LocalToRecord, then defers destruction.
+// Actual cleanup happens in ProcessDeferredDestructions at end of frame.
+void Registry::Destroy(EntityHandle LHandle)
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
-	// Defer destruction until end of frame
-	PendingDestructions.push_back(Id);
+
+	GlobalEntityHandle GHandle = GlobalEntityRegistry.LookupGlobalHandle(LHandle);
+	PendingDestructions.push_back(GHandle);
+}
+
+bool Registry::DestroyRecord(GlobalEntityHandle& GHandle)
+{
+	EntityRecord* Record = GlobalEntityRegistry.Records[GHandle.GetIndex()];
+	if (!Record)
+	{
+		LOG_ERROR_F("Failed to find record for handle %u during destruction", GHandle.GetIndex());
+		return false;
+	}
+	Archetype* arch = Record->Arch;
+
+	// Remove from archetype
+	arch->RemoveEntity(Record->LocalIndex, Record->ChunkIndex, Record->ArchIndex);
+	return true;
 }
 
 bool Registry::DestroyRecord(EntityRecord& Record)
 {
-	// Find chunk index in archetype's chunk list
-	Archetype* arch    = Record.Arch;
-	Chunk* targetChunk = Record.TargetChunk;
-
-	size_t chunkIndex = 0;
-	bool foundChunk   = false;
-	for (size_t i = 0; i < arch->Chunks.size(); ++i)
+	if (!Record.IsValid())
 	{
-		if (arch->Chunks[i] == targetChunk)
-		{
-			chunkIndex = i;
-			foundChunk = true;
-			break;
-		}
+		LOG_ERROR("Requested record is invalid for destruction");
+		return false;
 	}
+	Archetype* arch = Record.Arch;
 
-	if (!foundChunk)
-	{
-		LOG_ERROR_F("Failed to find chunk for entity %u during destruction", Record.Index);
-		return true;
-	}
-
-	// Calculate where the last entity is BEFORE removal
-	uint32_t lastEntityCacheIndex = arch->TotalEntityCount - 1;
-	uint32_t lastChunkIndex       = lastEntityCacheIndex / arch->EntitiesPerChunk;
-	uint32_t lastLocalIndex       = lastEntityCacheIndex % arch->EntitiesPerChunk;
-
-	// Check if we're actually swapping (not removing the last entity)
-	bool willSwap = false; //(chunkIndex != lastChunkIndex || Record.Index != lastLocalIndex);
-
-	// Remove from archetype (swap-and-pop with last entity)
-	arch->RemoveEntity(chunkIndex, Record.Index, Record.ArchetypeIdx);
-
-	// IMPORTANT: If we swapped with the last entity, update that entity's record
-	if (willSwap)
-	{
-		// Find the entity that was swapped
-		// We need to update EntityIndex for the swapped entity
-		Chunk* lastChunk = arch->Chunks[lastChunkIndex];
-
-		for (auto& entry : EntityIndex)
-		{
-			if (entry.Arch == arch &&
-				entry.TargetChunk == lastChunk &&
-				entry.Index == lastLocalIndex)
-			{
-				// Update this entity's record to point to the new location
-				entry.TargetChunk = targetChunk;
-				entry.Index       = Record.Index;
-				break;
-			}
-		}
-	}
+	// Remove from archetype
+	arch->RemoveEntity(Record.LocalIndex, Record.ChunkIndex, Record.ArchIndex);
 	return true;
 }
 
+// Processes all deferred destructions queued by Destroy().
+// Generation check prevents double-free if the same GHandle was queued twice
+// or the slot was already recycled by a prior frame's destruction.
 void Registry::ProcessDeferredDestructions()
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
-	for (EntityID Id : PendingDestructions)
+	for (GlobalEntityHandle GHandle : PendingDestructions)
 	{
-		if (!Id.IsValid()) continue;
+		EntityRecord* Record = GlobalEntityRegistry.Records[GHandle.GetIndex()];
 
-		uint32_t Index = Id.GetIndex();
-		if (Index >= EntityIndex.size()) continue;
+		if (!Record->IsValid()) continue;
+		if (Record->GetGeneration() != GHandle.GetGeneration()) continue;
 
-		EntityRecord& Record = EntityIndex[Index];
-
-		// Validate generation
-		if (Record.Generation != Id.GetGeneration()) continue;
-
-		if (!Record.IsValid()) continue;
-
-		if (DestroyRecord(Record))
+		if (DestroyRecord(*Record))
 		{
-			// Free the entity ID
-			FreeEntityID(Id);
+			FreeGlobalHandle(GHandle);
 		}
 	}
 
 	PendingDestructions.clear();
-
-	TNX_PLOT("PendingDestructions", static_cast<double>(PendingDestructions.size()));
 }
 
-EntityID Registry::FindEntityByLocation(Archetype* arch, Chunk* chunk, uint16_t localIndex) const
+GlobalEntityHandle Registry::FindEntityByLocation(const EntityCacheHandle& CacheHandle) const
 {
-	for (size_t i = 0; i < EntityIndex.size(); ++i)
-	{
-		const EntityRecord& rec = EntityIndex[i];
-		if (rec.Arch == arch && rec.TargetChunk == chunk && rec.Index == localIndex)
-		{
-			EntityID id{};
-			id.Index      = i;
-			id.Generation = rec.Generation;
-			id.TypeID     = 0;
-			id.OwnerID    = 0;
-			id.IsStatic   = 0;
-			id.MetaFlags  = 0;
-			return id;
-		}
-	}
-	return EntityID::Invalid();
+	GlobalEntityHandle GHandle = GlobalEntityRegistry.LookupGlobalHandle(CacheHandle);
+	const EntityRecord Record  = GlobalEntityRegistry.Records[GHandle.GetIndex()];
+	if (!Record.IsValid() || Record.GetGeneration() != GHandle.GetGeneration()) return GlobalEntityHandle();
+
+	return GHandle;
 }
 
 void Registry::InitializeArchetypes()
 {
 	MetaRegistry& MR            = MetaRegistry::Get();
 	ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
-	// need to combine classes in the meta registry that have the same TypeID.
 
 	for (auto& Arch : MR.ClassToArchetype)
 	{
@@ -402,28 +406,28 @@ void Registry::PropagateFrame(uint32_t currentFrame)
 	// (defined in ComponentCache<Volatile>)
 	VolatileSlab.PropagateFrame(PropagationCounter);
 
-	// Clear dirty bits for the frame we're about to write into
-	auto& nextDirty = *DirtyBitsFrame(currentFrame + 1);
-	std::fill(nextDirty.begin(), nextDirty.end(), 0ULL);
-
 	TrinyxJobs::WaitForCounter(&PropagationCounter, TrinyxJobs::Queue::Logic);
 }
 
+// Hard reset — wipes all entities, handles, free lists, caches, and archetype data.
+// Skips the normal deferred destruction path. Used by tests.
 void Registry::ResetRegistry()
 {
-	// Index 0 is invalid, so drop first and then iterate backward.
-	for (auto& Entity : EntityIndex | std::views::drop(1) | std::views::reverse)
-	{
-		if (!Entity.IsValid()) continue;
-		DestroyRecord(Entity);
-	}
-	EntityIndex.clear();
-	while (!FreeIndices.empty())
-	{
-		FreeIndices.pop();
-	}
+	GlobalEntityRegistry.Records.clear_all();
+	GlobalEntityRegistry.NetToRecord.clear_all();
+	GlobalEntityRegistry.LocalToRecord.clear_all();
+	GlobalEntityRegistry.CacheToRecord.clear_all();
+
+	while (!FreeRecordIndices.empty()) FreeRecordIndices.pop();
+	while (!FreeLocalIndices.empty()) FreeLocalIndices.pop();
+	while (!FreeNetIndices.empty()) FreeNetIndices.pop();
+	PendingLocalRecycles.clear();
+	PendingNetRecycles.clear();
 	PendingDestructions.clear();
-	NextEntityIndex = 1;
+
+	NextRecordIndex = 1;
+	NextLocalIndex  = 1;
+	NextNetIndex    = 1;
 
 	if (PhysicsPtr) PhysicsPtr->ResetAllBodies();
 
@@ -435,10 +439,6 @@ void Registry::ResetRegistry()
 	VolatileSlab.ClearFrameData();
 
 	for (auto& arch : Archetypes) arch.second->FreeAllChunks();
-
-	// Zero all dirty bit arrays so stale entities don't leak to the GPU
-	for (auto& bits : EntityDirtyBits) std::fill(bits.begin(), bits.end(), 0ULL);
-	std::fill(EntityActiveBits.begin(), EntityActiveBits.end(), 0ULL);
 }
 
 uint32_t Registry::GetTotalChunkCount() const
