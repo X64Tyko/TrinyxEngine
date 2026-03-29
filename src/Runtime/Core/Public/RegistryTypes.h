@@ -44,12 +44,12 @@ union EntitySlotMeta
 	}
 
 	// Comparison operators
-	bool operator==(const EntitySlotMeta& Other) const { return Value == Other.Value; }
-	bool operator!=(const EntitySlotMeta& Other) const { return Value != Other.Value; }
+	bool operator==(const EntitySlotMeta& other) const { return Value == other.Value; }
+	bool operator!=(const EntitySlotMeta& other) const { return Value != other.Value; }
 
 	// Network/ownership helpers
 	bool IsServer() const { return NetOwnerID == 0; }
-	bool IsLocal(uint8_t LocalClientID) const { return NetOwnerID == LocalClientID; }
+	bool IsLocal(uint8_t localClientID) const { return NetOwnerID == localClientID; }
 };
 
 static_assert(sizeof(EntitySlotMeta) == 4, "EntityIDNew must be 4 bytes");
@@ -70,7 +70,7 @@ union EntityNetHandle
 
 	// Network/ownership helpers
 	bool IsServer() const { return NetOwnerID == 0; }
-	bool IsLocal(uint8_t LocalClientID) const { return NetOwnerID == LocalClientID; }
+	bool IsLocal(uint8_t localClientID) const { return NetOwnerID == localClientID; }
 };
 
 // Can be sent with an EntityNetHandle and functions similarly to a GlobalHandle. Allows to send a handle over the wire so

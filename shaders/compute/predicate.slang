@@ -5,7 +5,7 @@
 // temporary predicate storage; prefix_sum.slang overwrites it in-place with
 // the final exclusive-scan output indices.
 //
-// Flags are read from CurrFieldAddrs[0] (the field slab slot with kSemFlags
+// Flags are read from CurrFieldAddrs[0] (the field slab slot with SemFlags
 // semantic, always at field index 0 by convention).
 
 #include "common/GpuFrameData.slang"
@@ -23,7 +23,7 @@ void main(uint3 tid : SV_DispatchThreadID)
     if (i >= fd->EntityCount)
         return;
 
-    // Flags live in the field slab at CurrFieldAddrs[0] (kSemFlags, always index 0).
+    // Flags live in the field slab at CurrFieldAddrs[0] (SemFlags, always index 0).
     uint flags = ((uint*)fd->CurrFieldAddrs[0])[i];
     uint pred  = (flags >> 31u) & 1u;   // 1 if active, 0 otherwise
 

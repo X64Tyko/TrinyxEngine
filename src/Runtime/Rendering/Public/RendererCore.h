@@ -19,8 +19,8 @@ struct SDL_Window;
 // FrameSync — per-frame synchronization and scratch resources.
 // -----------------------------------------------------------------------
 
-static constexpr int kMaxFramesInFlight   = 2;
-static constexpr int kInstanceBufferCount = 5;
+static constexpr int MaxFramesInFlight   = 2;
+static constexpr int InstanceBufferCount = 5;
 
 struct FrameSync
 {
@@ -93,8 +93,8 @@ protected:
 	VulkanContext* VkCtx          = nullptr;
 	VulkanMemory* VkMem           = nullptr;
 	SDL_Window* WindowPtr         = nullptr;
-	VkDevice device               = nullptr;
-	VkQueue graphicsQueue         = nullptr;
+	VkDevice Device               = nullptr;
+	VkQueue GraphicsQueue         = nullptr;
 	InputBuffer* VizInputPtr      = nullptr;
 
 	// ---- Thread lifecycle ----
@@ -105,7 +105,7 @@ protected:
 	// ---- Thread-owned Vulkan resources ----
 	VkFormat DepthFormat = VK_FORMAT_UNDEFINED;
 
-	FrameSync Frames[kMaxFramesInFlight];
+	FrameSync Frames[MaxFramesInFlight];
 	uint32_t CurrentFrame      = 0;
 	uint32_t LastRenderedFrame = 0;
 	uint64_t LastVolatileFrame = 0;
@@ -116,7 +116,7 @@ protected:
 	VkShaderModule VertShader = VK_NULL_HANDLE;
 	VkShaderModule FragShader = VK_NULL_HANDLE;
 
-	VulkanBuffer FieldSlabs[kInstanceBufferCount];
+	VulkanBuffer FieldSlabs[InstanceBufferCount];
 	uint32_t PrevFieldSlab    = 0;
 	uint32_t CurrentFieldSlab = 0;
 
@@ -130,10 +130,10 @@ protected:
 	// After scanning slab Flags for bit 30, OR the result into ALL planes.
 	// This ensures each plane accumulates all changes since its last write.
 	// Heap-allocated in Initialize() based on config MAX_RENDERABLE_ENTITIES.
-	uint64_t* DirtyPlanes[kInstanceBufferCount]{};
+	uint64_t* DirtyPlanes[InstanceBufferCount]{};
 	uint64_t* DirtySnapshot = nullptr;
 	uint32_t DirtyWordCount = 0;
-	bool FirstSlabWrite[kInstanceBufferCount]{true, true, true, true, true};
+	bool FirstSlabWrite[InstanceBufferCount]{true, true, true, true, true};
 
 	MeshManager Meshes;
 
@@ -174,7 +174,7 @@ protected:
 	uint32_t RenderFrameCount = 0;
 
 #if TNX_DEV_METRICS
-	uint64_t FrameInputTimestamp[kMaxFramesInFlight]{};
+	uint64_t FrameInputTimestamp[MaxFramesInFlight]{};
 	double LatencyAccumMs   = 0.0;
 	uint32_t LatencySamples = 0;
 	double DisplayRefreshMs = 0.0;

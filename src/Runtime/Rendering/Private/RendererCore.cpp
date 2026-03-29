@@ -93,7 +93,7 @@ void RendererCore<Derived>::Initialize(Registry* registry,
 template <typename Derived>
 void RendererCore<Derived>::Start()
 {
-	device = VkCtx->GetDevice();
+	Device = VkCtx->GetDevice();
 
 	if (!CreateDepthImage())
 	{
@@ -223,7 +223,7 @@ void RendererCore<Derived>::ThreadMain()
 	{
 	}
 
-	graphicsQueue     = static_cast<VkQueue>(VkCtx->GetQueues().Graphics);
+	GraphicsQueue = static_cast<VkQueue>(VkCtx->GetQueues().Graphics);
 
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
@@ -257,7 +257,7 @@ int RendererCore<Derived>::RenderFrame()
 
 	{
 		TNX_ZONE_COARSE_NC("Render_FenceWait", TNX_COLOR_RENDERING)
-		VkResult fenceResult = vkWaitForFences(device, 1, &fence, VK_TRUE, 2'000);
+		VkResult fenceResult = vkWaitForFences(Device, 1, &fence, VK_TRUE, 2'000);
 		if (fenceResult == VK_TIMEOUT)
 		{
 			return 0;
@@ -299,7 +299,7 @@ int RendererCore<Derived>::RenderFrame()
 	{
 		TNX_ZONE_COARSE_NC("Render_Acquire", TNX_COLOR_RENDERING)
 		VkResult acquireResult = vkAcquireNextImageKHR(
-			device,
+			Device,
 			*VkCtx->GetSwapchain().Handle,
 			0,
 			*frame.Acquired,
@@ -323,7 +323,7 @@ int RendererCore<Derived>::RenderFrame()
 		}
 	}
 
-	vkResetFences(device, 1, &fence);
+	vkResetFences(Device, 1, &fence);
 
 	FillGpuFrameData(frame);
 
@@ -361,7 +361,7 @@ int RendererCore<Derived>::RenderFrame()
 
 	{
 		TNX_ZONE_COARSE_NC("Render_Submit", TNX_COLOR_RENDERING)
-		vkQueueSubmit2(graphicsQueue, 1, &submitInfo, fence);
+		vkQueueSubmit2(GraphicsQueue, 1, &submitInfo, fence);
 	}
 
 	// Present
@@ -377,7 +377,7 @@ int RendererCore<Derived>::RenderFrame()
 
 	{
 		TNX_ZONE_COARSE_NC("Render_Present", TNX_COLOR_RENDERING)
-		VkResult presentResult = vkQueuePresentKHR(graphicsQueue, &presentInfo);
+		VkResult presentResult = vkQueuePresentKHR(GraphicsQueue, &presentInfo);
 		if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR)
 		{
 			OnSwapchainResize();
@@ -405,7 +405,7 @@ int RendererCore<Derived>::RenderFrame()
 	}
 #endif
 
-	CurrentFrame = (CurrentFrame + 1) % kMaxFramesInFlight;
+	CurrentFrame = (CurrentFrame + 1) % MaxFramesInFlight;
 
 	return 1;
 }
@@ -564,7 +564,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 		// Zero CompactCounter and MeshHistogram before compute passes
 		vkCmdFillBuffer(cmd, static_cast<VkBuffer>(frame.CompactCounterBuffer.Buffer), 0, sizeof(uint32_t), 0u);
 		vkCmdFillBuffer(cmd, static_cast<VkBuffer>(frame.MeshHistogramBuffer.Buffer), 0,
-						kMaxMeshSlots * sizeof(uint32_t), 0u);
+						MaxMeshSlots * sizeof(uint32_t), 0u);
 		{
 			VkMemoryBarrier2 mb{};
 			mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
@@ -909,10 +909,10 @@ bool RendererCore<Derived>::CreateFrameSync()
 	allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 	allocInfo.commandPool        = pool;
 	allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-	allocInfo.commandBufferCount = kMaxFramesInFlight;
+	allocInfo.commandBufferCount = MaxFramesInFlight;
 
-	VkCommandBuffer cmds[kMaxFramesInFlight];
-	VkResult result = vkAllocateCommandBuffers(device, &allocInfo, cmds);
+	VkCommandBuffer cmds[MaxFramesInFlight];
+	VkResult result = vkAllocateCommandBuffers(Device, &allocInfo, cmds);
 	if (result != VK_SUCCESS)
 	{
 		LOG_ERROR_F("[Renderer] vkAllocateCommandBuffers failed: %d", result);
@@ -922,16 +922,16 @@ bool RendererCore<Derived>::CreateFrameSync()
 	const vk::SemaphoreCreateInfo semCI{};
 	const vk::FenceCreateInfo fenceCI{vk::FenceCreateFlagBits::eSignaled};
 
-	constexpr VkDeviceSize kGpuDataSize = sizeof(GpuFrameData);
+	constexpr VkDeviceSize GpuDataSize = sizeof(GpuFrameData);
 
-	for (int i = 0; i < kMaxFramesInFlight; ++i)
+	for (int i = 0; i < MaxFramesInFlight; ++i)
 	{
 		Frames[i].Cmd      = cmds[i];
 		Frames[i].Acquired = raiiDev.createSemaphore(semCI);
 		Frames[i].Fence    = raiiDev.createFence(fenceCI);
 
 		Frames[i].GpuData = VkMem->AllocateBuffer(
-			kGpuDataSize,
+			GpuDataSize,
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 			GpuMemoryDomain::PersistentMapped,
 			/*requestDeviceAddress=*/ true);
@@ -942,9 +942,9 @@ bool RendererCore<Derived>::CreateFrameSync()
 			return false;
 		}
 
-		const VkDeviceSize kScanSize =
+		const VkDeviceSize ScanSize =
 			static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(uint32_t);
-		Frames[i].ScanBuffer = VkMem->AllocateBuffer(kScanSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+		Frames[i].ScanBuffer = VkMem->AllocateBuffer(ScanSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 													 GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].ScanBuffer.IsValid())
 		{
@@ -962,8 +962,8 @@ bool RendererCore<Derived>::CreateFrameSync()
 		}
 
 		// DrawArgs: one VkDrawIndexedIndirectCommand per mesh slot (256 max × 20 bytes = 5120 bytes)
-		constexpr VkDeviceSize kDrawArgsSize = kMaxMeshSlots * sizeof(VkDrawIndexedIndirectCommand);
-		Frames[i].DrawArgsBuffer             = VkMem->AllocateBuffer(kDrawArgsSize,
+		constexpr VkDeviceSize DrawArgsSize = MaxMeshSlots * sizeof(VkDrawIndexedIndirectCommand);
+		Frames[i].DrawArgsBuffer            = VkMem->AllocateBuffer(DrawArgsSize,
 														 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
 														 GpuMemoryDomain::PersistentMapped, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].DrawArgsBuffer.IsValid())
@@ -971,16 +971,16 @@ bool RendererCore<Derived>::CreateFrameSync()
 			LOG_ERROR_F("[Renderer] DrawArgsBuffer alloc failed (slot %d)", i);
 			return false;
 		}
-		std::memset(Frames[i].DrawArgsBuffer.MappedPtr, 0, kDrawArgsSize);
+		std::memset(Frames[i].DrawArgsBuffer.MappedPtr, 0, DrawArgsSize);
 
 #ifdef TNX_GPU_PICKING
-		constexpr uint32_t kInstanceFieldCount = kGpuOutFieldCount + 1; // +1 for entity cache index
+		constexpr uint32_t InstanceFieldCount = GpuOutFieldCount + 1; // +1 for entity cache index
 #else
-		constexpr uint32_t kInstanceFieldCount = kGpuOutFieldCount;
+		constexpr uint32_t InstanceFieldCount = GpuOutFieldCount;
 #endif
-		const VkDeviceSize kInstancesSize =
-			kInstanceFieldCount * static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
-		Frames[i].InstancesBuffer = VkMem->AllocateBuffer(kInstancesSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+		const VkDeviceSize InstancesSize =
+			InstanceFieldCount * static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
+		Frames[i].InstancesBuffer = VkMem->AllocateBuffer(InstancesSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 														  GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].InstancesBuffer.IsValid())
 		{
@@ -989,7 +989,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 		}
 
 		// Unsorted instances buffer (scatter output, pre-sort) — same size as sorted
-		Frames[i].UnsortedInstancesBuffer = VkMem->AllocateBuffer(kInstancesSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+		Frames[i].UnsortedInstancesBuffer = VkMem->AllocateBuffer(InstancesSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 																  GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].UnsortedInstancesBuffer.IsValid())
 		{
@@ -998,8 +998,8 @@ bool RendererCore<Derived>::CreateFrameSync()
 		}
 
 		// Mesh histogram + write index buffers (256 uint32 each = 1 KB)
-		constexpr VkDeviceSize kHistSize = kMaxMeshSlots * sizeof(uint32_t);
-		Frames[i].MeshHistogramBuffer    = VkMem->AllocateBuffer(kHistSize,
+		constexpr VkDeviceSize HistSize = MaxMeshSlots * sizeof(uint32_t);
+		Frames[i].MeshHistogramBuffer   = VkMem->AllocateBuffer(HistSize,
 															  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 															  GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].MeshHistogramBuffer.IsValid())
@@ -1008,7 +1008,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 			return false;
 		}
 
-		Frames[i].MeshWriteIdxBuffer = VkMem->AllocateBuffer(kHistSize,
+		Frames[i].MeshWriteIdxBuffer = VkMem->AllocateBuffer(HistSize,
 															 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 															 GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].MeshWriteIdxBuffer.IsValid())
@@ -1018,12 +1018,12 @@ bool RendererCore<Derived>::CreateFrameSync()
 		}
 	}
 
-	const VkDeviceSize kFieldSlabSize =
-		kGpuOutFieldCount * static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
-	for (int i = 0; i < kInstanceBufferCount; ++i)
+	const VkDeviceSize FieldSlabSize =
+		GpuOutFieldCount * static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
+	for (int i = 0; i < InstanceBufferCount; ++i)
 	{
 		FieldSlabs[i] = VkMem->AllocateBuffer(
-			kFieldSlabSize,
+			FieldSlabSize,
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 			GpuMemoryDomain::PersistentMapped,
 			/*requestDeviceAddress=*/ true);
@@ -1067,7 +1067,7 @@ bool RendererCore<Derived>::LoadShaders()
 		ci.pCode    = code.data();
 
 		VkShaderModule mod = VK_NULL_HANDLE;
-		vkCreateShaderModule(device, &ci, nullptr, &mod);
+		vkCreateShaderModule(Device, &ci, nullptr, &mod);
 		return mod;
 	};
 
@@ -1091,37 +1091,37 @@ void RendererCore<Derived>::DestroyShaders()
 
 	if (PredicatePipeline != VK_NULL_HANDLE)
 	{
-		vkDestroyPipeline(device, PredicatePipeline, nullptr);
+		vkDestroyPipeline(Device, PredicatePipeline, nullptr);
 		PredicatePipeline = VK_NULL_HANDLE;
 	}
 	if (PrefixSumPipeline != VK_NULL_HANDLE)
 	{
-		vkDestroyPipeline(device, PrefixSumPipeline, nullptr);
+		vkDestroyPipeline(Device, PrefixSumPipeline, nullptr);
 		PrefixSumPipeline = VK_NULL_HANDLE;
 	}
 	if (ScatterPipeline != VK_NULL_HANDLE)
 	{
-		vkDestroyPipeline(device, ScatterPipeline, nullptr);
+		vkDestroyPipeline(Device, ScatterPipeline, nullptr);
 		ScatterPipeline = VK_NULL_HANDLE;
 	}
 	if (BuildDrawsPipeline != VK_NULL_HANDLE)
 	{
-		vkDestroyPipeline(device, BuildDrawsPipeline, nullptr);
+		vkDestroyPipeline(Device, BuildDrawsPipeline, nullptr);
 		BuildDrawsPipeline = VK_NULL_HANDLE;
 	}
 	if (SortInstancesPipeline != VK_NULL_HANDLE)
 	{
-		vkDestroyPipeline(device, SortInstancesPipeline, nullptr);
+		vkDestroyPipeline(Device, SortInstancesPipeline, nullptr);
 		SortInstancesPipeline = VK_NULL_HANDLE;
 	}
 	if (VertShader != VK_NULL_HANDLE)
 	{
-		vkDestroyShaderModule(device, VertShader, nullptr);
+		vkDestroyShaderModule(Device, VertShader, nullptr);
 		VertShader = VK_NULL_HANDLE;
 	}
 	if (FragShader != VK_NULL_HANDLE)
 	{
-		vkDestroyShaderModule(device, FragShader, nullptr);
+		vkDestroyShaderModule(Device, FragShader, nullptr);
 		FragShader = VK_NULL_HANDLE;
 	}
 }
@@ -1156,7 +1156,7 @@ bool RendererCore<Derived>::CreateComputePipelines()
 		modCI.pCode    = code.data();
 
 		VkShaderModule mod = VK_NULL_HANDLE;
-		if (vkCreateShaderModule(device, &modCI, nullptr, &mod) != VK_SUCCESS)
+		if (vkCreateShaderModule(Device, &modCI, nullptr, &mod) != VK_SUCCESS)
 		{
 			LOG_ERROR_F("[Renderer] vkCreateShaderModule failed for %s", paths[i]);
 			return false;
@@ -1173,8 +1173,8 @@ bool RendererCore<Derived>::CreateComputePipelines()
 		pipeCI.stage  = stageCI;
 		pipeCI.layout = *PipelineLayout;
 
-		VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeCI, nullptr, targets[i]);
-		vkDestroyShaderModule(device, mod, nullptr);
+		VkResult result = vkCreateComputePipelines(Device, VK_NULL_HANDLE, 1, &pipeCI, nullptr, targets[i]);
+		vkDestroyShaderModule(Device, mod, nullptr);
 
 		if (result != VK_SUCCESS)
 		{
@@ -1231,31 +1231,31 @@ void RendererCore<Derived>::FillGpuFrameData(FrameSync& frame)
 	FrameData->Alpha                 = std::clamp(LogicPtr->GetFixedAlpha(), 0.0, 1.0);
 	FrameData->EntityCount           = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
 	FrameData->OutFieldStride        = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
-	FrameData->FieldCount            = kGpuOutFieldCount;
+	FrameData->FieldCount            = GpuOutFieldCount;
 	FrameData->UnsortedInstancesAddr = frame.UnsortedInstancesBuffer.DeviceAddr;
 	FrameData->MeshHistogramAddr     = frame.MeshHistogramBuffer.DeviceAddr;
 	FrameData->MeshWriteIdxAddr      = frame.MeshWriteIdxBuffer.DeviceAddr;
 	FrameData->MeshTableAddr         = Meshes.GetMeshTableAddr();
 	FrameData->MeshCount             = Meshes.GetMeshCount();
 
-	const uint32_t kFields[kGpuOutFieldCount] = {
-		kSemFlags,
-		kSemPosX, kSemPosY, kSemPosZ,
-		kSemRotQx, kSemRotQy, kSemRotQz, kSemRotQw,
-		kSemScaleX, kSemScaleY, kSemScaleZ,
-		kSemColorR, kSemColorG, kSemColorB, kSemColorA,
-		kSemMeshID,
+	const uint32_t Fields[GpuOutFieldCount] = {
+		SemFlags,
+		SemPosX, SemPosY, SemPosZ,
+		SemRotQx, SemRotQy, SemRotQz, SemRotQw,
+		SemScaleX, SemScaleY, SemScaleZ,
+		SemColorR, SemColorG, SemColorB, SemColorA,
+		SemMeshID,
 	};
 
 	const VkDeviceSize fieldStride = static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
 	const uint64_t slabBase        = FieldSlabs[CurrentFieldSlab].DeviceAddr;
 	const uint64_t prevSlabBase    = FieldSlabs[PrevFieldSlab].DeviceAddr;
 
-	for (uint32_t f = 0; f < kGpuOutFieldCount; ++f)
+	for (uint32_t f = 0; f < GpuOutFieldCount; ++f)
 	{
 		FrameData->CurrFieldAddrs[f]   = slabBase + static_cast<uint64_t>(f) * fieldStride;
 		FrameData->PrevFieldAddrs[f]   = prevSlabBase + static_cast<uint64_t>(f) * fieldStride;
-		FrameData->FieldSemantics[f]   = kFields[f];
+		FrameData->FieldSemantics[f]   = Fields[f];
 		FrameData->FieldElementSize[f] = sizeof(float);
 	}
 
@@ -1273,7 +1273,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 	uint32_t nextSlab = CurrentFieldSlab;
 	do
 	{
-		nextSlab = (nextSlab + 1) % kInstanceBufferCount;
+		nextSlab = (nextSlab + 1) % InstanceBufferCount;
 	} while (nextSlab == GPUActiveFrame || nextSlab == GPUPrevFrame);
 
 	const VkDeviceSize fieldStride = static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
@@ -1313,23 +1313,23 @@ void RendererCore<Derived>::WriteToFrameSlab()
 		size_t fi;
 		uint32_t sem;
 	};
-	const FieldDescription fieldDescs[kGpuOutFieldCount] = {
-		{temporalCache, temporalHdr, flagsSlot, 0, kSemFlags},
-		{temporalCache, temporalHdr, transformSlot, 0, kSemPosX},
-		{temporalCache, temporalHdr, transformSlot, 1, kSemPosY},
-		{temporalCache, temporalHdr, transformSlot, 2, kSemPosZ},
-		{temporalCache, temporalHdr, transformSlot, 3, kSemRotQx},
-		{temporalCache, temporalHdr, transformSlot, 4, kSemRotQy},
-		{temporalCache, temporalHdr, transformSlot, 5, kSemRotQz},
-		{temporalCache, temporalHdr, transformSlot, 6, kSemRotQw},
-		{volatileCache, volatileHdr, scaleSlot, 0, kSemScaleX},
-		{volatileCache, volatileHdr, scaleSlot, 1, kSemScaleY},
-		{volatileCache, volatileHdr, scaleSlot, 2, kSemScaleZ},
-		{volatileCache, volatileHdr, colorSlot, 0, kSemColorR},
-		{volatileCache, volatileHdr, colorSlot, 1, kSemColorG},
-		{volatileCache, volatileHdr, colorSlot, 2, kSemColorB},
-		{volatileCache, volatileHdr, colorSlot, 3, kSemColorA},
-		{volatileCache, volatileHdr, meshRefSlot, 0, kSemMeshID},
+	const FieldDescription fieldDescs[GpuOutFieldCount] = {
+		{temporalCache, temporalHdr, flagsSlot, 0, SemFlags},
+		{temporalCache, temporalHdr, transformSlot, 0, SemPosX},
+		{temporalCache, temporalHdr, transformSlot, 1, SemPosY},
+		{temporalCache, temporalHdr, transformSlot, 2, SemPosZ},
+		{temporalCache, temporalHdr, transformSlot, 3, SemRotQx},
+		{temporalCache, temporalHdr, transformSlot, 4, SemRotQy},
+		{temporalCache, temporalHdr, transformSlot, 5, SemRotQz},
+		{temporalCache, temporalHdr, transformSlot, 6, SemRotQw},
+		{volatileCache, volatileHdr, scaleSlot, 0, SemScaleX},
+		{volatileCache, volatileHdr, scaleSlot, 1, SemScaleY},
+		{volatileCache, volatileHdr, scaleSlot, 2, SemScaleZ},
+		{volatileCache, volatileHdr, colorSlot, 0, SemColorR},
+		{volatileCache, volatileHdr, colorSlot, 1, SemColorG},
+		{volatileCache, volatileHdr, colorSlot, 2, SemColorB},
+		{volatileCache, volatileHdr, colorSlot, 3, SemColorA},
+		{volatileCache, volatileHdr, meshRefSlot, 0, SemMeshID},
 	};
 
 	// ── Step 1: Scan slab Flags for dirty bit (bit 30) → build current dirty set ──
@@ -1358,7 +1358,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 		}
 
 		// Fan out: OR snapshot into ALL 5 GPU slab bitplanes
-		for (uint32_t s = 0; s < kInstanceBufferCount; ++s)
+		for (uint32_t s = 0; s < InstanceBufferCount; ++s)
 		{
 			for (uint32_t w = 0; w < DirtyWordCount; ++w)
 			{
@@ -1376,7 +1376,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 	if (fullCopy)
 	{
 		// First time writing to this slab — full copy, all fields
-		for (uint32_t f = 0; f < kGpuOutFieldCount; ++f)
+		for (uint32_t f = 0; f < GpuOutFieldCount; ++f)
 		{
 			const FieldDescription& fd = fieldDescs[f];
 			const void* src            = fd.cache->GetFieldData(fd.hdr, fd.slot, fd.fi);
@@ -1393,7 +1393,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 	{
 		// Selective upload: one job per field, each scatters only dirty entities.
 		// All jobs read the same bitplane (immutable until cleared after wait).
-		for (uint32_t f = 0; f < kGpuOutFieldCount; ++f)
+		for (uint32_t f = 0; f < GpuOutFieldCount; ++f)
 		{
 			const FieldDescription& fd = fieldDescs[f];
 			const auto* src            = static_cast<const uint8_t*>(fd.cache->GetFieldData(fd.hdr, fd.slot, fd.fi));
@@ -1456,7 +1456,7 @@ bool RendererCore<Derived>::CreatePipeline()
 	layoutCI.pPushConstantRanges    = &pushRange;
 
 	VkPipelineLayout rawLayout = VK_NULL_HANDLE;
-	if (vkCreatePipelineLayout(device, &layoutCI, nullptr, &rawLayout) != VK_SUCCESS)
+	if (vkCreatePipelineLayout(Device, &layoutCI, nullptr, &rawLayout) != VK_SUCCESS)
 	{
 		LOG_ERROR("[Renderer] vkCreatePipelineLayout failed");
 		return false;
@@ -1540,7 +1540,7 @@ bool RendererCore<Derived>::CreatePipeline()
 	pipelineCI.layout              = *PipelineLayout;
 
 	VkPipeline rawPipeline = VK_NULL_HANDLE;
-	if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &rawPipeline) != VK_SUCCESS)
+	if (vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &rawPipeline) != VK_SUCCESS)
 	{
 		LOG_ERROR("[Renderer] vkCreateGraphicsPipelines failed");
 		return false;
@@ -1575,7 +1575,7 @@ bool RendererCore<Derived>::CreateDepthImage()
 	DepthFormat = depthFormat;
 
 	const vk::Extent2D ext = VkCtx->GetSwapchain().Extent;
-	for (int i = 0; i < kMaxFramesInFlight; ++i)
+	for (int i = 0; i < MaxFramesInFlight; ++i)
 	{
 		Frames[i].DepthAttachment = VkMem->AllocateImage(
 			{ext.width, ext.height},
@@ -1592,7 +1592,7 @@ bool RendererCore<Derived>::CreateDepthImage()
 template <typename Derived>
 void RendererCore<Derived>::OnSwapchainResize()
 {
-	vkDeviceWaitIdle(device);
+	vkDeviceWaitIdle(Device);
 	VkCtx->RecreateSwapchain(WindowPtr);
 	CreateDepthImage();
 #ifdef TNX_GPU_PICKING
@@ -1661,7 +1661,7 @@ template <typename Derived>
 bool RendererCore<Derived>::CreatePickImages()
 {
 	const vk::Extent2D ext = VkCtx->GetSwapchain().Extent;
-	for (int i = 0; i < kMaxFramesInFlight; ++i)
+	for (int i = 0; i < MaxFramesInFlight; ++i)
 	{
 		Frames[i].PickAttachment = VkMem->AllocateImage(
 			{ext.width, ext.height},
@@ -1708,7 +1708,7 @@ bool RendererCore<Derived>::LoadPickShaders()
 		ci.codeSize        = code.size() * sizeof(uint32_t);
 		ci.pCode           = code.data();
 		VkShaderModule mod = VK_NULL_HANDLE;
-		vkCreateShaderModule(device, &ci, nullptr, &mod);
+		vkCreateShaderModule(Device, &ci, nullptr, &mod);
 		return mod;
 	};
 
@@ -1740,8 +1740,8 @@ bool RendererCore<Derived>::LoadPickShaders()
 	pipeCI.stage  = stageCI;
 	pipeCI.layout = *PipelineLayout; // same push constant layout
 
-	VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeCI, nullptr, &ScatterPickPipeline);
-	vkDestroyShaderModule(device, scatterMod, nullptr);
+	VkResult result = vkCreateComputePipelines(Device, VK_NULL_HANDLE, 1, &pipeCI, nullptr, &ScatterPickPipeline);
+	vkDestroyShaderModule(Device, scatterMod, nullptr);
 
 	if (result != VK_SUCCESS)
 	{
@@ -1759,8 +1759,8 @@ bool RendererCore<Derived>::LoadPickShaders()
 
 	stageCI.module = sortMod;
 	pipeCI.stage   = stageCI;
-	result         = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeCI, nullptr, &SortPickPipeline);
-	vkDestroyShaderModule(device, sortMod, nullptr);
+	result         = vkCreateComputePipelines(Device, VK_NULL_HANDLE, 1, &pipeCI, nullptr, &SortPickPipeline);
+	vkDestroyShaderModule(Device, sortMod, nullptr);
 
 	if (result != VK_SUCCESS)
 	{
@@ -1857,7 +1857,7 @@ bool RendererCore<Derived>::CreatePickPipeline()
 	pipelineCI.layout              = *PipelineLayout; // same push constant layout
 
 	VkPipeline rawPipeline = VK_NULL_HANDLE;
-	VkResult result        = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &rawPipeline);
+	VkResult result        = vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &rawPipeline);
 	if (result != VK_SUCCESS)
 	{
 		LOG_ERROR_F("[Renderer] Pick pipeline creation failed: %d", result);
@@ -1874,22 +1874,22 @@ void RendererCore<Derived>::DestroyPickShaders()
 {
 	if (ScatterPickPipeline != VK_NULL_HANDLE)
 	{
-		vkDestroyPipeline(device, ScatterPickPipeline, nullptr);
+		vkDestroyPipeline(Device, ScatterPickPipeline, nullptr);
 		ScatterPickPipeline = VK_NULL_HANDLE;
 	}
 	if (SortPickPipeline != VK_NULL_HANDLE)
 	{
-		vkDestroyPipeline(device, SortPickPipeline, nullptr);
+		vkDestroyPipeline(Device, SortPickPipeline, nullptr);
 		SortPickPipeline = VK_NULL_HANDLE;
 	}
 	if (PickVertShader != VK_NULL_HANDLE)
 	{
-		vkDestroyShaderModule(device, PickVertShader, nullptr);
+		vkDestroyShaderModule(Device, PickVertShader, nullptr);
 		PickVertShader = VK_NULL_HANDLE;
 	}
 	if (PickFragShader != VK_NULL_HANDLE)
 	{
-		vkDestroyShaderModule(device, PickFragShader, nullptr);
+		vkDestroyShaderModule(Device, PickFragShader, nullptr);
 		PickFragShader = VK_NULL_HANDLE;
 	}
 }

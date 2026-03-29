@@ -954,7 +954,7 @@ All entity data (including flags) flows through the field slab — 5 PersistentM
 that cycle independently of the 2 GPU frame-in-flight slots. The render thread copies SoA field
 arrays from TemporalComponentCache/VolatileComponentCache into the current slab when a new logic
 frame is detected. `GpuFrameData.CurrFieldAddrs[]` and `PrevFieldAddrs[]` point into the current
-and previous slabs respectively. Flags are always at field index 0 (`kSemFlags` semantic).
+and previous slabs respectively. Flags are always at field index 0 (`SemFlags` semantic).
 
 The InstanceBuffer is SoA: field `k` (semantic-1), entity `outIdx` →
 `InstancesAddr[k * OutFieldStride + outIdx]`.

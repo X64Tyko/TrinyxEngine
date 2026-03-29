@@ -77,8 +77,8 @@ TEST(DirtyBits_SetAfterPrePhys)
 
 	TrinyxJobs::Initialize(Reg->GetConfig);
 
-	constexpr int kCount = 16; // exactly 2 dirty bytes
-	Reg->Create<CubeEntity<>>(kCount);
+	constexpr int Count = 16; // exactly 2 dirty bytes
+	Reg->Create<CubeEntity<>>(Count);
 
 	std::vector<Archetype*> arches = Reg->ClassQuery<CubeEntity<>>();
 	ASSERT(!arches.empty());
@@ -90,10 +90,10 @@ TEST(DirtyBits_SetAfterPrePhys)
 	uint8_t* dirtyBytes = reinterpret_cast<uint8_t*>(Reg->DirtyBitsFrame(0)->data()) + (gsi / 8);
 
 	LOG_INFO_F("[DirtyBits] CacheIndexStart=%zu  byteOffset=%zu", gsi, gsi / 8);
-	for (int b = 0; b < (kCount + 7) / 8; ++b)
+	for (int b = 0; b < (Count + 7) / 8; ++b)
 		LOG_INFO_F("[DirtyBits]   byte[%d] = 0x%02X  (expected 0xFF)", b, dirtyBytes[b]);
 
-	for (int b = 0; b < (kCount + 7) / 8; ++b)
+	for (int b = 0; b < (Count + 7) / 8; ++b)
 		ASSERT_EQ((int)dirtyBytes[b], 0xFF);
 
 	Engine.ResetRegistry();
@@ -355,29 +355,29 @@ RUNTIME_TEST(Spawn_SuperCubeGrid)
 	std::mt19937 gen(rd());
 	std::uniform_real_distribution<float> colorDist(0.2f, 1.0f);
 
-	constexpr int kCount      = 100000;
-	constexpr float kSpacing  = 3.0f;
-	constexpr float kCubeHalf = 0.5f;
-	constexpr float kYBase    = 10.0f;
-	constexpr float kZOffset  = -200.0f;
+	constexpr int Count      = 100000;
+	constexpr float Spacing  = 3.0f;
+	constexpr float CubeHalf = 0.5f;
+	constexpr float YBase    = 10.0f;
+	constexpr float ZOffset  = -200.0f;
 
-	int gridSide   = static_cast<int>(std::ceil(std::sqrt(static_cast<float>(kCount))));
-	float gridHalf = static_cast<float>(gridSide) * kSpacing * 0.5f;
+	int gridSide   = static_cast<int>(std::ceil(std::sqrt(static_cast<float>(Count))));
+	float gridHalf = static_cast<float>(gridSide) * Spacing * 0.5f;
 
 	static std::vector<CubeSetup> setups;
 	setups.clear();
-	setups.reserve(kCount);
+	setups.reserve(Count);
 
-	for (int i = 0; i < kCount; ++i)
+	for (int i = 0; i < Count; ++i)
 	{
 		int row = i / gridSide;
 		int col = i % gridSide;
 
 		setups.push_back({
-			static_cast<float>(col) * kSpacing - gridHalf,
-			kYBase + static_cast<float>(row) * kSpacing,
-			kZOffset,
-			kCubeHalf, kCubeHalf, kCubeHalf,
+			static_cast<float>(col) * Spacing - gridHalf,
+			YBase + static_cast<float>(row) * Spacing,
+			ZOffset,
+			CubeHalf, CubeHalf, CubeHalf,
 			0.0f,
 			colorDist(gen), colorDist(gen), colorDist(gen),
 			JoltMotion::Static
@@ -390,7 +390,7 @@ RUNTIME_TEST(Spawn_SuperCubeGrid)
 	});
 
 	LOG_ALWAYS_F("SuperCube Grid: %d entities in %dx%d grid (30s lifetime)",
-				 kCount, gridSide, gridSide);
+				 Count, gridSide, gridSide);
 
 	// Self-destruct after 30 seconds
 	auto* idsPtr = &gSuperCubeIds;
@@ -421,19 +421,19 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 	std::uniform_real_distribution<float> speedDist(30.0f, 80.0f);
 	std::uniform_real_distribution<float> colorDist(0.4f, 1.0f);
 
-	constexpr int kCount     = 0;
-	constexpr float kOriginY = 20.0f;
-	constexpr float kOriginZ = -50.0f;
+	constexpr int Count     = 0;
+	constexpr float OriginY = 20.0f;
+	constexpr float OriginZ = -50.0f;
 
 	static std::vector<ProjectileSetup> setups;
 	setups.clear();
-	setups.reserve(kCount);
+	setups.reserve(Count);
 
-	for (int i = 0; i < kCount; ++i)
+	for (int i = 0; i < Count; ++i)
 	{
 		float speed = speedDist(gen);
 		setups.push_back({
-			0.0f, kOriginY, kOriginZ,
+			0.0f, OriginY, OriginZ,
 			spreadDist(gen), spreadDist(gen) + 10.0f, -speed,
 			colorDist(gen), colorDist(gen) * 0.5f, 0.1f, 1.0f
 		});
@@ -445,7 +445,7 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 	});
 
 	LOG_ALWAYS_F("Projectile Burst: %d projectiles from origin (0, %.0f, %.0f) (30s lifetime)",
-				 kCount, kOriginY, kOriginZ);
+				 Count, OriginY, OriginZ);
 
 	// Self-destruct after 30 seconds
 	auto* idsPtr = &gProjectileIds;

@@ -41,7 +41,7 @@ class Registry
 {
 public:
 	Registry();
-	Registry(const EngineConfig* Config);
+	Registry(const EngineConfig* config);
 	~Registry();
 
 	// --- Entity creation (public API returns LHandles for OOP land) ---
@@ -52,23 +52,23 @@ public:
 	std::vector<EntityHandle> Create(size_t count);
 
 	// Destroy + recreate at the same ClassID, reusing the handle slot
-	void Recreate(EntityHandle& InHandle);
+	void Recreate(EntityHandle& inHandle);
 
 	// Destroy + recreate as a different type
 	template <typename T>
-	void RecreateAs(EntityHandle& InHandle);
-	void RecreateAs(EntityHandle& InHandle, const EntityHandle& asHandle);
+	void RecreateAs(EntityHandle& inHandle);
+	void RecreateAs(EntityHandle& inHandle, const EntityHandle& asHandle);
 
 	// --- Entity destruction (deferred until ProcessDeferredDestructions) ---
 
-	void Destroy(EntityHandle LHandle);
-	void DestroyByGlobalHandle(GlobalEntityHandle GHandle);
+	void Destroy(EntityHandle lHandle);
+	void DestroyByGlobalHandle(GlobalEntityHandle gHandle);
 	void ProcessDeferredDestructions();
 
 	// --- Component access ---
 
 	template <typename T>
-	bool HasComponent(EntityHandle LHandle);
+	bool HasComponent(EntityHandle lHandle);
 
 	// --- Queries ---
 
@@ -99,10 +99,10 @@ public:
 	const auto& GetArchetypes() const { return Archetypes; }
 
 	// Reverse lookup: cache slot → record (read-only copy). Returns invalid record if not found.
-	EntityRecord GetRecordByCache(EntityCacheHandle CacheHandle) const;
+	EntityRecord GetRecordByCache(EntityCacheHandle cacheHandle) const;
 
 	// Reverse lookup: cache slot → GHandle. Returns default GlobalEntityHandle() if not found.
-	GlobalEntityHandle FindEntityByLocation(EntityCacheHandle CacheHandle) const;
+	GlobalEntityHandle FindEntityByLocation(EntityCacheHandle cacheHandle) const;
 
 	// Render → Logic handshake: render publishes the logic frame number it just consumed.
 	// Logic reads this to decide whether to clear accumulated dirty bits (bit 30).
@@ -131,21 +131,21 @@ private:
 	void CreateInternal(ClassID classID, std::span<GlobalEntityHandle> outHandles);
 	EntityHandle CreateByClassID(ClassID classID);
 	std::vector<EntityHandle> CreateByClassID(ClassID classID, size_t count);
-	EntityHandle MakeEntityHandle(GlobalEntityHandle GHandle, ClassID classID);
+	EntityHandle MakeEntityHandle(GlobalEntityHandle gHandle, ClassID classID);
 
-	void RecreateAs(EntityHandle& InHandle, ClassID newClassID);
+	void RecreateAs(EntityHandle& inHandle, ClassID newClassID);
 
 	// --- Archetype management ---
 
-	Archetype* GetOrCreateArchetype(const Signature& Sig, const ClassID& ID);
+	Archetype* GetOrCreateArchetype(const Signature& sig, const ClassID& id);
 	void InitializeArchetypes();
 
 	// --- Destruction internals ---
 	// DestroyRecord removes the entity from its archetype.
 	// FreeGlobalHandle reclaims the record index and requests local/net handle recycling.
 
-	bool DestroyRecord(GlobalEntityHandle& GHandle);
-	bool DestroyRecord(EntityRecord& Record);
+	bool DestroyRecord(GlobalEntityHandle& gHandle);
+	bool DestroyRecord(EntityRecord& record);
 
 	// --- Slab tier dispatch ---
 	// When TNX_ENABLE_ROLLBACK is off, Temporal falls back to the Volatile slab
@@ -215,7 +215,7 @@ private:
 	// --- Handle allocation/recycling methods ---
 
 	GlobalEntityHandle AllocateGlobalHandle();
-	void FreeGlobalHandle(GlobalEntityHandle GHandle);
+	void FreeGlobalHandle(GlobalEntityHandle gHandle);
 
 	uint32_t AllocateLocalIndex();
 	uint32_t AllocateNetIndex();
@@ -240,12 +240,12 @@ EntityHandle Registry::Create()
 }
 
 template <typename T>
-void Registry::RecreateAs(EntityHandle& InHandle)
+void Registry::RecreateAs(EntityHandle& inHandle)
 {
-	if (GlobalEntityRegistry.IsHandleValid(InHandle)) Destroy(InHandle);
+	if (GlobalEntityRegistry.IsHandleValid(inHandle)) Destroy(inHandle);
 
-	ClassID TargetType = T::StaticClassID();
-	InHandle           = CreateByClassID(TargetType);
+	ClassID targetType = T::StaticClassID();
+	inHandle           = CreateByClassID(targetType);
 }
 
 template <typename T>
@@ -255,12 +255,12 @@ std::vector<EntityHandle> Registry::Create(size_t count)
 }
 
 template <typename T>
-bool Registry::HasComponent(EntityHandle LHandle)
+bool Registry::HasComponent(EntityHandle lHandle)
 {
-	constexpr ComponentTypeID TypeID = T::StaticTypeID();
-	const ClassID Class              = LHandle.GetTypeID();
-	MetaRegistry& MR                 = MetaRegistry::Get();
-	return (MR.ClassToArchetype[Class] & TypeID) == TypeID;
+	constexpr ComponentTypeID typeID = T::StaticTypeID();
+	const ClassID classType          = lHandle.GetTypeID();
+	MetaRegistry& mr                 = MetaRegistry::Get();
+	return (mr.ClassToArchetype[classType] & typeID) == typeID;
 }
 
 template <typename... Components>

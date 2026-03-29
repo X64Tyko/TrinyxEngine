@@ -8,17 +8,17 @@
 
 #include "Registry.h"
 
-Archetype::Archetype(const Signature& Sig, const ClassID& ID, const char* DebugName)
-	: ArchSignature(Sig)
-	, ArchClassID(ID)
-	, DebugName(DebugName)
+Archetype::Archetype(const Signature& sig, const ClassID& id, const char* debugName)
+	: ArchSignature(sig)
+	, ArchClassID(id)
+	, DebugName(debugName)
 {
 }
 
-Archetype::Archetype(const ArchetypeKey& ArchKey, const char* DebugName)
-	: ArchSignature(ArchKey.Sig)
-	, ArchClassID(ArchKey.ID)
-	, DebugName(DebugName)
+Archetype::Archetype(const ArchetypeKey& archKey, const char* debugName)
+	: ArchSignature(archKey.Sig)
+	, ArchClassID(archKey.ID)
+	, DebugName(debugName)
 {
 }
 
@@ -42,7 +42,7 @@ Archetype::~Archetype()
 // For each field: queries its CacheTier from ComponentFieldRegistry, then records a FieldDescriptor
 // with the appropriate frame count and stride (cold fields get frameCount=1, frameStride=0).
 // Called exactly once per archetype by Registry::GetOrCreateArchetype / InitializeArchetypes.
-void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& Components, SystemID inArchSystemID)
+void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& components, SystemID inArchSystemID)
 {
 	assert(ArchetypeFieldLayout.count() == 0 && "BuildLayout called multiple times on same archetype");
 	Reg          = reg;
@@ -50,13 +50,13 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& C
 
 	constexpr size_t ReservedHeaderSpace = Chunk::HEADER_SIZE;
 
-	// Entity class declares chunk size via kEntitiesPerChunk or inherits the default (256).
+	// Entity class declares chunk size via EntitiesPerChunk or inherits the default (256).
 	EntitiesPerChunk = MetaRegistry::Get().EntityGetters[ArchClassID].EntitiesPerChunk;
 
 	size_t currentOffset   = ReservedHeaderSpace;
 	uint8_t ArchfieldIndex = 0;
 
-	for (const ComponentMetaEx& comp : Components)
+	for (const ComponentMetaEx& comp : components)
 	{
 		ComponentTypeID typeID = comp.TypeID;
 
@@ -107,14 +107,14 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& C
 
 // Returns the number of allocated slots in a specific chunk (includes tombstoned).
 // Use for iteration bounds — callers rely on bitplane/masked-store to skip dead slots.
-uint32_t Archetype::GetAllocatedChunkCount(size_t ChunkIndex) const
+uint32_t Archetype::GetAllocatedChunkCount(size_t chunkIndex) const
 {
-	if (Chunks.empty() || ChunkIndex >= Chunks.size() || EntitiesPerChunk == 0) return 0;
+	if (Chunks.empty() || chunkIndex >= Chunks.size() || EntitiesPerChunk == 0) return 0;
 
-	if (ChunkIndex == Chunks.size() - 1)
+	if (chunkIndex == Chunks.size() - 1)
 	{
-		uint32_t Remainder = AllocatedEntityCount % EntitiesPerChunk;
-		return (Remainder == 0 && AllocatedEntityCount > 0) ? EntitiesPerChunk : Remainder;
+		uint32_t remainder = AllocatedEntityCount % EntitiesPerChunk;
+		return (remainder == 0 && AllocatedEntityCount > 0) ? EntitiesPerChunk : remainder;
 	}
 
 	return EntitiesPerChunk;
@@ -124,14 +124,14 @@ uint32_t Archetype::GetAllocatedChunkCount(size_t ChunkIndex) const
 // TODO: Currently an approximation — derives per-chunk count from a global TotalEntityCount
 // counter, which doesn't track which chunks the removals came from. Needs per-chunk live
 // counters or Active flag scanning to be accurate.
-uint32_t Archetype::GetLiveChunkCount(size_t ChunkIndex) const
+uint32_t Archetype::GetLiveChunkCount(size_t chunkIndex) const
 {
-	if (Chunks.empty() || ChunkIndex >= Chunks.size() || EntitiesPerChunk == 0) return 0;
+	if (Chunks.empty() || chunkIndex >= Chunks.size() || EntitiesPerChunk == 0) return 0;
 
-	if (ChunkIndex == Chunks.size() - 1)
+	if (chunkIndex == Chunks.size() - 1)
 	{
-		uint32_t Remainder = TotalEntityCount % EntitiesPerChunk;
-		return (Remainder == 0 && TotalEntityCount > 0) ? EntitiesPerChunk : Remainder;
+		uint32_t remainder = TotalEntityCount % EntitiesPerChunk;
+		return (remainder == 0 && TotalEntityCount > 0) ? EntitiesPerChunk : remainder;
 	}
 
 	return EntitiesPerChunk;
@@ -188,17 +188,17 @@ void Archetype::PushEntities(std::span<EntitySlot> outSlots)
 // The Dirty flag propagates through the GPU pipeline: the predicate shader reads it and
 // excludes the entity from draw commands. Memory is not freed here — the slot stays
 // allocated in the chunk and can be reclaimed by PushEntities.
-void Archetype::RemoveEntity(size_t ChunkIndex, uint32_t LocalIndex, uint32_t ArchetypeIdx)
+void Archetype::RemoveEntity(size_t chunkIndex, uint32_t localIndex, uint32_t archetypeIdx)
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
 	if (AllocatedEntityCount == 0) return;
-	if (ChunkIndex >= Chunks.size()) return;
-	if (LocalIndex >= EntitiesPerChunk) return;
+	if (chunkIndex >= Chunks.size()) return;
+	if (localIndex >= EntitiesPerChunk) return;
 
 	// Write Dirty into the Flags field so the GPU predicate shader stops drawing this entity.
 	{
-		Chunk* chunk                = Chunks[ChunkIndex];
+		Chunk* chunk                = Chunks[chunkIndex];
 		ComponentTypeID flagsTypeID = CacheSlotMeta<>::StaticTypeID();
 		FieldKey flagKey{flagsTypeID, ComponentFieldRegistry::Get().GetCacheSlotIndex(flagsTypeID), 0};
 		auto* flagDesc = ArchetypeFieldLayout.find(flagKey);
@@ -213,11 +213,11 @@ void Archetype::RemoveEntity(size_t ChunkIndex, uint32_t LocalIndex, uint32_t Ar
 			flagsBase           += writeFrame * flagDesc->fieldFrameStride;
 		}
 
-		auto* MetaInfo = reinterpret_cast<uint32_t*>(flagsBase) + LocalIndex;
-		*MetaInfo      = static_cast<uint32_t>(TemporalFlagBits::Dirty);
+		auto* metaInfo = reinterpret_cast<uint32_t*>(flagsBase) + localIndex;
+		*metaInfo      = static_cast<uint32_t>(TemporalFlagBits::Dirty);
 	}
 
-	InactiveEntitySlots.push_back(ActiveEntitySlots[ArchetypeIdx]);
+	InactiveEntitySlots.push_back(ActiveEntitySlots[archetypeIdx]);
 
 	// Only TotalEntityCount is decremented (live count).
 	// AllocatedEntityCount stays — it's the high-water mark for iteration bounds.
@@ -226,14 +226,14 @@ void Archetype::RemoveEntity(size_t ChunkIndex, uint32_t LocalIndex, uint32_t Ar
 
 // Returns base pointers (frame 0) for every field of a given component type within a chunk.
 // Used by external code that needs per-field access without going through BuildFieldArrayTable.
-std::vector<void*> Archetype::GetFieldArrays(Chunk* TargetChunk, ComponentTypeID TypeID)
+std::vector<void*> Archetype::GetFieldArrays(Chunk* targetChunk, ComponentTypeID typeID)
 {
-	ComponentFieldRegistry& CFR          = ComponentFieldRegistry::Get();
-	const std::vector<FieldMeta>* fields = CFR.GetFields(TypeID);
+	ComponentFieldRegistry& cfr          = ComponentFieldRegistry::Get();
+	const std::vector<FieldMeta>* fields = cfr.GetFields(typeID);
 
 	if (!fields || fields->empty())
 	{
-		LOG_ERROR_F("Component %u has no fields registered", TypeID);
+		LOG_ERROR_F("Component %u has no fields registered", typeID);
 		return {};
 	}
 
@@ -242,11 +242,11 @@ std::vector<void*> Archetype::GetFieldArrays(Chunk* TargetChunk, ComponentTypeID
 
 	for (size_t fieldIdx = 0; fieldIdx < fields->size(); ++fieldIdx)
 	{
-		FieldKey key{TypeID, CFR.GetCacheSlotIndex(TypeID), static_cast<uint32_t>(fieldIdx)};
+		FieldKey key{typeID, cfr.GetCacheSlotIndex(typeID), static_cast<uint32_t>(fieldIdx)};
 		auto it = ArchetypeFieldLayout.find(key);
 		if (it)
 		{
-			fieldArrays.push_back(TargetChunk->GetFieldPtr(it->fieldSlotIndex));
+			fieldArrays.push_back(targetChunk->GetFieldPtr(it->fieldSlotIndex));
 		}
 	}
 

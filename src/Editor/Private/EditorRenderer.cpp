@@ -19,8 +19,8 @@
 // -----------------------------------------------------------------------
 struct ImGuiEventQueue
 {
-	static constexpr uint32_t kCapacity = 64;
-	SDL_Event Events[kCapacity]{};
+	static constexpr uint32_t Capacity = 64;
+	SDL_Event Events[Capacity]{};
 	uint32_t Head = 0;
 	uint32_t Tail = 0;
 	std::mutex Mutex;
@@ -33,8 +33,8 @@ struct ImGuiEventQueue
 		std::lock_guard lock(Mutex);
 		if (e.type == SDL_EVENT_DROP_FILE && e.drop.data) PendingDropPath = e.drop.data;
 		Events[Head] = e;
-		Head         = (Head + 1) % kCapacity;
-		if (Head == Tail) Tail = (Tail + 1) % kCapacity;
+		Head         = (Head + 1) % Capacity;
+		if (Head == Tail) Tail = (Tail + 1) % Capacity;
 	}
 
 	// Drain events: feed to ImGui and collect any dropped file paths.
@@ -48,7 +48,7 @@ struct ImGuiEventQueue
 			SDL_Event& ev = Events[Tail];
 			ImGui_ImplSDL3_ProcessEvent(&ev);
 			if (ev.type == SDL_EVENT_DROP_FILE) droppedFile = std::move(PendingDropPath);
-			Tail = (Tail + 1) % kCapacity;
+			Tail = (Tail + 1) % Capacity;
 		}
 		return droppedFile;
 	}
@@ -101,7 +101,7 @@ bool EditorRenderer::InitImGui()
 	poolCI.poolSizeCount = 1;
 	poolCI.pPoolSizes    = poolSizes;
 
-	if (vkCreateDescriptorPool(device, &poolCI, nullptr, &ImGuiDescriptorPool) != VK_SUCCESS)
+	if (vkCreateDescriptorPool(Device, &poolCI, nullptr, &ImGuiDescriptorPool) != VK_SUCCESS)
 	{
 		LOG_ERROR("[EditorRenderer] Failed to create ImGui descriptor pool");
 		return false;
@@ -140,7 +140,7 @@ bool EditorRenderer::InitImGui()
 	initInfo.ApiVersion          = VK_API_VERSION_1_4;
 	initInfo.Instance            = VkCtx->GetInstance();
 	initInfo.PhysicalDevice      = VkCtx->GetPhysicalDevice();
-	initInfo.Device              = device;
+	initInfo.Device              = Device;
 	initInfo.QueueFamily         = VkCtx->GetQueues().GraphicsFamily;
 	initInfo.Queue               = static_cast<VkQueue>(VkCtx->GetQueues().Graphics);
 	initInfo.DescriptorPool      = ImGuiDescriptorPool;
@@ -174,7 +174,7 @@ void EditorRenderer::ShutdownImGui()
 {
 	if (!bImGuiInitialized) return;
 
-	vkDeviceWaitIdle(device);
+	vkDeviceWaitIdle(Device);
 
 	delete Editor;
 	Editor = nullptr;
@@ -187,7 +187,7 @@ void EditorRenderer::ShutdownImGui()
 
 	if (ImGuiDescriptorPool != VK_NULL_HANDLE)
 	{
-		vkDestroyDescriptorPool(device, ImGuiDescriptorPool, nullptr);
+		vkDestroyDescriptorPool(Device, ImGuiDescriptorPool, nullptr);
 		ImGuiDescriptorPool = VK_NULL_HANDLE;
 	}
 

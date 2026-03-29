@@ -178,9 +178,9 @@ public:
 			EntityGetters[ID].PostPhys = InvokePostPhysicsImpl<T>;
 		}
 
-		if constexpr (requires { T::kEntitiesPerChunk; })
+		if constexpr (requires { T::EntitiesPerChunk; })
 		{
-			EntityGetters[ID].EntitiesPerChunk = T::kEntitiesPerChunk;
+			EntityGetters[ID].EntitiesPerChunk = T::EntitiesPerChunk;
 		}
 	}
 

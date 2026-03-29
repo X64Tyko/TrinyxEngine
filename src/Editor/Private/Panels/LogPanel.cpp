@@ -63,7 +63,7 @@ void LogPanel::Draw(EditorState& /*state*/)
 	const Logger& logger = Logger::Get();
 	const LogEntry* ring = logger.GetLogRing();
 	uint32_t head        = logger.GetLogHead();
-	uint32_t ringSize    = Logger::kLogRingSize;
+	uint32_t ringSize    = Logger::LogRingSize;
 	uint32_t start       = (head < ringSize) ? 0 : head - ringSize;
 
 	for (uint32_t i = start; i < head; ++i)

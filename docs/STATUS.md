@@ -75,8 +75,8 @@ latency, rollback netcode, networked multiplayer.
 - Shared struct header: `shaders/GpuFrameData.slang` (C++ mirror: `GpuFrameData.h`, static_assert 3192 bytes)
 - CMakeLists: slangc invocations with `-I shaders` + GpuFrameData.slang in DEPENDS
 - 3-pass: predicate → prefix_sum (Option-B subgroup scan) → scatter (GPU interpolation + InstanceBuffer)
-- Flags read from field slab via `CurrFieldAddrs[0]` (kSemFlags=1, always index 0 by convention)
-- 14 field semantics: Flags + PosXYZ + RotXYZ + ScaleXYZ + ColorRGBA (kSemFlags=1..kSemColorA=14)
+- Flags read from field slab via `CurrFieldAddrs[0]` (SemFlags=1, always index 0 by convention)
+- 14 field semantics: Flags + PosXYZ + RotXYZ + ScaleXYZ + ColorRGBA (SemFlags=1..SemColorA=14)
 - 5 field slabs (PersistentMapped, cycling independently of 2 GPU frame slots)
 - Compute→graphics barrier: `dstStage = VERTEX_SHADER_BIT | DRAW_INDIRECT_BIT`
 - Camera wired: LogicThread::PublishCompletedFrame writes Vulkan RH perspective + identity view each frame

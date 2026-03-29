@@ -23,7 +23,7 @@ struct ActionBinding
 	Action Mapping;
 };
 
-inline constexpr ActionBinding kDefaultBindings[] = {
+inline constexpr ActionBinding DefaultBindings[] = {
 	{SDL_SCANCODE_W, Action::MoveForward},
 	{SDL_SCANCODE_S, Action::MoveBackward},
 	{SDL_SCANCODE_A, Action::MoveLeft},
@@ -31,7 +31,7 @@ inline constexpr ActionBinding kDefaultBindings[] = {
 	{SDL_SCANCODE_SPACE, Action::MoveUp},
 	{SDL_SCANCODE_LCTRL, Action::MoveDown},
 };
-inline constexpr int kDefaultBindingCount = static_cast<int>(sizeof(kDefaultBindings) / sizeof(kDefaultBindings[0]));
+inline constexpr int DefaultBindingCount = static_cast<int>(sizeof(DefaultBindings) / sizeof(DefaultBindings[0]));
 
 // ── Event queue entry ────────────────────────────────────────────────────────
 struct InputData
@@ -79,7 +79,7 @@ struct InputBuffer
 	// Perf counter captured at the moment Brain calls Swap().
 	// Carried through the frame header to VulkRender for input→photon measurement.
 	uint64_t LastSwapPerfCount = 0;
-	uint64_t currentSwapTime   = 0;
+	uint64_t CurrentSwapTime   = 0;
 #endif
 
 	// ── Sentinel-side (writer) ───────────────────────────────────────────
@@ -124,8 +124,8 @@ struct InputBuffer
 	void Swap()
 	{
 #if TNX_DEV_METRICS
-		LastSwapPerfCount = currentSwapTime;
-		currentSwapTime   = SDL_GetPerformanceCounter();
+		LastSwapPerfCount = CurrentSwapTime;
+		CurrentSwapTime   = SDL_GetPerformanceCounter();
 #endif
 		ReadSlot         = WriteSlot.load(std::memory_order_acquire);
 		uint8_t newWrite = ReadSlot ^ 1;
@@ -163,9 +163,9 @@ struct InputBuffer
 
 	bool IsActionDown(Action action) const
 	{
-		for (int i = 0; i < kDefaultBindingCount; ++i)
+		for (int i = 0; i < DefaultBindingCount; ++i)
 		{
-			if (kDefaultBindings[i].Mapping == action && IsKeyDown(kDefaultBindings[i].Key)) return true;
+			if (DefaultBindings[i].Mapping == action && IsKeyDown(DefaultBindings[i].Key)) return true;
 		}
 		return false;
 	}
@@ -174,6 +174,6 @@ struct InputBuffer
 	float GetMouseDY() const { return MouseDY[ReadSlot]; }
 #if TNX_DEV_METRICS
 	uint64_t GetSwapPerfCount() const { return LastSwapPerfCount; }
-	uint64_t GetCurrentSwapTime() const { return currentSwapTime; }
+	uint64_t GetCurrentSwapTime() const { return CurrentSwapTime; }
 #endif
 };

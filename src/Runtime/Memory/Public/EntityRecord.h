@@ -73,10 +73,10 @@ public:
 	{
 	}
 
-	GlobalEntityHandle(uint32_t Index, uint32_t Generation, uint32_t PrefabIndex)
-		: Index(Index)
-		, Generation(Generation)
-		, PrefabIndex(PrefabIndex)
+	GlobalEntityHandle(uint32_t index, uint32_t generation, uint32_t prefabIndex)
+		: Index(index)
+		, Generation(generation)
+		, PrefabIndex(prefabIndex)
 	{
 	}
 
@@ -135,18 +135,18 @@ private:
 	EntityArchive() = default;
 
 	// Lookup methods - return GlobalEntityHandle (only accessible to Registry via friendship)
-	GlobalEntityHandle LookupGlobalHandle(const EntityHandle& inHandle) const { return LocalToRecord[inHandle.GetHandleIndex()]; }
-	GlobalEntityHandle LookupGlobalHandle(const EntityNetHandle& inHandle) const { return NetToRecord[inHandle.GetHandleIndex()]; }
-	GlobalEntityHandle LookupGlobalHandle(EntityCacheHandle inHandle) const { return CacheToRecord[inHandle]; }
+	GlobalEntityHandle LookupGlobalHandle(const EntityHandle& handle) const { return LocalToRecord[handle.GetHandleIndex()]; }
+	GlobalEntityHandle LookupGlobalHandle(const EntityNetHandle& handle) const { return NetToRecord[handle.GetHandleIndex()]; }
+	GlobalEntityHandle LookupGlobalHandle(EntityCacheHandle handle) const { return CacheToRecord[handle]; }
 
 	// Private GetRecord - mutable access for Registry only
 	template <typename T>
-	EntityRecord* GetRecordPtr(T InHandle) requires (std::same_as<std::remove_cvref_t<T>, EntityHandle> || std::same_as<std::remove_cvref_t<T>, EntityNetHandle> || std::same_as<std::remove_cvref_t<T>, EntityCacheHandle>)
+	EntityRecord* GetRecordPtr(T handle) requires (std::same_as<std::remove_cvref_t<T>, EntityHandle> || std::same_as<std::remove_cvref_t<T>, EntityNetHandle> || std::same_as<std::remove_cvref_t<T>, EntityCacheHandle>)
 	{
-		if (!IsHandleValid(InHandle)) return nullptr;
+		if (!IsHandleValid(handle)) return nullptr;
 
-		const GlobalEntityHandle& GHandle = LookupGlobalHandle(InHandle);
-		return Records[GHandle.GetIndex()];
+		const GlobalEntityHandle& gHandle = LookupGlobalHandle(handle);
+		return Records[gHandle.GetIndex()];
 	}
 
 	// Storage - fully private
@@ -158,17 +158,17 @@ private:
 public:
 	// Public read-only API - returns record by value (can't modify internal state)
 	template <typename T>
-	EntityRecord GetRecord(T InHandle) const requires (std::same_as<std::remove_cvref_t<T>, EntityHandle> || std::same_as<std::remove_cvref_t<T>, EntityNetHandle> || std::same_as<std::remove_cvref_t<T>, EntityCacheHandle>)
+	EntityRecord GetRecord(T handle) const requires (std::same_as<std::remove_cvref_t<T>, EntityHandle> || std::same_as<std::remove_cvref_t<T>, EntityNetHandle> || std::same_as<std::remove_cvref_t<T>, EntityCacheHandle>)
 	{
-		const GlobalEntityHandle& GHandle = LookupGlobalHandle(InHandle);
-		return Records[GHandle.GetIndex()];
+		const GlobalEntityHandle& gHandle = LookupGlobalHandle(handle);
+		return Records[gHandle.GetIndex()];
 	}
 
 	// Public validation - read-only check
 	template <typename T>
-	bool IsHandleValid(T InHandle) const requires (std::same_as<std::remove_cvref_t<T>, EntityHandle> || std::same_as<std::remove_cvref_t<T>, EntityNetHandle> || std::same_as<std::remove_cvref_t<T>, EntityCacheHandle>)
+	bool IsHandleValid(T handle) const requires (std::same_as<std::remove_cvref_t<T>, EntityHandle> || std::same_as<std::remove_cvref_t<T>, EntityNetHandle> || std::same_as<std::remove_cvref_t<T>, EntityCacheHandle>)
 	{
-		const GlobalEntityHandle& GHandle = LookupGlobalHandle(InHandle);
-		return GHandle.GetGeneration() == Records[GHandle.GetIndex()].EntityInfo.GetGeneration();
+		const GlobalEntityHandle& gHandle = LookupGlobalHandle(handle);
+		return gHandle.GetGeneration() == Records[gHandle.GetIndex()].EntityInfo.GetGeneration();
 	}
 };

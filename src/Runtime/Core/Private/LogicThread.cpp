@@ -68,9 +68,9 @@ void LogicThread::ThreadMain()
 	const double fixedStepTime = ConfigPtr->GetFixedStepTime();
 
 	// Safety caps
-	constexpr double kMaxDt              = 0.25;
-	constexpr double kMaxAccumulatedTime = -0.25;
-	constexpr int kMaxPhysSubSteps       = 8;
+	constexpr double MaxDt              = 0.25;
+	constexpr double MaxAccumulatedTime = -0.25;
+	constexpr int MaxPhysSubSteps       = 8;
 
 	while (!TrinyxEngine::Get().GetJobsInitialized())
 	{
@@ -96,7 +96,7 @@ void LogicThread::ThreadMain()
 		double dt = static_cast<double>(counterElapsed) / static_cast<double>(perfFrequency);
 
 		// Spiral of death cap
-		if (dt > kMaxDt) dt = kMaxDt;
+		if (dt > MaxDt) dt = MaxDt;
 
 #if TNX_ENABLE_EDITOR
 		// When paused: still process input (camera) and publish frames
@@ -115,7 +115,7 @@ void LogicThread::ThreadMain()
 #endif
 
 		double acc = Accumulator.load(std::memory_order_relaxed) - dt;
-		if (acc < kMaxAccumulatedTime) acc = kMaxAccumulatedTime;
+		if (acc < MaxAccumulatedTime) acc = MaxAccumulatedTime;
 		Accumulator.store(acc, std::memory_order_relaxed);
 
 		// Fixed update loop with substepping
@@ -124,7 +124,7 @@ void LogicThread::ThreadMain()
 			TNX_ZONE_NC("Physics Loop", TNX_COLOR_LOGIC);
 
 			int steps = 0;
-			while (Accumulator.load(std::memory_order_relaxed) <= 0 && steps < kMaxPhysSubSteps)
+			while (Accumulator.load(std::memory_order_relaxed) <= 0 && steps < MaxPhysSubSteps)
 			{
 				// FPS tracking
 				FpsFixedCount++;
@@ -192,9 +192,9 @@ void LogicThread::ProcessVizInput(double dt)
 	CamPitch -= VizInput->GetMouseDY() * CamMouseSens;
 
 	// Clamp pitch to avoid gimbal lock at poles
-	constexpr float kMaxPitch = 1.5533f; // ~89 degrees
-	if (CamPitch > kMaxPitch) CamPitch = kMaxPitch;
-	if (CamPitch < -kMaxPitch) CamPitch = -kMaxPitch;
+	constexpr float MaxPitch = 1.5533f; // ~89 degrees
+	if (CamPitch > MaxPitch) CamPitch = MaxPitch;
+	if (CamPitch < -MaxPitch) CamPitch = -MaxPitch;
 
 	// ── WASD movement (camera-relative, flying) ──────────────────────────
 	float sinYaw   = std::sin(CamYaw);
@@ -363,11 +363,11 @@ void LogicThread::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)
 		const double remainingSec =
 			static_cast<double>(frameEnd - currentCounter) / static_cast<double>(perfFrequency);
 
-		constexpr double kSleepMarginSec = 0.002;
+		constexpr double SleepMarginSec = 0.002;
 
-		if (remainingSec > kSleepMarginSec)
+		if (remainingSec > SleepMarginSec)
 		{
-			const double sleepSec = remainingSec - kSleepMarginSec;
+			const double sleepSec = remainingSec - SleepMarginSec;
 			SDL_Delay(static_cast<uint32_t>(sleepSec * 1000.0));
 		}
 

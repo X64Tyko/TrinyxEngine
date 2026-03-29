@@ -142,9 +142,9 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 	TempAllocator = std::make_unique<JPH::TempAllocatorImpl>(2048 * config->MAX_JOLT_BODIES);
 
 	// --- Job system adapter ---
-	constexpr JPH::uint kMaxJobs     = JPH::cMaxPhysicsJobs;
-	constexpr JPH::uint kMaxBarriers = JPH::cMaxPhysicsBarriers;
-	JobSystem                        = std::make_unique<JoltJobSystemAdapter>(kMaxJobs, kMaxBarriers, &JoltPhysCounter);
+	constexpr JPH::uint MaxJobs     = JPH::cMaxPhysicsJobs;
+	constexpr JPH::uint MaxBarriers = JPH::cMaxPhysicsBarriers;
+	JobSystem                       = std::make_unique<JoltJobSystemAdapter>(MaxJobs, MaxBarriers, &JoltPhysCounter);
 
 	// --- Layer configuration (table-based, no virtual overrides) ---
 	s_BPLayerInterface = new JPH::BroadPhaseLayerInterfaceTable(
@@ -181,7 +181,7 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 
 	// --- Entity ↔ Body mapping ---
 	EntityToBody.resize(config->MAX_JOLT_BODIES, JPH::BodyID());
-	BodyToEntity.resize(config->MAX_JOLT_BODIES, kInvalidEntityIndex);
+	BodyToEntity.resize(config->MAX_JOLT_BODIES, InvalidEntityIndex);
 
 	LOG_INFO_F("[JoltPhysics] Initialized — maxBodies=%u, tempAlloc=%uMB, maxConcurrency=%d",
 			   cMaxBodies, (2048 * config->MAX_JOLT_BODIES) / (1024 * 1024),
@@ -352,7 +352,7 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 			EntityToBody[idx] = bodyID;
 
 			uint32_t bodyIdx = bodyID.GetIndex();
-			if (bodyIdx >= BodyToEntity.size()) BodyToEntity.resize(bodyIdx + 1024, kInvalidEntityIndex);
+			if (bodyIdx >= BodyToEntity.size()) BodyToEntity.resize(bodyIdx + 1024, InvalidEntityIndex);
 			BodyToEntity[bodyIdx] = idx;
 
 			bodiesCreated++;
@@ -380,7 +380,7 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 			bodyInterface.DestroyBody(EntityToBody[idx]);
 
 			uint32_t bodyIdx = EntityToBody[idx].GetIndex();
-			if (bodyIdx < BodyToEntity.size()) BodyToEntity[bodyIdx] = kInvalidEntityIndex;
+			if (bodyIdx < BodyToEntity.size()) BodyToEntity[bodyIdx] = InvalidEntityIndex;
 			EntityToBody[idx] = JPH::BodyID();
 			bodiesDestroyed++;
 		}
@@ -518,7 +518,7 @@ void JoltPhysics::DestroyBody(uint32_t entityIndex)
 
 	// Clear mapping
 	uint32_t bodyIdx = bodyID.GetIndex();
-	if (bodyIdx < BodyToEntity.size()) BodyToEntity[bodyIdx] = kInvalidEntityIndex;
+	if (bodyIdx < BodyToEntity.size()) BodyToEntity[bodyIdx] = InvalidEntityIndex;
 	EntityToBody[entityIndex] = JPH::BodyID();
 }
 
@@ -539,7 +539,7 @@ void JoltPhysics::ResetAllBodies()
 	}
 
 	std::fill(EntityToBody.begin(), EntityToBody.end(), JPH::BodyID());
-	std::fill(BodyToEntity.begin(), BodyToEntity.end(), kInvalidEntityIndex);
+	std::fill(BodyToEntity.begin(), BodyToEntity.end(), InvalidEntityIndex);
 
 	if (bodiesDestroyed > 0)
 	{
@@ -560,7 +560,7 @@ JPH::BodyID JoltPhysics::GetBodyID(uint32_t entityIndex) const
 uint32_t JoltPhysics::GetEntityIndex(JPH::BodyID bodyID) const
 {
 	uint32_t idx = bodyID.GetIndex();
-	if (idx >= BodyToEntity.size()) return kInvalidEntityIndex;
+	if (idx >= BodyToEntity.size()) return InvalidEntityIndex;
 	return BodyToEntity[idx];
 }
 

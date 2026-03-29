@@ -32,7 +32,7 @@ void main(uint3 gid : SV_DispatchThreadID)
         return;
 
     // Re-check active flag (predicate may have been 0 even if tid < entityCount).
-    // Flags live in the field slab at CurrFieldAddrs[0] (kSemFlags, always index 0).
+    // Flags live in the field slab at CurrFieldAddrs[0] (SemFlags, always index 0).
     uint flags = ((uint*)fd->CurrFieldAddrs[0])[i];
     if ((flags >> 31u) == 0u)
         return;
@@ -50,14 +50,14 @@ void main(uint3 gid : SV_DispatchThreadID)
         uint sem = fd->FieldSemantics[f];
         uint esz = fd->FieldElementSize[f];
 
-        if (sem == kSemGeneric || sem == kSemFlags)
+        if (sem == SemGeneric || sem == SemFlags)
             continue;   // Flags are uint, not interpolatable
 
-        if (sem > kGpuOutFieldCount)
+        if (sem > GpuOutFieldCount)
             continue;   // Out-of-range
 
         // MeshID: uint field, no interpolation — copy current value and build histogram
-        if (sem == kSemMeshID)
+        if (sem == SemMeshID)
         {
             uint meshID = ((uint*)fd->CurrFieldAddrs[f])[i];
             outBuf[(sem - 1u) * stride + outIdx] = asfloat(meshID);
@@ -84,6 +84,6 @@ void main(uint3 gid : SV_DispatchThreadID)
     // This is a uint reinterpreted as float in the SoA buffer; the vertex
     // shader reads it back as uint via asuint(). CPU resolves cache index
     // to EntityRecord on readback.
-    outBuf[(kSemEntityCacheIdx - 1u) * stride + outIdx] = asfloat(i);
+    outBuf[(SemEntityCacheIdx - 1u) * stride + outIdx] = asfloat(i);
 #endif
 }

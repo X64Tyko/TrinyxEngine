@@ -135,23 +135,23 @@ VSOut main(uint vertIdx : SV_VertexID, uint baseVert : SV_StartVertexLocation,
     float* inst   = (float*)fd->InstancesAddr;
     uint   stride = fd->OutFieldStride;
 
-    float3 pos   = float3(inst[(kSemPosX   - 1u) * stride + instIdx],
-                          inst[(kSemPosY   - 1u) * stride + instIdx],
-                          inst[(kSemPosZ   - 1u) * stride + instIdx]);
+    float3 pos   = float3(inst[(SemPosX   - 1u) * stride + instIdx],
+                          inst[(SemPosY   - 1u) * stride + instIdx],
+                          inst[(SemPosZ   - 1u) * stride + instIdx]);
 
-    float4 rotQ  = float4(inst[(kSemRotQx  - 1u) * stride + instIdx],
-                          inst[(kSemRotQy  - 1u) * stride + instIdx],
-                          inst[(kSemRotQz  - 1u) * stride + instIdx],
-                          inst[(kSemRotQw  - 1u) * stride + instIdx]);
+    float4 rotQ  = float4(inst[(SemRotQx  - 1u) * stride + instIdx],
+                          inst[(SemRotQy  - 1u) * stride + instIdx],
+                          inst[(SemRotQz  - 1u) * stride + instIdx],
+                          inst[(SemRotQw  - 1u) * stride + instIdx]);
 
-    float3 scale = float3(inst[(kSemScaleX - 1u) * stride + instIdx],
-                          inst[(kSemScaleY - 1u) * stride + instIdx],
-                          inst[(kSemScaleZ - 1u) * stride + instIdx]);
+    float3 scale = float3(inst[(SemScaleX - 1u) * stride + instIdx],
+                          inst[(SemScaleY - 1u) * stride + instIdx],
+                          inst[(SemScaleZ - 1u) * stride + instIdx]);
 
-    float4 color = float4(inst[(kSemColorR - 1u) * stride + instIdx],
-                          inst[(kSemColorG - 1u) * stride + instIdx],
-                          inst[(kSemColorB - 1u) * stride + instIdx],
-                          inst[(kSemColorA - 1u) * stride + instIdx]);
+    float4 color = float4(inst[(SemColorR - 1u) * stride + instIdx],
+                          inst[(SemColorG - 1u) * stride + instIdx],
+                          inst[(SemColorB - 1u) * stride + instIdx],
+                          inst[(SemColorA - 1u) * stride + instIdx]);
 
     // --- Transform ---
     float4x4 model = buildModel(pos, rotQ, scale);
@@ -169,7 +169,7 @@ VSOut main(uint vertIdx : SV_VertexID, uint baseVert : SV_StartVertexLocation,
     o.worldNrm = worldNormal;
 #ifdef TNX_GPU_PICKING
     // Read cache index written by scatter as asfloat(uint) — reinterpret back.
-    o.entityCacheIdx = asuint(inst[(kSemEntityCacheIdx - 1u) * stride + instIdx]);
+    o.entityCacheIdx = asuint(inst[(SemEntityCacheIdx - 1u) * stride + instIdx]);
 #endif
     return o;
 }

@@ -87,7 +87,7 @@ private:
 	std::vector<JPH::BodyID> EntityToBody;
 	std::vector<uint32_t> BodyToEntity;
 
-	static constexpr uint32_t kInvalidEntityIndex = UINT32_MAX;
+	static constexpr uint32_t InvalidEntityIndex = UINT32_MAX;
 
 	const EngineConfig* ConfigPtr = nullptr;
 	std::vector<uint64_t> LiveEntityBits; // Bitplane: 1 bit per entity index, reused across FlushPendingBodies calls

@@ -2,7 +2,7 @@
 #include <iostream>
 #include <filesystem>
 
-void Logger::Init(const std::string& LogFilePath, LogLevel inMinLevel)
+void Logger::Init(const std::string& logFilePath, LogLevel inMinLevel)
 {
 	std::lock_guard<std::mutex> lock(Mutex);
 
@@ -13,12 +13,12 @@ void Logger::Init(const std::string& LogFilePath, LogLevel inMinLevel)
 
 	MinLevel = inMinLevel;
 
-	// Open log File in append mode
-	LogFile.open(LogFilePath, std::ios::out | std::ios::app);
+	// Open log file in append mode
+	LogFile.open(logFilePath, std::ios::out | std::ios::app);
 
 	if (!LogFile.is_open())
 	{
-		std::cerr << "Failed to open log File: " << LogFilePath << std::endl;
+		std::cerr << "Failed to open log file: " << logFilePath << std::endl;
 		return;
 	}
 
@@ -31,7 +31,7 @@ void Logger::Init(const std::string& LogFilePath, LogLevel inMinLevel)
 	LogFile << "========================================\n\n";
 	LogFile.flush();
 
-	std::cout << "[Logger] Initialized - Writing to: " << LogFilePath << std::endl;
+	std::cout << "[Logger] Initialized - Writing to: " << logFilePath << std::endl;
 }
 
 void Logger::Shutdown()
@@ -56,27 +56,27 @@ void Logger::Shutdown()
 	bInitialized = false;
 }
 
-void Logger::Log(LogLevel Level, const char* File, int Line, const std::string& Message)
+void Logger::Log(LogLevel level, const char* file, int line, const std::string& message)
 {
-	// Filter by minimum Level
-	if (Level < MinLevel)
+	// Filter by minimum level
+	if (level < MinLevel)
 	{
 		return;
 	}
 
 	std::lock_guard<std::mutex> lock(Mutex);
 
-	// Extract Filename from path
-	std::string Filename = std::filesystem::path(File).filename().string();
+	// Extract filename from path
+	std::string filename = std::filesystem::path(file).filename().string();
 
-	// Format: [Timestamp] [LEVEL] (File:Line) Message
+	// Format: [Timestamp] [LEVEL] (file:line) message
 	std::string logEntry = "[" + GetTimestamp() + "] " +
-		"[" + LevelToString(Level) + "] " +
-		"(" + Filename + ":" + std::to_string(Line) + ") " +
-		Message;
+		"[" + LevelToString(level) + "] " +
+		"(" + filename + ":" + std::to_string(line) + ") " +
+		message;
 
 	// Console output with color
-	std::cout << LevelToColor(Level) << logEntry << "\033[0m" << std::endl;
+	std::cout << LevelToColor(level) << logEntry << "\033[0m" << std::endl;
 
 	// File output (no color codes)
 	if (LogFile.is_open())
@@ -86,9 +86,9 @@ void Logger::Log(LogLevel Level, const char* File, int Line, const std::string& 
 	}
 
 	// Ring buffer for editor panel
-	LogEntry& entry = LogRing[LogHead % kLogRingSize];
-	entry.Level     = Level;
-	snprintf(entry.Message, sizeof(entry.Message), "%s", Message.c_str());
+	LogEntry& entry = LogRing[LogHead % LogRingSize];
+	entry.Level     = level;
+	snprintf(entry.Message, sizeof(entry.Message), "%s", message.c_str());
 	LogHead++;
 }
 
@@ -112,9 +112,9 @@ std::string Logger::GetTimestamp()
 	return oss.str();
 }
 
-std::string Logger::LevelToString(LogLevel Level)
+std::string Logger::LevelToString(LogLevel level)
 {
-	switch (Level)
+	switch (level)
 	{
 		case LogLevel::Trace: return "TRACE";
 		case LogLevel::Debug: return "DEBUG";
@@ -126,9 +126,9 @@ std::string Logger::LevelToString(LogLevel Level)
 	}
 }
 
-std::string Logger::LevelToColor(LogLevel Level)
+std::string Logger::LevelToColor(LogLevel level)
 {
-	switch (Level)
+	switch (level)
 	{
 		case LogLevel::Trace: return "\033[37m";   // White
 		case LogLevel::Debug: return "\033[36m";   // Cyan

@@ -11,33 +11,33 @@
 // Layout is byte-for-byte identical to GpuFrameData.slang; the static_assert
 // below enforces the match at compile time.
 //
-// Flags are read from CurrFieldAddrs — the field with kSemFlags semantic
+// Flags are read from CurrFieldAddrs — the field with SemFlags semantic
 // is always at field index 0 (convention enforced by FillGpuFrameData).
 // ---------------------------------------------------------------------------
 
-constexpr uint32_t kMaxGpuFields     = 128;
-constexpr uint32_t kMaxMeshSlots     = 256;
-constexpr uint32_t kGpuOutFieldCount = 16; // Flags + PosXYZ(3) + RotQxyzw(4) + ScaleXYZ(3) + ColorRGBA(4) + MeshID
+constexpr uint32_t MaxGpuFields     = 128;
+constexpr uint32_t MaxMeshSlots     = 256;
+constexpr uint32_t GpuOutFieldCount = 16; // Flags + PosXYZ(3) + RotQxyzw(4) + ScaleXYZ(3) + ColorRGBA(4) + MeshID
 
-// GpuFieldSemantic constants — match kSem* values in GpuFrameData.slang.
-// SoA slot index for field k = kSem - 1.
-constexpr uint32_t kSemGeneric = 0;
-constexpr uint32_t kSemFlags   = 1;
-constexpr uint32_t kSemPosX    = 2;
-constexpr uint32_t kSemPosY    = 3;
-constexpr uint32_t kSemPosZ    = 4;
-constexpr uint32_t kSemRotQx   = 5;
-constexpr uint32_t kSemRotQy   = 6;
-constexpr uint32_t kSemRotQz   = 7;
-constexpr uint32_t kSemRotQw   = 8;
-constexpr uint32_t kSemScaleX  = 9;
-constexpr uint32_t kSemScaleY  = 10;
-constexpr uint32_t kSemScaleZ  = 11;
-constexpr uint32_t kSemColorR  = 12;
-constexpr uint32_t kSemColorG  = 13;
-constexpr uint32_t kSemColorB  = 14;
-constexpr uint32_t kSemColorA  = 15;
-constexpr uint32_t kSemMeshID  = 16;
+// GpuFieldSemantic constants — match values in GpuFrameData.slang.
+// SoA slot index for field k = sem - 1.
+constexpr uint32_t SemGeneric = 0;
+constexpr uint32_t SemFlags   = 1;
+constexpr uint32_t SemPosX    = 2;
+constexpr uint32_t SemPosY    = 3;
+constexpr uint32_t SemPosZ    = 4;
+constexpr uint32_t SemRotQx   = 5;
+constexpr uint32_t SemRotQy   = 6;
+constexpr uint32_t SemRotQz   = 7;
+constexpr uint32_t SemRotQw   = 8;
+constexpr uint32_t SemScaleX  = 9;
+constexpr uint32_t SemScaleY  = 10;
+constexpr uint32_t SemScaleZ  = 11;
+constexpr uint32_t SemColorR  = 12;
+constexpr uint32_t SemColorG  = 13;
+constexpr uint32_t SemColorB  = 14;
+constexpr uint32_t SemColorA  = 15;
+constexpr uint32_t SemMeshID  = 16;
 
 // GPU-side mesh slot — mirrors MeshManager::MeshSlot for GPU read.
 // 16 bytes, tightly packed for storage buffer access.
@@ -69,10 +69,10 @@ struct GpuFrameData
 	uint64_t MeshTableAddr;                   // offset 144
 	uint32_t MeshCount;                       // offset 152
 	uint32_t _pad0;                           // offset 156
-	uint64_t PrevFieldAddrs[kMaxGpuFields];   // offset 160
-	uint64_t CurrFieldAddrs[kMaxGpuFields];   // offset 1184
-	uint32_t FieldSemantics[kMaxGpuFields];   // offset 2208
-	uint32_t FieldElementSize[kMaxGpuFields]; // offset 2720
+	uint64_t PrevFieldAddrs[MaxGpuFields];   // offset 160
+	uint64_t CurrFieldAddrs[MaxGpuFields];   // offset 1184
+	uint32_t FieldSemantics[MaxGpuFields];   // offset 2208
+	uint32_t FieldElementSize[MaxGpuFields]; // offset 2720
 };                                            // total  3232
 
 static_assert(sizeof(GpuFrameData) == 3232,

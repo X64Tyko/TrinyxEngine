@@ -106,17 +106,17 @@ public:
 	uint32_t page_count() const { return (uint32_t)m_pages.size(); }
 
 private:
-	static constexpr uint32_t kPageShift = []
+	static constexpr uint32_t PageShift = []
 	{
 		uint32_t s = 0;
 		uint32_t n = EntriesPerPage;
 		while ((n >>= 1) != 0) ++s;
 		return s;
 	}();
-	static constexpr uint32_t kPageMask = EntriesPerPage - 1;
+	static constexpr uint32_t PageMask = EntriesPerPage - 1;
 
-	FORCE_INLINE static uint32_t page_index(Key k) { return k >> kPageShift; }
-	FORCE_INLINE static uint32_t page_offset(Key k) { return k & kPageMask; }
+	FORCE_INLINE static uint32_t page_index(Key k) { return k >> PageShift; }
+	FORCE_INLINE static uint32_t page_offset(Key k) { return k & PageMask; }
 
 	Value* allocate_page(uint32_t pageIndex)
 	{

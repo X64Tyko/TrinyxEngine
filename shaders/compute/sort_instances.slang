@@ -31,8 +31,8 @@ void main(uint3 gid : SV_DispatchThreadID)
     float* sorted   = (float*)fd->InstancesAddr;
     uint   stride   = fd->OutFieldStride;
 
-    // Read MeshID from unsorted buffer (slot = kSemMeshID - 1 = 15)
-    uint meshID = asuint(unsorted[(kSemMeshID - 1u) * stride + srcIdx]);
+    // Read MeshID from unsorted buffer (slot = SemMeshID - 1 = 15)
+    uint meshID = asuint(unsorted[(SemMeshID - 1u) * stride + srcIdx]);
 
     // Atomically claim a destination slot in the sorted buffer
     uint* writeIdx = (uint*)fd->MeshWriteIdxAddr;
@@ -40,13 +40,13 @@ void main(uint3 gid : SV_DispatchThreadID)
     InterlockedAdd(writeIdx[meshID], 1u, destIdx);
 
     // Copy all field slots from unsorted to sorted
-    for (uint s = 0u; s < kGpuOutFieldCount; s++)
+    for (uint s = 0u; s < GpuOutFieldCount; s++)
     {
         sorted[s * stride + destIdx] = unsorted[s * stride + srcIdx];
     }
 
 #ifdef TNX_GPU_PICKING
-    sorted[(kSemEntityCacheIdx - 1u) * stride + destIdx] =
-        unsorted[(kSemEntityCacheIdx - 1u) * stride + srcIdx];
+    sorted[(SemEntityCacheIdx - 1u) * stride + destIdx] =
+        unsorted[(SemEntityCacheIdx - 1u) * stride + srcIdx];
 #endif
 }
