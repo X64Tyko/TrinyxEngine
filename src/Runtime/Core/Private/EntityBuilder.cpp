@@ -95,7 +95,8 @@ static void WriteFieldValue(void* dst, size_t fieldSize, FieldValueType valueTyp
 	}
 }
 
-// Build a map of field name → (fieldArrayIndex, fieldSize) for an archetype.
+// Build a map of field name → (fieldSlotIndex, fieldSize, valueType) for an archetype
+// using ArchetypeFieldLayout + ComponentFieldRegistry for name resolution.
 struct FieldLookup
 {
 	size_t ArrayIndex;
@@ -106,19 +107,17 @@ struct FieldLookup
 static std::vector<std::pair<const char*, FieldLookup>> BuildFieldMap(const Archetype* arch)
 {
 	std::vector<std::pair<const char*, FieldLookup>> map;
-	map.reserve(arch->CachedFieldArrayLayout.size());
+	const auto& cfr = ComponentFieldRegistry::Get();
 
-	for (size_t i = 0; i < arch->CachedFieldArrayLayout.size(); ++i)
+	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 	{
-		const char* name = arch->FieldArrayTemplateCache[i].debugName;
+		const auto* fields = cfr.GetFields(fdesc.componentID);
+		const char* name   = (fields && fdesc.componentSlotIndex < fields->size())
+							   ? (*fields)[fdesc.componentSlotIndex].Name
+							   : nullptr;
 		if (name)
 		{
-			map.push_back({
-				name, {
-					i, arch->CachedFieldArrayLayout[i].size,
-					arch->CachedFieldArrayLayout[i].valueType
-				}
-			});
+			map.push_back({name, {fdesc.fieldSlotIndex, fdesc.fieldSize, fdesc.valueType}});
 		}
 	}
 	return map;
@@ -185,24 +184,24 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 	// Find which chunk this entity landed in (last chunk, since we just pushed)
 	size_t chunkIdx           = arch->Chunks.size() - 1;
 	Chunk* chunk              = arch->Chunks[chunkIdx];
-	uint32_t chunkEntityCount = arch->GetChunkCount(chunkIdx);
+	uint32_t chunkEntityCount = arch->GetAllocatedChunkCount(chunkIdx);
 	uint32_t localIndex       = chunkEntityCount - 1; // Just-pushed entity is at the tail
 
 	// Build field array table for the write frame
-	void* fieldArrayTable[MAX_FIELD_ARRAYS];
+	void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 
 	auto WriteEntity = [&]
 	{
-		// Zero-initialize all decomposed fields for this entity.
+		// Zero-initialize all fields for this entity.
 		// Fields omitted from JSON must not contain garbage — an unnormalized
 		// quaternion (NaN/denorm) will crash Jolt's multiply operator.
-		for (size_t i = 0; i < arch->CachedFieldArrayLayout.size(); ++i)
+		for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 		{
-			const auto& desc = arch->CachedFieldArrayLayout[i];
-			if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
+			size_t idx = fdesc.fieldSlotIndex;
+			if (!fieldArrayTable[idx]) continue;
 
-			auto* base = static_cast<uint8_t*>(fieldArrayTable[i]);
-			std::memset(base + localIndex * desc.size, 0, desc.size);
+			auto* base = static_cast<uint8_t*>(fieldArrayTable[idx]);
+			std::memset(base + localIndex * fdesc.fieldSize, 0, fdesc.fieldSize);
 		}
 
 		// Apply component field values from JSON
@@ -401,7 +400,7 @@ JsonValue EntityBuilder::SerializeEntity(Registry* reg, Archetype* arch, size_t 
 
 	// Build field array table for reading
 	Chunk* chunk = arch->Chunks[chunkIdx];
-	void* fieldArrayTable[MAX_FIELD_ARRAYS];
+	void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 	arch->BuildFieldArrayTable(chunk, fieldArrayTable,
 							   reg->GetTemporalCache()->GetActiveWriteFrame(),
 							   reg->GetVolatileCache()->GetActiveWriteFrame());
@@ -414,19 +413,22 @@ JsonValue EntityBuilder::SerializeEntity(Registry* reg, Archetype* arch, size_t 
 	ComponentTypeID currentCompID = 0;
 	JsonValue* currentComp        = nullptr;
 
-	for (size_t i = 0; i < arch->CachedFieldArrayLayout.size(); ++i)
+	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 	{
-		const auto& desc = arch->CachedFieldArrayLayout[i];
-		if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
+		size_t idx = fdesc.fieldSlotIndex;
+		if (!fieldArrayTable[idx]) continue;
 
-		// Skip the Flags field (index 0 by convention, componentID for TemporalFlags)
-		const char* fieldName = arch->FieldArrayTemplateCache[i].debugName;
+		// Look up field name from ComponentFieldRegistry
+		const auto* fields    = CFR.GetFields(fdesc.componentID);
+		const char* fieldName = (fields && fdesc.componentSlotIndex < fields->size())
+									? (*fields)[fdesc.componentSlotIndex].Name
+									: nullptr;
 		if (!fieldName) continue;
 
 		// Look up component name when the component ID changes
-		if (desc.componentID != currentCompID)
+		if (fdesc.componentID != currentCompID)
 		{
-			currentCompID        = desc.componentID;
+			currentCompID        = fdesc.componentID;
 			const char* compName = CFR.GetAllComponents().count(currentCompID)
 									   ? CFR.GetComponentMeta(currentCompID).Name
 									   : nullptr;
@@ -445,8 +447,8 @@ JsonValue EntityBuilder::SerializeEntity(Registry* reg, Archetype* arch, size_t 
 		if (!currentComp) continue;
 
 		// Read field value
-		const auto* base          = static_cast<const uint8_t*>(fieldArrayTable[i]);
-		(*currentComp)[fieldName] = ReadFieldValue(base + localIndex * desc.size, desc.size, desc.valueType);
+		const auto* base          = static_cast<const uint8_t*>(fieldArrayTable[idx]);
+		(*currentComp)[fieldName] = ReadFieldValue(base + localIndex * fdesc.fieldSize, fdesc.fieldSize, fdesc.valueType);
 	}
 
 	entity["components"] = std::move(components);
@@ -467,16 +469,16 @@ JsonValue EntityBuilder::SerializeScene(Registry* reg, const char* sceneName)
 	{
 		for (size_t ci = 0; ci < arch->Chunks.size(); ++ci)
 		{
-			uint32_t count = arch->GetChunkCount(ci);
+			uint32_t count = arch->GetAllocatedChunkCount(ci);
 
 			// Build field table to read flags
-			void* fieldArrayTable[MAX_FIELD_ARRAYS];
+			void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 			arch->BuildFieldArrayTable(arch->Chunks[ci], fieldArrayTable,
 									   reg->GetTemporalCache()->GetActiveWriteFrame(),
 									   reg->GetVolatileCache()->GetActiveWriteFrame());
 
-			// Flags are at field index 0 by convention
-			const auto* flagsArr = (arch->CachedFieldArrayLayout.size() > 0 && fieldArrayTable[0])
+			// Flags are at field index 0 by convention (CacheSlotMeta::Flags)
+			const auto* flagsArr = (arch->GetFieldArrayCount() > 0 && fieldArrayTable[0])
 									   ? static_cast<const int32_t*>(fieldArrayTable[0])
 									   : nullptr;
 

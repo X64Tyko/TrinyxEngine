@@ -54,6 +54,14 @@ public:
 		return m_entries.insert(it, {key, TValue{}})->second;
 	}
 
+	// Find or insert a default-constructed value — returns reference to existing or new entry
+	FORCE_INLINE TValue& findOrAdd(const TKey& key)
+	{
+		auto it = lower_bound(key);
+		if (it != m_entries.end() && it->first == key) return it->second;
+		return m_entries.insert(it, {key, TValue{}})->second;
+	}
+
 	// Check existence
 	FORCE_INLINE bool contains(const TKey& key) const
 	{
@@ -88,6 +96,8 @@ public:
 
 	// Direct access to underlying storage (for advanced use)
 	const std::vector<Entry>& entries() const { return m_entries; }
+
+	size_t count() const { return m_entries.size(); }
 
 private:
 	// Binary search for key

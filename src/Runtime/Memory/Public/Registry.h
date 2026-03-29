@@ -2,6 +2,7 @@
 #include <queue>
 #include <span>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include "Archetype.h"
 #include "EntityRecord.h"
@@ -60,12 +61,11 @@ public:
 	// --- Entity destruction (deferred until ProcessDeferredDestructions) ---
 
 	void Destroy(EntityHandle LHandle);
+	void DestroyByGlobalHandle(GlobalEntityHandle GHandle);
 	void ProcessDeferredDestructions();
 
 	// --- Component access ---
 
-	template <typename T>
-	T* GetComponent(EntityHandle LHandle);
 	template <typename T>
 	bool HasComponent(EntityHandle LHandle);
 
@@ -97,8 +97,11 @@ public:
 	uint32_t GetTotalEntityCount() const;
 	const auto& GetArchetypes() const { return Archetypes; }
 
+	// Reverse lookup: cache slot → record (read-only copy). Returns invalid record if not found.
+	EntityRecord GetRecordByCache(EntityCacheHandle CacheHandle) const;
+
 	// Reverse lookup: cache slot → GHandle. Returns default GlobalEntityHandle() if not found.
-	GlobalEntityHandle FindEntityByLocation(const EntityCacheHandle& CacheHandle) const;
+	GlobalEntityHandle FindEntityByLocation(EntityCacheHandle CacheHandle) const;
 
 private:
 	friend class Archetype;
@@ -106,6 +109,8 @@ private:
 	friend struct EntityBuilder;
 	friend struct EntityRecord;
 	friend struct EntityArchive;
+	friend class TrinyxEngine;
+	friend class EditorContext;
 
 	void SetPhysics(JoltPhysics* physics) { PhysicsPtr = physics; }
 	void ResetRegistry();
@@ -219,7 +224,7 @@ private:
 template <typename T>
 EntityHandle Registry::Create()
 {
-	constexpr ClassID classID = T::StaticClassID();
+	ClassID classID = T::StaticClassID();
 	GlobalEntityHandle GHandle;
 	CreateInternal(classID, {&GHandle, 1});
 	return MakeEntityHandle(GHandle, classID);
@@ -230,8 +235,8 @@ void Registry::RecreateAs(EntityHandle& InHandle)
 {
 	if (GlobalEntityRegistry.IsHandleValid(InHandle)) Destroy(InHandle);
 
-	constexpr ClassID TargetType = T::StaticClassID();
-	InHandle                     = CreateByClassID(TargetType);
+	ClassID TargetType = T::StaticClassID();
+	InHandle           = CreateByClassID(TargetType);
 }
 
 template <typename T>
@@ -241,25 +246,12 @@ std::vector<EntityHandle> Registry::Create(size_t count)
 }
 
 template <typename T>
-T* Registry::GetComponent(EntityHandle LHandle)
-{
-	if (!GlobalEntityRegistry.IsHandleValid(LHandle)) return nullptr;
-
-	EntityRecord* Record = GlobalEntityRegistry.GetRecordPtr(LHandle);
-	if (!Record->IsValid()) return nullptr;
-
-	ComponentTypeID TypeID = T::StaticTypeID();
-
-	T* ComponentArray = Record->Arch->GetComponentArray<T>(Record->TargetChunk, TypeID);
-	if (!ComponentArray) return nullptr;
-
-	return &ComponentArray[Record->ChunkIndex];
-}
-
-template <typename T>
 bool Registry::HasComponent(EntityHandle LHandle)
 {
-	return GetComponent<T>(LHandle) != nullptr;
+	constexpr ComponentTypeID TypeID = T::StaticTypeID();
+	const ClassID Class              = LHandle.GetTypeID();
+	MetaRegistry& MR                 = MetaRegistry::Get();
+	return (MR.ClassToArchetype[Class] & TypeID) == TypeID;
 }
 
 template <typename... Components>
@@ -344,13 +336,13 @@ inline void Registry::InvokeScalarUpdate(double dt)
 				[ScalarUpdate, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
 				{
 					Chunk* chunk         = arch->Chunks[chunkIdx];
-					uint32_t entityCount = arch->GetChunkCount(chunkIdx);
+					uint32_t entityCount = arch->GetAllocatedChunkCount(chunkIdx);
 					if (entityCount == 0) return;
 
 					void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 					arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
 
-					ScalarUpdate(dt, fieldArrayTable, nullptr, entityCount);
+					ScalarUpdate(dt, fieldArrayTable, fieldArrayTable[0], entityCount);
 				},
 				&ScalarUpdateCounter, TrinyxJobs::Queue::Logic);
 		}
@@ -402,13 +394,13 @@ inline void Registry::InvokePrePhys(double dt)
 				[prePhys, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
 				{
 					Chunk* chunk         = arch->Chunks[chunkIdx];
-					uint32_t entityCount = arch->GetChunkCount(chunkIdx);
+					uint32_t entityCount = arch->GetAllocatedChunkCount(chunkIdx);
 					if (entityCount == 0) return;
 
 					void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 					arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
 
-					prePhys(dt, fieldArrayTable, nullptr, entityCount);
+					prePhys(dt, fieldArrayTable, fieldArrayTable[0], entityCount);
 				},
 				&prePhysCounter, TrinyxJobs::Queue::Logic);
 		}
@@ -459,13 +451,13 @@ inline void Registry::InvokePostPhys(double dt)
 				[PostPhys, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
 				{
 					Chunk* chunk         = arch->Chunks[chunkIdx];
-					uint32_t entityCount = arch->GetChunkCount(chunkIdx);
+					uint32_t entityCount = arch->GetAllocatedChunkCount(chunkIdx);
 					if (entityCount == 0) return;
 
 					void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 					arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
 
-					PostPhys(dt, fieldArrayTable, nullptr, entityCount);
+					PostPhys(dt, fieldArrayTable, fieldArrayTable[0], entityCount);
 				},
 				&postPhysCounter, TrinyxJobs::Queue::Logic);
 		}

@@ -172,7 +172,7 @@ struct CubeEntity : EntityView<CubeEntity, WIDTH>
 **Dynamic chunk sizing:** The target entity count per chunk can be specified at the class
 level via a template parameter on `EntityView`. A data-heavy `Projectile` might request 4096-entity
 chunks for maximum SIMD throughput; a complex `Player` might request 4-entity chunks to eliminate
-padding waste. Currently the engine defaults to 1024-entity chunks.
+padding waste. Currently the engine defaults to 256-entity chunks.
 
 ```cpp
 template <FieldWidth WIDTH = FieldWidth::Scalar>
@@ -526,6 +526,77 @@ Shared header included by all Slang shaders (`#include "GpuFrameData.slang"`). C
 - `ScanAddr` / `PrefixAddr` — BDAs for the predicate and prefix sum buffers
 - `OutFieldStride` — stride between field planes in the InstanceBuffer SoA
 - `EntityCount`, `DrawArgs` — entity count and indirect draw arguments buffer
+
+---
+
+## Registry Handle Spaces
+
+The Registry manages three independent handle/index spaces. Index 0 is reserved/invalid in all three.
+
+```
+GHandle  (GlobalEntityHandle) — internal record identity, indexes Records[]
+LHandle  (EntityHandle)       — OOP/Construct-facing handle, indexes LocalToRecord[]
+NetHandle (EntityNetHandle)   — network replication handle, indexes NetToRecord[]
+```
+
+**EntityRecord** stores the entity's archetype placement with three fields:
+
+| Field        | Type       | Meaning                                          |
+|--------------|------------|--------------------------------------------------|
+| `ArchIndex`  | `uint32_t` | Flat index across all chunks in the archetype    |
+| `ChunkIndex` | `uint32_t` | Which chunk in the archetype's `Chunks[]` array  |
+| `LocalIndex` | `uint32_t` | Index within the chunk (0 .. EntitiesPerChunk−1) |
+
+Local and net indices use deferred recycling (`PendingLocalRecycles`, `PendingNetRecycles`) to prevent
+ABA handle aliasing. Record indices recycle immediately with generation bumps.
+
+---
+
+## Archetype — FieldKey and FieldDescriptor
+
+Each archetype's field layout is stored in `ArchetypeFieldLayout` (`FlatMap<FieldKey, FieldDescriptor>`).
+
+**FieldKey** — composite lookup key:
+
+```cpp
+struct FieldKey
+{
+    ComponentTypeID componentID;  // Which component type
+    uint8_t cacheSlotIndex;       // Cache slot (from ComponentFieldRegistry)
+    uint32_t fieldIndex;          // Which field within the component (0, 1, 2...)
+};
+```
+
+`pack()` encodes all three into a single `size_t` for fast sorted comparison:
+`(componentID << 32) | (cacheSlotIndex << 16) | fieldIndex`.
+
+**FieldDescriptor** — everything needed to locate and index a field:
+
+| Field                    | Purpose                                          |
+|--------------------------|--------------------------------------------------|
+| `fieldSlotIndex`         | Index into `Chunk::Header::FieldPtrs[]`          |
+| `componentSlotIndex`     | Field index within its component (0, 1, 2...)    |
+| `temporalComponentIndex` | Cache slot index in the temporal/volatile slab   |
+| `componentID`            | Component type this field belongs to             |
+| `tier`                   | Which cache tier (Temporal, Volatile, None)      |
+| `fieldSize`              | Size of one element (e.g. 4 for float)           |
+| `fieldFrameCount`        | Frame count in cache ring (1 for cold)           |
+| `fieldFrameStride`       | Bytes between frame N and frame N+1 (0 for cold) |
+| `bIsTemporal`            | True if stored in temporal/volatile slab         |
+
+**Branchless frame math:** `BuildFieldArrayTable` resolves all fields uniformly:
+`outTable[idx] = base + (frame % fieldFrameCount) * fieldFrameStride`. Cold fields degenerate to
+`base + 0` (frameCount=1, frameStride=0) — no tier branching needed.
+
+### Entity Slot Counters
+
+| Counter                | Mutated on             | Purpose                                                                 |
+|------------------------|------------------------|-------------------------------------------------------------------------|
+| `AllocatedEntityCount` | Fresh push only        | High-water mark. Used by `GetAllocatedChunkCount` for iteration bounds. |
+| `TotalEntityCount`     | Push (+1), Remove (−1) | Live count. Used by `GetLiveChunkCount` for UI/diagnostics.             |
+
+`RemoveEntity` tombstones in place (clears Active flag, moves slot to `InactiveEntitySlots`).
+`PushEntities` reuses tombstoned slots before allocating fresh slots at the high-water mark.
 
 ---
 

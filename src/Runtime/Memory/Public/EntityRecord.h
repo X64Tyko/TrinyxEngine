@@ -110,9 +110,9 @@ struct EntityRecord
 	EntityCacheHandle CacheEntityIndex{}; // Cache slab index
 	EntitySlotMeta EntityInfo{};
 
-	uint32_t ArchIndex  = 0; // index at the archetype level
-	uint32_t LocalIndex = 0; // chunk index in the archetype
-	uint32_t ChunkIndex = 0; // index at the chunk level
+	uint32_t ArchIndex  = 0; // Flat index across all chunks in the archetype
+	uint32_t ChunkIndex = 0; // Which chunk in the archetype's Chunks[] array
+	uint32_t LocalIndex = 0; // Index within the chunk (0 .. EntitiesPerChunk-1)
 
 	Archetype* Arch    = nullptr; // Which archetype this entity belongs to
 	Chunk* TargetChunk = nullptr; // Which chunk within that archetype

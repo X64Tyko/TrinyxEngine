@@ -42,7 +42,7 @@ public:
 	EntityView(const EntityView&)            = delete;
 	EntityView& operator=(const EntityView&) = delete;
 
-	static Derived<WIDTH> Get(Registry& reg, EntityID id)
+	static Derived<WIDTH> Get(Registry& reg, EntityHandle id)
 	{
 		Derived<WIDTH> view;
 		view.Reg = &reg;
@@ -57,7 +57,7 @@ public:
 		Flags.Advance(step);
 	}
 
-    FORCE_INLINE void Hydrate(void** fieldArrayTable, uint8_t* FlagBase, uint32_t index = 0, int32_t count = -1)
+	FORCE_INLINE void Hydrate(void** fieldArrayTable, void* FlagBase, uint32_t index = 0, int32_t count = -1)
 	{
 		constexpr auto schema = Derived<WIDTH>::DefineSchema();
 

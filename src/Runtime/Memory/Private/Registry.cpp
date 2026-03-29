@@ -155,14 +155,14 @@ GlobalEntityHandle Registry::AllocateGlobalHandle()
 		FreeRecordIndices.pop();
 
 		// Bump generation so stale GHandles from the previous occupant won't validate
-		EntityRecord* Record = GlobalEntityRegistry.Records[Index];
-		if (!Record || !Record->IsValid())
+		EntityRecord& Record = GlobalEntityRegistry.Records.findOrAdd(Index);
+		if (Record.IsValid())
 		{
-			LOG_ERROR_F("Invalid entity record at index %u", Index);
-			assert(false && "Invalid entity record");
+			LOG_ERROR_F("Existing entity requested at index: %u", Index);
+			assert(false && "Reallocating entity record");
 		}
 
-		uint16_t Generation = Record->GetGeneration() + 1;
+		uint16_t Generation = Record.GetGeneration() + 1;
 		if (Generation == 0) Generation = 1; // skip 0 (reserved for invalid)
 
 		GHandle.Index      = Index;
@@ -275,7 +275,7 @@ void Registry::CreateInternal(ClassID classID, std::span<GlobalEntityHandle> out
 	Archetype* arch = GetOrCreateArchetype(sig, classID);
 
 	std::vector<Archetype::EntitySlot> Slots(count);
-	arch->PushEntities(Slots, count);
+	arch->PushEntities(Slots);
 
 	for (size_t i = 0; i < count; ++i)
 	{
@@ -283,14 +283,14 @@ void Registry::CreateInternal(ClassID classID, std::span<GlobalEntityHandle> out
 		GlobalEntityHandle GHandle = AllocateGlobalHandle();
 
 		// Populate record
-		EntityRecord* Record          = GlobalEntityRegistry.Records[GHandle.GetIndex()];
-		Record->Arch                  = arch;
-		Record->TargetChunk           = Slot.TargetChunk;
-		Record->ArchIndex             = Slot.ArchIndex;
-		Record->LocalIndex            = Slot.LocalIndex;
-		Record->ChunkIndex            = Slot.ChunkIndex;
-		Record->EntityInfo.Generation = GHandle.GetGeneration();
-		Record->EntityInfo.ValidBit   = true;
+		EntityRecord& Record         = GlobalEntityRegistry.Records.findOrAdd(GHandle.GetIndex());
+		Record.Arch                  = arch;
+		Record.TargetChunk           = Slot.TargetChunk;
+		Record.ArchIndex             = Slot.ArchIndex;
+		Record.LocalIndex            = Slot.LocalIndex;
+		Record.ChunkIndex            = Slot.ChunkIndex;
+		Record.EntityInfo.Generation = GHandle.GetGeneration();
+		Record.EntityInfo.ValidBit   = true;
 
 		// Cache index → global handle mapping
 		GlobalEntityRegistry.CacheToRecord.set(Slot.CacheIndex, GHandle);
@@ -309,6 +309,12 @@ void Registry::Destroy(EntityHandle LHandle)
 	PendingDestructions.push_back(GHandle);
 }
 
+void Registry::DestroyByGlobalHandle(GlobalEntityHandle GHandle)
+{
+	TNX_ZONE_C(TNX_COLOR_MEMORY);
+	PendingDestructions.push_back(GHandle);
+}
+
 bool Registry::DestroyRecord(GlobalEntityHandle& GHandle)
 {
 	EntityRecord* Record = GlobalEntityRegistry.Records[GHandle.GetIndex()];
@@ -320,7 +326,7 @@ bool Registry::DestroyRecord(GlobalEntityHandle& GHandle)
 	Archetype* arch = Record->Arch;
 
 	// Remove from archetype
-	arch->RemoveEntity(Record->LocalIndex, Record->ChunkIndex, Record->ArchIndex);
+	arch->RemoveEntity(Record->ChunkIndex, Record->LocalIndex, Record->ArchIndex);
 	return true;
 }
 
@@ -334,7 +340,7 @@ bool Registry::DestroyRecord(EntityRecord& Record)
 	Archetype* arch = Record.Arch;
 
 	// Remove from archetype
-	arch->RemoveEntity(Record.LocalIndex, Record.ChunkIndex, Record.ArchIndex);
+	arch->RemoveEntity(Record.ChunkIndex, Record.LocalIndex, Record.ArchIndex);
 	return true;
 }
 
@@ -344,6 +350,9 @@ bool Registry::DestroyRecord(EntityRecord& Record)
 void Registry::ProcessDeferredDestructions()
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
+
+	if (PendingDestructions.empty()) [[likely]]
+		return;
 
 	for (GlobalEntityHandle GHandle : PendingDestructions)
 	{
@@ -361,12 +370,19 @@ void Registry::ProcessDeferredDestructions()
 	PendingDestructions.clear();
 }
 
-GlobalEntityHandle Registry::FindEntityByLocation(const EntityCacheHandle& CacheHandle) const
+EntityRecord Registry::GetRecordByCache(EntityCacheHandle CacheHandle) const
 {
 	GlobalEntityHandle GHandle = GlobalEntityRegistry.LookupGlobalHandle(CacheHandle);
-	const EntityRecord Record  = GlobalEntityRegistry.Records[GHandle.GetIndex()];
-	if (!Record.IsValid() || Record.GetGeneration() != GHandle.GetGeneration()) return GlobalEntityHandle();
+	EntityRecord Record        = GlobalEntityRegistry.Records[GHandle.GetIndex()];
+	if (!Record.IsValid() || Record.GetGeneration() != GHandle.GetGeneration()) return EntityRecord{};
+	return Record;
+}
 
+GlobalEntityHandle Registry::FindEntityByLocation(EntityCacheHandle CacheHandle) const
+{
+	GlobalEntityHandle GHandle = GlobalEntityRegistry.LookupGlobalHandle(CacheHandle);
+	EntityRecord Record        = GlobalEntityRegistry.Records[GHandle.GetIndex()];
+	if (!Record.IsValid() || Record.GetGeneration() != GHandle.GetGeneration()) return GlobalEntityHandle();
 	return GHandle;
 }
 

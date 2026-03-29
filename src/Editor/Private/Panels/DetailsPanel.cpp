@@ -115,36 +115,55 @@ void DetailsPanel::Draw(EditorState& state)
 	{
 		const auto& cfr = ComponentFieldRegistry::Get();
 
-		for (auto& [typeID, meta] : arch->ComponentLayout)
+		// Iterate field layout, group by component (fields are contiguous per component)
+		ComponentTypeID currentCompID = 0;
+		bool treeOpen                 = false;
+
+		for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 		{
-			char compLabel[128];
-			const auto* fields = cfr.GetFields(typeID);
-			size_t fieldCount  = fields ? fields->size() : 0;
-
-			snprintf(compLabel, sizeof(compLabel), "Component %u  (%zu fields)###comp_%u",
-					 typeID, fieldCount, typeID);
-
-			if (ImGui::TreeNodeEx(compLabel, ImGuiTreeNodeFlags_DefaultOpen))
+			// New component — close previous tree node, open a new one
+			if (fdesc.componentID != currentCompID)
 			{
-				if (fields && !fields->empty())
+				if (treeOpen) ImGui::TreePop();
+
+				currentCompID        = fdesc.componentID;
+				const auto* fields   = cfr.GetFields(currentCompID);
+				size_t fieldCount    = fields ? fields->size() : 0;
+				const char* compName = cfr.GetAllComponents().count(currentCompID)
+										   ? cfr.GetComponentMeta(currentCompID).Name
+										   : "Unknown";
+
+				char compLabel[128];
+				snprintf(compLabel, sizeof(compLabel), "%s  (%zu fields)###comp_%u",
+						 compName ? compName : "Unknown", fieldCount, currentCompID);
+
+				treeOpen = ImGui::TreeNodeEx(compLabel, ImGuiTreeNodeFlags_DefaultOpen);
+				if (treeOpen)
 				{
 					ImGui::Columns(2, nullptr, true);
 					ImGui::SetColumnWidth(0, 160.0f);
-					for (auto& field : *fields)
-					{
-						ImGui::Text("%s", field.Name);
-						ImGui::NextColumn();
-						ImGui::Text("%zu bytes (align %zu)", field.Size, field.Alignment);
-						ImGui::NextColumn();
-					}
-					ImGui::Columns(1);
 				}
-				else
-				{
-					ImGui::TextDisabled("No decomposed fields");
-				}
-				ImGui::TreePop();
 			}
+
+			if (treeOpen)
+			{
+				// Look up field name from the registry
+				const auto* fields = cfr.GetFields(fdesc.componentID);
+				const char* name   = (fields && fdesc.componentSlotIndex < fields->size())
+									   ? (*fields)[fdesc.componentSlotIndex].Name
+									   : "???";
+
+				ImGui::Text("%s", name);
+				ImGui::NextColumn();
+				ImGui::Text("%zu bytes", fdesc.fieldSize);
+				ImGui::NextColumn();
+			}
+		}
+
+		if (treeOpen)
+		{
+			ImGui::Columns(1);
+			ImGui::TreePop();
 		}
 	}
 
@@ -159,7 +178,7 @@ void DetailsPanel::Draw(EditorState& state)
 				ImGui::TextDisabled("Pause simulation to edit values");
 			}
 
-			size_t fieldCount = arch->CachedFieldArrayLayout.size();
+			size_t fieldCount = arch->GetFieldArrayCount();
 			if (fieldCount > 0 && fieldCount <= MAX_FIELDS_PER_ARCHETYPE)
 			{
 				void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
@@ -169,47 +188,45 @@ void DetailsPanel::Draw(EditorState& state)
 
 				arch->BuildFieldArrayTable(state.SelectedChunk, fieldArrayTable, temporalFrame, volatileFrame);
 
+				const auto& cfr = ComponentFieldRegistry::Get();
+
 				ImGui::Columns(2, "FieldValues", true);
 				ImGui::SetColumnWidth(0, 160.0f);
 
-				for (size_t i = 0; i < fieldCount; ++i)
+				for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 				{
-					const auto& desc = arch->CachedFieldArrayLayout[i];
-					if (!desc.isDecomposed) continue;
+					size_t idx = fdesc.fieldSlotIndex;
 
-					const char* fieldName = arch->FieldArrayTemplateCache[i].debugName;
+					// Look up field name from the registry
+					const auto* fields    = cfr.GetFields(fdesc.componentID);
+					const char* fieldName = (fields && fdesc.componentSlotIndex < fields->size())
+												? (*fields)[fdesc.componentSlotIndex].Name
+												: "???";
 
 					ImGui::Text("%s", fieldName);
 					ImGui::NextColumn();
 
-					if (fieldArrayTable[i])
+					if (fieldArrayTable[idx])
 					{
 						if (simPaused)
 						{
 							bool edited = EditFieldValue(
-								fieldName, desc.size, fieldArrayTable[i],
+								fieldName, fdesc.fieldSize, fieldArrayTable[idx],
 								state.SelectedLocalIndex,
-								static_cast<uint8_t>(desc.valueType));
+								static_cast<uint8_t>(fdesc.valueType));
 
 							if (edited)
 							{
 								state.bSceneDirty = true;
-
-								// Mark entity dirty in the registry bitplane so GPU picks it up
-								size_t cacheIdx = state.SelectedChunk->Header.CacheIndexStart
-									+ state.SelectedLocalIndex;
-								auto* dirtyBits = state.RegistryPtr->DirtyBitsFrame(temporalFrame);
-								uint64_t& word  = (*dirtyBits)[cacheIdx / 64];
-								word            |= uint64_t(1) << (cacheIdx % 64);
 							}
 						}
 						else
 						{
 							// Read-only display when sim is running
-							uint8_t* base      = static_cast<uint8_t*>(fieldArrayTable[i]);
-							const void* valPtr = base + state.SelectedLocalIndex * desc.size;
+							uint8_t* base      = static_cast<uint8_t*>(fieldArrayTable[idx]);
+							const void* valPtr = base + state.SelectedLocalIndex * fdesc.fieldSize;
 
-							switch (desc.valueType)
+							switch (fdesc.valueType)
 							{
 								case FieldValueType::Float32: ImGui::Text("%.4f", *static_cast<const float*>(valPtr));
 									break;
@@ -219,7 +236,7 @@ void DetailsPanel::Draw(EditorState& state)
 									break;
 								case FieldValueType::Uint32: ImGui::Text("%u", *static_cast<const uint32_t*>(valPtr));
 									break;
-								default: ImGui::Text("%zu bytes", desc.size);
+								default: ImGui::Text("%zu bytes", fdesc.fieldSize);
 									break;
 							}
 						}

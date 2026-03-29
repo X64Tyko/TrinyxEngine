@@ -1,8 +1,8 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
-#include "Registry.h"
 #include "RegistryTypes.h"
 #include "Logger.h"
 

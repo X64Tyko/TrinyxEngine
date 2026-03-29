@@ -4,6 +4,7 @@
 #include "Types.h"
 #include <vector>
 
+#include "EntityRecord.h"
 #include "RegistryTypes.h"
 
 class Registry;

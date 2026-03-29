@@ -59,6 +59,13 @@ struct FixedBitset
 		return result;
 	}
 
+	// Bitwise OR assignment
+	FixedBitset& operator|=(const FixedBitset& other)
+	{
+		for (uint32_t i = 0; i < WordCount; ++i) Words[i] |= other.Words[i];
+		return *this;
+	}
+
 	bool operator==(const FixedBitset& other) const
 	{
 		return std::memcmp(Words, other.Words, sizeof(Words)) == 0;

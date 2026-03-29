@@ -201,9 +201,10 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	using VecMask = FieldMask<FieldType, typename Traits::VecType, WIDTH>;
 
 	FieldType* __restrict WriteArray = nullptr;
-	uint8_t* __restrict DirtyBits    = nullptr; // - Current frame Dirty bit plane
+	int32_t* __restrict FlagsArray   = nullptr; // CacheSlotMeta::Flags — Dirty bit lives at bit 30
 	uint32_t index;
-	uint8_t dirtyVal = 1 << 7;
+
+	static constexpr int32_t kDirtyBit = static_cast<int32_t>(1u << 30);
 
 	explicit operator typename Traits::VecType() const
 	{
@@ -211,18 +212,18 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		else return Traits::load(&WriteArray[index]);
 	}
 
-	// Bind: point at the write frame (pre-frame memcpy already seeded old state into it)
-	FORCE_INLINE void Bind(void* writeArray, void* dirtyBits, uint32_t startIndex = 0, int32_t startCount = -1)
+	// Bind: point at the write frame (pre-frame memcpy already seeded old state into it).
+	// flagsArray is the CacheSlotMeta::Flags int32_t* from fieldArrayTable[0].
+	FORCE_INLINE void Bind(void* writeArray, void* flagsArray, uint32_t startIndex = 0, int32_t startCount = -1)
 	{
 		WriteArray = (FieldType*)writeArray;
-		DirtyBits  = (uint8_t*)dirtyBits;
+		FlagsArray = (int32_t*)flagsArray;
 		index      = startIndex;
 
 		if constexpr (WIDTH != FieldWidth::Scalar)
 		{
 			const __m256i count_vec = _mm256_set1_epi32(startCount);
 			this->mask              = _mm256_cmpgt_epi32(count_vec, FieldProxyConsts::element_indices);
-			dirtyVal                = startCount < 0 ? 0xFF : static_cast<uint8_t>(~(1U) << (7 - startCount));
 		}
 	}
 
@@ -305,7 +306,7 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 			Traits::store(&WriteArray[index], this->mask, VecVal);
 		}
 
-		*DirtyBits |= dirtyVal;
+		MarkDirty();
 		return *this;
 	}
 
@@ -326,7 +327,7 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 			Traits::store(&WriteArray[index], this->mask, Traits::add(Traits::load(&WriteArray[index]), VecVal));
 		}
 
-		*DirtyBits |= dirtyVal;
+		MarkDirty();
 		return *this;
 	}
 
@@ -347,7 +348,7 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 			Traits::store(&WriteArray[index], this->mask, Traits::sub(Traits::load(&WriteArray[index]), VecVal));
 		}
 
-		*DirtyBits |= dirtyVal;
+		MarkDirty();
 		return *this;
 	}
 
@@ -367,8 +368,8 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 
 			Traits::store(&WriteArray[index], this->mask, Traits::mul(Traits::load(&WriteArray[index]), VecVal));
 		}
-		
-		*DirtyBits |= dirtyVal;
+
+		MarkDirty();
 		return *this;
 	}
 
@@ -389,24 +390,31 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 			Traits::store(&WriteArray[index], this->mask, Traits::div(Traits::load(&WriteArray[index]), VecVal));
 		}
 
-		*DirtyBits |= dirtyVal;
+		MarkDirty();
 		return *this;
+	}
+
+	// Mark the current entity/entities as dirty via CacheSlotMeta::Flags (bit 30).
+	// FlagsArray must be non-null for fields that need dirty tracking.
+	// CacheSlotMeta::Flags passes nullptr (self-referential — it IS the flags).
+	FORCE_INLINE void MarkDirty()
+	{
+		if constexpr (WIDTH == FieldWidth::Scalar)
+		{
+			FlagsArray[index] |= kDirtyBit;
+		}
+		else
+		{
+			__m256i flags = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&FlagsArray[index]));
+			flags         = _mm256_or_si256(flags, _mm256_set1_epi32(kDirtyBit));
+			_mm256_storeu_si256(reinterpret_cast<__m256i*>(&FlagsArray[index]), flags);
+		}
 	}
 
 	// Advance: move index forward — no copy needed, pre-frame memcpy already propagated old state
 	FORCE_INLINE void Advance(uint32_t step)
 	{
 		index += step;
-
-		if constexpr (WIDTH != FieldWidth::Scalar)
-		{
-			++DirtyBits;
-		}
-		else
-		{
-			DirtyBits += (dirtyVal == 0x01);
-			dirtyVal  = static_cast<uint8_t>((dirtyVal >> 1) | (dirtyVal << 7));
-		}
 	}
 
 	// ── Unary negation ──

@@ -71,6 +71,16 @@ public:
 		page[page_offset(key)] = v;
 	}
 
+	// Find or allocate — returns a reference to the slot, allocating the page if needed
+	FORCE_INLINE Value& findOrAdd(Key key)
+	{
+		assert(key < MaxKey);
+		const uint32_t p = page_index(key);
+		Value* page      = m_pages[p];
+		if (!page) page = allocate_page(p);
+		return page[page_offset(key)];
+	}
+
 	FORCE_INLINE void erase(Key key)
 	{
 		if (key >= MaxKey) return;

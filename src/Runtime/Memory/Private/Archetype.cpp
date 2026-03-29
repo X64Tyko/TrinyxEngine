@@ -38,428 +38,270 @@ Archetype::~Archetype()
 	Chunks.clear();
 }
 
+// Populates ArchetypeFieldLayout from the component list and computes TotalChunkDataSize.
+// For each field: queries its CacheTier from ComponentFieldRegistry, then records a FieldDescriptor
+// with the appropriate frame count and stride (cold fields get frameCount=1, frameStride=0).
+// Called exactly once per archetype by Registry::GetOrCreateArchetype / InitializeArchetypes.
 void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& Components, SystemID inArchSystemID)
 {
-	// BuildLayout should only be called once
-	assert(TotalFieldArrayCount == 0 && "BuildLayout called multiple times on same archetype");
+	assert(ArchetypeFieldLayout.count() == 0 && "BuildLayout called multiple times on same archetype");
 	Reg          = reg;
 	ArchSystemID = inArchSystemID;
 
-	// Calculate total stride (sum of all component sizes, excluding temporal)
-	size_t TotalStride = 0;
-
-	for (const ComponentMetaEx& Meta : Components)
-	{
-		if (Meta.TemporalTier == CacheTier::None)
-		{
-			TotalStride += Meta.Size;
-		}
-	}
-
-	// Calculate how many entities fit in a chunk
 	constexpr size_t ReservedHeaderSpace = Chunk::HEADER_SIZE;
 
-	// Per-class override: entity declares static constexpr uint32_t kEntitiesPerChunk = N.
-	// Must be applied before the layout loop so field offsets and TotalChunkDataSize use the new count.
-	if (uint32_t override_ = MetaRegistry::Get().EntityGetters[ArchClassID].EntitiesPerChunk) EntitiesPerChunk = override_;
+	// Entity class declares chunk size via kEntitiesPerChunk or inherits the default (256).
+	EntitiesPerChunk = MetaRegistry::Get().EntityGetters[ArchClassID].EntitiesPerChunk;
 
-	size_t currentOffset       = ReservedHeaderSpace;
-	uint8_t temporalFieldIndex = 0; // Counter for temporal field array indices
-	uint8_t slotIdx            = 0;
+	size_t currentOffset   = ReservedHeaderSpace;
+	uint8_t ArchfieldIndex = 0;
 
-	for (const auto& comp : Components)
+	for (const ComponentMetaEx& comp : Components)
 	{
 		ComponentTypeID typeID = comp.TypeID;
 
-		// Check if component has pre-registered field decomposition
-		const std::vector<FieldMeta>* fields =
-			ComponentFieldRegistry::Get().GetFields(typeID);
+		const std::vector<FieldMeta>* fields    = ComponentFieldRegistry::Get().GetFields(typeID);
 		const CacheTier temporalTier            = ComponentFieldRegistry::Get().GetTemporalTier(typeID);
 		const uint8_t cacheSlotID               = ComponentFieldRegistry::Get().GetCacheSlotIndex(typeID);
 		const ComponentCacheBase* temporalCache = reg->GetCache(temporalTier);
 
-		if (fields && !fields->empty())
+		if (!fields || fields->empty())
 		{
-			// Component is decomposed - allocate separate field arrays
-			LOG_INFO_F("Decomposing component %u into %zu field arrays",
-					   typeID, fields->size());
-
-			for (size_t fieldIdx = 0; fieldIdx < fields->size(); ++fieldIdx)
-			{
-				const FieldMeta& field = (*fields)[fieldIdx];
-
-				size_t fieldFrames = 1;
-				size_t frameStride = 0;
-				size_t fieldOffset = currentOffset; // Track offset before advancing
-
-				if (temporalTier != CacheTier::None)
-				{
-					// Mark this field as temporal with array index - will be allocated per-chunk
-					FieldKey key{typeID, cacheSlotID, static_cast<uint32_t>(fieldIdx)};
-					if (TemporalFieldIndices.find(key) == TemporalFieldIndices.end())
-					{
-						slotIdx                   = temporalFieldIndex;
-						TemporalFieldIndices[key] = {
-							temporalFieldIndex++,
-							temporalCache->GetTotalFrameCount(),
-							temporalCache->GetFrameStride()
-						};
-
-						LOG_INFO_F("  Temporal field %s[%zu] will be allocated per-chunk (index %u)",
-								   field.Name, fieldIdx, temporalFieldIndex - 1);
-					}
-
-					fieldFrames = temporalCache->GetTotalFrameCount();
-					frameStride = temporalCache->GetFrameStride();
-				}
-				else
-				{
-					slotIdx = fieldIdx;
-					// Cold chunk allocation — single-frame SoA array in chunk data
-					currentOffset = AlignOffset(currentOffset, field.Alignment);
-					fieldOffset   = currentOffset;
-
-					// Store offset for this field array
-					FieldKey key{typeID, cacheSlotID, static_cast<uint32_t>(fieldIdx)};
-					FieldOffsets[key] = currentOffset;
-
-					LOG_TRACE_F("  Cold field %s[%zu]: offset=%zu, size=%zu",
-								field.Name, fieldIdx, currentOffset, field.Size);
-
-					// Advance by EntitiesPerChunk * field size
-					currentOffset += EntitiesPerChunk * field.Size;
-				}
-
-				// Add to cached layout
-				CachedFieldArrayLayout.push_back({
-					cacheSlotID,                     //Component Cache slot index
-					comp.TypeID,                     // Component Type ID
-					static_cast<uint32_t>(fieldIdx), // Component Offset
-					slotIdx,                         // Temporal field offset
-					fieldFrames,                     // Number of frames in the cache
-					frameStride,                     // frame stride of the cache
-					field.Size,                      // size of the field
-					true,                            // decomposed
-					temporalTier,                    // Cache tier field lives in
-					field.ValueType                  // Field Type
-				});
-
-				// Add to template cache (stores start offset, not end)
-				FieldArrayTemplateCache.push_back({
-					fieldOffset,
-					field.Name
-				});
-			}
-
-			TotalFieldArrayCount += fields->size();
+			LOG_ERROR_F("Component %u has no fields registered", typeID);
+			return;
 		}
-		else
+
+		LOG_INFO_F("Component %u: %zu fields", typeID, fields->size());
+
+		for (uint8_t fieldIdx = 0; fieldIdx < fields->size(); ++fieldIdx)
 		{
-			// Non-decomposed component - store as single array
-			LOG_INFO_F("Component %u stored as non-decomposed array", typeID);
+			const FieldMeta& field = (*fields)[fieldIdx];
+			currentOffset          = AlignOffset(currentOffset, FIELD_ARRAY_ALIGNMENT);
+			currentOffset          += field.Size * EntitiesPerChunk;
 
-			currentOffset = AlignOffset(currentOffset, comp.Alignment);
-
-			ComponentLayout[typeID] = ComponentMetaEx{
-				typeID,
-				comp.Name,
-				comp.Size,
-				comp.Alignment,
-				currentOffset,
-				false,
-				CacheTier::None,
-				comp.CacheSlotIndex,
-				std::vector<FieldMeta>()
-			};
-
-			// Add to cached layout as single array
-			CachedFieldArrayLayout.push_back({
-				comp.CacheSlotIndex,    // componentSlotIndex
-				typeID,                 // componentID
-				0,                      // fieldIndex
-				0,                      // FieldSlotIndex
-				1,                      // fieldFrames
-				0,                      // frameStride
-				comp.Size,              // size
-				false,                  // isDecomposed
-				CacheTier::None,        // tier
-				FieldValueType::Unknown // valueType
-			});
-
-			// Add to template cache
-			FieldArrayTemplateCache.push_back({
-				currentOffset,
-				"non_decomposed"
-			});
-
-			currentOffset        += EntitiesPerChunk * comp.Size;
-			TotalFieldArrayCount += 1;
+			FieldKey key{typeID, cacheSlotID, static_cast<uint32_t>(fieldIdx)};
+			ArchetypeFieldLayout.insert_or_assign(key, FieldDescriptor{
+													  ArchfieldIndex++,
+													  fieldIdx,
+													  cacheSlotID,
+													  typeID,
+													  temporalTier,
+													  field.ValueType,
+													  field.Size,
+													  temporalCache ? temporalCache->GetTotalFrameCount() : 1, // 1 frame for cold — makes frame % 1 == 0, no branch needed
+													  temporalCache ? temporalCache->GetFrameStride() : 0,
+													  temporalCache ? true : false
+												  });
 		}
 	}
 
 	static constexpr size_t MinEntitySize = 64;
 	TotalChunkDataSize                    = std::max(currentOffset, MinEntitySize);
 
-	LOG_INFO_F("Archetype layout: %zu field arrays (%zu temporal), %zu bytes, %u entities/chunk",
-			   TotalFieldArrayCount, TemporalFieldIndices.size(), TotalChunkDataSize, EntitiesPerChunk);
-
-	// Validate cache consistency
-	assert(CachedFieldArrayLayout.size() == TotalFieldArrayCount);
-	assert(FieldArrayTemplateCache.size() == TotalFieldArrayCount);
+	LOG_INFO_F("Archetype layout: %zu field arrays, %zu bytes, %u entities/chunk",
+			   ArchetypeFieldLayout.count(), TotalChunkDataSize, EntitiesPerChunk);
 
 	// Validate temporal field count doesn't exceed chunk header capacity
-	assert(TemporalFieldIndices.size() <= Chunk::MAX_TEMPORAL_FIELDS);
+	assert(ArchetypeFieldLayout.count() <= Chunk::MAX_CHUNK_FIELDS);
 }
 
-uint32_t Archetype::GetChunkCount(size_t ChunkIndex) const
+// Returns the number of allocated slots in a specific chunk (includes tombstoned).
+// Use for iteration bounds — callers rely on bitplane/masked-store to skip dead slots.
+uint32_t Archetype::GetAllocatedChunkCount(size_t ChunkIndex) const
 {
 	if (Chunks.empty() || ChunkIndex >= Chunks.size() || EntitiesPerChunk == 0) return 0;
 
-	// If it's the last chunk, calculate remainder
 	if (ChunkIndex == Chunks.size() - 1)
 	{
-		uint32_t Remainder = TotalEntityCount % EntitiesPerChunk;
-		// Handle case where last chunk is exactly full
-		return (Remainder == 0 && TotalEntityCount > 0) ? EntitiesPerChunk : Remainder;
+		uint32_t Remainder = AllocatedEntityCount % EntitiesPerChunk;
+		return (Remainder == 0 && AllocatedEntityCount > 0) ? EntitiesPerChunk : Remainder;
 	}
 
-	// All other chunks are guaranteed full (dense packing invariant)
 	return EntitiesPerChunk;
 }
 
-void Archetype::PushEntities(std::vector<EntitySlot>& outSlots, size_t count)
+// Returns the number of live (non-tombstoned) entities in a specific chunk.
+// TODO: Currently an approximation — derives per-chunk count from a global TotalEntityCount
+// counter, which doesn't track which chunks the removals came from. Needs per-chunk live
+// counters or Active flag scanning to be accurate.
+uint32_t Archetype::GetLiveChunkCount(size_t ChunkIndex) const
 {
-	TNX_ZONE_C(TNX_COLOR_MEMORY);
-	// Safety check for empty archetypes
-	if (EntitiesPerChunk == 0)
+	if (Chunks.empty() || ChunkIndex >= Chunks.size() || EntitiesPerChunk == 0) return 0;
+
+	if (ChunkIndex == Chunks.size() - 1)
 	{
-		EntitiesPerChunk = 256; // Default fallback
+		uint32_t Remainder = TotalEntityCount % EntitiesPerChunk;
+		return (Remainder == 0 && TotalEntityCount > 0) ? EntitiesPerChunk : Remainder;
 	}
 
-	// Check if we need a new chunk
-	while ((TotalEntityCount + count) / EntitiesPerChunk >= Chunks.size())
+	return EntitiesPerChunk;
+}
+
+// Allocates entity slots, filling outSlots with chunk/index/cache information.
+// Prefers reusing InactiveEntitySlots (from prior RemoveEntity calls) before
+// appending to the tail. Allocates new chunks as needed.
+void Archetype::PushEntities(std::span<EntitySlot> outSlots)
+{
+	TNX_ZONE_C(TNX_COLOR_MEMORY);
+
+	assert(EntitiesPerChunk > 0 && "EntitiesPerChunk must be set by BuildLayout before pushing entities");
+	const size_t count = outSlots.size();
+
+	// Ensure enough chunks exist for new fresh allocations (worst case: no inactive slots to reuse)
+	while ((AllocatedEntityCount + count) / EntitiesPerChunk >= Chunks.size())
 	{
 		Chunk* NewChunk = AllocateChunk();
 		Chunks.push_back(NewChunk);
 		ActiveEntitySlots.resize(Chunks.size() * EntitiesPerChunk);
 	}
 
-	outSlots.reserve(count);
 	for (auto& Slot : outSlots)
 	{
-		// Calculate which chunk and local index
-		uint32_t ChunkIndex = TotalEntityCount / EntitiesPerChunk;
-		uint32_t LocalIndex = TotalEntityCount % EntitiesPerChunk;
-
 		if (!InactiveEntitySlots.empty())
 		{
+			// Reuse a previously tombstoned slot — already counted in AllocatedEntityCount
 			Slot = InactiveEntitySlots.back();
 			InactiveEntitySlots.pop_back();
 		}
 		else
 		{
-			Slot.TargetChunk = Chunks[ChunkIndex];
-			Slot.LocalIndex  = LocalIndex;
-			Slot.CacheIndex  = TotalEntityCount;
-		}
-		ActiveEntitySlots[Slot.CacheIndex] = Slot;
+			// Fresh allocation at the high-water mark
+			uint32_t ChunkIndex = AllocatedEntityCount / EntitiesPerChunk;
+			uint32_t LocalIndex = AllocatedEntityCount % EntitiesPerChunk;
 
+			Slot.TargetChunk = Chunks[ChunkIndex];
+			Slot.ChunkIndex  = ChunkIndex;
+			Slot.LocalIndex  = LocalIndex;
+			Slot.ArchIndex   = AllocatedEntityCount;
+			Slot.CacheIndex  = Chunks[ChunkIndex]->Header.CacheIndexStart + LocalIndex;
+
+			AllocatedEntityCount++;
+		}
+
+		ActiveEntitySlots[Slot.ArchIndex] = Slot;
 		TotalEntityCount++;
 	}
 }
 
+// Tombstones an entity by clearing its Active flag and setting Dirty in the Flags field,
+// then moves the slot from ActiveEntitySlots to InactiveEntitySlots for future reuse.
+// The Dirty flag propagates through the GPU pipeline: the predicate shader reads it and
+// excludes the entity from draw commands. Memory is not freed here — the slot stays
+// allocated in the chunk and can be reclaimed by PushEntities.
 void Archetype::RemoveEntity(size_t ChunkIndex, uint32_t LocalIndex, uint32_t ArchetypeIdx)
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
-	if (TotalEntityCount == 0) return;
+	if (AllocatedEntityCount == 0) return;
+	if (ChunkIndex >= Chunks.size()) return;
+	if (LocalIndex >= EntitiesPerChunk) return;
 
-	if constexpr (false)
+	// Write Dirty into the Flags field so the GPU predicate shader stops drawing this entity.
 	{
-		// Calculate the last entity's location
-		uint32_t LastChunkIndex = (TotalEntityCount - 1) / EntitiesPerChunk;
-		uint32_t LastLocalIndex = (TotalEntityCount - 1) % EntitiesPerChunk;
+		Chunk* chunk                = Chunks[ChunkIndex];
+		ComponentTypeID flagsTypeID = CacheSlotMeta<>::StaticTypeID();
+		FieldKey flagKey{flagsTypeID, ComponentFieldRegistry::Get().GetCacheSlotIndex(flagsTypeID), 0};
+		auto* flagDesc = ArchetypeFieldLayout.find(flagKey);
+		assert(flagDesc && "Flags field missing from archetype layout");
 
-		// If we're not removing the last entity, swap it with the last
-		if (ChunkIndex != LastChunkIndex || LocalIndex != LastLocalIndex)
+		auto* flagsBase = static_cast<uint8_t*>(chunk->GetFieldPtr(flagDesc->fieldSlotIndex));
+
+		// Offset into the correct write frame for temporal/volatile fields
+		if (flagDesc->bIsTemporal)
 		{
-			Chunk* TargetChunk = Chunks[ChunkIndex];
-			Chunk* LastChunk   = Chunks[LastChunkIndex];
-
-			// Swap all regular field arrays (non-temporal)
-			for (const auto& [key, offset] : FieldOffsets)
-			{
-				const std::vector<FieldMeta>* fields = ComponentFieldRegistry::Get().GetFields(key.componentID);
-				if (!fields || key.fieldIndex >= fields->size()) continue;
-
-				const FieldMeta& field = (*fields)[key.fieldIndex];
-
-				void* targetFieldArray = TargetChunk->GetBuffer(static_cast<uint32_t>(offset));
-				void* lastFieldArray   = LastChunk->GetBuffer(static_cast<uint32_t>(offset));
-
-				// Swap using field size
-				char* target = static_cast<char*>(targetFieldArray) + (LocalIndex * field.Size);
-				char* last   = static_cast<char*>(lastFieldArray) + (LastLocalIndex * field.Size);
-
-				memcpy(target, last, field.Size);
-			}
-
-			size_t size = CachedFieldArrayLayout.size();
-			for (size_t i = 0; i < size; ++i)
-			{
-				const auto& desc = CachedFieldArrayLayout[i];
-
-				// Get frame 0 pointers for both chunks
-				uint8_t* targetFrame0 = static_cast<uint8_t*>(TargetChunk->GetTemporalFieldPointer(desc.fieldIndex));
-				uint8_t* lastFrame0   = static_cast<uint8_t*>(LastChunk->GetTemporalFieldPointer(desc.fieldIndex));
-
-				// Swap across all temporal frames — use the cached scalar, no cache call needed.
-				for (size_t frameIdx = 0; frameIdx < desc.fieldFrames; ++frameIdx)
-				{
-					size_t frameOffset = frameIdx * desc.frameStride;
-
-					char* target = reinterpret_cast<char*>(targetFrame0 + frameOffset) + (LocalIndex * desc.size);
-					char* last   = reinterpret_cast<char*>(lastFrame0 + frameOffset) + (LastLocalIndex * desc.size);
-
-					memcpy(target, last, desc.size);
-				}
-			}
-
-			// Also handle non-decomposed components
-			for (const auto& [typeID, meta] : ComponentLayout)
-			{
-				void* targetArray = TargetChunk->GetBuffer(static_cast<uint32_t>(meta.OffsetInChunk));
-				void* lastArray   = LastChunk->GetBuffer(static_cast<uint32_t>(meta.OffsetInChunk));
-
-				char* target = static_cast<char*>(targetArray) + (LocalIndex * meta.Size);
-				char* last   = static_cast<char*>(lastArray) + (LastLocalIndex * meta.Size);
-
-				memcpy(target, last, meta.Size);
-			}
+			uint32_t writeFrame = Reg->GetCache(flagDesc->tier)->GetActiveWriteFrame();
+			flagsBase           += writeFrame * flagDesc->fieldFrameStride;
 		}
-	}
 
-	// Mark entity as inactive+dirty in the Flags field so the GPU predicate stops drawing it.
-	// Find the TemporalFlags::Flags field in the layout and write to the current write frame.
-	{
-		Chunk* chunk            = Chunks[ChunkIndex];
-		const uint8_t flagsSlot = ComponentFieldRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID());
-
-		for (size_t i = 0; i < CachedFieldArrayLayout.size(); ++i)
-		{
-			const auto& desc = CachedFieldArrayLayout[i];
-			if (desc.componentSlotIndex != flagsSlot) continue;
-			//if (desc.Tier == CacheTier::None) break; // Flags should always be temporal
-
-			// Get the write frame pointer for the Flags field
-			uint32_t writeFrame = Reg->GetTemporalCache()->GetActiveWriteFrame();
-			auto* flagsBase     = static_cast<int32_t*>(
-				static_cast<void*>(
-					static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(desc.FieldSlotIndex))
-					+ writeFrame * desc.frameStride));
-
-			// Clear Active, set Dirty so the renderer sees the removal
-			flagsBase[LocalIndex] = static_cast<int32_t>(TemporalFlagBits::Dirty);
-
-			// Also mark the entity dirty in the Registry's per-frame bitplane
-			size_t cacheIdx     = chunk->Header.CacheIndexStart + LocalIndex;
-			auto* dirtyBitplane = Reg->DirtyBitsFrame(writeFrame);
-			uint64_t& word      = (*dirtyBitplane)[cacheIdx / 64];
-			word                |= uint64_t(1) << (cacheIdx % 64);
-			break;
-		}
+		auto* MetaInfo = reinterpret_cast<uint32_t*>(flagsBase) + LocalIndex;
+		*MetaInfo      = static_cast<uint32_t>(TemporalFlagBits::Dirty);
 	}
 
 	InactiveEntitySlots.push_back(ActiveEntitySlots[ArchetypeIdx]);
 
-	// Decrement entity count
+	// Only TotalEntityCount is decremented (live count).
+	// AllocatedEntityCount stays — it's the high-water mark for iteration bounds.
 	TotalEntityCount--;
-
-	// If the last chunk is now empty, we could deallocate it
-	// (optional optimization - for now we keep it allocated)
 }
 
+// Returns base pointers (frame 0) for every field of a given component type within a chunk.
+// Used by external code that needs per-field access without going through BuildFieldArrayTable.
 std::vector<void*> Archetype::GetFieldArrays(Chunk* TargetChunk, ComponentTypeID TypeID)
 {
-	// Check if component is decomposed
-	const std::vector<FieldMeta>* fields = ComponentFieldRegistry::Get().GetFields(TypeID);
 	ComponentFieldRegistry& CFR          = ComponentFieldRegistry::Get();
+	const std::vector<FieldMeta>* fields = CFR.GetFields(TypeID);
 
-	if (fields && !fields->empty())
+	if (!fields || fields->empty())
 	{
-		// Decomposed component - return all field arrays
-		std::vector<void*> fieldArrays;
-		fieldArrays.reserve(fields->size());
-
-		for (size_t fieldIdx = 0; fieldIdx < fields->size(); ++fieldIdx)
-		{
-			FieldKey key{TypeID, CFR.GetCacheSlotIndex(TypeID), static_cast<uint32_t>(fieldIdx)};
-			auto it = FieldOffsets.find(key);
-			if (it != FieldOffsets.end())
-			{
-				fieldArrays.push_back(TargetChunk->GetBuffer(static_cast<uint32_t>(it->second)));
-			}
-		}
-
-		return fieldArrays;
+		LOG_ERROR_F("Component %u has no fields registered", TypeID);
+		return {};
 	}
-	// Non-decomposed component - return single array
-	auto It = ComponentLayout.find(TypeID);
-	if (It == ComponentLayout.end()) return {};
 
-	const ComponentMetaEx& Meta = It->second;
-	return {TargetChunk->GetBuffer(static_cast<uint32_t>(Meta.OffsetInChunk))};
+	std::vector<void*> fieldArrays;
+	fieldArrays.reserve(fields->size());
+
+	for (size_t fieldIdx = 0; fieldIdx < fields->size(); ++fieldIdx)
+	{
+		FieldKey key{TypeID, CFR.GetCacheSlotIndex(TypeID), static_cast<uint32_t>(fieldIdx)};
+		auto it = ArchetypeFieldLayout.find(key);
+		if (it)
+		{
+			fieldArrays.push_back(TargetChunk->GetFieldPtr(it->fieldSlotIndex));
+		}
+	}
+
+	return fieldArrays;
 }
 
+// Allocates a 64-byte aligned chunk, wires FieldPtrs[] for every field in the layout,
+// and advances all cache allocators to keep entityCacheIDs globally synchronized.
+// Includes Tracy fragmentation diagnostics (gap tracking, span efficiency).
 Chunk* Archetype::AllocateChunk()
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
-	// TotalChunkDataSize = HEADER_SIZE + (EntitiesPerChunk * all field strides), set in BuildLayout.
-	// This accounts for per-class kEntitiesPerChunk overrides which may exceed DATA_SIZE.
-	size_t newChunkSize = TotalChunkDataSize * EntitiesPerChunk + Chunk::HEADER_SIZE;
+
 #ifdef _MSC_VER
-	auto NewChunk = static_cast<Chunk*>(_aligned_malloc(newChunkSize, 64));
+	auto NewChunk = static_cast<Chunk*>(_aligned_malloc(TotalChunkDataSize, 64));
 #else
-	auto NewChunk = static_cast<Chunk*>(aligned_alloc(64, newChunkSize));
+	auto NewChunk = static_cast<Chunk*>(aligned_alloc(64, TotalChunkDataSize));
 #endif
 
 	// Tracy memory profiling: Track chunk allocation with pool name
 	// This lets you see separate pools for Archetypes
-	TNX_ALLOC_N(NewChunk, newChunkSize, DebugName);
+	TNX_ALLOC_N(NewChunk, TotalChunkDataSize, DebugName);
 
-	size_t largestSize = 0;
+	NewChunk->Header            = Chunk::ChunkHeader{};
+	NewChunk->Header.FieldCount = static_cast<uint8_t>(ArchetypeFieldLayout.count());
 
-	// Allocate temporal field arrays for this chunk
-	if (!TemporalFieldIndices.empty())
+	size_t largestSize   = 0;
+	size_t currentOffset = Chunk::HEADER_SIZE;
+	auto* chunkBase      = reinterpret_cast<uint8_t*>(NewChunk);
+
+	// Wire each field's FieldPtrs[] entry:
+	//   Temporal/Volatile → allocated in the slab (pointer into ring buffer)
+	//   Cold              → packed inline after the chunk header
+	for (const auto& [fkey, fdesc] : ArchetypeFieldLayout)
 	{
-		ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
-		for (const auto& [key, fieldData] : TemporalFieldIndices)
+		largestSize = std::max(largestSize, fdesc.fieldSize);
+		if (fdesc.bIsTemporal)
 		{
-			const std::vector<FieldMeta>* fields = CFR.GetFields(key.componentID);
-			const CacheTier temporalTier         = CFR.GetTemporalTier(key.componentID);
-			ComponentCacheBase* TemporalCache    = Reg->GetCache(temporalTier);
-
-			if (!fields || key.fieldIndex >= fields->size()) continue;
-
-			const FieldMeta& field = (*fields)[key.fieldIndex];
-			largestSize            = std::max(largestSize, field.Size);
-
-			void* temporalPtr = TemporalCache->AllocateFieldArray(
+			ComponentCacheBase* TemporalCache                = Reg->GetCache(fdesc.tier);
+			NewChunk->Header.FieldPtrs[fdesc.fieldSlotIndex] = TemporalCache->AllocateFieldArray(
 				this,
 				NewChunk,
-				key.temporalFieldIndex,
-				key.fieldIndex,
-				field.Name,
+				fdesc.temporalComponentIndex,
+				fdesc.componentSlotIndex,
+				"",
 				EntitiesPerChunk,
-				field.Size,
-				ArchSystemID
-			);
-
-			// Store frame 0 pointer in chunk header at the assigned array index
-			NewChunk->SetTemporalFieldPointer(fieldData.SlotIndex, temporalPtr);
+				fdesc.fieldSize,
+				ArchSystemID);
 		}
-
-		LOG_TRACE_F("Allocated %zu temporal field arrays for chunk", TemporalFieldIndices.size());
+		else
+		{
+			currentOffset                                    = AlignOffset(currentOffset, FIELD_ARRAY_ALIGNMENT);
+			NewChunk->Header.FieldPtrs[fdesc.fieldSlotIndex] = chunkBase + currentOffset;
+			currentOffset                                    += fdesc.fieldSize * EntitiesPerChunk;
+		}
 	}
 
 	// Advance ALL caches so entityCacheIDs stay globally synchronized.
@@ -512,6 +354,9 @@ Chunk* Archetype::AllocateChunk()
 	return NewChunk;
 }
 
+// Hard reset — frees all chunk memory and clears slot tracking.
+// Used by Registry::ResetRegistry. After this, new entities go through AllocateChunk
+// which re-wires slab field arrays at correct allocator offsets.
 void Archetype::FreeAllChunks()
 {
 	for (Chunk* ChunkPtr : Chunks)
@@ -526,5 +371,6 @@ void Archetype::FreeAllChunks()
 	Chunks.clear();
 	ActiveEntitySlots.clear();
 	InactiveEntitySlots.clear();
-	TotalEntityCount = 0;
+	AllocatedEntityCount = 0;
+	TotalEntityCount     = 0;
 }
