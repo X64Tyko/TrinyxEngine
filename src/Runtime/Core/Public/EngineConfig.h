@@ -27,10 +27,15 @@ struct EngineConfig
 	// This controls how fast your main thread goes, higher = better input latency
 	int InputPollHz = 1000;
 
-	int MAX_PHYSICS_ENTITIES = 11000;
+	// Arena 1 capacity (Render + Dual partitions). Determines the slab boundary
+	// between Arena 1 and Arena 2. Must be <= MAX_CACHED_ENTITIES.
+	int MAX_RENDERABLE_ENTITIES = 11000;
 
-	// The max number of Dynamic entities in the world at one time.
+	// The max number of Dynamic entities in the world at one time (all arenas combined).
 	int MAX_CACHED_ENTITIES = 25000;
+
+	// Maximum Jolt physics bodies. Sizes the body interface, temp allocator, and mapping arrays.
+	int MAX_JOLT_BODIES = 11000;
 
 	// Number of temporal frames stored in history. Min 8, must be power of 2.
 	// At 128Hz: 128 frames = 1 second of history

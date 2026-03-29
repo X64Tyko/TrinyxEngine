@@ -39,19 +39,22 @@ struct EngineConfig
     //
     // Two fixed-size arenas, each with a dual-ended allocator:
     //
-    //   Arena 1: Physics  [0 .. MAX_PHYSICS_ENTITIES)
-    //     PHYS  (→) from 0                — physics-only bodies, triggers
-    //     DUAL  (←) from MAX_PHYSICS      — physics + render (players, props)
+    //   Arena 1: Renderable  [0 .. MAX_RENDERABLE_ENTITIES)
+    //     RENDER (→) from 0              — render-only (particles, decals)
+    //     DUAL   (←) from MAX_RENDERABLE — physics + render (players, props)
     //
-    //   Arena 2: Cached  [MAX_PHYSICS_ENTITIES .. MAX_CACHED_ENTITIES)
-    //     RENDER (→) from MAX_PHYSICS     — render-only (particles, decals)
-    //     LOGIC  (←) from MAX_CACHED      — logic/rollback-only entities
+    //   Arena 2: Cached  [MAX_RENDERABLE_ENTITIES .. MAX_CACHED_ENTITIES)
+    //     PHYS  (→) from MAX_RENDERABLE  — physics-only bodies, triggers
+    //     LOGIC (←) from MAX_CACHED      — logic/rollback-only entities
     //
     // Constraint (validated at startup):
-    //   MAX_PHYSICS_ENTITIES <= MAX_CACHED_ENTITIES
+    //   MAX_RENDERABLE_ENTITIES <= MAX_CACHED_ENTITIES
 
-    // Total size of Arena 1 (Physics). PHYS + DUAL must fit within this.
-    int MAX_PHYSICS_ENTITIES = 11000;
+    // Total size of Arena 1 (Renderable). RENDER + DUAL must fit within this.
+    int MAX_RENDERABLE_ENTITIES = 11000;
+
+    // Maximum Jolt physics bodies (sizes Jolt body arrays, separate from arena boundary).
+    int MAX_JOLT_BODIES = 8000;
 
     // Total size of both arenas combined.
     int MAX_CACHED_ENTITIES = 25000;
@@ -99,17 +102,19 @@ locks and is not exposed through `EngineConfig`.
 The two-arena layout must satisfy:
 
 ```
-MaxDualEntities + MaxPhysEntities <= MaxPhysicsEntities   // both physics buckets fit in Arena 1
-MaxPhysicsEntities + MaxRenderEntities <= MaxCachedEntities  // arenas fit in total budget
+MaxRenderEntities + MaxDualEntities <= MaxRenderableEntities   // both renderable buckets fit in Arena 1
+MaxRenderableEntities + MaxPhysEntities <= MaxCachedEntities   // arenas fit in total budget
 ```
 
 Logic entities fill the remainder of Arena 2:
 ```
-MaxLogicEntities = MAX_CACHED_ENTITIES - MAX_PHYSICS_ENTITIES - (render entities allocated so far)
+MaxLogicEntities = MAX_CACHED_ENTITIES - MAX_RENDERABLE_ENTITIES - (phys entities allocated so far)
 ```
 
-**Physics iterates Arena 1:** `PHYS[0..N_phys)` + `DUAL[MAX_PHYS-N_dual..MAX_PHYS)` + `STATIC`
-**Render iterates:** `DUAL[MAX_PHYS-N_dual..MAX_PHYS)` + `RENDER[MAX_PHYS..MAX_PHYS+N_render)` + `STATIC`
+**Physics iterates DUAL + PHYS at boundary:** `DUAL[MAX_RENDERABLE-N_dual..MAX_RENDERABLE)` +
+`PHYS[MAX_RENDERABLE..MAX_RENDERABLE+N_phys)` + `STATIC`
+**Render iterates RENDER + DUAL in Arena 1:** `RENDER[0..N_render)` + `DUAL[MAX_RENDERABLE-N_dual..MAX_RENDERABLE)` +
+`STATIC`
 
 Oversizing a partition or arena wastes memory but has no correctness impact. Undersizing causes a startup assertion
 failure.
@@ -124,7 +129,7 @@ failure.
 EngineConfig rpgConfig;
 rpgConfig.FixedUpdateHz        = 60;
 rpgConfig.PhysicsUpdateInterval = 4;     // 15Hz physics
-rpgConfig.MAX_PHYSICS_ENTITIES = 10000;
+rpgConfig.MAX_RENDERABLE_ENTITIES = 10000;
 rpgConfig.MAX_CACHED_ENTITIES  = 50000;
 rpgConfig.TemporalFrameCount   = 8;
 rpgConfig.NetworkUpdateHz      = 0;
@@ -139,7 +144,7 @@ rpgConfig.NetworkUpdateHz      = 0;
 ```cpp
 EngineConfig lightweightConfig;
 lightweightConfig.FixedUpdateHz        = 60;
-lightweightConfig.MAX_PHYSICS_ENTITIES = 5000;
+lightweightConfig.MAX_RENDERABLE_ENTITIES = 5000;
 lightweightConfig.MAX_CACHED_ENTITIES  = 25000;
 lightweightConfig.TemporalFrameCount   = 8;
 lightweightConfig.NetworkUpdateHz      = 0;
@@ -155,7 +160,7 @@ lightweightConfig.NetworkUpdateHz      = 0;
 EngineConfig balancedConfig;
 balancedConfig.FixedUpdateHz        = 128;
 balancedConfig.PhysicsUpdateInterval = 2;   // 64Hz physics
-balancedConfig.MAX_PHYSICS_ENTITIES = 25000;
+balancedConfig.MAX_RENDERABLE_ENTITIES = 25000;
 balancedConfig.MAX_CACHED_ENTITIES  = 100000;
 balancedConfig.TemporalFrameCount   = 16;   // ~125ms history @ 128Hz
 balancedConfig.NetworkUpdateHz      = 30;
@@ -172,7 +177,7 @@ EngineConfig competitiveConfig;
 competitiveConfig.FixedUpdateHz        = 512;
 competitiveConfig.PhysicsUpdateInterval = 8;   // 64Hz physics
 competitiveConfig.InputPollHz          = 1000;
-competitiveConfig.MAX_PHYSICS_ENTITIES = 15000;
+competitiveConfig.MAX_RENDERABLE_ENTITIES = 15000;
 competitiveConfig.MAX_CACHED_ENTITIES  = 25000;
 competitiveConfig.TemporalFrameCount   = 128;  // ~250ms history @ 512Hz
 competitiveConfig.NetworkUpdateHz      = 60;
@@ -189,7 +194,7 @@ Requires `TNX_ENABLE_ROLLBACK` defined; without it, Temporal falls back to 3-fra
 ```cpp
 EngineConfig simulationConfig;
 simulationConfig.FixedUpdateHz        = 60;
-simulationConfig.MAX_PHYSICS_ENTITIES = 50000;
+simulationConfig.MAX_RENDERABLE_ENTITIES = 50000;
 simulationConfig.MAX_CACHED_ENTITIES  = 250000;
 simulationConfig.TemporalFrameCount   = 8;
 simulationConfig.NetworkUpdateHz      = 0;
@@ -291,7 +296,8 @@ The `TNX_IMPLEMENT_GAME` macro generates `main()`, initializes the engine with t
 ```ini
 FixedUpdateHz = 512
 TemporalFrameCount = 128
-MAX_PHYSICS_ENTITIES = 15000
+MAX_RENDERABLE_ENTITIES = 15000
+MAX_JOLT_BODIES = 8000
 MAX_CACHED_ENTITIES = 25000
 InputPollHz = 1000
 JobCacheSize = 16384

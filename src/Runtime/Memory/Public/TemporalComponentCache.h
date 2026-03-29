@@ -1,6 +1,7 @@
 #pragma once
 #include <atomic>
 #include <cstdint>
+#include <utility>
 #include <vector>
 #include <unordered_map>
 
@@ -119,6 +120,16 @@ public:
 	uint32_t GetTotalFrameCount() const { return static_cast<uint32_t>(TemporalFrameCount); }
 	CacheTier GetTier() const { return Tier_; }
 
+	// Returns [start, end) cache index range for the contiguous DUAL+PHYS partition.
+	// Physics systems iterate this as a single dense scan with no gap.
+	std::pair<uint32_t, uint32_t> GetPhysicsRange() const
+	{
+		return {
+			static_cast<uint32_t>((MaxRenderableBoundary - DualOffset) / 4),
+			static_cast<uint32_t>((MaxRenderableBoundary + PhysOffset) / 4)
+		};
+	}
+
 	// Returns a reference to the allocator offset for the given partition.
 	// Physics grows right from 0 (Arena 1); Dual grows left from MaxPhysics (Arena 1);
 	// Render grows right from MaxPhysics (Arena 2); Logic grows left from MaxCached (Arena 2).
@@ -157,14 +168,14 @@ protected:
 	uint32_t LastWrittenFrame = -1;
 	uint32_t ActiveWriteFrame = 0;
 
-	size_t MaxPhysicsBoundary = 0;
-	size_t MaxCachedBoundary  = 0;
+	size_t MaxRenderableBoundary = 0;
+	size_t MaxCachedBoundary     = 0;
 
 	// Per-partition allocation cursors (entity counts, not bytes).
 	// Converted to byte offsets at allocation time by multiplying by fieldSize.
-	size_t PhysOffset   = 0; // Arena 1, grows right from 0
+	size_t RenderOffset = 0; // Arena 1, grows right from 0
 	size_t DualOffset   = 0; // Arena 1, grows left  from MaxPhysics
-	size_t RenderOffset = 0; // Arena 2, grows right from MaxPhysics
+	size_t PhysOffset   = 0; // Arena 2, grows right from MaxPhysics
 	size_t LogicOffset  = 0; // Arena 2, grows left  from MaxCached
 
 private:

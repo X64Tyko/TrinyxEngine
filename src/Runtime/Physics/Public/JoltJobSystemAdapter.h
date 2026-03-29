@@ -4,6 +4,7 @@
 #include <Jolt/Core/JobSystemWithBarrier.h>
 #include <Jolt/Core/FixedSizeFreeList.h>
 
+#include "Profiler.h"
 #include "TrinyxJobs.h"
 
 JPH_SUPPRESS_WARNINGS
@@ -53,15 +54,17 @@ public:
 protected:
 	void QueueJob(Job* inJob) override
 	{
+		//TNX_ZONE_NC("Jolt_QueueJob", 0xFF8800);
+
 		// Take a reference so the job stays alive until our lambda completes.
 		inJob->AddRef();
 
-		// Dispatch to TrinyxJobs General queue. The lambda captures only the
+		// Dispatch to TrinyxJobs Physics queue. The lambda captures only the
 		// raw pointer (8 bytes), well within the 48-byte payload limit.
-
 		TrinyxJobs::Dispatch(
 			[inJob](uint32_t)
 			{
+				//TNX_ZONE_NC("Jolt_ExecJob", 0xFF8800);
 				inJob->Execute();
 				inJob->Release();
 			},

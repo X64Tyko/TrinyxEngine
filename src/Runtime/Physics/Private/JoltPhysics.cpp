@@ -25,7 +25,6 @@
 #include "Registry.h"
 #include "JoltBody.h"
 #include "TransRot.h"
-#include "FieldMath.h"
 
 JPH_SUPPRESS_WARNINGS
 
@@ -114,19 +113,6 @@ static JPH::RefConst<JPH::Shape> CreateShapeFromSettings(
 	}
 }
 
-// Find the field array table offset for a component by its TypeID.
-// Returns -1 if the component is not in this archetype.
-// Returns the fieldSlotIndex of the first field belonging to the given component.
-// Bind(&fieldArrayTable[offset], ...) then binds all fields contiguously from that point.
-static int FindComponentFieldOffset(const Archetype* arch, ComponentTypeID typeID)
-{
-	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
-	{
-		if (fdesc.componentID == typeID) return fdesc.fieldSlotIndex;
-	}
-	return -1;
-}
-
 // ---------------------------------------------------------------------------
 // JoltPhysics implementation
 // ---------------------------------------------------------------------------
@@ -152,7 +138,7 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 	JPH::RegisterTypes();
 
 	// --- Temp allocator: 32 MB pre-allocated scratch space ---
-	TempAllocator = std::make_unique<JPH::TempAllocatorImpl>(2048 * config->MAX_PHYSICS_ENTITIES);
+	TempAllocator = std::make_unique<JPH::TempAllocatorImpl>(2048 * config->MAX_JOLT_BODIES);
 
 	// --- Job system adapter ---
 	constexpr JPH::uint kMaxJobs     = JPH::cMaxPhysicsJobs;
@@ -181,10 +167,10 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 		*s_ObjPairFilter, JoltLayers::NumLayers);
 
 	// --- Physics system ---
-	const JPH::uint cMaxBodies             = static_cast<JPH::uint>(config->MAX_PHYSICS_ENTITIES);
+	const JPH::uint cMaxBodies             = static_cast<JPH::uint>(config->MAX_JOLT_BODIES);
 	const JPH::uint cNumBodyMutexes        = 0; // Jolt default
 	const JPH::uint cMaxBodyPairs          = 65536;
-	const JPH::uint cMaxContactConstraints = config->MAX_PHYSICS_ENTITIES * 2; // enough for everyone?
+	const JPH::uint cMaxContactConstraints = config->MAX_JOLT_BODIES * 2; // enough for everyone?
 
 	PhysSystem = std::make_unique<JPH::PhysicsSystem>();
 	PhysSystem->Init(cMaxBodies, cNumBodyMutexes, cMaxBodyPairs, cMaxContactConstraints,
@@ -193,17 +179,19 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 	PhysSystem->SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f));
 
 	// --- Entity ↔ Body mapping ---
-	EntityToBody.resize(config->MAX_PHYSICS_ENTITIES, JPH::BodyID());
-	BodyToEntity.resize(config->MAX_PHYSICS_ENTITIES, kInvalidEntityIndex);
+	EntityToBody.resize(config->MAX_JOLT_BODIES, JPH::BodyID());
+	BodyToEntity.resize(config->MAX_JOLT_BODIES, kInvalidEntityIndex);
 
-	LOG_INFO_F("[JoltPhysics] Initialized — maxBodies=%u, tempAlloc=32MB", cMaxBodies);
+	LOG_INFO_F("[JoltPhysics] Initialized — maxBodies=%u, tempAlloc=%uMB, maxConcurrency=%d",
+			   cMaxBodies, (2048 * config->MAX_JOLT_BODIES) / (1024 * 1024),
+			   JobSystem->GetMaxConcurrency());
 
 	for (auto& vec : fieldScratch)
 	{
-		vec.reserve(config->MAX_PHYSICS_ENTITIES);
+		vec.reserve(config->MAX_JOLT_BODIES);
 	}
 
-	syncList.reserve(config->MAX_PHYSICS_ENTITIES);
+	syncList.reserve(config->MAX_JOLT_BODIES);
 	return true;
 }
 
@@ -253,135 +241,125 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 {
 	TNX_ZONE_NC("Jolt_FlushBodies", TNX_COLOR_JOLT);
 
-	// Query archetypes that contain JoltBody
-	auto arches = reg->ComponentQuery<JoltBody<>>();
-	if (arches.empty()) return;
+	// JoltBody is volatile, TransRot is temporal — they may live in different slabs
+	// when TNX_ENABLE_ROLLBACK is on. Get the correct cache for each component.
+	ComponentCacheBase* VC = reg->GetVolatileCache(); // JoltBody lives here
+	ComponentCacheBase* TC = reg->GetTemporalCache(); // TransRot lives here
+
+	// Physics range is identical across both caches (allocators advance in sync).
+	auto [physStart, physEnd] = VC->GetPhysicsRange();
+	if (physStart >= physEnd) return; // No physics entities allocated
 
 	JPH::BodyInterface& bodyInterface = PhysSystem->GetBodyInterface();
 
-	const ComponentTypeID bodyTypeID  = JoltBody<>::StaticTypeID();
-	const ComponentTypeID transTypeID = TransRot<>::StaticTypeID();
+	// Get slab field arrays for the active write frame (direct slab access).
+	// JoltBody fields from VolatileCache, TransRot fields from TemporalCache.
+	TemporalFrameHeader* volHeader = VC->GetFrameHeader();
+	TemporalFrameHeader* tmpHeader = TC->GetFrameHeader();
+
+	const uint8_t bodySlot = JoltBody<>::StaticTemporalIndex();
+	auto* slabShape        = static_cast<uint32_t*>(VC->GetFieldData(volHeader, bodySlot, 0));
+	auto* slabHalfX        = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 1));
+	auto* slabHalfY        = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 2));
+	auto* slabHalfZ        = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 3));
+	auto* slabMotion       = static_cast<uint32_t*>(VC->GetFieldData(volHeader, bodySlot, 4));
+	auto* slabMass         = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 5));
+	auto* slabFriction     = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 6));
+	auto* slabRestit       = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 7));
+
+	const uint8_t transSlot = TransRot<>::StaticTemporalIndex();
+	auto* slabPosX          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 0));
+	auto* slabPosY          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 1));
+	auto* slabPosZ          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 2));
+	auto* slabRotX          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 3));
+	auto* slabRotY          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 4));
+	auto* slabRotZ          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 5));
+	auto* slabRotW          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 6));
+
+	if (!slabShape || !slabPosX) return; // Fields not allocated yet
 
 	// Bitplane tracking which entity indices are alive (1 bit per entity).
-	const size_t bitplaneWords = (EntityToBody.size() + 63) / 64;
+	// Sized to cover the full physics range even if EntityToBody hasn't grown that far.
+	const size_t maxIdx        = std::max(static_cast<size_t>(physEnd), EntityToBody.size());
+	const size_t bitplaneWords = (maxIdx + 63) / 64;
 	if (LiveEntityBits.size() < bitplaneWords) LiveEntityBits.resize(bitplaneWords);
 	std::fill(LiveEntityBits.begin(), LiveEntityBits.begin() + bitplaneWords, 0ULL);
 
 	uint32_t bodiesCreated = 0;
 
-	for (Archetype* arch : arches)
+	// Iterate the contiguous DUAL+PHYS slab region.
+	// Fast path (body exists): single array check — no archetype/chunk indirection.
+	// Slow path (new entity): read all fields directly from slab by cache index.
+	for (uint32_t idx = physStart; idx < physEnd; ++idx)
 	{
-		// Find field array table offsets for JoltBody and TransRot
-		int bodyOffset  = FindComponentFieldOffset(arch, bodyTypeID);
-		int transOffset = FindComponentFieldOffset(arch, transTypeID);
-		if (bodyOffset < 0) continue; // shouldn't happen
+		// Mark this cache index as alive in the bitplane
+		LiveEntityBits[idx / 64] |= (1ULL << (idx % 64));
 
-		for (size_t chunkIdx = 0; chunkIdx < arch->Chunks.size(); ++chunkIdx)
+		// Fast path: body already exists for this entity
+		if (idx < EntityToBody.size() && !EntityToBody[idx].IsInvalid()) continue;
+
+		// Skip uninitialized slots — zero half-extents means no JoltBody data was written.
+		// Can't use Shape/Motion as sentinels since Box=0 and Static=0 are valid values.
+		if (slabHalfX[idx] == 0.0f && slabHalfY[idx] == 0.0f && slabHalfZ[idx] == 0.0f) continue;
+
+		uint32_t shapeType = slabShape[idx];
+
+		// Read JoltBody fields directly from slab
+		float hx          = slabHalfX[idx];
+		float hy          = slabHalfY[idx];
+		float hz          = slabHalfZ[idx];
+		uint32_t motion   = slabMotion[idx];
+		float mass        = slabMass[idx];
+		float friction    = slabFriction[idx];
+		float restitution = slabRestit[idx];
+
+		// Read initial transform from slab
+		JPH::RVec3 pos(slabPosX[idx], slabPosY[idx], slabPosZ[idx]);
+		JPH::Quat rot(slabRotX[idx], slabRotY[idx], slabRotZ[idx], slabRotW[idx]);
+
+		// Guard against zero/denorm quaternions (zero-initialized fields
+		// or imprecise scene file values). Jolt asserts on unnormalized quats.
+		if (rot.LengthSq() < 1.0e-6f) rot = JPH::Quat::sIdentity();
+		else rot                          = rot.Normalized();
+
+		// Create shape
+		JPH::RefConst<JPH::Shape> shape = CreateShapeFromSettings(shapeType, hx, hy, hz);
+
+		// Build body creation settings
+		JPH::BodyCreationSettings settings(
+			shape, pos, rot,
+			ToJoltMotionType(motion),
+			ToJoltLayer(motion));
+
+		settings.mFriction    = friction;
+		settings.mRestitution = restitution;
+		if (motion == 2) // Dynamic
 		{
-			Chunk* chunk         = arch->Chunks[chunkIdx];
-			uint32_t entityCount = arch->GetAllocatedChunkCount(chunkIdx);
-			if (entityCount == 0) continue;
+			settings.mOverrideMassProperties       = JPH::EOverrideMassProperties::CalculateInertia;
+			settings.mMassPropertiesOverride.mMass = mass;
+		}
 
-			void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
-			arch->BuildFieldArrayTable(chunk, fieldArrayTable, reg->GetTemporalCache()->GetActiveWriteFrame(), reg->GetVolatileCache()->GetActiveWriteFrame());
+		// Create and add body
+		JPH::Body* joltBody = bodyInterface.CreateBody(settings);
+		if (joltBody)
+		{
+			JPH::BodyID bodyID = joltBody->GetID();
+			bodyInterface.AddBody(bodyID, JPH::EActivation::Activate);
 
-			// Bind JoltBody fields at their offset in the table
-			JoltBody<> body;
-			body.Bind(&fieldArrayTable[bodyOffset], fieldArrayTable[0]);
+			// Store mapping
+			if (idx >= EntityToBody.size()) EntityToBody.resize(idx + 1024, JPH::BodyID());
+			EntityToBody[idx] = bodyID;
 
-			// Bind TransRot if present (for initial position/rotation)
-			TransRot<> trans;
-			bool hasTrans = (transOffset >= 0);
-			if (hasTrans) trans.Bind(&fieldArrayTable[transOffset], fieldArrayTable[0]);
+			uint32_t bodyIdx = bodyID.GetIndex();
+			if (bodyIdx >= BodyToEntity.size()) BodyToEntity.resize(bodyIdx + 1024, kInvalidEntityIndex);
+			BodyToEntity[bodyIdx] = idx;
 
-			for (uint32_t i = 0; i < entityCount; ++i)
-			{
-				uint32_t cacheIdx = chunk->Header.CacheIndexStart + i;
-
-				// Mark this entity as alive
-				if (cacheIdx < EntityToBody.size()) LiveEntityBits[cacheIdx / 64] |= (1ULL << (cacheIdx % 64));
-
-				// Skip if body already exists for this entity
-				if (cacheIdx < EntityToBody.size() && !EntityToBody[cacheIdx].IsInvalid())
-				{
-					body.Advance(1);
-					if (hasTrans) trans.Advance(1);
-					continue;
-				}
-
-				// Read body settings
-				uint32_t shapeType = FieldMath::Read(body.Shape);
-				float hx           = FieldMath::Read(body.HalfExtentX);
-				float hy           = FieldMath::Read(body.HalfExtentY);
-				float hz           = FieldMath::Read(body.HalfExtentZ);
-				uint32_t motion    = FieldMath::Read(body.Motion);
-				float mass         = FieldMath::Read(body.Mass);
-				float friction     = FieldMath::Read(body.Friction);
-				float restitution  = FieldMath::Read(body.Restitution);
-
-				// Read initial transform (position + rotation)
-				JPH::RVec3 pos(0, 0, 0);
-				JPH::Quat rot = JPH::Quat::sIdentity();
-				if (hasTrans)
-				{
-					pos = JPH::RVec3(
-						FieldMath::Read(trans.PosX),
-						FieldMath::Read(trans.PosY),
-						FieldMath::Read(trans.PosZ));
-					rot = JPH::Quat(
-						FieldMath::Read(trans.RotQx),
-						FieldMath::Read(trans.RotQy),
-						FieldMath::Read(trans.RotQz),
-						FieldMath::Read(trans.RotQw));
-
-					// Guard against zero/denorm quaternions (zero-initialized fields
-					// or imprecise scene file values). Jolt asserts on unnormalized quats.
-					if (rot.LengthSq() < 1.0e-6f) rot = JPH::Quat::sIdentity();
-					else rot                          = rot.Normalized();
-				}
-
-				// Create shape
-				JPH::RefConst<JPH::Shape> shape = CreateShapeFromSettings(shapeType, hx, hy, hz);
-
-				// Build body creation settings
-				JPH::BodyCreationSettings settings(
-					shape, pos, rot,
-					ToJoltMotionType(motion),
-					ToJoltLayer(motion));
-
-				settings.mFriction    = friction;
-				settings.mRestitution = restitution;
-				if (motion == 2) // Dynamic
-				{
-					settings.mOverrideMassProperties       = JPH::EOverrideMassProperties::CalculateInertia;
-					settings.mMassPropertiesOverride.mMass = mass;
-				}
-
-				// Create and add body
-				JPH::Body* joltBody = bodyInterface.CreateBody(settings);
-				if (joltBody)
-				{
-					JPH::BodyID bodyID = joltBody->GetID();
-					bodyInterface.AddBody(bodyID, JPH::EActivation::Activate);
-
-					// Store mapping
-					if (cacheIdx >= EntityToBody.size()) EntityToBody.resize(cacheIdx + 1024, JPH::BodyID());
-					EntityToBody[cacheIdx] = bodyID;
-
-					uint32_t bodyIdx = bodyID.GetIndex();
-					if (bodyIdx >= BodyToEntity.size()) BodyToEntity.resize(bodyIdx + 1024, kInvalidEntityIndex);
-					BodyToEntity[bodyIdx] = cacheIdx;
-
-					bodiesCreated++;
-				}
-
-				body.Advance(1);
-				if (hasTrans) trans.Advance(1);
-			}
+			bodiesCreated++;
 		}
 	}
 
-	// Destroy orphaned Jolt bodies — any mapped body whose entity wasn't visited above.
+	// Destroy orphaned Jolt bodies — any mapped body whose entity isn't in the physics range.
+	// Entities outside [physStart, physEnd) have unset bits, so their bodies get cleaned up.
 	uint32_t bodiesDestroyed = 0;
 	for (size_t word = 0; word < bitplaneWords; ++word)
 	{

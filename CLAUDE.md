@@ -134,16 +134,18 @@ Brain and Encoder are **coordinators, not dedicated workers**. On an 8-core CPU 
 ### Partition Layout: Dual-Ended Arenas
 
 ```
-Arena 1: Physics  [0 .. MAX_PHYSICS_ENTITIES)
-  PHYS  (→) starts at 0           — physics-only (triggers, invisible movers)
-  DUAL  (←) starts at MAX_PHYSICS — physics + render (players, AI, physics props)
+Arena 1: Renderable  [0 .. MAX_RENDERABLE_ENTITIES)
+  RENDER (→) starts at 0              — render-only (particles, decals, ambient props)
+  DUAL   (←) starts at MAX_RENDERABLE — physics + render (players, AI, physics props)
 
-Arena 2: Cached  [MAX_PHYSICS_ENTITIES .. MAX_CACHED_ENTITIES)
-  RENDER (→) starts at MAX_PHYSICS — render-only (particles, decals, ambient props)
-  LOGIC  (←) starts at MAX_CACHED  — logic/rollback-only entities
+Arena 2: Cached  [MAX_RENDERABLE_ENTITIES .. MAX_CACHED_ENTITIES)
+  PHYS  (→) starts at MAX_RENDERABLE — physics-only (triggers, invisible movers)
+  LOGIC (←) starts at MAX_CACHED     — logic/rollback-only entities
 ```
 
-Physics iterates Arena 1 only — a dense wall of 100% relevant entities. Render iterates the DUAL tail + RENDER head, which are contiguous at the arena boundary (effectively one scan). No pointer chasing. No irrelevant data in either pass.
+Physics iterates DUAL + PHYS contiguously at the arena boundary — a dense wall of 100% relevant entities, no gap to
+skip. Render iterates RENDER + DUAL with a gap in Arena 1; the GPU predicate pass handles gaps at negligible cost. Jolt
+body arrays are sized by `MAX_JOLT_BODIES` (separate from the arena boundary).
 
 ### Entity Group Auto-Derivation
 
@@ -182,7 +184,9 @@ A raw `float` added to a component but not registered in `DefineFields()` is ine
 
 ### Bitplanes and Gap Skipping
 
-The active strip is scanned 64 entities at a time (one 64-bit word). A zero word (64 inactive entities) is skipped with no field data touched. This covers the gap between PHYS and DUAL buckets in Arena 1 at negligible overhead. For mixed words, `FieldProxy` uses AVX2 masked loads/stores (8-wide, branchless).
+The active strip is scanned 64 entities at a time (one 64-bit word). A zero word (64 inactive entities) is skipped with
+no field data touched. This covers the gap between RENDER and DUAL buckets in Arena 1 at negligible overhead. For mixed
+words, `FieldProxy` uses AVX2 masked loads/stores (8-wide, branchless).
 
 ---
 

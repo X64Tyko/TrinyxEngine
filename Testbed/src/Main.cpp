@@ -299,7 +299,7 @@ RUNTIME_TEST(Spawn_JoltPyramid)
 	constexpr float cBoxSize       = 2.0f;
 	constexpr float cHalfBoxSize   = 1.0f;
 	constexpr float cBoxSeparation = 0.5f;
-	constexpr int cPyramidHeight   = 15;
+	constexpr int cPyramidHeight   = 25;
 	constexpr float xOffset        = 0.0f;
 	constexpr float yOffset        = -30.0f;
 	constexpr float zOffset        = -100.0f;

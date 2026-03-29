@@ -7,7 +7,7 @@
 ## Timeline Context
 
 **Project Start:** ~2026-02-01 (Week 1)
-**Current Date:** 2026-03-14
+**Current Date:** 2026-03-29
 **Phase:** Editor (Phase 1–6 of editor plan in progress)
 
 ---
@@ -124,12 +124,14 @@ in the long run.
 **Jolt Physics (v5.5.0):**
 
 - JoltJobSystemAdapter bridges JPH::JobSystemWithBarrier onto Jolt job queue
-- JoltBody cold component (TNX_REGISTER_FIELDS, CacheTier::None) — SoA in chunk, not slab
-- FlushPendingBodies: creates Jolt bodies for unmapped entities on spawn
+- JoltBody volatile component (TNX_VOLATILE_FIELDS, CacheTier::Volatile) — SoA in slab, slab-direct iteration
+- FlushPendingBodies: iterates contiguous DUAL+PHYS slab region directly via GetPhysicsRange(), no archetype/chunk
+  indirection
 - PullActiveTransforms: writes pos+rot from awake bodies back into SoA WriteArrays
 - Physics loop: PrePhysics → (FlushPendingBodies → Jolt Step -- phystick % 0) → (PullActiveTransforms -- phystick %
   phystick - 1) → PostPhysics
 - BodyID↔EntityCacheIndex bidirectional lookup (EntityToBody, BodyToEntity vectors)
+- GetPhysicsRange() on ComponentCacheBase: returns [DualStart, PhysEnd) in cache index units for dense physics iteration
 
 **Input System:**
 
@@ -164,14 +166,14 @@ in the long run.
 
 ### Brain (Logic Thread, 512Hz)
 
-| Test                           | Entity Count | Time                      | Notes                                      |
-|--------------------------------|--------------|---------------------------|--------------------------------------------|
-| PrePhysics (Transform only)    | 100k         | ~0.1ms                    | On target                                  |
-| Full Frame (no physics)        | 100k         | ~0.3ms with propagation   | Well under 1.95ms budget                   |
-| 15-layer pyramid (1,240 cubes) | 1,240        | avg 1ms (capped 1024 FPS) | 58μs physics, 105μs on Jolt pull frames    |
-| 25-layer pyramid (5,525 cubes) | 5,525        | avg 1ms, max 15.58ms      | 1.16ms physics, 2.44ms on Jolt pull frames |
-| Jolt step (15-layer)           | 1,240        | 4.13ms                    | 512Hz logic / 8 lockstep = 64Hz physics    |
-| Jolt step (25-layer)           | 5,525        | 12.58ms                   | 512Hz logic / 8 lockstep = 64Hz physics    |
+| Test                           | Entity Count | Time                        | Notes                                   |
+|--------------------------------|--------------|-----------------------------|-----------------------------------------|
+| PrePhysics (Transform only)    | 100k         | ~0.1ms                      | On target                               |
+| Full Frame (no physics)        | 100k         | ~0.3ms with propagation     | Well under 1.95ms budget                |
+| 15-layer pyramid (1,240 cubes) | 1,240        | avg 1ms (capped 1024 FPS)   | 58μs physics, 105μs on Jolt pull frames |
+| 25-layer pyramid (5,525 cubes) | 5,526        | avg ~1ms, spike 14.67ms     | Slab-direct iteration, 64Hz physics     |
+| Jolt step (15-layer)           | 1,240        | 4.13ms                      | 512Hz logic / 8 lockstep = 64Hz physics |
+| Jolt step (25-layer)           | 5,526        | ~12ms settling, <1ms steady | Monolithic island during settling phase |
 
 ### Encoder (Render Thread)
 
@@ -211,7 +213,8 @@ in the long run.
 - [x] Project-relative INI config (`*Defaults.ini` scanning from source directory)
 - [x] Tiered storage partition layout (Cold/Static/Volatile/Temporal with dual-ended arena layout)
 - [x] 5 GPU InstanceBuffers (circular buffer while rGPU compute pipeline is in progress)
-- [x] Jolt Physics v5.5.0 (JoltJobSystemAdapter, JoltBody cold component, FlushPendingBodies/PullActiveTransforms)
+- [x] Jolt Physics v5.5.0 (JoltJobSystemAdapter, JoltBody volatile component, slab-direct
+  FlushPendingBodies/PullActiveTransforms)
 - [x] Cold component infrastructure (TNX_REGISTER_FIELDS → CacheTier::None → SoA in chunk)
 - [x] Input buffering (double-buffered, lock-free polling, event + bitstate querying)
 - [x] VecMath / QuatMath / FieldMath libraries

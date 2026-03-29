@@ -23,8 +23,9 @@ The engine is designed for high-frequency simulation with a large number of dyna
 
 - PrePhysics: ~1.0ms for 1M entities (stress test)
 - PrePhysics: ~0.1ms for 100k entities (on target)
-- Setup Jolt solver, configurable fixed updates per tick and runs inside a worker job. default Logic runs at 512Hz with
-  8 fixed steps for phys, 64Hz. ~10k awake cubes in a pyramid (30 layers) ~0.55ms for actual transform pulls.
+- Jolt solver at 64Hz (512Hz/8 ratio), parallelized across worker pool via JoltJobSystemAdapter
+- 25-layer pyramid (5,526 entities): ~1ms steady-state, 14.67ms settling spike. Slab-direct iteration (no archetype
+  indirection)
 - History Write--Frame Propagation: ~0.2ms for 100k entities.
 
 ---
@@ -200,14 +201,15 @@ All benchmarks performed on:
 
 ---
 
-## Current Status vs Targets (Week 7)
+## Current Status vs Targets (Week 8)
 
-| Target                    | Goal   | Current                   | Delta       | Status |
-|---------------------------|--------|---------------------------|-------------|--------|
-| Full Frame (100k @ 512Hz) | 1.95ms | ~0.3ms @ 512Hz            | ✅ Achieved! | ✅      |
-| Render (100k @ 60 FPS)    | 8.5ms  | ~0.7ms (no cull)          | ✅ Excellent | ✅      |
-| Memory (100k, 128 pages)  | 685 MB | ~2.2GB w/ 10k Jolt bodies | ⏳ Pending   | 🔄     |
-| Input Latency             | <16ms  | ~7ms on 240Hz monitor     | ⏳ TBD       | ⏳      |
+| Target                    | Goal   | Current                    | Delta       | Status |
+|---------------------------|--------|----------------------------|-------------|--------|
+| Full Frame (100k @ 512Hz) | 1.95ms | ~0.3ms @ 512Hz             | ✅ Achieved! | ✅      |
+| Physics (5.5k @ 64Hz)     | 0.8ms  | ~1ms steady, 14.67ms spike | ✅ On target | ✅      |
+| Render (100k @ 60 FPS)    | 8.5ms  | ~0.7ms (no cull)           | ✅ Excellent | ✅      |
+| Memory (100k, 128 pages)  | 685 MB | ~2.2GB w/ 10k Jolt bodies  | ⏳ Pending   | 🔄     |
+| Input Latency             | <16ms  | ~7ms on 240Hz monitor      | ⏳ TBD       | ⏳      |
 
 **Key Observations:**
 
@@ -215,5 +217,8 @@ All benchmarks performed on:
 - FieldProxy SIMD optimization was the breakthrough (4x speedup)
 - Render thread at 0.73ms leaves plenty of headroom
 - Memory usage is pretty massive with rollback enabled, around 270MB without.
+- JoltBody moved from cold to volatile tier — FlushPendingBodies now iterates contiguous DUAL+PHYS slab region directly
+- 25-layer pyramid (5,526 entities) settling in ~14.67ms, steady state ~1ms — dense pyramid forms monolithic Jolt island
+  limiting parallelism during settling
 
 ---

@@ -306,37 +306,40 @@ entity's tier classification.
 ## Partition Design: Dual-Ended Arenas
 
 The slab is divided into two fixed-size arenas by `EngineConfig`. Within each arena, two buckets grow
-inward from opposite ends. Arena boundaries (`MaxPhysicsEntities`, `MaxCachedEntities`) and maximum
+inward from opposite ends. Arena boundaries (`MaxRenderableEntities`, `MaxCachedEntities`) and maximum
 bucket sizes are all predetermined at startup.
 
 ```
-Arena 1: Physics  [0 .. MAX_PHYSICS_ENTITIES)
-  PHYS  (→) starts at 0            — physics-only (triggers, invisible movers)
-  DUAL  (←) starts at MAX_PHYSICS  — physics + render (players, AI, physics props)
+Arena 1: Renderable  [0 .. MAX_RENDERABLE_ENTITIES)
+  RENDER (→) starts at 0              — render-only (particles, decals, ambient props)
+  DUAL   (←) starts at MAX_RENDERABLE — physics + render (players, AI, physics props)
 
-Arena 2: Cached  [MAX_PHYSICS_ENTITIES .. MAX_CACHED_ENTITIES)
-  RENDER (→) starts at MAX_PHYSICS — render-only (particles, decals, ambient props)
-  LOGIC  (←) starts at MAX_CACHED  — logic/rollback-only entities
+Arena 2: Cached  [MAX_RENDERABLE_ENTITIES .. MAX_CACHED_ENTITIES)
+  PHYS  (→) starts at MAX_RENDERABLE — physics-only (triggers, invisible movers)
+  LOGIC (←) starts at MAX_CACHED     — logic/rollback-only entities
 ```
 
 Config constraints (validated at startup):
 ```
-assert(MaxDualEntities + MaxPhysEntities <= MaxPhysicsEntities)
-assert(MaxPhysicsEntities + MaxRenderEntities <= MaxCachedEntities)
+assert(MaxRenderEntities + MaxDualEntities <= MaxRenderableEntities)
+assert(MaxRenderableEntities + MaxPhysEntities <= MaxCachedEntities)
 ```
 
-**System iteration patterns — two dense passes each, no pointer chasing:**
+**System iteration patterns:**
 
-- Physics iterates Arena 1: `PHYS[0..N_phys)` + `DUAL[MAX_PHYSICS-N_dual..MAX_PHYSICS)` + `STATIC`
-  100% physics entities; render-only and logic-only data are outside this range entirely.
-- Render iterates: `DUAL[MAX_PHYSICS-N_dual..MAX_PHYSICS)` + `RENDER[MAX_PHYSICS..MAX_PHYSICS+N_render)` + `STATIC`
-  The DUAL tail and RENDER head are contiguous at the arena boundary — effectively one scan.
+- Physics iterates DUAL + PHYS contiguously at the arena boundary: `DUAL[MAX_RENDERABLE-N_dual..MAX_RENDERABLE)` +
+  `PHYS[MAX_RENDERABLE..MAX_RENDERABLE+N_phys)` + `STATIC`
+  DUAL and PHYS are adjacent — physics sees one dense scan with no gap. 100% physics entities; render-only and
+  logic-only data are outside this range entirely.
+- Render iterates RENDER + DUAL within Arena 1: `RENDER[0..N_render)` + `DUAL[MAX_RENDERABLE-N_dual..MAX_RENDERABLE)` +
+  `STATIC`
+  There is a gap between RENDER and DUAL in Arena 1; the GPU predicate pass handles this at negligible cost.
 
-The physics solver iterates Arena 1 exclusively. It sees a dense wall of memory containing 100%
-of its relevant entities, with no render-only or logic-only data anywhere in its access range. Because 32-bit slots
-correspond to an entity global ID this can lead to holes and gaps, but the arena layout minimizes the holes and makes
-the significant gap the one between Phys and Dual, allowing processes to fly over it. Might be worth swapping Physics
-and Render alloocation slots in the future depending on if Renderer or physics benefits more for the gapless iteration.
+The physics solver iterates the DUAL tail + PHYS head at the arena boundary. It sees a dense wall of memory containing
+100% of its relevant entities, with no render-only or logic-only data anywhere in its access range. Because 32-bit slots
+correspond to an entity global ID this can lead to holes and gaps within buckets, but the arena layout minimizes these
+and the contiguous DUAL+PHYS boundary eliminates the largest potential gap. Jolt body arrays are sized separately via
+`MAX_JOLT_BODIES` in EngineConfig.
 
 ---
 
@@ -448,7 +451,7 @@ There are several bitplanes dedicated to tracking which components an entity has
 
 **Macro-gap skipping:** The universal strip is scanned 64 entities at a time (one 64-bit word). If the
 entire word is zero (all 64 entities inactive), the branch predictor instantly skips that block — no
-field data is touched. This covers the unused space between the PHYS and DUAL buckets within Arena 1
+field data is touched. This covers the unused space between the RENDER and DUAL buckets within Arena 1
 and sparse regions at startup with no measurable overhead.
 
 **Micro-gap execution:** When a word has mixed active/inactive entities, `FieldProxy` uses AVX2 masked
