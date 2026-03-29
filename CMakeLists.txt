@@ -77,7 +77,9 @@ set(GNS_PATH "${CMAKE_SOURCE_DIR}/libs/gns")
 add_library(Slang::Compiler SHARED IMPORTED GLOBAL
         src/Runtime/Core/Public/TrinyxJobs.h
         src/Runtime/Core/Private/ThreadPinning.h
-        src/Runtime/Core/Public/TrinyxRingBuffer.h)
+        src/Runtime/Core/Public/TrinyxRingBuffer.h
+        src/Runtime/Core/Public/RegistryTypes.h
+        src/Runtime/Core/Public/Events.h)
 set_target_properties(Slang::Compiler PROPERTIES
         IMPORTED_LOCATION             "${SLANG_PATH}/lib/libslang-compiler.so"
         INTERFACE_INCLUDE_DIRECTORIES "${SLANG_PATH}/include"

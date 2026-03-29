@@ -67,6 +67,11 @@ public:
 	const EngineConfig* GetConfig() const { return &Config; }
 	bool GetJobsInitialized() const { return bJobsInitialized.load(std::memory_order_relaxed); }
 
+	// Test-only: hard-reset the registry (wipes all entities, handles, caches).
+	// Routed through TrinyxEngine because Registry::ResetRegistry is private.
+	void ResetRegistry() const;
+	void ConfirmLocalRecycles() const;
+
 	/// Spawn entities from any thread. Blocks until the work completes at a
 	/// safe sync point in the Logic thread's frame. If already on Logic,
 	/// executes immediately. See SpawnSync.h for full documentation.

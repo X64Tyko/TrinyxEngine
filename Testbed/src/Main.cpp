@@ -15,67 +15,66 @@
 
 using namespace tnx::Testing;
 
-TEST (Registry_CreateEntities)
+TEST(Registry_CreateEntities)
 {
 	Registry* Reg = Engine.GetRegistry();
-	std::vector<EntityID> Entities;
+	std::vector<EntityHandle> Entities;
 
 	for (int i = 0; i < 5; ++i)
 	{
-		EntityID Id = Reg->Create<TestEntity<>>();
+		EntityHandle Id = Reg->Create<TestEntity<>>();
 		Entities.push_back(Id);
 	}
 
 	ASSERT_EQ(Entities.size(), 5);
 
-	Reg->ResetRegistry();
+	Engine.ResetRegistry();
 }
 
-TEST (Registry_ValidEntityIDs)
+TEST(Registry_ValidEntityIDs)
 {
 	Registry* Reg = Engine.GetRegistry();
-	std::vector<EntityID> Entities;
+	std::vector<EntityHandle> Entities;
 
 	for (int i = 0; i < 100; ++i)
 	{
 		Entities.push_back(Reg->Create<TestEntity<>>());
 	}
 
-	for (EntityID Id : Entities)
+	for (EntityHandle Id : Entities)
 	{
 		ASSERT(Id.IsValid());
 	}
-	Reg->ResetRegistry();
+	Engine.ResetRegistry();
 }
 
-TEST (Registry_DestroyAndReuse)
+TEST(Registry_DestroyAndReuse)
 {
 	Registry* Reg = Engine.GetRegistry();
-	std::vector<EntityID> Entities;
+	std::vector<EntityHandle> Entities;
 
 	for (int i = 0; i < 10; ++i)
 	{
 		Entities.push_back(Reg->Create<TestEntity<>>());
 	}
 
-	uint32_t firstIndex      = Entities[0].GetIndex();
-	uint32_t firstGeneration = Entities[0].GetGeneration();
+	uint32_t firstHandleIndex = Entities[0].GetHandleIndex();
 
 	Reg->Destroy(Entities[0]);
 	Reg->ProcessDeferredDestructions();
+	Engine.ConfirmLocalRecycles();
 
-	EntityID NewId = Reg->Create<TestEntity<>>();
-	ASSERT_EQ(NewId.GetIndex(), firstIndex);
-	ASSERT(NewId.GetGeneration() > firstGeneration);
+	EntityHandle NewId = Reg->Create<TestEntity<>>();
+	ASSERT_EQ(NewId.GetHandleIndex(), firstHandleIndex);
 
-	Reg->ResetRegistry();
+	Engine.ResetRegistry();
 }
 
 /* Temporarily disabled, jobs aren't properly initialized until the Run loop is active.
 TEST(DirtyBits_SetAfterPrePhys)
 {
 	Registry* Reg = Engine.GetRegistry();
-	
+
 	TrinyxJobs::Initialize(Reg->GetConfig);
 
 	constexpr int kCount = 16; // exactly 2 dirty bytes
@@ -97,7 +96,7 @@ TEST(DirtyBits_SetAfterPrePhys)
 	for (int b = 0; b < (kCount + 7) / 8; ++b)
 		ASSERT_EQ((int)dirtyBytes[b], 0xFF);
 
-	Reg->ResetRegistry();
+	Engine.ResetRegistry();
 }
 */
 
@@ -115,10 +114,10 @@ struct CubeSetup
 };
 
 static void WriteCubeSetups(Registry* reg, const std::vector<CubeSetup>& setups,
-							std::vector<EntityID>& outIds)
+							std::vector<EntityHandle>& outIds)
 {
-	int32_t totalCount           = static_cast<int32_t>(setups.size());
-	std::vector<EntityID> newIds = reg->Create<CubeEntity<>>(totalCount);
+	int32_t totalCount               = static_cast<int32_t>(setups.size());
+	std::vector<EntityHandle> newIds = reg->Create<CubeEntity<>>(totalCount);
 	outIds.insert(outIds.end(), newIds.begin(), newIds.end());
 
 	uint32_t setupIdx              = 0;
@@ -129,12 +128,11 @@ static void WriteCubeSetups(Registry* reg, const std::vector<CubeSetup>& setups,
 		for (size_t chunkIdx = 0; chunkIdx < arch->Chunks.size(); ++chunkIdx)
 		{
 			Chunk* chunk              = arch->Chunks[chunkIdx];
-			uint32_t chunkEntityCount = arch->GetChunkCount(chunkIdx);
+			uint32_t chunkEntityCount = arch->GetAllocatedChunkCount(chunkIdx);
 
-			void* fieldArrayTable[MAX_FIELD_ARRAYS];
+			void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 			arch->BuildFieldArrayTable(chunk, fieldArrayTable, reg->GetTemporalCache()->GetActiveWriteFrame(), reg->GetVolatileCache()->GetActiveWriteFrame());
-			cube.Hydrate(fieldArrayTable, reinterpret_cast<uint8_t*>(reg->DirtyBitsFrame(0)->data())
-						 + (chunk->Header.CacheIndexStart / 8));
+			cube.Hydrate(fieldArrayTable, fieldArrayTable[0]);
 
 			for (uint32_t i = 0; i < chunkEntityCount; ++i, cube.Advance(1))
 			{
@@ -180,10 +178,10 @@ struct ProjectileSetup
 };
 
 static void WriteProjectileSetups(Registry* reg, const std::vector<ProjectileSetup>& setups,
-								  std::vector<EntityID>& outIds)
+								  std::vector<EntityHandle>& outIds)
 {
-	int32_t totalCount           = static_cast<int32_t>(setups.size());
-	std::vector<EntityID> newIds = reg->Create<Projectile<>>(totalCount);
+	int32_t totalCount               = static_cast<int32_t>(setups.size());
+	std::vector<EntityHandle> newIds = reg->Create<Projectile<>>(totalCount);
 	outIds.insert(outIds.end(), newIds.begin(), newIds.end());
 
 	uint32_t setupIdx              = 0;
@@ -194,12 +192,11 @@ static void WriteProjectileSetups(Registry* reg, const std::vector<ProjectileSet
 		for (size_t chunkIdx = 0; chunkIdx < arch->Chunks.size(); ++chunkIdx)
 		{
 			Chunk* chunk              = arch->Chunks[chunkIdx];
-			uint32_t chunkEntityCount = arch->GetChunkCount(chunkIdx);
+			uint32_t chunkEntityCount = arch->GetAllocatedChunkCount(chunkIdx);
 
-			void* fieldArrayTable[MAX_FIELD_ARRAYS];
+			void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 			arch->BuildFieldArrayTable(chunk, fieldArrayTable, reg->GetTemporalCache()->GetActiveWriteFrame(), reg->GetVolatileCache()->GetActiveWriteFrame());
-			proj.Hydrate(fieldArrayTable, reinterpret_cast<uint8_t*>(reg->DirtyBitsFrame(0)->data())
-						 + (chunk->Header.CacheIndexStart / 8));
+			proj.Hydrate(fieldArrayTable, fieldArrayTable[0]);
 
 			for (uint32_t i = 0; i < chunkEntityCount; ++i, proj.Advance(1))
 			{
@@ -226,10 +223,10 @@ static void WriteProjectileSetups(Registry* reg, const std::vector<ProjectileSet
 }
 
 static void WriteSuperCubeSetups(Registry* reg, const std::vector<CubeSetup>& setups,
-								 std::vector<EntityID>& outIds)
+								 std::vector<EntityHandle>& outIds)
 {
-	int32_t totalCount           = static_cast<int32_t>(setups.size());
-	std::vector<EntityID> newIds = reg->Create<SuperCube<>>(totalCount);
+	int32_t totalCount               = static_cast<int32_t>(setups.size());
+	std::vector<EntityHandle> newIds = reg->Create<SuperCube<>>(totalCount);
 	outIds.insert(outIds.end(), newIds.begin(), newIds.end());
 
 	uint32_t setupIdx              = 0;
@@ -240,12 +237,11 @@ static void WriteSuperCubeSetups(Registry* reg, const std::vector<CubeSetup>& se
 		for (size_t chunkIdx = 0; chunkIdx < arch->Chunks.size(); ++chunkIdx)
 		{
 			Chunk* chunk              = arch->Chunks[chunkIdx];
-			uint32_t chunkEntityCount = arch->GetChunkCount(chunkIdx);
+			uint32_t chunkEntityCount = arch->GetAllocatedChunkCount(chunkIdx);
 
-			void* fieldArrayTable[MAX_FIELD_ARRAYS];
+			void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 			arch->BuildFieldArrayTable(chunk, fieldArrayTable, reg->GetTemporalCache()->GetActiveWriteFrame(), reg->GetVolatileCache()->GetActiveWriteFrame());
-			cube.Hydrate(fieldArrayTable, reinterpret_cast<uint8_t*>(reg->DirtyBitsFrame(0)->data())
-						 + (chunk->Header.CacheIndexStart / 8));
+			cube.Hydrate(fieldArrayTable, fieldArrayTable[0]);
 
 			for (uint32_t i = 0; i < chunkEntityCount; ++i, cube.Advance(1))
 			{
@@ -279,11 +275,11 @@ static void WriteSuperCubeSetups(Registry* reg, const std::vector<CubeSetup>& se
 // ===========================================================================
 
 // File-scope entity ID storage for runtime spawn/cleanup
-static std::vector<EntityID> gPyramidIds;
-static std::vector<EntityID> gSuperCubeIds;
-static std::vector<EntityID> gProjectileIds;
+static std::vector<EntityHandle> gPyramidIds;
+static std::vector<EntityHandle> gSuperCubeIds;
+static std::vector<EntityHandle> gProjectileIds;
 
-RUNTIME_TEST (Runtime_JobsInitialized)
+RUNTIME_TEST(Runtime_JobsInitialized)
 {
 	ASSERT(Engine.GetJobsInitialized());
 }
@@ -294,7 +290,7 @@ RUNTIME_TEST (Runtime_JobsInitialized)
 //            transform pull-back, GPU predicate/scatter with Active flags.
 // Persistent — stays up for the duration of the session.
 // ---------------------------------------------------------------------------
-RUNTIME_TEST (Spawn_JoltPyramid)
+RUNTIME_TEST(Spawn_JoltPyramid)
 {
 	std::random_device rd;
 	std::mt19937 gen(rd());
@@ -353,7 +349,7 @@ RUNTIME_TEST (Spawn_JoltPyramid)
 // Exercises: high entity count, ScalarUpdate color animation, no Jolt overhead.
 // Self-destructs after 30 seconds.
 // ---------------------------------------------------------------------------
-RUNTIME_TEST (Spawn_SuperCubeGrid)
+RUNTIME_TEST(Spawn_SuperCubeGrid)
 {
 	std::random_device rd;
 	std::mt19937 gen(rd());
@@ -403,7 +399,7 @@ RUNTIME_TEST (Spawn_SuperCubeGrid)
 		SDL_Delay(30000);
 		TrinyxEngine::Get().Spawn([idsPtr](Registry* reg)
 		{
-			for (EntityID id : *idsPtr) reg->Destroy(id);
+			for (EntityHandle id : *idsPtr) reg->Destroy(id);
 			LOG_ALWAYS_F("[RuntimeTest] SuperCube Grid: destroyed %zu entities after 30s",
 						 idsPtr->size());
 			idsPtr->clear();
@@ -417,7 +413,7 @@ RUNTIME_TEST (Spawn_SuperCubeGrid)
 //            alpha fade, AVX2 wide-path throughput.
 // Self-destructs after 30 seconds.
 // ---------------------------------------------------------------------------
-RUNTIME_TEST (Spawn_ProjectileBurst)
+RUNTIME_TEST(Spawn_ProjectileBurst)
 {
 	std::random_device rd;
 	std::mt19937 gen(rd());
@@ -458,7 +454,7 @@ RUNTIME_TEST (Spawn_ProjectileBurst)
 		SDL_Delay(30000);
 		TrinyxEngine::Get().Spawn([idsPtr](Registry* reg)
 		{
-			for (EntityID id : *idsPtr) reg->Destroy(id);
+			for (EntityHandle id : *idsPtr) reg->Destroy(id);
 			LOG_ALWAYS_F("[RuntimeTest] Projectile Burst: destroyed %zu entities after 30s",
 						 idsPtr->size());
 			idsPtr->clear();
@@ -466,7 +462,7 @@ RUNTIME_TEST (Spawn_ProjectileBurst)
 	}).detach();
 }
 
-RUNTIME_TEST (Runtime_EntityCountValid)
+RUNTIME_TEST(Runtime_EntityCountValid)
 {
 	Registry* Reg        = Engine.GetRegistry();
 	size_t totalEntities = Reg->GetTotalEntityCount();

@@ -23,7 +23,7 @@ template <typename T> concept HasOnCollide = requires(T t) { t.OnCollide(); };
 template <typename T> concept HasDefineSchema = requires(T t) { t.DefineSchema(); };
 template <typename T> concept HasDefineFields = requires(T t) { t.DefineFields(); };
 
-using UpdateFunc = void(*)(double, void**, uint8_t*, uint32_t);
+using UpdateFunc = void(*)(double, void**, void*, uint32_t);
 
 #define REGISTER_ENTITY_PREPHYS(Type, ClassID) \
     case ClassID: InvokePrePhysicsImpl<Type>(dt, fieldArrayTable, componentCount); break;
@@ -37,7 +37,7 @@ struct EntityMeta
 	UpdateFunc PostPhys     = nullptr;
 	UpdateFunc ScalarUpdate = nullptr;
 
-	uint32_t EntitiesPerChunk = 0; // 0 = auto-compute from chunk size
+	uint32_t EntitiesPerChunk = 256;
 
 	EntityMeta()
 	{
@@ -62,7 +62,7 @@ struct EntityMeta
 };
 
 template <typename T>
-FORCE_INLINE void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, uint8_t* FlagBase, uint32_t componentCount)
+FORCE_INLINE void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
 {
 	alignas(32) typename T::WideType viewBatch;
 
@@ -86,7 +86,7 @@ FORCE_INLINE void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, uint8_
 }
 
 template <typename T>
-FORCE_INLINE void InvokeScalarUpdateImpl(double dt, void** fieldArrayTable, uint8_t* FlagBase, uint32_t componentCount)
+FORCE_INLINE void InvokeScalarUpdateImpl(double dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
 {
 	// Use Scalar for the update, this is where users can cross-reference entities and do non-SIMD things.
 	alignas(32) T viewBatch;
@@ -102,7 +102,7 @@ FORCE_INLINE void InvokeScalarUpdateImpl(double dt, void** fieldArrayTable, uint
 }
 
 template <typename T>
-FORCE_INLINE void InvokePostPhysicsImpl(double dt, void** fieldArrayTable, uint8_t* FlagBase, uint32_t componentCount)
+FORCE_INLINE void InvokePostPhysicsImpl(double dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
 {
 	alignas(32) typename T::WideType viewBatch;
 
@@ -190,7 +190,7 @@ public:
 		const ClassID ID             = C::StaticClassID();
 		const ComponentTypeID TypeID = T::StaticTypeID();
 		ComponentSignature& Def      = ClassToArchetype[ID];
-		Def                          |= 1 << (TypeID - 1);
+		Def.set(TypeID - 1);
 
 		for (auto& component : ClassToComponentList[ID])
 		{

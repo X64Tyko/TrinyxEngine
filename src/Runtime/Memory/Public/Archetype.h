@@ -2,16 +2,31 @@
 #include "Types.h"
 #include "Signature.h"
 #include "Chunk.h"
-#include <vector>
+#include <span>
 #include <unordered_map>
-#include <unordered_set>
-
+#include <vector>
 #include "ComponentView.h"
 #include "FieldMeta.h"
+#include "FlatMap.h"
 #include "Schema.h"
 
-// Archetype - manages storage for entities with a specific component signature
-// Uses Structure-of-Arrays (SoA) layout within each chunk
+// Archetype — manages storage for all entities sharing a (Signature, ClassID) pair.
+//
+// Each archetype owns a list of Chunks (dense, 64-byte aligned allocations) and a
+// ArchetypeFieldLayout table (FlatMap<FieldKey, FieldDescriptor>) that is the single
+// source of truth for every field's slot index, cache tier, frame count, and stride.
+//
+// Fields may live in three places depending on their CacheTier:
+//   Temporal/Volatile — SoA ring buffer in the corresponding ComponentCache slab.
+//                       FieldPtrs[] in the chunk header point into the slab.
+//   Cold (None)       — SoA arrays packed directly inside the chunk allocation.
+//
+// BuildFieldArrayTable / BuildFieldDualArrayTable resolve frame indices using pure
+// arithmetic: `base + (frame % frameCount) * frameStride`. Cold fields degenerate
+// to `base + 0` (frameCount=1, frameStride=0) — no tier branching needed.
+//
+// Lifetime: Registry owns all Archetype instances. Only Registry calls BuildLayout,
+// PushEntities, and RemoveEntity.
 class Archetype
 {
 public:
@@ -23,6 +38,15 @@ public:
 		bool operator==(const ArchetypeKey& other) const
 		{
 			return ID == other.ID && Sig == other.Sig;
+		}
+
+		// Required for FlatMap (sorted container)
+		bool operator<(const ArchetypeKey& other) const
+		{
+			// Compare ClassID first (likely fewer unique values, better branch prediction)
+			if (ID != other.ID) return ID < other.ID;
+			// Then compare signature bitset
+			return Sig < other.Sig;
 		}
 	};
 
@@ -40,265 +64,126 @@ public:
 	const char* DebugName;
 
 	// Entity capacity and tracking
-	uint32_t EntitiesPerChunk = 1024; // How many entities fit in one chunk
-	uint32_t TotalEntityCount = 0;    // Total entities across all chunks
+	uint32_t EntitiesPerChunk     = 0; // Set by BuildLayout from EntityMeta
+	uint32_t AllocatedEntityCount = 0; // High-water mark of allocated slots (includes tombstoned).
+	// Used by GetAllocatedChunkCount for iteration bounds.
+	uint32_t TotalEntityCount = 0; // Live (non-tombstoned) entities across all chunks.
 
 	// Chunk storage
 	std::vector<Chunk*> Chunks;
 
-	// Component layout information
-	std::unordered_map<ComponentTypeID, ComponentMetaEx> ComponentLayout;
+	// Returns allocated slot count for a chunk (includes tombstoned). Use for iteration bounds —
+	// callers rely on bitplane/masked-store to skip dead slots.
+	uint32_t GetAllocatedChunkCount(size_t ChunkIndex) const;
 
-	// Cached component iteration data (built once in BuildLayout)
-	struct ComponentCacheEntry
-	{
-		ComponentTypeID TypeID;
-		bool IsFieldDecomposed;
-		size_t ChunkOffset;
-	};
+	// Returns live (non-tombstoned) entity count for a chunk.
+	uint32_t GetLiveChunkCount(size_t ChunkIndex) const;
 
-	std::vector<ComponentCacheEntry> ComponentIterationCache;
-
-	// Get the number of entities in a specific chunk (handles tail chunk)
-	uint32_t GetChunkCount(size_t ChunkIndex) const;
-
-	// Slot descriptor returned by PushEntity (used by Registry::Create to update EntityIndex)
+	// Slot descriptor returned by PushEntities — gives Registry everything it needs
+	// to populate an EntityRecord after allocating an archetype slot.
 	struct EntitySlot
 	{
-		Chunk* TargetChunk;
-		uint32_t LocalIndex;
-		uint32_t CacheIndex; // Index across all chunks
+		Chunk* TargetChunk;  // The chunk this slot belongs to
+		uint32_t ChunkIndex; // Which chunk in Chunks[] (0-based)
+		uint32_t LocalIndex; // Index within the chunk (0 .. EntitiesPerChunk-1)
+		uint32_t ArchIndex;  // Flat index across all chunks in this archetype
+		uint32_t CacheIndex; // Index in the temporal/volatile cache slab
 	};
 
 	std::vector<EntitySlot> ActiveEntitySlots;
 	std::vector<EntitySlot> InactiveEntitySlots;
 
-	// Get typed array pointer for a component in a specific chunk
-	template <typename T>
-	T* GetComponentArray(Chunk* TargetChunk, ComponentTypeID TypeID)
-	{
-		auto It = ComponentLayout.find(TypeID);
-		if (It == ComponentLayout.end()) return nullptr;
-
-		const ComponentMetaEx& Meta = It->second;
-		return reinterpret_cast<T*>(TargetChunk->GetBuffer(static_cast<uint32_t>(Meta.OffsetInChunk)));
-	}
-
-	template <typename T>
-	T* GetComponent(Chunk* TargetChunk, ComponentTypeID TypeID, uint32_t Index)
-	{
-		// TODO: need to verify this Index is valid
-		return GetComponentArray<T>(TargetChunk, TypeID)[Index];
-	}
-
-	// Get field arrays for decomposed components (SoA)
+	// Get all field array base pointers for a given component type within a chunk (frame 0).
 	std::vector<void*> GetFieldArrays(Chunk* TargetChunk, ComponentTypeID TypeID);
-
 
 	// Edge graph for archetype transitions (future optimization)
 	std::unordered_map<ComponentTypeID, Archetype*> AddEdges;    // Add component X -> go to archetype Y
 	std::unordered_map<ComponentTypeID, Archetype*> RemoveEdges; // Remove component X -> go to archetype Y
 
-	// Field array lookup key
+	// Composite key for field lookup: (componentID, cacheSlotIndex, fieldIndex)
 	struct FieldKey
 	{
 		ComponentTypeID componentID;
-		uint8_t temporalFieldIndex;
+		uint8_t cacheSlotIndex;
 		uint32_t fieldIndex;
 
 		bool operator==(const FieldKey& other) const
 		{
-			return componentID == other.componentID && temporalFieldIndex == other.temporalFieldIndex && fieldIndex == other.fieldIndex;
+			return componentID == other.componentID && cacheSlotIndex == other.cacheSlotIndex && fieldIndex == other.fieldIndex;
 		}
-	};
 
-	struct FieldKeyHash
-	{
-		size_t operator()(const FieldKey& key) const
+		bool operator<(const FieldKey& other) const { return pack() < other.pack(); }
+
+		size_t pack() const
 		{
-			return (static_cast<size_t>(key.componentID) << 32) | (static_cast<size_t>(key.temporalFieldIndex) << 16) | key.fieldIndex;
+			return (static_cast<size_t>(componentID) << 32) | (static_cast<size_t>(cacheSlotIndex) << 16) | fieldIndex;
 		}
 	};
 
-	// Storage for field array offsets
-	std::unordered_map<FieldKey, size_t, FieldKeyHash> FieldOffsets;
-
-	// Per-SoA-field info used by BuildFieldArrayTable and GetTemporalFieldWritePtr.
-	struct TemporalFieldInfo
+	struct FieldDescriptor
 	{
-		uint8_t SlotIndex;   // Index into chunk header temporal pointer array
-		uint32_t FrameCount; // Number of frames in this field's slab ring
-		size_t FrameStride;  // Bytes from frame N base to frame N+1 base
-	};
-
-	// Key: (ComponentTypeID, fieldIndex) → TemporalFieldInfo
-	std::unordered_map<FieldKey, TemporalFieldInfo, FieldKeyHash> TemporalFieldIndices;
-
-	// CACHED FIELD ARRAY TABLE - computed once after BuildLayout()
-	// This stores the field array count and layout order
-	struct FieldArrayDescriptor
-	{
-		uint8_t componentSlotIndex;
-		ComponentTypeID componentID;
-		uint32_t fieldIndex;
-		uint8_t FieldSlotIndex;
-		size_t fieldFrames;
-		size_t frameStride;
-		size_t size;
-		bool isDecomposed;
-		CacheTier tier;
+		uint8_t fieldSlotIndex;         // Index into Chunk::Header::FieldPtrs[]
+		uint8_t componentSlotIndex;     // Field index within its component (0, 1, 2...)
+		uint8_t temporalComponentIndex; // Cache slot index in the temporal/volatile slab
+		ComponentTypeID componentID;    // Component type this field belongs to
+		CacheTier tier;                 // Which cache tier (Temporal, Volatile, None)
 		FieldValueType valueType = FieldValueType::Unknown;
+		size_t fieldSize;        // Size of one element (e.g. 4 for float)
+		size_t fieldFrameCount;  // Frame count in cache ring (1 for cold)
+		size_t fieldFrameStride; // Bytes between frame N and frame N+1 (0 for cold)
+		bool bIsTemporal;        // True if stored in temporal/volatile slab
 	};
 
-	std::vector<FieldArrayDescriptor> CachedFieldArrayLayout;
-	size_t TotalFieldArrayCount = 0;
+	// Single source of truth for every field in this archetype — maps (component, cacheSlot, fieldIdx)
+	// to its chunk slot index, cache tier, frame ring parameters, and element size.
+	FlatMap<FieldKey, FieldDescriptor> ArchetypeFieldLayout;
 
-	// Pre-compute field array offsets (chunk-independent)
-	// Call this once after BuildLayout() to cache offsets
-	struct FieldArrayTemplate
-	{
-		size_t offsetInChunk;
-		const char* debugName; // For debugging
-	};
-
-	std::vector<FieldArrayTemplate> FieldArrayTemplateCache;
-
+	// Total byte size of each chunk allocation (header + all cold field arrays). Set by BuildLayout.
 	size_t TotalChunkDataSize = 0;
 
-	// Get pointer to a specific field array within a chunk (always returns frame 0 for temporal)
+	// Get base pointer to a field array within a chunk (frame 0 for temporal/volatile fields).
 	void* GetFieldArray(Chunk* chunk, ComponentTypeID typeID, uint32_t fieldIndex)
 	{
-		ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
-		FieldKey key{typeID, CFR.GetCacheSlotIndex(typeID), fieldIndex};
-
-		// Check if this is a temporal field
-		auto temporalIt = TemporalFieldIndices.find(key);
-		if (temporalIt != TemporalFieldIndices.end())
-		{
-			// Return frame 0 pointer from chunk header
-			return chunk->GetTemporalFieldPointer(temporalIt->second.SlotIndex);
-		}
-
-		// Regular chunk field
-		auto it = FieldOffsets.find(key);
-		if (it == FieldOffsets.end()) return nullptr;
-
-		return chunk->GetBuffer(static_cast<uint32_t>(it->second));
+		FieldKey key{typeID, ComponentFieldRegistry::Get().GetCacheSlotIndex(typeID), fieldIndex};
+		auto* desc = ArchetypeFieldLayout.find(key);
+		return desc ? chunk->GetFieldPtr(desc->fieldSlotIndex) : nullptr;
 	}
 
 	// Build interleaved dual field array table (read T, write T+1) for FieldProxy::Bind()
 	// Output layout: [read0, write0, read1, write1, read2, write2, ...]
-	// absoluteFrame: raw monotonic frame counter — each SoA field computes its own
-	// modular read/write indices from its FrameCount, so Volatile (3-frame triple-buffer) and
+	// absoluteFrame/VolatileAbsoluteFrame: raw monotonic frame counters — each field computes
+	// its own modular read/write indices from its FrameCount, so Volatile (triple-buffer) and
 	// Temporal (N-frame) fields in the same archetype work correctly.
+	// Cold fields use frameCount=1, frameStride=0 so the math degenerates to base+0 (branchless).
 	void BuildFieldDualArrayTable(Chunk* chunk, void** outDualArrayTable, uint32_t absoluteFrame, uint32_t VolatileAbsoluteFrame) const
 	{
-		auto chunkBase = chunk->Data;
-
-		size_t size = CachedFieldArrayLayout.size();
-		for (size_t i = 0; i < size; ++i)
+		for (const auto& [fkey, fdesc] : ArchetypeFieldLayout)
 		{
-			const auto& desc = CachedFieldArrayLayout[i];
-			if (desc.isDecomposed)
-			{
-				if (desc.tier == CacheTier::None)
-				{
-					// Cold decomposed — single-frame, read and write are the same pointer
-					void* ptr                    = chunkBase + FieldArrayTemplateCache[i].offsetInChunk;
-					outDualArrayTable[i * 2]     = ptr;
-					outDualArrayTable[i * 2 + 1] = ptr;
-				}
-				else
-				{
-					uint8_t* frame0Ptr = static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(desc.fieldIndex));
-					uint32_t readIdx   = (desc.tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame) % desc.fieldFrames;
-					uint32_t writeIdx  = ((desc.tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame) + 1) % desc.fieldFrames;
+			size_t idx        = fdesc.fieldSlotIndex;
+			auto* base        = static_cast<uint8_t*>(chunk->Header.FieldPtrs[idx]);
+			uint32_t frame    = (fdesc.tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame);
+			uint32_t readIdx  = frame % fdesc.fieldFrameCount;
+			uint32_t writeIdx = (frame + 1) % fdesc.fieldFrameCount;
 
-					outDualArrayTable[i * 2]     = frame0Ptr + readIdx * desc.frameStride;  // Read T
-					outDualArrayTable[i * 2 + 1] = frame0Ptr + writeIdx * desc.frameStride; // Write T+1
-				}
-			}
-			else
-			{
-				// Non-decomposed — read and write are the same pointer
-				void* ptr                    = chunkBase + FieldArrayTemplateCache[i].offsetInChunk;
-				outDualArrayTable[i * 2]     = ptr;
-				outDualArrayTable[i * 2 + 1] = ptr;
-			}
+			outDualArrayTable[idx * 2]     = base + readIdx * fdesc.fieldFrameStride;
+			outDualArrayTable[idx * 2 + 1] = base + writeIdx * fdesc.fieldFrameStride;
 		}
 	}
 
+	// Build single field array table for a specific frame (used by update dispatch, serialization).
+	// Cold fields use frameCount=1, frameStride=0 so the math degenerates to base+0 (branchless).
 	void BuildFieldArrayTable(Chunk* chunk, void** outFieldArrayTable, uint32_t absoluteFrame, uint32_t VolatileAbsoluteFrame) const
 	{
-		for (size_t i = 0; i < CachedFieldArrayLayout.size(); ++i)
+		for (const auto& [fkey, fdesc] : ArchetypeFieldLayout)
 		{
-			const auto& desc = CachedFieldArrayLayout[i];
-
-			if (desc.isDecomposed)
-			{
-				if (desc.tier == CacheTier::None)
-				{
-					// Cold decomposed — single-frame SoA array in chunk data
-					outFieldArrayTable[i] = chunk->Data + FieldArrayTemplateCache[i].offsetInChunk;
-				}
-				else
-				{
-					// Temporal/Volatile — multi-frame SoA in slab
-					size_t frameIdx       = ((desc.tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame) % desc.fieldFrames) * desc.frameStride;
-					outFieldArrayTable[i] = static_cast<uint8_t*>(chunk->GetTemporalFieldPointer(desc.FieldSlotIndex)) + frameIdx;
-				}
-			}
-			else
-			{
-				// Non-decomposed component - get whole component array
-				outFieldArrayTable[i] = chunk->Data + FieldArrayTemplateCache[i].offsetInChunk;
-			}
+			size_t idx              = fdesc.fieldSlotIndex;
+			auto* base              = static_cast<uint8_t*>(chunk->Header.FieldPtrs[idx]);
+			uint32_t frame          = (fdesc.tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame);
+			outFieldArrayTable[idx] = base + (frame % fdesc.fieldFrameCount) * fdesc.fieldFrameStride;
 		}
 	}
 
-	// Get total field array count (for allocating table)
-	size_t GetFieldArrayCount() const
-	{
-		return TotalFieldArrayCount;
-	}
-
-	// Validate that cached layout matches current state
-	bool ValidateCache() const
-	{
-		return CachedFieldArrayLayout.size() == TotalFieldArrayCount &&
-			FieldArrayTemplateCache.size() == TotalFieldArrayCount;
-	}
-
-	// Get component type at specific table index (for debug/validation)
-	ComponentTypeID GetComponentTypeAtTableIndex(size_t tableIndex) const
-	{
-		if (tableIndex >= CachedFieldArrayLayout.size()) return 0;
-
-		return CachedFieldArrayLayout[tableIndex].componentID;
-	}
-
-	// Get field name at specific table index (for debugging)
-	const char* GetFieldNameAtTableIndex(size_t tableIndex) const
-	{
-		if (tableIndex >= FieldArrayTemplateCache.size()) return "invalid";
-
-		return FieldArrayTemplateCache[tableIndex].debugName;
-	}
-
-	// Helper: Align offset to alignment requirement
-	static size_t AlignOffset(size_t offset, size_t alignment)
-	{
-		return (offset + alignment - 1) & ~(alignment - 1);
-	}
-
-	// Legacy: Get component array for non-decomposed components
-	void* GetComponentArrayRaw(Chunk* chunk, ComponentTypeID typeID)
-	{
-		auto it = ComponentLayout.find(typeID);
-		if (it == ComponentLayout.end()) return nullptr;
-
-		return chunk->GetBuffer(static_cast<uint32_t>(it->second.OffsetInChunk));
-	}
+	size_t GetFieldArrayCount() const { return ArchetypeFieldLayout.count(); }
 
 private:
 	friend class Registry;
@@ -308,11 +193,16 @@ private:
 	SystemID ArchSystemID = SystemID::None;
 
 	// Entity slot allocation / removal — only Registry drives these.
-	void PushEntities(std::vector<EntitySlot>& outSlots, size_t count = 1);
+	void PushEntities(std::span<EntitySlot> outSlots);
 	void RemoveEntity(size_t ChunkIndex, uint32_t LocalIndex, uint32_t ArchetypeIdx);
 
 	// Layout construction — called once by Registry after component metadata is known.
 	void BuildLayout(class Registry* reg, const std::vector<ComponentMetaEx>& Components, SystemID inArchSystemID = SystemID::None);
+
+	static size_t AlignOffset(size_t offset, size_t alignment)
+	{
+		return (offset + alignment - 1) & ~(alignment - 1);
+	}
 
 	// Chunk allocation
 	Chunk* AllocateChunk();
@@ -326,16 +216,13 @@ struct ArchetypeKeyHash
 {
 	size_t operator()(const Archetype::ArchetypeKey& key) const
 	{
-		// Start with classID
-		size_t hash = key.ID;
-
-		// Mix in signature using FNV-1a
+		// FNV-1a hash
 		constexpr size_t FNV_PRIME  = 0x100000001b3;
 		constexpr size_t FNV_OFFSET = 0xcbf29ce484222325;
 
-		hash = FNV_OFFSET;
-		hash ^= key.ID;
-		hash *= FNV_PRIME;
+		size_t hash = FNV_OFFSET;
+		hash        ^= static_cast<uint64_t>(key.ID) << 48;
+		hash        *= FNV_PRIME;
 
 		// Process signature in 64-bit chunks
 		const uint64_t* data = reinterpret_cast<const uint64_t*>(&key.Sig);

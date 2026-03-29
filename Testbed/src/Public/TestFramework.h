@@ -81,7 +81,7 @@ namespace tnx::Testing
         }
     };
 
-    std::vector<EntityID> entityIDs;
+	std::vector<EntityHandle> entityIDs;
 
 	// Runtime test registry — tests that run after the engine loop is active
 	// (Logic, Render, and Jobs are all running).

@@ -285,7 +285,7 @@ FORCE_INLINE void ForEachField(Func&& func)
 
 #define TNX_BIND_FINAL(ComponentType, Member, ...) Member.MaskFinal(count);
 
-#define TNX_BIND_BIND(ComponentType, Member, ...) Member.Bind(arrays[arrayIndex], dirtyBits, startIndex, count); arrayIndex += 1;
+#define TNX_BIND_BIND(ComponentType, Member, ...) Member.Bind(arrays[arrayIndex], flagsArray, startIndex, count); arrayIndex += 1;
 
 // Handles creating the field definition, debug field names, Bind function, and Registering the struct component
 #define TNX_REGISTER_FIELDS(ComponentType, ...) \
@@ -304,7 +304,7 @@ FORCE_INLINE void ForEachField(Func&& func)
         __VA_OPT__(TNX_MAPF_LIST(TNX_BIND_ADVANCE, ComponentType, __VA_ARGS__)) \
     } \
 \
-    FORCE_INLINE void Bind(void** arrays, uint8_t* dirtyBits, uint32_t startIndex = 0, int32_t count = -1) \
+    FORCE_INLINE void Bind(void** arrays, void* flagsArray, uint32_t startIndex = 0, int32_t count = -1) \
     { \
         int32_t arrayIndex = 0; \
         __VA_OPT__(TNX_MAPF_LIST(TNX_BIND_BIND, ComponentType, __VA_ARGS__)) \

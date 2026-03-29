@@ -4,6 +4,9 @@
 #include "Types.h"
 #include <vector>
 
+#include "EntityRecord.h"
+#include "RegistryTypes.h"
+
 class Registry;
 
 // Data-driven entity spawning from JSON.
@@ -25,7 +28,7 @@ struct EntityBuilder
 	// Expected format:
 	//   { "type": "CubeEntity", "components": { "TransRot": { "PosX": 1.0, ... }, ... } }
 	// Returns the created EntityID, or an invalid ID on failure.
-	static EntityID SpawnEntity(Registry* reg, const JsonValue& entityJson);
+	static EntityHandle SpawnEntity(Registry* reg, const JsonValue& entityJson);
 
 	// Spawn all entities described in a scene JSON.
 	// Expected format:

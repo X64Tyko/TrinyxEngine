@@ -13,6 +13,7 @@
 #include "MeshImporter.h"
 #include "MeshManager.h"
 #include "Registry.h"
+#include "CacheSlotMeta.h"
 #include "TemporalComponentCache.h"
 #include <cctype>
 #include <cmath>
@@ -98,16 +99,21 @@ void EditorContext::LoadScene(const std::string& path, bool bReset)
 /// Find a float field pointer by debug name in an archetype's field array table.
 static float* FindFieldFloat(Archetype* arch, void** fieldArrayTable, const char* name, uint32_t localIndex)
 {
-	for (size_t i = 0; i < arch->CachedFieldArrayLayout.size(); ++i)
-	{
-		const auto& desc = arch->CachedFieldArrayLayout[i];
-		if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
-		if (desc.valueType != FieldValueType::Float32) continue;
+	const auto& cfr = ComponentFieldRegistry::Get();
 
-		const char* fieldName = arch->FieldArrayTemplateCache[i].debugName;
-		if (std::strcmp(fieldName, name) == 0)
+	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
+	{
+		if (fdesc.valueType != FieldValueType::Float32) continue;
+		if (!fieldArrayTable[fdesc.fieldSlotIndex]) continue;
+
+		const auto* fields    = cfr.GetFields(fdesc.componentID);
+		const char* fieldName = (fields && fdesc.componentSlotIndex < fields->size())
+									? (*fields)[fdesc.componentSlotIndex].Name
+									: nullptr;
+
+		if (fieldName && std::strcmp(fieldName, name) == 0)
 		{
-			return static_cast<float*>(fieldArrayTable[i]) + localIndex;
+			return static_cast<float*>(fieldArrayTable[fdesc.fieldSlotIndex]) + localIndex;
 		}
 	}
 	return nullptr;
@@ -278,11 +284,19 @@ void EditorContext::DrawGizmo()
 
 		State.bSceneDirty = true;
 
-		// Mark entity dirty for GPU upload
-		size_t cacheIdx = State.SelectedChunk->Header.CacheIndexStart + State.SelectedLocalIndex;
-		auto* dirtyBits = State.RegistryPtr->DirtyBitsFrame(temporalFrame);
-		uint64_t& word  = (*dirtyBits)[cacheIdx / 64];
-		word            |= uint64_t(1) << (cacheIdx % 64);
+		// Mark entity dirty for GPU upload via CacheSlotMeta::Flags (bit 30)
+		Archetype::FieldKey flagKey{CacheSlotMeta<>::StaticTypeID(), ComponentFieldRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID()), 0};
+		auto* flagDesc = State.SelectedArchetype->ArchetypeFieldLayout.find(flagKey);
+		if (flagDesc)
+		{
+			auto* base = static_cast<uint8_t*>(State.SelectedChunk->GetFieldPtr(flagDesc->fieldSlotIndex));
+			if (base)
+			{
+				uint32_t writeFrame             = State.RegistryPtr->GetCache(flagDesc->tier)->GetActiveWriteFrame();
+				auto* flags                     = reinterpret_cast<int32_t*>(base + writeFrame * flagDesc->fieldFrameStride);
+				flags[State.SelectedLocalIndex] |= static_cast<int32_t>(TemporalFlagBits::Dirty);
+			}
+		}
 	}
 }
 
@@ -332,34 +346,20 @@ void EditorContext::ConsumePick()
 	if (ImGui::GetIO().WantCaptureMouse) return;
 	if (ImGuizmo::IsOver()) return;
 
-	// Resolve cache index → archetype + chunk + local index
-	// This is temporary until the EntityID refactoring goes in
+	// Resolve cache index → entity record via O(1) registry lookup
 	Registry* reg = State.RegistryPtr;
 	if (!reg) return;
 
-	for (auto& [key, arch] : reg->GetArchetypes())
-	{
-		if (!arch) continue;
+	EntityRecord record = reg->GetRecordByCache(static_cast<EntityCacheHandle>(cacheIdx));
+	if (!record.IsValid()) return;
 
-		for (size_t ci = 0; ci < arch->Chunks.size(); ++ci)
-		{
-			Chunk* chunk         = arch->Chunks[ci];
-			uint32_t entityCount = arch->GetChunkCount(ci);
-			uint32_t start       = static_cast<uint32_t>(chunk->Header.CacheIndexStart);
-
-			if (cacheIdx >= start && cacheIdx < start + entityCount)
-			{
-				State.ClearSelection();
-				State.Selection          = EditorState::SelectionType::Entity;
-				State.SelectedClassID    = key.ID;
-				State.SelectedArchetype  = arch;
-				State.SelectedChunk      = chunk;
-				State.SelectedLocalIndex = static_cast<uint16_t>(cacheIdx - start);
-				State.SelectedCacheIndex = cacheIdx;
-				return;
-			}
-		}
-	}
+	State.ClearSelection();
+	State.Selection          = EditorState::SelectionType::Entity;
+	State.SelectedClassID    = record.Arch->ArchClassID;
+	State.SelectedArchetype  = record.Arch;
+	State.SelectedChunk      = record.TargetChunk;
+	State.SelectedLocalIndex = static_cast<uint16_t>(record.LocalIndex);
+	State.SelectedCacheIndex = cacheIdx;
 #endif
 }
 
@@ -867,24 +867,22 @@ void EditorContext::DeleteSelectedEntity()
 	if (State.Selection != EditorState::SelectionType::Entity) return;
 
 	// Capture selection data before clearing — Spawn lambda runs on Logic thread.
-	// NOTE: Temporary linear scan via FindEntityByLocation. Will be replaced with
-	// a direct EntityID lookup once entities store their ID in chunk metadata.
-	Archetype* arch     = State.SelectedArchetype;
 	Chunk* chunk        = State.SelectedChunk;
 	uint16_t localIndex = State.SelectedLocalIndex;
 
 	State.ClearSelection();
 
-	EnginePtr->Spawn([arch, chunk, localIndex](Registry* reg)
+	EnginePtr->Spawn([chunk, localIndex](Registry* reg)
 	{
-		EntityID id = reg->FindEntityByLocation(arch, chunk, localIndex);
-		if (!id.IsValid())
+		EntityCacheHandle cacheIdx = chunk->Header.CacheIndexStart + localIndex;
+		GlobalEntityHandle gHandle = reg->FindEntityByLocation(cacheIdx);
+		if (gHandle.GetIndex() == 0)
 		{
 			LOG_WARN("[Editor] Could not find entity to delete");
 			return;
 		}
-		reg->Destroy(id);
-		LOG_INFO_F("[Editor] Deleted entity (index %u)", id.GetIndex());
+		reg->DestroyByGlobalHandle(gHandle);
+		LOG_INFO_F("[Editor] Deleted entity (cache index %u)", cacheIdx);
 	});
 
 	State.bSceneDirty = true;
@@ -902,7 +900,7 @@ void EditorContext::SnapshotScene()
 
 	for (auto& [key, arch] : reg->GetArchetypes())
 	{
-		size_t fieldCount = arch->CachedFieldArrayLayout.size();
+		size_t fieldCount = arch->GetFieldArrayCount();
 		if (fieldCount == 0) continue;
 
 		ArchetypeSnapshot archSnap;
@@ -912,18 +910,17 @@ void EditorContext::SnapshotScene()
 		for (size_t ci = 0; ci < arch->Chunks.size(); ++ci)
 		{
 			Chunk* chunk         = arch->Chunks[ci];
-			uint32_t entityCount = arch->GetChunkCount(ci);
+			uint32_t entityCount = arch->GetAllocatedChunkCount(ci);
 			if (entityCount == 0) continue;
 
 			void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 			arch->BuildFieldArrayTable(chunk, fieldArrayTable, temporalFrame, volatileFrame);
 
-			// Calculate total bytes needed for all decomposed fields in this chunk
+			// Calculate total bytes needed for all fields in this chunk
 			size_t totalBytes = 0;
-			for (size_t i = 0; i < fieldCount; ++i)
+			for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 			{
-				const auto& desc = arch->CachedFieldArrayLayout[i];
-				if (desc.isDecomposed && fieldArrayTable[i]) totalBytes += desc.size * entityCount;
+				if (fieldArrayTable[fdesc.fieldSlotIndex]) totalBytes += fdesc.fieldSize * entityCount;
 			}
 
 			ArchetypeSnapshot::ChunkData chunkData;
@@ -933,13 +930,12 @@ void EditorContext::SnapshotScene()
 
 			// Copy field data into snapshot
 			size_t offset = 0;
-			for (size_t i = 0; i < fieldCount; ++i)
+			for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 			{
-				const auto& desc = arch->CachedFieldArrayLayout[i];
-				if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
+				if (!fieldArrayTable[fdesc.fieldSlotIndex]) continue;
 
-				size_t bytes = desc.size * entityCount;
-				std::memcpy(chunkData.FieldData.data() + offset, fieldArrayTable[i], bytes);
+				size_t bytes = fdesc.fieldSize * entityCount;
+				std::memcpy(chunkData.FieldData.data() + offset, fieldArrayTable[fdesc.fieldSlotIndex], bytes);
 				offset += bytes;
 			}
 
@@ -983,8 +979,6 @@ void EditorContext::RestoreSnapshot()
 
 			if (!ownerArch) continue;
 
-			size_t fieldCount = ownerArch->CachedFieldArrayLayout.size();
-
 			// Restore per-chunk field data
 			for (auto& chunkSnap : archSnap.Chunks)
 			{
@@ -997,24 +991,13 @@ void EditorContext::RestoreSnapshot()
 				// If the chunk now has more entities (spawned during Play), the snapshot
 				// data covers only the original ones; extras get their Active flag cleared below.
 				size_t offset = 0;
-				for (size_t i = 0; i < fieldCount; ++i)
+				for (const auto& [fkey, fdesc] : ownerArch->ArchetypeFieldLayout)
 				{
-					const auto& desc = ownerArch->CachedFieldArrayLayout[i];
-					if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
+					if (!fieldArrayTable[fdesc.fieldSlotIndex]) continue;
 
-					size_t bytes = desc.size * chunkSnap.EntityCount;
-					std::memcpy(fieldArrayTable[i], chunkSnap.FieldData.data() + offset, bytes);
+					size_t bytes = fdesc.fieldSize * chunkSnap.EntityCount;
+					std::memcpy(fieldArrayTable[fdesc.fieldSlotIndex], chunkSnap.FieldData.data() + offset, bytes);
 					offset += bytes;
-				}
-
-				// Mark all snapshotted entities dirty so the GPU picks up the restore
-				size_t cacheStart = chunk->Header.CacheIndexStart;
-				auto* dirtyBits   = reg->DirtyBitsFrame(temporalFrame);
-				for (uint32_t e = 0; e < chunkSnap.EntityCount; ++e)
-				{
-					size_t idx     = cacheStart + e;
-					uint64_t& word = (*dirtyBits)[idx / 64];
-					word           |= uint64_t(1) << (idx % 64);
 				}
 			}
 
@@ -1027,41 +1010,25 @@ void EditorContext::RestoreSnapshot()
 				LOG_INFO_F("[Editor] Tombstoning %u entities created during Play in archetype %u",
 						   extraCount, archSnap.ArchClassID);
 
-				// Find the TemporalFlags field (Active flag is bit 31 of TemporalFlags::Flags).
-				// Walk entities beyond the snapshot count and clear their Active flag.
+				// Look up the Flags field descriptor once
+				Archetype::FieldKey flagKey{CacheSlotMeta<>::StaticTypeID(), ComponentFieldRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID()), 0};
+				auto* flagDesc = ownerArch->ArchetypeFieldLayout.find(flagKey);
+
 				uint32_t entityIdx = archSnap.TotalEntityCount;
 				while (entityIdx < ownerArch->TotalEntityCount)
 				{
 					uint32_t chunkIdx = entityIdx / ownerArch->EntitiesPerChunk;
 					uint32_t localIdx = entityIdx % ownerArch->EntitiesPerChunk;
 
-					if (chunkIdx < ownerArch->Chunks.size())
+					if (chunkIdx < ownerArch->Chunks.size() && flagDesc)
 					{
 						Chunk* chunk = ownerArch->Chunks[chunkIdx];
 
-						// Find the Flags field in the layout and clear the Active bit
 						void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 						ownerArch->BuildFieldArrayTable(chunk, fieldArrayTable, temporalFrame, volatileFrame);
 
-						for (size_t i = 0; i < fieldCount; ++i)
-						{
-							const auto& desc = ownerArch->CachedFieldArrayLayout[i];
-							if (!desc.isDecomposed || !fieldArrayTable[i]) continue;
-
-							// TemporalFlags::Flags is an int32 field — check by ValueType + Size
-							if (desc.valueType == FieldValueType::Int32 && desc.size == sizeof(int32_t))
-							{
-								int32_t* flags  = static_cast<int32_t*>(fieldArrayTable[i]);
-								flags[localIdx] &= ~static_cast<int32_t>(1u << 31); // Clear Active bit
-							}
-						}
-
-						// Mark dirty for GPU
-						size_t cacheStart = chunk->Header.CacheIndexStart;
-						auto* dirtyBits   = reg->DirtyBitsFrame(temporalFrame);
-						size_t idx        = cacheStart + localIdx;
-						uint64_t& word    = (*dirtyBits)[idx / 64];
-						word              |= uint64_t(1) << (idx % 64);
+						auto* flagsArr     = static_cast<int32_t*>(fieldArrayTable[flagDesc->fieldSlotIndex]);
+						flagsArr[localIdx] = static_cast<int32_t>(TemporalFlagBits::Dirty);
 					}
 
 					entityIdx++;

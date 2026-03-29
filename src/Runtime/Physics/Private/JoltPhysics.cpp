@@ -116,15 +116,13 @@ static JPH::RefConst<JPH::Shape> CreateShapeFromSettings(
 
 // Find the field array table offset for a component by its TypeID.
 // Returns -1 if the component is not in this archetype.
+// Returns the fieldSlotIndex of the first field belonging to the given component.
+// Bind(&fieldArrayTable[offset], ...) then binds all fields contiguously from that point.
 static int FindComponentFieldOffset(const Archetype* arch, ComponentTypeID typeID)
 {
-	const auto& layout = arch->CachedFieldArrayLayout;
-	// Cache slot ID for the target component
-	uint8_t targetSlot = ComponentFieldRegistry::Get().GetCacheSlotIndex(typeID);
-
-	for (size_t i = 0; i < layout.size(); ++i)
+	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 	{
-		if (layout[i].componentSlotIndex == targetSlot) return static_cast<int>(i);
+		if (fdesc.componentID == typeID) return fdesc.fieldSlotIndex;
 	}
 	return -1;
 }
@@ -281,7 +279,7 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 		for (size_t chunkIdx = 0; chunkIdx < arch->Chunks.size(); ++chunkIdx)
 		{
 			Chunk* chunk         = arch->Chunks[chunkIdx];
-			uint32_t entityCount = arch->GetChunkCount(chunkIdx);
+			uint32_t entityCount = arch->GetAllocatedChunkCount(chunkIdx);
 			if (entityCount == 0) continue;
 
 			void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
@@ -289,12 +287,12 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 
 			// Bind JoltBody fields at their offset in the table
 			JoltBody<> body;
-			body.Bind(&fieldArrayTable[bodyOffset], nullptr);
+			body.Bind(&fieldArrayTable[bodyOffset], fieldArrayTable[0]);
 
 			// Bind TransRot if present (for initial position/rotation)
 			TransRot<> trans;
 			bool hasTrans = (transOffset >= 0);
-			if (hasTrans) trans.Bind(&fieldArrayTable[transOffset], nullptr);
+			if (hasTrans) trans.Bind(&fieldArrayTable[transOffset], fieldArrayTable[0]);
 
 			for (uint32_t i = 0; i < entityCount; ++i)
 			{

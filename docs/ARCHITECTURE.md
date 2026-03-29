@@ -372,6 +372,76 @@ they don't want to.
 
 ---
 
+## Registry — Entity Handle Architecture
+
+The Registry is the central entity management system. It manages three independent handle/index spaces:
+
+| Handle    | Type                 | Indexes into      | Recycling                           | Purpose                     |
+|-----------|----------------------|-------------------|-------------------------------------|-----------------------------|
+| GHandle   | `GlobalEntityHandle` | `Records[]`       | Immediate (generation-bumped)       | Internal record identity    |
+| LHandle   | `EntityHandle`       | `LocalToRecord[]` | Deferred via `PendingLocalRecycles` | OOP/Construct-facing handle |
+| NetHandle | `EntityNetHandle`    | `NetToRecord[]`   | Deferred via `PendingNetRecycles`   | Network replication handle  |
+
+Index 0 is reserved/invalid in all three spaces.
+
+**Deferred recycling** prevents ABA problems: a stale LHandle held by OOP code (or a stale NetHandle held
+by a remote client) could alias a newly created entity if the index were reused immediately. Freed
+local/net indices sit in pending lists until `ConfirmLocalRecycles()`/`ConfirmNetRecycles()` is called
+after the safety window (end of frame for local, network ack for net).
+
+### Creation Flow
+
+1. `CreateInternal(classID, span<GHandle>)` — allocates GHandles, populates EntityRecords, pushes archetype slots
+2. `MakeEntityHandle(GHandle, classID)` — allocates a local index, wires `LocalToRecord[localIdx] → GHandle`, stores
+   LHandle on the record
+3. Public API (`Create<T>`, `CreateByClassID`) wraps the above, returns `EntityHandle` (LHandle)
+
+### Destruction Flow
+
+1. `Destroy(LHandle)` — resolves to GHandle, defers to `PendingDestructions`
+2. `ProcessDeferredDestructions()` — generation-checks each GHandle, calls `RemoveEntity` (tombstones in archetype),
+   then `FreeGlobalHandle`
+3. `FreeGlobalHandle` — reclaims record index immediately, requests local/net handle recycling (deferred)
+4. `ConfirmLocalRecycles()`/`ConfirmNetRecycles()` — moves pending indices to free pool after safety window
+
+### EntityRecord Fields
+
+Each `EntityRecord` stores the entity's archetype placement:
+
+| Field        | Meaning                                          |
+|--------------|--------------------------------------------------|
+| `ArchIndex`  | Flat index across all chunks in the archetype    |
+| `ChunkIndex` | Which chunk in the archetype's `Chunks[]` array  |
+| `LocalIndex` | Index within the chunk (0 .. EntitiesPerChunk−1) |
+
+---
+
+## Archetype Slot Management
+
+Each archetype manages a list of `Chunk` allocations and tracks entity slots with two independent counters:
+
+| Counter                | Mutated on             | Purpose                                                                                                          |
+|------------------------|------------------------|------------------------------------------------------------------------------------------------------------------|
+| `AllocatedEntityCount` | Fresh push only        | High-water mark of allocated slots (includes tombstoned). Used by `GetAllocatedChunkCount` for iteration bounds. |
+| `TotalEntityCount`     | Push (+1), Remove (−1) | Live (non-tombstoned) entity count. Used by `GetLiveChunkCount` for UI/diagnostics.                              |
+
+**Why two counters:** `RemoveEntity` tombstones in place — it clears the Active flag and moves the slot to
+`InactiveEntitySlots` but does not compact data. If iteration bounds were derived from a counter that
+decrements on removal, update loops could skip live entities near the tail of a chunk. The high-water mark
+(`AllocatedEntityCount`) guarantees all allocated slots are visited; the bitplane/masked-store path skips
+tombstoned slots at zero cost.
+
+**Slot reuse:** `PushEntities` reuses tombstoned slots from `InactiveEntitySlots` before allocating fresh
+slots at the high-water mark. Reuse does not increment `AllocatedEntityCount` (the slot already exists).
+
+**ArchetypeFieldLayout** (`FlatMap<FieldKey, FieldDescriptor>`) is the single source of truth for every
+field in the archetype — its chunk slot index, cache tier, frame count, stride, and element size. Both
+`BuildFieldArrayTable` and `BuildFieldDualArrayTable` iterate this map and resolve frame indices with pure
+arithmetic: `base + (frame % frameCount) * frameStride`. Cold fields use `frameCount=1, frameStride=0` so
+the math degenerates to `base + 0` — no tier branching needed.
+
+---
+
 ## Bitplanes:
 
 There are several bitplanes dedicated to tracking which components an entity has, if the entity is dirty, etc.
@@ -937,6 +1007,10 @@ dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
 - [x] Cold component infrastructure (TNX_REGISTER_FIELDS → CacheTier::None → SoA in chunk, not slab)
 - [x] Input buffering (double-buffered input, lock-free polling, event + bitstate querying)
 - [x] VecMath / QuatMath / FieldMath libraries
+- [x] Registry three-handle-space architecture (GHandle/LHandle/NetHandle with deferred recycling)
+- [x] Archetype dual-counter slot management (AllocatedEntityCount high-water + TotalEntityCount live count)
+- [x] Archetype tombstone-in-place removal (Active flag cleared, slot moved to InactiveEntitySlots for reuse)
+- [x] ArchetypeFieldLayout as single source of truth (FlatMap<FieldKey, FieldDescriptor>, branchless frame math)
 
 ## Designed, Not Yet Implemented
 
@@ -945,6 +1019,8 @@ dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
 - [ ] **Cumulative dirty bit array wired to GPU upload** (tracking functional, not yet driving upload path)
 - [ ] `GetTemporalFieldWritePtr` migrated from Archetype to TemporalComponentCache
 - [ ] `TemporalFrameStride` removed from Archetype (duplicated state — call cache->GetFrameStride())
+- [ ] `GetLiveChunkCount` needs per-chunk live counters or Active flag scanning (currently approximation from global
+  counter)
 - [ ] **Presentation Reconciler** (Anti-Events, speculative presentation diff)
 - [ ] **Fixed-point coordinate system** (Fixed32, SimFloat alias, Jolt bridge)
 - [ ] **ConstraintEntity system** (constraint pool, rigid attachment pass, physics root determination)

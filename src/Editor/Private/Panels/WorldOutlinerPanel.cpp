@@ -52,7 +52,7 @@ void WorldOutlinerPanel::Draw(EditorState& state)
 			for (size_t ci = 0; ci < arch->Chunks.size(); ++ci)
 			{
 				Chunk* chunk         = arch->Chunks[ci];
-				uint32_t entityCount = arch->GetChunkCount(ci);
+				uint32_t entityCount = arch->GetLiveChunkCount(ci);
 
 				char chunkLabel[128];
 				snprintf(chunkLabel, sizeof(chunkLabel), "Chunk %zu  (%u entities)###chunk_%u_%zu",

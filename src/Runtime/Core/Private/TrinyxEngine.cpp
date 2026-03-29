@@ -155,6 +155,16 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	return true;
 }
 
+void TrinyxEngine::ResetRegistry() const
+{
+	RegistryPtr->ResetRegistry();
+}
+
+void TrinyxEngine::ConfirmLocalRecycles() const
+{
+	RegistryPtr->ConfirmLocalRecycles();
+}
+
 void TrinyxEngine::StartThreadsAndJobs()
 {
 	Logic->Start();

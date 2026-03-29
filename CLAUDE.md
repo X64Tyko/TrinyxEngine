@@ -290,6 +290,17 @@ The calling thread provides a lambda and performs a synchronized handshake with 
 
 Entity is requested for deletion → goes into a deletion queue → tombstoned (Active flag cleared) immediately. The tombstone propagates through all systems for free: GPU predicate pass stops drawing it, physics awake-only pull ignores it, 64-entity bitplane scan skips it. A deferred destroy then runs on the Logic thread to reclaim memory. Visual and physics despawn happen at tombstone time; memory reclamation happens at deferred destroy time. These are decoupled but aligned.
 
+**Archetype slot management:** `RemoveEntity` tombstones in place — clears Active flag, moves slot to
+`InactiveEntitySlots` for future reuse by `PushEntities`. Two counters track slots independently:
+`AllocatedEntityCount` (high-water mark, never decremented — used by `GetAllocatedChunkCount` for iteration bounds) and
+`TotalEntityCount` (live count, decremented on removal — used by `GetLiveChunkCount` for UI/diagnostics). Update loops
+iterate all allocated slots; the bitplane/masked-store path skips tombstoned entities at zero cost.
+
+**Handle recycling:** `FreeGlobalHandle` reclaims the record index immediately (generation-bumped). Local and net handle
+indices enter `PendingLocalRecycles`/`PendingNetRecycles` and only move to the free pool when `ConfirmLocalRecycles()`/
+`ConfirmNetRecycles()` is called after the safety window. This prevents ABA aliasing where OOP code or a remote client
+holds a stale handle.
+
 Spawn and despawn are serialized through the Logic thread by construction — the handshake model for spawn and deferred destroy on the Logic thread for despawn guarantee this.
 
 ---

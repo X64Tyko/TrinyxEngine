@@ -19,7 +19,7 @@
 #include "MeshRef.h"
 #include "TransRot.h"
 #include "Scale.h"
-#include "TemporalFlags.h"
+#include "CacheSlotMeta.h"
 #include "LogicThread.h"
 #include "TrinyxEngine.h"
 #include "../../Core/Private/ThreadPinning.h"
@@ -1287,7 +1287,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 	const ComponentTypeID transformSlot = TransRot<>::StaticTemporalIndex();
 	const ComponentTypeID scaleSlot     = Scale<>::StaticTemporalIndex();
 	const ComponentTypeID colorSlot     = ColorData<>::StaticTemporalIndex();
-	const ComponentTypeID flagsSlot     = TemporalFlags<>::StaticTemporalIndex();
+	const ComponentTypeID flagsSlot     = CacheSlotMeta<>::StaticTemporalIndex();
 	const ComponentTypeID meshRefSlot   = MeshRef<>::StaticTemporalIndex();
 
 	struct FieldDescription
