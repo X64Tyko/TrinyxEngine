@@ -123,6 +123,18 @@ protected:
 	uint32_t GPUActiveFrame = 0;
 	uint32_t GPUPrevFrame   = 0;
 
+	// ── GPU dirty bitplanes ─────────────────────────────────────────────
+	// One bitplane per GPU field slab. Each bit = one entity.
+	// Only tracks MAX_RENDERABLE_ENTITIES — PHYS/LOGIC partitions are never rendered.
+	// When writing to slab K: upload entities marked in DirtyPlane[K], then clear it.
+	// After scanning slab Flags for bit 30, OR the result into ALL planes.
+	// This ensures each plane accumulates all changes since its last write.
+	// Heap-allocated in Initialize() based on config MAX_RENDERABLE_ENTITIES.
+	uint64_t* DirtyPlanes[kInstanceBufferCount]{};
+	uint64_t* DirtySnapshot = nullptr;
+	uint32_t DirtyWordCount = 0;
+	bool FirstSlabWrite[kInstanceBufferCount]{true, true, true, true, true};
+
 	MeshManager Meshes;
 
 	vk::raii::PipelineLayout PipelineLayout{nullptr};

@@ -346,6 +346,7 @@ void LogicThread::PublishCompletedFrame()
 
 	// Publish frame number atomically - RenderThread can now read this frame
 	LastCompletedFrame.store(FrameNumber, std::memory_order_release);
+	RegistryPtr->LastPublishedFrame = FrameNumber;
 }
 
 void LogicThread::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)

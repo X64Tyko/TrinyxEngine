@@ -1,7 +1,9 @@
 #include "Registry.h"
+#include "CacheSlotMeta.h"
 #include "JoltPhysics.h"
 #include "Profiler.h"
 #include <cassert>
+#include <immintrin.h>
 #include "Archetype.h"
 
 #include "SchemaReflector.h"
@@ -423,6 +425,48 @@ void Registry::PropagateFrame(uint32_t currentFrame)
 	VolatileSlab.PropagateFrame(PropagationCounter);
 
 	TrinyxJobs::WaitForCounter(&PropagationCounter, TrinyxJobs::Queue::Logic);
+
+	// ── Post-propagation dirty bit maintenance ──────────────────────────
+	// Bit 29 (DirtiedFrame): cleared unconditionally — it's per-frame only.
+	// Bit 30 (Dirty): cleared only if render has caught up (RenderAck >= LastPublishedFrame).
+	//
+	// After memcpy propagation, the new write frame has inherited all dirty bits.
+	// We clear here so this frame starts clean, and FieldProxy sets fresh bits.
+	{
+		TNX_ZONE_NC("Clear Dirty Bits", TNX_COLOR_LOGIC)
+
+		const bool renderCaughtUp = RenderHasAcked && RenderAck.load(std::memory_order_acquire) >= LastPublishedFrame;
+		const int32_t clearMask   = renderCaughtUp
+									  ? ~(static_cast<int32_t>(TemporalFlagBits::Dirty) | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame))
+									  : ~static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
+
+		// CacheSlotMeta (flags) is always in the temporal cache (or volatile when rollback is off).
+		// Get the flags field from the active write frame.
+		ComponentCacheBase* flagsCache  = GetTemporalCache();
+		TemporalFrameHeader* writeHdr   = flagsCache->GetFrameHeader();
+		const ComponentTypeID flagsSlot = CacheSlotMeta<>::StaticTemporalIndex();
+		auto* flags                     = static_cast<int32_t*>(flagsCache->GetFieldData(writeHdr, flagsSlot, 0));
+
+		if (flags)
+		{
+			// MAX_CACHED_ENTITIES worth of int32_t flags in the slab.
+			// Iterate the full range — bitplane scan over gaps costs ~microseconds.
+			const size_t entityCount = flagsCache->GetMaxCachedEntityCount();
+			const size_t simdCount   = entityCount / 8;
+			const size_t remainder   = entityCount % 8;
+
+			const __m256i mask = _mm256_set1_epi32(clearMask);
+			auto* ptr          = reinterpret_cast<__m256i*>(flags);
+			for (size_t i = 0; i < simdCount; ++i)
+			{
+				_mm256_storeu_si256(ptr + i, _mm256_and_si256(_mm256_loadu_si256(ptr + i), mask));
+			}
+			for (size_t i = simdCount * 8; i < simdCount * 8 + remainder; ++i)
+			{
+				flags[i] &= clearMask;
+			}
+		}
+	}
 }
 
 // Hard reset — wipes all entities, handles, free lists, caches, and archetype data.

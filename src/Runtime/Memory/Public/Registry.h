@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <queue>
 #include <span>
 #include <unordered_map>
@@ -103,6 +104,12 @@ public:
 	// Reverse lookup: cache slot → GHandle. Returns default GlobalEntityHandle() if not found.
 	GlobalEntityHandle FindEntityByLocation(EntityCacheHandle CacheHandle) const;
 
+	// Render → Logic handshake: render publishes the logic frame number it just consumed.
+	// Logic reads this to decide whether to clear accumulated dirty bits (bit 30).
+	std::atomic<uint32_t> RenderAck{0};
+	uint32_t LastPublishedFrame = 0;
+	bool RenderHasAcked         = false; // false until render publishes its first ack
+
 private:
 	friend class Archetype;
 	friend class LogicThread;
@@ -162,7 +169,9 @@ private:
 		return nullptr;
 	}
 
-	// Propagate SoA data from frame T to T+1
+	// Propagate SoA data from frame T to T+1.
+	// After propagation: clears DirtiedFrame (bit 29) unconditionally,
+	// clears Dirty (bit 30) if render has acknowledged the last published frame.
 	void PropagateFrame(uint32_t currentFrame);
 
 	// =========================================================================

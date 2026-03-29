@@ -15,11 +15,13 @@
 #include "Registry.h"
 #include "TemporalComponentCache.h"
 
+#include "CacheSlotMeta.h"
 #include "ColorData.h"
 #include "MeshRef.h"
-#include "TransRot.h"
 #include "Scale.h"
-#include "CacheSlotMeta.h"
+#include "TransRot.h"
+
+#include <immintrin.h>
 #include "LogicThread.h"
 #include "TrinyxEngine.h"
 #include "../../Core/Private/ThreadPinning.h"
@@ -80,6 +82,10 @@ void RendererCore<Derived>::Initialize(Registry* registry,
 	VkMem       = vkMem;
 	WindowPtr   = window;
 	VizInputPtr = vizInput;
+
+	DirtyWordCount = (static_cast<uint32_t>(config->MAX_RENDERABLE_ENTITIES) + 63) / 64;
+	DirtySnapshot  = new uint64_t[DirtyWordCount]();
+	for (auto& plane : DirtyPlanes) plane = new uint64_t[DirtyWordCount]();
 
 	LOG_INFO("[Renderer] Initialized");
 }
@@ -192,6 +198,15 @@ void RendererCore<Derived>::Join()
 #ifdef TNX_GPU_PICKING
 	DestroyPickShaders();
 #endif
+
+	delete[] DirtySnapshot;
+	DirtySnapshot = nullptr;
+	for (auto& plane : DirtyPlanes)
+	{
+		delete[] plane;
+		plane = nullptr;
+	}
+
 	Self().OnShutdown();
 }
 
@@ -1298,7 +1313,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 		size_t fi;
 		uint32_t sem;
 	};
-	const FieldDescription kFieldDescs[kGpuOutFieldCount] = {
+	const FieldDescription fieldDescs[kGpuOutFieldCount] = {
 		{temporalCache, temporalHdr, flagsSlot, 0, kSemFlags},
 		{temporalCache, temporalHdr, transformSlot, 0, kSemPosX},
 		{temporalCache, temporalHdr, transformSlot, 1, kSemPosY},
@@ -1317,21 +1332,103 @@ void RendererCore<Derived>::WriteToFrameSlab()
 		{volatileCache, volatileHdr, meshRefSlot, 0, kSemMeshID},
 	};
 
+	// ── Step 1: Scan slab Flags for dirty bit (bit 30) → build current dirty set ──
+	const auto* flagsSrc = static_cast<const int32_t*>(
+		temporalCache->GetFieldData(temporalHdr, flagsSlot, 0));
+
+	if (flagsSrc)
+	{
+		constexpr int32_t dirtyBit = static_cast<int32_t>(TemporalFlagBits::Dirty);
+		const uint32_t entityCount = (ConfigPtr->MAX_RENDERABLE_ENTITIES + 7) & ~7u; // round up to SIMD width
+
+		// Scan flags → build DirtySnapshot, then OR into all planes
+		std::memset(DirtySnapshot, 0, DirtyWordCount * sizeof(uint64_t));
+		for (uint32_t i = 0; i < entityCount; i += 8)
+		{
+			// Load 8 flags, test bit 30, pack to bitmask
+			__m256i flags = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&flagsSrc[i]));
+			__m256i test  = _mm256_and_si256(flags, _mm256_set1_epi32(dirtyBit));
+			int mask      = _mm256_movemask_ps(_mm256_castsi256_ps(
+				_mm256_cmpeq_epi32(test, _mm256_set1_epi32(dirtyBit))));
+
+			if (mask)
+			{
+				DirtySnapshot[i / 64] |= static_cast<uint64_t>(mask) << (i % 64);
+			}
+		}
+
+		// Fan out: OR snapshot into ALL 5 GPU slab bitplanes
+		for (uint32_t s = 0; s < kInstanceBufferCount; ++s)
+		{
+			for (uint32_t w = 0; w < DirtyWordCount; ++w)
+			{
+				DirtyPlanes[s][w] |= DirtySnapshot[w];
+			}
+		}
+	}
+
+	// ── Step 2: Upload dirty entities for this slab, or full copy on first write ──
+	const bool fullCopy = FirstSlabWrite[nextSlab];
+	uint64_t* plane     = DirtyPlanes[nextSlab];
+
 	TrinyxJobs::JobCounter GPUTransferCounter;
 
-	for (uint32_t f = 0; f < kGpuOutFieldCount; ++f)
+	if (fullCopy)
 	{
-		const FieldDescription& fieldDesc = kFieldDescs[f];
-		const void* src                   = fieldDesc.cache->GetFieldData(fieldDesc.hdr, fieldDesc.slot, fieldDesc.fi);
-		uint8_t* dst                      = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
-		TrinyxJobs::Dispatch([src, dst, fieldStride](uint32_t)
+		// First time writing to this slab — full copy, all fields
+		for (uint32_t f = 0; f < kGpuOutFieldCount; ++f)
 		{
-			if (src) std::memcpy(dst, src, static_cast<size_t>(fieldStride));
-			else std::memset(dst, 0, static_cast<size_t>(fieldStride));
-		}, &GPUTransferCounter, TrinyxJobs::Queue::Render);
+			const FieldDescription& fd = fieldDescs[f];
+			const void* src            = fd.cache->GetFieldData(fd.hdr, fd.slot, fd.fi);
+			uint8_t* dst               = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
+			TrinyxJobs::Dispatch([src, dst, fieldStride](uint32_t)
+			{
+				if (src) std::memcpy(dst, src, static_cast<size_t>(fieldStride));
+				else std::memset(dst, 0, static_cast<size_t>(fieldStride));
+			}, &GPUTransferCounter, TrinyxJobs::Queue::Render);
+		}
+		FirstSlabWrite[nextSlab] = false;
+	}
+	else
+	{
+		// Selective upload: one job per field, each scatters only dirty entities.
+		// All jobs read the same bitplane (immutable until cleared after wait).
+		for (uint32_t f = 0; f < kGpuOutFieldCount; ++f)
+		{
+			const FieldDescription& fd = fieldDescs[f];
+			const auto* src            = static_cast<const uint8_t*>(fd.cache->GetFieldData(fd.hdr, fd.slot, fd.fi));
+			uint8_t* dst               = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
+
+			if (!src) continue;
+
+			const uint64_t* dirtyPlane = plane;
+			const uint32_t wordCount   = DirtyWordCount;
+
+			TrinyxJobs::Dispatch([src, dst, dirtyPlane, wordCount](uint32_t)
+			{
+				for (uint32_t w = 0; w < wordCount; ++w)
+				{
+					uint64_t bits = dirtyPlane[w];
+					while (bits)
+					{
+						uint32_t bit = __builtin_ctzll(bits);
+						uint32_t idx = w * 64 + bit;
+						std::memcpy(dst + idx * sizeof(float), src + idx * sizeof(float), sizeof(float));
+						bits &= bits - 1;
+					}
+				}
+			}, &GPUTransferCounter, TrinyxJobs::Queue::Render);
+		}
 	}
 
 	TrinyxJobs::WaitForCounter(&GPUTransferCounter, TrinyxJobs::Queue::Render);
+
+	// ── Step 3: Clear this slab's dirty plane — it's now up to date ──
+	std::memset(plane, 0, DirtyWordCount * sizeof(uint64_t));
+
+	// ── Step 4: Publish RenderAck so logic knows we consumed this frame ──
+	RegistryPtr->RenderAck.store(temporalHdr->FrameNumber, std::memory_order_release);
+	RegistryPtr->RenderHasAcked = true;
 
 	volatileCache->UnlockFrameRead(LastVolatileFrame);
 #ifdef TNX_ENABLE_ROLLBACK

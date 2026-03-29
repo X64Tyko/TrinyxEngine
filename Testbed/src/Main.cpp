@@ -355,7 +355,7 @@ RUNTIME_TEST(Spawn_SuperCubeGrid)
 	std::mt19937 gen(rd());
 	std::uniform_real_distribution<float> colorDist(0.2f, 1.0f);
 
-	constexpr int kCount      = 0;
+	constexpr int kCount      = 100000;
 	constexpr float kSpacing  = 3.0f;
 	constexpr float kCubeHalf = 0.5f;
 	constexpr float kYBase    = 10.0f;

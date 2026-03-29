@@ -1,5 +1,6 @@
 #include "JoltPhysics.h"
 #include "JoltJobSystemAdapter.h"
+#include "CacheSlotMeta.h"
 #include "EngineConfig.h"
 #include "Logger.h"
 #include "Profiler.h"
@@ -488,6 +489,19 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 
 	// Because we're waiting for jobs to finish within the func we shouldn't need to worry about scope loss
 	TrinyxJobs::WaitForCounter(&writebackCounter, TrinyxJobs::Queue::Logic);
+
+	// Mark pulled entities dirty — PullActiveTransforms bypasses FieldProxy, so we set bits manually.
+	constexpr int32_t dirtyMask = static_cast<int32_t>(TemporalFlagBits::Dirty)
+		| static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
+	auto* flags = static_cast<int32_t*>(TC->GetFieldData(TC->GetFrameHeader(), CacheSlotMeta<>::StaticTemporalIndex(), 0));
+	if (flags)
+	{
+		for (const auto& entity : syncList)
+		{
+			flags[entity.offset] |= dirtyMask;
+		}
+	}
+
 	TC->UnlockFrameWrite();
 }
 

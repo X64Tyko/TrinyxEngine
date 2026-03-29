@@ -19,13 +19,14 @@ The engine is designed for high-frequency simulation with a large number of dyna
 | **Overhead**           | 0.25ms     | Scheduling, atomics, profiling               | 🎯 Tracking |
 | **TOTAL**              | **1.95ms** | **Full simulation frame @ 512Hz**            | 🎯 Target   |
 
-**Current Reality (Week 7, 512Hz):**
+**Current Reality (Week 8, 512Hz):**
 
 - PrePhysics: ~1.0ms for 1M entities (stress test)
 - PrePhysics: ~0.1ms for 100k entities (on target)
 - Jolt solver at 64Hz (512Hz/8 ratio), parallelized across worker pool via JoltJobSystemAdapter
 - 25-layer pyramid (5,526 entities): ~1ms steady-state, 14.67ms settling spike. Slab-direct iteration (no archetype
   indirection)
+- 100k cubes + 25-layer pyramid: Logic 0.73ms steady-state (1375 FPS), 18.74ms during settling
 - History Write--Frame Propagation: ~0.2ms for 100k entities.
 
 ---
@@ -44,11 +45,13 @@ Target: 60-120 FPS (8-16ms per frame) for 100k visible entities
 | **GPU Submit + Sync**       | 0.5ms     | Frame fence, swapchain acquisition     | ✅ Working      |
 | **TOTAL**                   | **8.5ms** | **~117 FPS rendering budget**          | 🔄 In Progress |
 
-**Current Reality (Week 7):**
+**Current Reality (Week 8):**
 
-- Full frame: ~0.7ms (321 FPS) for 100k entities
+- Full frame: ~0.88ms (1133 FPS) for 100k entities with dirty-bit selective upload
+- 205k entities (100k super cubes + 5.5k physics): ~3.1ms (320 FPS) during settling, ~1.5ms (660 FPS) steady-state
 - No culling yet (rendering all entities)
 - No state sorting yet (naive draw order)
+- Dirty-bit-driven GPU upload operational — only modified entities uploaded per frame
 
 ---
 
@@ -201,22 +204,25 @@ All benchmarks performed on:
 
 ---
 
-## Current Status vs Targets (Week 8)
+## Current Status vs Targets (Week 9)
 
-| Target                    | Goal   | Current                    | Delta       | Status |
-|---------------------------|--------|----------------------------|-------------|--------|
-| Full Frame (100k @ 512Hz) | 1.95ms | ~0.3ms @ 512Hz             | ✅ Achieved! | ✅      |
-| Physics (5.5k @ 64Hz)     | 0.8ms  | ~1ms steady, 14.67ms spike | ✅ On target | ✅      |
-| Render (100k @ 60 FPS)    | 8.5ms  | ~0.7ms (no cull)           | ✅ Excellent | ✅      |
-| Memory (100k, 128 pages)  | 685 MB | ~2.2GB w/ 10k Jolt bodies  | ⏳ Pending   | 🔄     |
-| Input Latency             | <16ms  | ~7ms on 240Hz monitor      | ⏳ TBD       | ⏳      |
+| Target                    | Goal   | Current                          | Delta       | Status |
+|---------------------------|--------|----------------------------------|-------------|--------|
+| Full Frame (100k @ 512Hz) | 1.95ms | ~0.73ms steady, 18.74ms settling | ✅ Achieved! | ✅      |
+| Physics (5.5k @ 64Hz)     | 0.8ms  | ~1ms steady, 14.67ms spike       | ✅ On target | ✅      |
+| Render (100k @ 60 FPS)    | 8.5ms  | ~0.88ms (dirty upload, no cull)  | ✅ Excellent | ✅      |
+| Render (205k @ 60 FPS)    | —      | ~1.5ms steady, ~3.1ms settling   | ✅ Bonus     | ✅      |
+| Memory (100k, 128 pages)  | 685 MB | ~2.2GB w/ 10k Jolt bodies        | ⏳ Pending   | 🔄     |
+| Input Latency             | <16ms  | ~9ms on 240Hz monitor            | ✅ Achieved! | ✅      |
 
 **Key Observations:**
 
-- Already hitting 0.3ms full frame - exceeding 512Hz target!
+- 100k cubes + 25-layer pyramid: render 1133 FPS steady, logic 1375 FPS steady, 9.24ms input-to-photon
+- 205k entities (100k super cubes + 5.5k physics): render 320 FPS settling → 790 FPS steady
+- Dirty-bit-driven selective GPU upload operational — only modified entities uploaded per frame
+- Render FPS climbs as physics settles (fewer dirty entities → less upload work)
 - FieldProxy SIMD optimization was the breakthrough (4x speedup)
-- Render thread at 0.73ms leaves plenty of headroom
-- Memory usage is pretty massive with rollback enabled, around 270MB without.
+- Memory usage is pretty massive with rollback enabled, around 270MB without
 - JoltBody moved from cold to volatile tier — FlushPendingBodies now iterates contiguous DUAL+PHYS slab region directly
 - 25-layer pyramid (5,526 entities) settling in ~14.67ms, steady state ~1ms — dense pyramid forms monolithic Jolt island
   limiting parallelism during settling

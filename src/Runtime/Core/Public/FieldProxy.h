@@ -201,10 +201,12 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	using VecMask = FieldMask<FieldType, typename Traits::VecType, WIDTH>;
 
 	FieldType* __restrict WriteArray = nullptr;
-	int32_t* __restrict FlagsArray   = nullptr; // CacheSlotMeta::Flags — Dirty bit lives at bit 30
+	int32_t* __restrict FlagsArray   = nullptr; // CacheSlotMeta::Flags — dirty bits at 30 (accumulate) and 29 (per-frame)
 	uint32_t index;
 
-	static constexpr int32_t kDirtyBit = static_cast<int32_t>(1u << 30);
+	static constexpr int32_t DirtyBit        = static_cast<int32_t>(1u << 30);
+	static constexpr int32_t DirtiedFrameBit = static_cast<int32_t>(1u << 29);
+	static constexpr int32_t DirtyMask       = DirtyBit | DirtiedFrameBit;
 
 	explicit operator typename Traits::VecType() const
 	{
@@ -394,19 +396,20 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		return *this;
 	}
 
-	// Mark the current entity/entities as dirty via CacheSlotMeta::Flags (bit 30).
+	// Mark the current entity/entities as dirty via CacheSlotMeta::Flags.
+	// Sets bit 30 (accumulates until render clears) and bit 29 (cleared at frame start).
 	// FlagsArray must be non-null for fields that need dirty tracking.
 	// CacheSlotMeta::Flags passes nullptr (self-referential — it IS the flags).
 	FORCE_INLINE void MarkDirty()
 	{
 		if constexpr (WIDTH == FieldWidth::Scalar)
 		{
-			FlagsArray[index] |= kDirtyBit;
+			FlagsArray[index] |= DirtyMask;
 		}
 		else
 		{
 			__m256i flags = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&FlagsArray[index]));
-			flags         = _mm256_or_si256(flags, _mm256_set1_epi32(kDirtyBit));
+			flags         = _mm256_or_si256(flags, _mm256_set1_epi32(DirtyMask));
 			_mm256_storeu_si256(reinterpret_cast<__m256i*>(&FlagsArray[index]), flags);
 		}
 	}

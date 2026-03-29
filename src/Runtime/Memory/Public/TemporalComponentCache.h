@@ -119,6 +119,7 @@ public:
 
 	uint32_t GetTotalFrameCount() const { return static_cast<uint32_t>(TemporalFrameCount); }
 	CacheTier GetTier() const { return Tier_; }
+	uint32_t GetMaxCachedEntityCount() const { return static_cast<uint32_t>(MaxCachedBoundary / sizeof(float)); }
 
 	// Returns [start, end) cache index range for the contiguous DUAL+PHYS partition.
 	// Physics systems iterate this as a single dense scan with no gap.
