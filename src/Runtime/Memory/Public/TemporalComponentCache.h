@@ -89,9 +89,9 @@ public:
 	bool TryLockFrameForWrite(uint32_t& outWriteFrame);
 	bool VerifyFrameReadable(uint32_t bufferIndex) const;
 	void UnlockFrameWrite();
-	bool TryLockFrameForRead(uint32_t frameNum = -1);
-	void UnlockFrameRead(uint32_t frameNum = -1);
-	
+	bool TryLockFrameForRead(uint32_t frameNum);
+	void UnlockFrameRead(uint32_t frameNum);
+
 	uint32_t GetActiveWriteFrame() const { return ActiveWriteFrame; }
 	uint32_t GetActiveReadFrame() const { return LastWrittenFrame; }
 
@@ -165,8 +165,8 @@ protected:
 	FnPropagateFramePtr FnPropagateFrame = nullptr;
 	
 	// Set by ComponentCacheImpl before calling InitializeInternal so GetTier() is valid immediately.
-	CacheTier Tier_ = CacheTier::Volatile;
-	uint32_t LastWrittenFrame = -1;
+	CacheTier Tier_           = CacheTier::Volatile;
+	uint32_t LastWrittenFrame = 0;
 	uint32_t ActiveWriteFrame = 0;
 
 	size_t MaxRenderableBoundary = 0;
@@ -346,13 +346,14 @@ public:
 		}
 		else
 		{
-			bool stuck = false;
+			uint32_t spins = 0;
 			while (!base->LockFrameForWrite(targetSlot))
 			{
-				if (!stuck)
+				if (++spins > 10'000'000)
 				{
-					LOG_DEBUG("Stuck!");
-					stuck = true;
+					LOG_ERROR_F("[Temporal] PropagateFrame stuck — frame %u has leaked lock (flags=0x%02x)",
+								targetSlot, base->GetFrameHeader(targetSlot)->OwnershipFlags.load(std::memory_order_relaxed));
+					return;
 				}
 			}
 		}

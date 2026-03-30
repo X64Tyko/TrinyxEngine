@@ -1282,15 +1282,19 @@ void RendererCore<Derived>::WriteToFrameSlab()
 	ComponentCacheBase* temporalCache = RegistryPtr->GetTemporalCache();
 	ComponentCacheBase* volatileCache = RegistryPtr->GetVolatileCache();
 
-	if (!volatileCache->TryLockFrameForRead(LastVolatileFrame)
-#ifdef TNX_ENABLE_ROLLBACK
-		|| !temporalCache->TryLockFrameForRead(LastTemporalFrame)
-#endif
-	)
+	if (!volatileCache->TryLockFrameForRead(LastVolatileFrame))
 	{
-		LOG_ERROR("[Renderer] Failed to lock frame for read");
+		LOG_ERROR("[Renderer] Failed to lock volatile frame for read");
 		return;
 	}
+#ifdef TNX_ENABLE_ROLLBACK
+	if (!temporalCache->TryLockFrameForRead(LastTemporalFrame))
+	{
+		volatileCache->UnlockFrameRead(LastVolatileFrame);
+		LOG_ERROR("[Renderer] Failed to lock temporal frame for read");
+		return;
+	}
+#endif
 
 	TNX_ZONE_NC("Write Frame Slab", TNX_COLOR_RENDERING)
 	PrevFieldSlab    = CurrentFieldSlab;
