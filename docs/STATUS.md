@@ -251,9 +251,11 @@ in the long run.
 ### Planned (Next Phase)
 
 - [x] **Render pipeline optimization** — dirty-bit selective GPU upload (2026-03-29)
+- [x] **Rollback determinism** — full slab rollback + Jolt SaveState/RestoreState, byte-perfect ECS + Jolt determinism
+  verified (2026-03-29)
 - [ ] **Frustum culling** — SIMD 6-plane test, GPU-side predicate enhancement
 - [ ] **State-sorted rendering** — 64-bit sort keys, GPU radix sort after scatter
-- [ ] **Rollback netcode** — Temporal slab rollback + dirty resimulation
+- [ ] **Rollback netcode** — network integration using proven rollback substrate + dirty resimulation
 
 ---
 
