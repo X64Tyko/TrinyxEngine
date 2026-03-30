@@ -12,6 +12,7 @@
 #include "Registry.h"
 #include "ThreadPinning.h"
 #include "TrinyxJobs.h"
+#include "World.h"
 #if TNX_ENABLE_EDITOR
 #include "EditorRenderer.h"
 #else
@@ -55,15 +56,6 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 		}
 	}
 
-	// Create GPU Device
-	// GpuDevice = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, nullptr);
-	// if (!GpuDevice)
-	// {
-	// 	std::cerr << "GPU Device Failed: " << SDL_GetError() << std::endl;
-	// 	SDL_DestroyWindow(EngineWindow);
-	// 	return false;
-	// }
-	// SDL_WINDOW_VULKAN lets SDL register the window for Vulkan surface creation.
 	EngineWindow = SDL_CreateWindow(title, width, height,
 									SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
 	if (!EngineWindow)
@@ -72,24 +64,12 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 		return false;
 	}
 
-	// Claim the Window for the Device
-	// if (!SDL_ClaimWindowForGPUDevice(GpuDevice, EngineWindow))
-	// {
-	// 	std::cerr << "Claim Window Failed: " << SDL_GetError() << std::endl;
-	// 	SDL_DestroyGPUDevice(GpuDevice);
-	// 	SDL_DestroyWindow(EngineWindow);
-	// 	return false;
-	// }
-
 	// ---- Vulkan init -----------------------------------------------------
-	// Validation layers on in debug, off in release. VulkanContext reads the
-	// flag; change to false here to skip the layer even in debug builds.
 #if defined(NDEBUG)
 	[[maybe_unused]] constexpr bool enableValidation = false;
 #else
 	[[maybe_unused]] constexpr bool enableValidation = true;
 #endif
-
 
 	if (!VkCtx.Initialize(EngineWindow, enableValidation))
 	{
@@ -107,9 +87,8 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 		EngineWindow = nullptr;
 		return false;
 	}
-	// using straight Vulkan is... a bit more difficult than SDL lol.
 
-	// ---- Core systems ----------------------------------------------------
+	// ---- Config ----------------------------------------------------------
 	if (projectDir && projectDir[0] != '\0')
 	{
 		Config = EngineConfig::LoadFromDirectory(projectDir);
@@ -125,29 +104,38 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	EditorTemporalFrameCount  = Config.TemporalFrameCount; // Stash for PIE
 	Config.TemporalFrameCount = 3;
 #endif
-	RegistryPtr = std::make_unique<Registry>(&Config);
-	Pacer.Initialize(GpuDevice);
 
-	// ---- Physics ---------------------------------------------------------
-	Physics = std::make_unique<JoltPhysics>();
-	if (!Physics->Initialize(&Config))
+	// ---- GNS + NetThread -------------------------------------------------
+	if (Config.Mode != EngineMode::Standalone)
 	{
-		std::cerr << "JoltPhysics::Initialize failed" << std::endl;
+		if (!GNS.Initialize())
+		{
+			LOG_ERROR("GNSContext::Initialize failed — falling back to Standalone");
+			Config.Mode = EngineMode::Standalone;
+		}
+		else
+		{
+			Net = std::make_unique<NetThread>();
+			Net->Initialize(&GNS, &Config);
+		}
+	}
+
+	// ---- World (owns Registry, Physics, LogicThread, Input, SpawnSync) ---
+	DefaultWorld = std::make_unique<World>();
+	if (!DefaultWorld->Initialize(Config, width, height))
+	{
+		std::cerr << "World::Initialize failed" << std::endl;
 		return false;
 	}
-	RegistryPtr->SetPhysics(Physics.get());
+	Pacer.Initialize(GpuDevice);
 
-	// ---- Threads ---------------------------------------------------------
-	Logic  = std::make_unique<LogicThread>();
+	// ---- Renderer --------------------------------------------------------
 	Render = std::make_unique<RendererType>();
 
-	Logic->Initialize(RegistryPtr.get(), &Config, Physics.get(), &SimInput, &VizInput, width, height);
+	Render->Initialize(DefaultWorld->GetRegistry(), DefaultWorld->GetLogicThread(),
+					   &Config, &VkCtx, &VkMem, EngineWindow, DefaultWorld->GetVizInput());
 #if TNX_ENABLE_EDITOR
-	Logic->SetSimPaused(true); // Editor starts paused — press Play to simulate
-#endif
-
-	Render->Initialize(RegistryPtr.get(), Logic.get(), &Config, &VkCtx, &VkMem, EngineWindow, &VizInput);
-#if TNX_ENABLE_EDITOR
+	DefaultWorld->GetLogicThread()->SetSimPaused(true); // Editor starts paused
 	Render->SetEngine(this);
 #endif
 
@@ -155,28 +143,48 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	return true;
 }
 
+Registry* TrinyxEngine::GetRegistry() const
+{
+	return DefaultWorld ? DefaultWorld->GetRegistry() : nullptr;
+}
+
 void TrinyxEngine::ResetRegistry() const
 {
-	RegistryPtr->ResetRegistry();
+	if (DefaultWorld) DefaultWorld->ResetRegistry();
 }
 
 void TrinyxEngine::ConfirmLocalRecycles() const
 {
-	RegistryPtr->ConfirmLocalRecycles();
+	if (DefaultWorld) DefaultWorld->ConfirmLocalRecycles();
+}
+
+void TrinyxEngine::Spawn(std::function<void(Registry*)> action)
+{
+	if (DefaultWorld) DefaultWorld->Spawn(std::move(action));
 }
 
 void TrinyxEngine::StartThreadsAndJobs()
 {
-	Logic->Start();
+	DefaultWorld->Start();
 	Render->Start();
 
-	while (!Logic->IsRunning() || !Render->IsRunning())
+	while (!DefaultWorld->GetLogicThread()->IsRunning() || !Render->IsRunning())
 	{
 		// Spin while we wait so that we don't initialize workers before our Primary threads
 	}
 
+	// Start NetThread in threaded mode for Client/ListenServer.
+	// Server mode uses inline Tick() from the main loop — no extra thread.
+	if (Net && Config.Mode != EngineMode::Server)
+	{
+		Net->Start();
+	}
+
 	bool JobsInitialized = TrinyxJobs::Initialize(&Config);
 	bJobsInitialized.store(JobsInitialized, std::memory_order_release);
+
+	// Notify the world's LogicThread that jobs are ready
+	DefaultWorld->SetJobsInitialized(JobsInitialized);
 
 	bIsRunning = true;
 }
@@ -191,9 +199,20 @@ void TrinyxEngine::RunMainLoop()
 
 		const uint64_t frameStart = SDL_GetPerformanceCounter();
 
+#if defined(TNX_DEDICATED_SERVER)
+		// Dedicated server: main thread is the network poller.
+		// No window, no SDL events, no renderer.
+		if (Net) Net->Tick();
+#elif TNX_ENABLE_EDITOR
+		// Editor: runtime mode for PIE (server + N clients in one process).
+		if (Config.Mode == EngineMode::Server && Net) Net->Tick();
+		else PumpEvents();
+#else
+		// Shipping client/standalone: always pump SDL events.
 		PumpEvents();
+#endif
 
-		if (Logic && !Logic->IsRunning())
+		if (DefaultWorld->GetLogicThread() && !DefaultWorld->GetLogicThread()->IsRunning())
 		{
 			LOG_ERROR("[Sentinel] Logic thread stopped unexpectedly — shutting down");
 			bIsRunning.store(false, std::memory_order_release);
@@ -215,31 +234,30 @@ void TrinyxEngine::Shutdown()
 {
 	LOG_INFO("TrinyxEngine shutting down");
 
-	// Stop threads.  RenderThread calls vkDeviceWaitIdle before its loop exits.
-	if (Logic) Logic->Stop();
+	// Stop threads
+	DefaultWorld->Stop();
 	if (Render) Render->Stop();
-	if (Logic) Logic->Join();
+	if (Net) Net->Stop();
+	DefaultWorld->Join();
 	if (Render) Render->Join();
+	if (Net) Net->Join();
 
-	// Shut down the job system after coordinator threads have exited —
-	// no more jobs will be dispatched, so workers can drain and join.
+	// Shut down the job system after coordinator threads have exited
 	TrinyxJobs::Shutdown();
 
 	// Destroy thread objects BEFORE Vulkan teardown.
-	// RenderThread owns GPU resources (DepthImage, field buffers, pipelines, etc.)
-	// that call vmaDestroy* in their destructors.  VulkanMemory (VMA) must still
-	// be alive when those destructors run, so we reset the unique_ptrs here
-	// rather than letting them fire in TrinyxEngine's destructor after Shutdown().
+	// RenderThread owns GPU resources that call vmaDestroy* in their destructors.
 	Render.reset();
-	Logic.reset();
-	Physics.reset();
+	DefaultWorld->Shutdown();
+	DefaultWorld.reset();
 
-	// Tear down Vulkan explicitly here — before SDL_Quit() and before the
-	// TrinyxEngine singleton's atexit destructor fires.  Validation layers
-	// use static memory that is freed before atexit(); calling vkDestroy*
-	// from atexit() causes a dispatch-handle crash in the validation layer.
-	VkMem.Shutdown(); // VMA allocator — must precede device destruction
-	VkCtx.Shutdown(); // device → surface → instance (raii objects cleared)
+	// Tear down networking
+	Net.reset();
+	GNS.Shutdown();
+
+	// Tear down Vulkan
+	VkMem.Shutdown();
+	VkCtx.Shutdown();
 
 	if (EngineWindow)
 	{
@@ -254,6 +272,12 @@ void TrinyxEngine::Shutdown()
 void TrinyxEngine::PumpEvents()
 {
 	TNX_ZONE_N("Input_Poll");
+
+	InputBuffer* SimInput = DefaultWorld->GetSimInput();
+	InputBuffer* VizInput = DefaultWorld->GetVizInput();
+#ifdef TNX_ENABLE_ROLLBACK
+	LogicThread* Logic = DefaultWorld->GetLogicThread();
+#endif
 
 #if TNX_ENABLE_EDITOR
 	// The render thread owns the decision of whether the engine gets input.
@@ -294,8 +318,8 @@ void TrinyxEngine::PumpEvents()
 #endif
 				if (!e.key.repeat)
 				{
-					SimInput.PushKey(e.key.scancode, true);
-					VizInput.PushKey(e.key.scancode, true);
+					SimInput->PushKey(e.key.scancode, true);
+					VizInput->PushKey(e.key.scancode, true);
 				}
 				break;
 
@@ -303,16 +327,16 @@ void TrinyxEngine::PumpEvents()
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				SimInput.PushKey(e.key.scancode, false);
-				VizInput.PushKey(e.key.scancode, false);
+				SimInput->PushKey(e.key.scancode, false);
+				VizInput->PushKey(e.key.scancode, false);
 				break;
 
 			case SDL_EVENT_MOUSE_MOTION:
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				SimInput.AddMouseDelta(e.motion.xrel, e.motion.yrel);
-				VizInput.AddMouseDelta(e.motion.xrel, e.motion.yrel);
+				SimInput->AddMouseDelta(e.motion.xrel, e.motion.yrel);
+				VizInput->AddMouseDelta(e.motion.xrel, e.motion.yrel);
 				break;
 
 #if !TNX_ENABLE_EDITOR
@@ -330,65 +354,9 @@ void TrinyxEngine::PumpEvents()
 }
 
 /*
-void TrinyxEngine::ServiceRenderThread()
-{
-	TNX_ZONE_N("Service_RenderThread");
-
-	if (!Render) return;
-
-	// Check if RenderThread is ready to submit
-	if (Render->ReadyToSubmit())
-	{
-		SubmitRenderCommands();
-	}
-
-	// Check if RenderThread needs GPU resources
-	if (Render->NeedsGPUResources())
-	{
-		AcquireAndProvideGPUResources();
-	}
-}
-
-void TrinyxEngine::AcquireAndProvideGPUResources()
-{
-	TNX_ZONE_N("Main_AcquireGPU");
-
-	if (!Pacer.BeginFrame()) return;
-
-	// Acquire command buffer and swapchain texture
-	SDL_GPUCommandBuffer* cmdBuf = SDL_AcquireGPUCommandBuffer(GpuDevice);
-	if (!cmdBuf)
-	{
-		// No command buffer available, skip this frame
-		return;
-	}
-	// Provide to RenderThread via Render->ProvideGPUResources(cmd, swapchain)
-	SDL_GPUTexture* swapchainTex;
-	if (!SDL_AcquireGPUSwapchainTexture(cmdBuf, EngineWindow, &swapchainTex, nullptr, nullptr) || !swapchainTex)
-	{
-		// Failed to acquire texture
-		SDL_CancelGPUCommandBuffer(cmdBuf);
-		return;
-	}
-
-	Render->ProvideGPUResources(cmdBuf, swapchainTex);
-}
-
-void TrinyxEngine::SubmitRenderCommands()
-{
-	TNX_ZONE_N("Main_SubmitGPU");
-
-	// Retrieve command buffer from RenderThread
-	SDL_GPUCommandBuffer* cmdBuf = Render->TakeCommandBuffer();
-	if (!cmdBuf)
-	{
-		LOG_ERROR("[Main] Failed to take command buffer from RenderThread");
-		return;
-	}
-
-	Pacer.EndFrame(cmdBuf);
-	Render->NotifyFrameSubmitted();
-}
+void TrinyxEngine::ServiceRenderThread() { ... }
+void TrinyxEngine::AcquireAndProvideGPUResources() { ... }
+void TrinyxEngine::SubmitRenderCommands() { ... }
 */
 
 void TrinyxEngine::CalculateFPS()

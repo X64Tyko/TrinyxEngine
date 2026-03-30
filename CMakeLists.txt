@@ -84,7 +84,7 @@ set(GNS_PATH "${CMAKE_SOURCE_DIR}/libs/gns")
 # do: target_link_libraries(MyTarget PRIVATE Slang::Compiler)
 add_library(Slang::Compiler SHARED IMPORTED GLOBAL
         src/Runtime/Core/Public/TrinyxJobs.h
-        src/Runtime/Core/Private/ThreadPinning.h
+        src/Runtime/Core/Public/ThreadPinning.h
         src/Runtime/Core/Public/TrinyxRingBuffer.h
         src/Runtime/Core/Public/RegistryTypes.h
         src/Runtime/Core/Public/Events.h)

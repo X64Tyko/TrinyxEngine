@@ -9,8 +9,10 @@ enum class CoreAffinity : uint8_t
 	Input,
 	Physics,
 	Render,
+	Network,
 	Worker
 };
+
 /**
  * TrinyxThreading — Core-aware thread pinning.
  *
@@ -19,8 +21,9 @@ enum class CoreAffinity : uint8_t
  *   physical cores first (non-SMT), then SMT siblings.
  * Core 0 is skipped (reserved for OS/interrupts).
  *
- * The three coordinator threads (Sentinel, Brain, Encoder) each get
- * a dedicated physical core. Remaining cores form the worker pool.
+ * The four coordinator threads (Sentinel, Brain, Encoder, NetThread) each
+ * get a dedicated physical core. Remaining cores form the worker pool.
+ * On CPUs with fewer than 5 cores, Network shares with Sentinel.
  */
 namespace TrinyxThreading
 {

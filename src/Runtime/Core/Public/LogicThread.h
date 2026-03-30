@@ -8,6 +8,7 @@
 // Forward declarations
 class Registry;
 class JoltPhysics;
+class SpawnSync;
 struct EngineConfig;
 struct InputBuffer;
 struct FramePacket;
@@ -26,7 +27,9 @@ public:
 	~LogicThread() = default;
 
 	void Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
-					InputBuffer* simInput, InputBuffer* vizInput, int windowWidth, int windowHeight);
+					InputBuffer* simInput, InputBuffer* vizInput,
+					SpawnSync* spawner, const std::atomic<bool>* jobsInitialized,
+					int windowWidth, int windowHeight);
 	void Start();
 	void Stop();
 	void Join();
@@ -78,6 +81,8 @@ private:
 	const EngineConfig* ConfigPtr           = nullptr;
 	JoltPhysics* PhysicsPtr                 = nullptr;
 	class ComponentCacheBase* TemporalCache = nullptr;
+	SpawnSync* SpawnerPtr                   = nullptr;
+	const std::atomic<bool>* JobsInitPtr    = nullptr;
 
 	// Input
 	InputBuffer* SimInput = nullptr;

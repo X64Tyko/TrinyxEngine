@@ -1,6 +1,8 @@
 ﻿#pragma once
 #include <algorithm>
 
+#include "NetTypes.h" // EngineMode
+
 struct EngineConfig
 {
 	// Load from an INI file; writes defaults and returns them if the file does not exist.
@@ -9,6 +11,10 @@ struct EngineConfig
 	// Scan a directory for all *Defaults.ini files and load them (alphabetical order).
 	// Later files override earlier values. Writes EngineDefaults.ini if none found.
 	static EngineConfig LoadFromDirectory(const char* dir);
+
+	// Engine mode — determines which subsystems are initialized.
+	// Set via CLI args (--server, --client, --listen) or programmatically.
+	EngineMode Mode = EngineMode::Standalone;
 
 	// Variadic Update, let the Logic thread run uncapped or limit its updates, cannot be lower than Fixed update if capped.
 	int TargetFPS = 0; // 0 = Uncapped

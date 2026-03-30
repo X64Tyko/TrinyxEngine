@@ -3,6 +3,7 @@
 #include "EntityBuilder.h"
 #include "JoltPhysics.h"
 #include "TrinyxEngine.h"
+#include "World.h"
 #include "EditorRenderer.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -959,7 +960,7 @@ void EditorContext::RestoreSnapshot()
 
 		// Reset all Jolt bodies — Play may have created bodies that don't exist in the snapshot.
 		// FlushPendingBodies will recreate them from the restored field data on the next physics tick.
-		if (EnginePtr->Physics) EnginePtr->Physics->ResetAllBodies();
+		if (EnginePtr->GetDefaultWorld() && EnginePtr->GetDefaultWorld()->GetPhysics()) EnginePtr->GetDefaultWorld()->GetPhysics()->ResetAllBodies();
 
 		uint32_t temporalFrame = reg->GetTemporalCache()->GetActiveWriteFrame();
 		uint32_t volatileFrame = reg->GetVolatileCache()->GetActiveWriteFrame();

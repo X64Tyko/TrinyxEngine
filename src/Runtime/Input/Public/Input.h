@@ -118,6 +118,20 @@ struct InputBuffer
 		MouseDY[slot] += dy;
 	}
 
+	// ── Network-side (writer) ───────────────────────────────────────────
+	// Bulk state injection for network-sourced input. NetThread deserializes
+	// an InputFrame message and writes the full state in one shot.
+	// Same write slot as Sentinel — on a server, NetThread is the sole writer.
+
+	/// Replace the entire key state + mouse delta for the current write slot.
+	void InjectState(const uint8_t* keyData, float mouseDX, float mouseDY)
+	{
+		uint8_t slot = WriteSlot.load(std::memory_order_relaxed);
+		std::memcpy(KeyState[slot], keyData, 64);
+		MouseDX[slot] = mouseDX;
+		MouseDY[slot] = mouseDY;
+	}
+
 	// ── Brain-side (reader) ──────────────────────────────────────────────
 
 	// Call once at the top of each logic frame.

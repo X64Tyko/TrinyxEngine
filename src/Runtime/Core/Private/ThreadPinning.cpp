@@ -32,7 +32,7 @@ namespace TrinyxThreading
 	static bool s_HasSMT            = false;
 	static bool s_Initialized       = false;
 
-	static constexpr uint32_t ReservedCores = 3; // Sentinel, Brain, Encoder
+	static constexpr uint32_t ReservedCores = 4; // Sentinel, Brain, Encoder, NetThread
 
 	// ---- Platform-specific topology scanning -----------------------------
 
@@ -252,6 +252,10 @@ namespace TrinyxThreading
 			case CoreAffinity::Input: return s_CoreList[0].LogicalId;
 			case CoreAffinity::Physics: return s_CoreList[1].LogicalId;
 			case CoreAffinity::Render: return s_CoreList[2].LogicalId;
+			case CoreAffinity::Network:
+				// On CPUs with 4+ available cores, Network gets its own core.
+				// Otherwise shares with Sentinel (core index 0 = Input).
+				return s_CoreList.size() > 3 ? s_CoreList[3].LogicalId : s_CoreList[0].LogicalId;
 			case CoreAffinity::Worker: return -1; // > core count, will auto decide
 		}
 		

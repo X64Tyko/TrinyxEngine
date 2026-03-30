@@ -9,8 +9,8 @@
 #include <SDL3/SDL.h>
 #include <cmath>
 
+#include "SpawnSync.h"
 #include "ThreadPinning.h"
-#include "TrinyxEngine.h"
 #include "JoltPhysics.h"
 
 #ifdef TNX_ENABLE_ROLLBACK
@@ -20,13 +20,17 @@
 #endif
 
 void LogicThread::Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
-							 InputBuffer* simInput, InputBuffer* vizInput, int windowWidth, int windowHeight)
+							 InputBuffer* simInput, InputBuffer* vizInput,
+							 SpawnSync* spawner, const std::atomic<bool>* jobsInitialized,
+							 int windowWidth, int windowHeight)
 {
 	RegistryPtr    = registry;
 	ConfigPtr      = config;
 	PhysicsPtr     = physics;
 	SimInput       = simInput;
 	VizInput       = vizInput;
+	SpawnerPtr     = spawner;
+	JobsInitPtr    = jobsInitialized;
 	TemporalCache  = registry->GetTemporalCache();
 	WindowWidth    = windowWidth;
 	WindowHeight   = windowHeight;
@@ -78,12 +82,12 @@ void LogicThread::ThreadMain()
 	constexpr double MaxAccumulatedTime = -0.25;
 	constexpr int MaxPhysSubSteps       = 8;
 
-	while (!TrinyxEngine::Get().GetJobsInitialized())
+	while (!JobsInitPtr->load(std::memory_order_acquire))
 	{
 	}
 
 	// Stamp our thread ID so SpawnSync knows who the Logic thread is
-	TrinyxEngine::Get().GetSpawner().SetLogicThreadId(std::this_thread::get_id());
+	SpawnerPtr->SetLogicThreadId(std::this_thread::get_id());
 
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
@@ -91,7 +95,7 @@ void LogicThread::ThreadMain()
 
 		// Sync point for deferred spawns — if any thread is waiting to
 		// spawn entities, freeze here and let it write to the current frame.
-		TrinyxEngine::Get().GetSpawner().SyncPoint();
+		SpawnerPtr->SyncPoint();
 		RegistryPtr->ProcessDeferredDestructions();
 
 		// Measure delta time

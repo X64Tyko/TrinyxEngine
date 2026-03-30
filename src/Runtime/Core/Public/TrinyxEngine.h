@@ -4,8 +4,8 @@
 #include <memory>
 
 #include "EngineConfig.h"
-#include "SpawnSync.h"
-#include "Input.h"
+#include "GNSContext.h"
+#include "NetThread.h"
 #include "VulkanContext.h"
 #include "VulkanMemory.h"
 #include "../../Rendering/Private/FramePacer.h"
@@ -15,6 +15,7 @@ class RenderThread;
 class Registry;
 class LogicThread;
 class JoltPhysics;
+class World;
 
 // Compile-time renderer selection: EditorRenderer (ImGui overlay) or GameplayRenderer (no-op overlay).
 #if TNX_ENABLE_EDITOR
@@ -34,10 +35,10 @@ using RendererType = GameplayRenderer;
  * - VulkanContext + VulkanMemory ownership and lifetime
  * - Thread lifecycle management
  * - Frame pacing (timing only — the RenderThread is GPU-autonomous)
+ * - World ownership: manages one or more World instances
  *
- * The Sentinel no longer participates in GPU resource handoff.
- * All command buffer acquisition, submission, and presentation happen
- * inside VulkRender::ThreadMain().
+ * Each World owns its own Registry, JoltPhysics, LogicThread, InputBuffers,
+ * and SpawnSync. The engine owns the GPU resources shared across all worlds.
  */
 class TrinyxEngine
 {
@@ -63,25 +64,28 @@ public:
 		return instance;
 	}
 
-	Registry* GetRegistry() const { return RegistryPtr.get(); }
+	// --- World access ---
+	World* GetDefaultWorld() const { return DefaultWorld.get(); }
+
+	// Convenience: access the default world's registry.
+	Registry* GetRegistry() const;
 	const EngineConfig* GetConfig() const { return &Config; }
 	bool GetJobsInitialized() const { return bJobsInitialized.load(std::memory_order_relaxed); }
 
 	// Test-only: hard-reset the registry (wipes all entities, handles, caches).
-	// Routed through TrinyxEngine because Registry::ResetRegistry is private.
 	void ResetRegistry() const;
 	void ConfirmLocalRecycles() const;
 
-	/// Spawn entities from any thread. Blocks until the work completes at a
-	/// safe sync point in the Logic thread's frame. If already on Logic,
-	/// executes immediately. See SpawnSync.h for full documentation.
-	void Spawn(std::function<void(Registry*)> action)
-	{
-		Spawner.Spawn(std::move(action), RegistryPtr.get());
-	}
+	/// Spawn entities from any thread via the default world's SpawnSync.
+	void Spawn(std::function<void(Registry*)> action);
 
-	/// Access the SpawnSync directly (used by LogicThread for SyncPoint/SetLogicThreadId).
-	SpawnSync& GetSpawner() { return Spawner; }
+	// Renderer access (needed by EditorContext)
+	RendererType* GetRenderer() const { return Render.get(); }
+	SDL_Window* GetWindow() const { return EngineWindow; }
+
+	// Networking
+	GNSContext* GetGNSContext() const { return const_cast<GNSContext*>(&GNS); }
+	NetThread* GetNetThread() const { return Net.get(); }
 
 private:
 #ifdef TNX_ENABLE_EDITOR
@@ -92,9 +96,6 @@ private:
 	void StartThreadsAndJobs();
 	void RunMainLoop();
 	void PumpEvents(); // Handle OS events
-	//void ServiceRenderThread();           // Check if RenderThread needs GPU resources or wants to submit
-	//void AcquireAndProvideGPUResources(); // Acquire cmd + swapchain, provide to RenderThread
-	//void SubmitRenderCommands();          // Take CmdBuffer from RenderThread and submit
 	void WaitForTiming(uint64_t frameStart, uint64_t perfFrequency);
 
 	// FPS tracking
@@ -105,28 +106,25 @@ private:
 	SDL_GPUDevice* GpuDevice;
 	FramePacer Pacer;
 
-	// --- Vulkan (owned here, passed as pointers to RenderThread) ---
+	// --- Networking ---
+	GNSContext GNS;
+	std::unique_ptr<NetThread> Net;
+
+	// --- Vulkan (owned here, shared across worlds) ---
 	VulkanContext VkCtx;
 	VulkanMemory VkMem;
 
-	// --- Core Systems ---
-	std::unique_ptr<Registry> RegistryPtr;
+	// --- Config ---
 	EngineConfig Config;
 #if TNX_ENABLE_EDITOR && defined(TNX_ENABLE_ROLLBACK)
 	int EditorTemporalFrameCount = 8; // User's original value, stashed for PIE worlds
 #endif
 
-	// --- Thread Modules ---
-	std::unique_ptr<JoltPhysics> Physics;
-	std::unique_ptr<LogicThread> Logic;
+	// --- World (owns Registry, Physics, Logic, Input, SpawnSync) ---
+	std::unique_ptr<World> DefaultWorld;
+
+	// --- Renderer (shared, reads from active world) ---
 	std::unique_ptr<RendererType> Render;
-
-	// --- Input ---
-	InputBuffer SimInput;
-	InputBuffer VizInput;
-
-	// --- Spawn sync ---
-	SpawnSync Spawner;
 
 	// --- Lifecycle ---
 	std::atomic<bool> bIsRunning{false};

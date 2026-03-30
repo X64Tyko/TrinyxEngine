@@ -24,7 +24,7 @@
 #include <immintrin.h>
 #include "LogicThread.h"
 #include "TrinyxEngine.h"
-#include "../../Core/Private/ThreadPinning.h"
+#include "ThreadPinning.h"
 
 // -----------------------------------------------------------------------
 // Helpers

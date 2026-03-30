@@ -117,6 +117,7 @@ private:
 	friend struct EntityRecord;
 	friend struct EntityArchive;
 	friend class TrinyxEngine;
+	friend class World;
 	friend class EditorContext;
 
 	void SetPhysics(JoltPhysics* physics) { PhysicsPtr = physics; }

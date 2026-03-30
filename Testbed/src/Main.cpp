@@ -12,8 +12,225 @@
 #include "Archetype.h"
 #include "Logger.h"
 #include "TestFramework.h"
+#include "GNSContext.h"
+#include "NetConnectionManager.h"
+#include "NetThread.h"
+#include "World.h"
+#include "Input.h"
 
 using namespace tnx::Testing;
+
+// ---------------------------------------------------------------------------
+// Networking: GNS loopback ping/pong test
+// Validates: GNS static linking, loopback connectivity, PacketHeader framing
+// ---------------------------------------------------------------------------
+TEST(Net_LoopbackPingPong)
+{
+	// Tests run in Standalone mode — GNS isn't initialized by the engine.
+	// Create a local GNSContext for this test.
+	(void)Engine;
+	GNSContext gnsLocal;
+	ASSERT(gnsLocal.Initialize());
+	GNSContext* gns = &gnsLocal;
+
+	// Single connection manager handles both server and client roles.
+	// GNS supports listen + connect on the same interface — the poll group
+	// collects messages from all connections regardless of direction.
+	NetConnectionManager mgr;
+	mgr.Initialize(gns);
+
+	constexpr uint16_t kPort = 27015;
+	ASSERT(mgr.Listen(kPort));
+
+	HSteamNetConnection clientConn = mgr.Connect("127.0.0.1", kPort);
+	ASSERT(clientConn != 0);
+
+	// Pump callbacks until we have 2 connections (server-side accept + client-side connect)
+	const uint64_t deadline = SDL_GetTicks() + 2000;
+	while (mgr.GetConnectionCount() < 2 && SDL_GetTicks() < deadline)
+	{
+		mgr.RunCallbacks();
+		SDL_Delay(10);
+	}
+	ASSERT(mgr.GetConnectionCount() >= 2);
+
+	// Identify server-side and client-side connection handles
+	HSteamNetConnection serverConn = 0;
+	for (const auto& ci : mgr.GetConnections())
+	{
+		if (ci.Handle != clientConn)
+		{
+			serverConn = ci.Handle;
+			break;
+		}
+	}
+	ASSERT(serverConn != 0);
+
+	// Client sends Ping
+	PacketHeader pingHeader{};
+	pingHeader.Type        = static_cast<uint8_t>(NetMessageType::Ping);
+	pingHeader.Flags       = PacketFlag::DefaultFlags;
+	pingHeader.SequenceNum = 1;
+	pingHeader.FrameNumber = 0;
+	pingHeader.SenderID    = 1;
+	pingHeader.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
+	pingHeader.PayloadSize = 0;
+
+	ASSERT(mgr.Send(clientConn, pingHeader, nullptr, true));
+
+	// Poll until a Ping arrives on the server-side connection
+	std::vector<ReceivedMessage> msgs;
+	const uint64_t recvDeadline = SDL_GetTicks() + 1000;
+	while (msgs.empty() && SDL_GetTicks() < recvDeadline)
+	{
+		mgr.RunCallbacks();
+		mgr.PollIncoming(msgs);
+		SDL_Delay(5);
+	}
+
+	ASSERT_EQ(static_cast<int>(msgs.size()), 1);
+	ASSERT_EQ(msgs[0].Header.Type, static_cast<uint8_t>(NetMessageType::Ping));
+	ASSERT_EQ(msgs[0].Header.SenderID, 1);
+	ASSERT_EQ(msgs[0].Connection, serverConn); // Arrived on the server-accepted connection
+
+	// Server responds with Pong on the connection it received from
+	PacketHeader pongHeader{};
+	pongHeader.Type        = static_cast<uint8_t>(NetMessageType::Pong);
+	pongHeader.Flags       = PacketFlag::DefaultFlags;
+	pongHeader.SequenceNum = 1;
+	pongHeader.FrameNumber = 0;
+	pongHeader.SenderID    = 0; // Server
+	pongHeader.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
+	pongHeader.PayloadSize = 0;
+
+	ASSERT(mgr.Send(serverConn, pongHeader, nullptr, true));
+
+	// Poll until the Pong arrives on the client connection
+	msgs.clear();
+	const uint64_t pongDeadline = SDL_GetTicks() + 1000;
+	while (msgs.empty() && SDL_GetTicks() < pongDeadline)
+	{
+		mgr.RunCallbacks();
+		mgr.PollIncoming(msgs);
+		SDL_Delay(5);
+	}
+
+	ASSERT_EQ(static_cast<int>(msgs.size()), 1);
+	ASSERT_EQ(msgs[0].Header.Type, static_cast<uint8_t>(NetMessageType::Pong));
+	ASSERT_EQ(msgs[0].Header.SenderID, 0);
+	ASSERT_EQ(msgs[0].Connection, clientConn); // Arrived on the client connection
+
+	LOG_ALWAYS("[Net_LoopbackPingPong] Loopback ping/pong successful — GNS connectivity verified");
+
+	mgr.Shutdown();
+	// gnsLocal destroyed by stack unwinding after mgr
+}
+
+// ---------------------------------------------------------------------------
+// Networking: InputFrame routing through NetThread to World's InputBuffer
+// Validates: NetThread inline Tick(), InputFrame deserialization, InputBuffer injection
+// ---------------------------------------------------------------------------
+TEST(Net_InputFrameRouting)
+{
+	(void)Engine;
+
+	GNSContext gnsLocal;
+	ASSERT(gnsLocal.Initialize());
+
+	// Create a NetThread in inline mode (no thread spawned)
+	EngineConfig config{};
+	config.NetworkUpdateHz = 30;
+
+	NetThread net;
+	net.Initialize(&gnsLocal, &config);
+
+	// We need a World to route input to. Use an InputBuffer directly
+	// since we can't easily create a full World in the test context.
+	// Instead, use the engine's DefaultWorld and map OwnerID 1 to it.
+	World* world = Engine.GetDefaultWorld();
+	ASSERT(world != nullptr);
+	net.MapConnectionToWorld(1, world);
+
+	// Use the NetThread's own connection manager for both roles.
+	// GNS supports listen + connect on the same interface, and the static
+	// s_Instance callback only routes to one manager at a time.
+	NetConnectionManager* mgr = net.GetConnectionManager();
+
+	constexpr uint16_t kPort = 27016;
+	ASSERT(mgr->Listen(kPort));
+
+	HSteamNetConnection clientConn = mgr->Connect("127.0.0.1", kPort);
+	ASSERT(clientConn != 0);
+
+	// Pump until both sides are connected (server accept + client connect = 2)
+	const uint64_t deadline = SDL_GetTicks() + 2000;
+	while (mgr->GetConnectionCount() < 2 && SDL_GetTicks() < deadline)
+	{
+		mgr->RunCallbacks();
+		SDL_Delay(10);
+	}
+	ASSERT(mgr->GetConnectionCount() >= 2);
+
+	// Find the server-side connection (the one that isn't the client's outgoing)
+	HSteamNetConnection serverSideConn = 0;
+	for (const auto& ci : mgr->GetConnections())
+	{
+		if (ci.Handle != clientConn)
+		{
+			serverSideConn = ci.Handle;
+			break;
+		}
+	}
+	ASSERT(serverSideConn != 0);
+	mgr->AssignOwnerID(serverSideConn, 1);
+
+	// Build an InputFrame payload with 'W' key pressed (SDL_SCANCODE_W = 26)
+	InputFramePayload payload{};
+	memset(payload.KeyState, 0, 64);
+	constexpr uint8_t wScancode      = 26; // SDL_SCANCODE_W
+	payload.KeyState[wScancode >> 3] |= (1u << (wScancode & 7));
+	payload.MouseDX                  = 1.5f;
+	payload.MouseDY                  = -0.5f;
+
+	// Send InputFrame from client
+	PacketHeader header{};
+	header.Type        = static_cast<uint8_t>(NetMessageType::InputFrame);
+	header.Flags       = PacketFlag::DefaultFlags;
+	header.PayloadSize = sizeof(InputFramePayload);
+	header.SequenceNum = 1;
+	header.FrameNumber = 0;
+	header.SenderID    = 1;
+
+	ASSERT(mgr->Send(clientConn, header,
+		reinterpret_cast<const uint8_t*>(&payload), true));
+
+	// Pump until the message arrives and is routed
+	const uint64_t deadline2 = SDL_GetTicks() + 2000;
+	bool received            = false;
+	while (!received && SDL_GetTicks() < deadline2)
+	{
+		net.Tick(); // inline mode — polls server-side + routes messages
+
+		// Check if the key was injected into the World's SimInput
+		InputBuffer* simInput = world->GetSimInput();
+		simInput->Swap(); // advance read slot to see injected state
+		if (simInput->IsKeyDown(static_cast<SDL_Scancode>(wScancode)))
+		{
+			received = true;
+		}
+		else
+		{
+			SDL_Delay(10);
+		}
+	}
+	ASSERT(received);
+
+	LOG_ALWAYS("[Net_InputFrameRouting] InputFrame routed through NetThread to World's InputBuffer — verified");
+
+	mgr->StopListening();
+	// gnsLocal and net destroyed in correct order by stack unwinding
+	// (net first, then gnsLocal — so NetConnectionManager shuts down before GNS)
+}
 
 TEST(Registry_CreateEntities)
 {
