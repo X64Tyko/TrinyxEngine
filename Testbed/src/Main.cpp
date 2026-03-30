@@ -299,7 +299,11 @@ RUNTIME_TEST(Spawn_JoltPyramid)
 	constexpr float cBoxSize       = 2.0f;
 	constexpr float cHalfBoxSize   = 1.0f;
 	constexpr float cBoxSeparation = 0.5f;
+#ifdef TNX_ENABLE_ROLLBACK
+	constexpr int cPyramidHeight = 5; // Reduced for rollback determinism testing
+#else
 	constexpr int cPyramidHeight   = 25;
+#endif
 	constexpr float xOffset        = 0.0f;
 	constexpr float yOffset        = -30.0f;
 	constexpr float zOffset        = -100.0f;

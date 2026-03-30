@@ -379,3 +379,18 @@ size_t ComponentCacheBase::AlignSize(size_t size)
 {
 	return (size + FIELD_ARRAY_ALIGNMENT - 1) & ~(FIELD_ARRAY_ALIGNMENT - 1);
 }
+
+#ifdef TNX_ENABLE_ROLLBACK
+std::vector<ComponentCacheBase::FieldCompareInfo> ComponentCacheBase::GetValidFieldInfos() const
+{
+	std::vector<FieldCompareInfo> result;
+	result.reserve(ValidFields.size());
+	for (uint16_t idx : ValidFields)
+	{
+		const auto& fa = FieldAllocations[idx];
+		result.push_back({fa.CompType, fa.FieldIndex, fa.FieldName,
+						  fa.OffsetInFrame, fa.CurrentUsed, fa.FieldSize});
+	}
+	return result;
+}
+#endif

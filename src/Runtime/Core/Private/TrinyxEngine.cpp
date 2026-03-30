@@ -282,6 +282,13 @@ void TrinyxEngine::PumpEvents()
 					bIsRunning.store(false, std::memory_order_release);
 					break;
 				}
+#ifdef TNX_ENABLE_ROLLBACK
+				if (e.key.scancode == SDL_SCANCODE_F5 && !e.key.repeat)
+				{
+					if (Logic) Logic->RequestRollbackTest();
+					break;
+				}
+#endif
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif

@@ -56,8 +56,22 @@ struct alignas(64) TemporalFrameHeader
 	uint32_t ActiveEntityCount;
 	uint32_t TotalAllocatedEntities;
 
+#ifdef TNX_ENABLE_ROLLBACK
+	// Input snapshot for deterministic replay during rollback.
+	// Recorded after ProcessSimInput each tick; replayed during resimulation.
+	uint8_t InputKeyState[64];
+	float InputMouseDX;
+	float InputMouseDY;
+#endif
+
 	// Padding to cache line
-#if TNX_DEV_METRICS
+#if defined(TNX_ENABLE_ROLLBACK) && TNX_DEV_METRICS
+	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint32_t) * 3
+		+ sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(float) + 64 + sizeof(float) * 2) % 64];
+#elif defined(TNX_ENABLE_ROLLBACK)
+	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint32_t) * 3
+		+ sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(float) + 64 + sizeof(float) * 2) % 64];
+#elif TNX_DEV_METRICS
 	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(float)) % 64];
 #else
 	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(float)) % 64];
@@ -147,6 +161,27 @@ public:
 	{
 		FnPropagateFrame(this, counter);
 	}
+
+#ifdef TNX_ENABLE_ROLLBACK
+	// Rollback test support — direct manipulation of frame pointers and slab access.
+	void SetActiveWriteFrame(uint32_t frame) { ActiveWriteFrame = frame; }
+	void SetLastWrittenFrame(uint32_t frame) { LastWrittenFrame = frame; }
+	void* GetSlabPtr() const { return SlabPtr; }
+	size_t GetTotalSlabSize() const { return TotalSlabSize; }
+	size_t GetFrameDataCapacity() const { return FrameDataCapacity; }
+
+	struct FieldCompareInfo
+	{
+		ComponentTypeID CompType;
+		size_t FieldIndex;
+		const char* FieldName;
+		size_t OffsetInFrame;
+		size_t CurrentUsed;
+		size_t FieldSize;
+	};
+
+	std::vector<FieldCompareInfo> GetValidFieldInfos() const;
+#endif
 
 protected:
 	template <typename Derived>

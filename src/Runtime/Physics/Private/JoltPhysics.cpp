@@ -22,6 +22,9 @@
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayerInterfaceTable.h>
 #include <Jolt/Physics/Collision/ObjectLayerPairFilterTable.h>
 #include <Jolt/Physics/Collision/BroadPhase/ObjectVsBroadPhaseLayerFilterTable.h>
+#ifdef TNX_ENABLE_ROLLBACK
+#include <Jolt/Physics/StateRecorderImpl.h>
+#endif
 
 #include "Registry.h"
 #include "JoltBody.h"
@@ -193,6 +196,15 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 	}
 
 	syncList.reserve(config->MAX_JOLT_BODIES);
+
+#ifdef TNX_ENABLE_ROLLBACK
+	// Size snapshot ring to cover the full temporal rollback window.
+	// One snapshot per Flush+Pull boundary frame.
+	SnapshotCapacity = static_cast<uint32_t>(config->TemporalFrameCount);
+	SnapshotRing.resize(SnapshotCapacity);
+	LOG_INFO_F("[JoltPhysics] Snapshot ring: %u slots for rollback", SnapshotCapacity);
+#endif
+
 	return true;
 }
 
@@ -453,7 +465,7 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 	{
 		JPH::BodyLockRead lock(bodyInterface, syncList[i].id);
 		JPH::Vec4 pos(lock.GetBody().GetPosition());
-		JPH::Vec4 rot	(lock.GetBody().GetRotation().GetXYZW());
+		JPH::Vec4 rot(lock.GetBody().GetRotation().GetXYZW());
 		fieldScratch[0].data()[i] = pos[0];
 		fieldScratch[1].data()[i] = pos[1];
 		fieldScratch[2].data()[i] = pos[2];
@@ -462,7 +474,7 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 		fieldScratch[5].data()[i] = rot[2];
 		fieldScratch[6].data()[i] = rot[3];
 	}
-	
+
 	_mm_sfence();
 
 	ComponentCacheBase* TC = reg->GetTemporalCache();
@@ -578,3 +590,38 @@ const JPH::BodyInterface& JoltPhysics::GetBodyInterfaceNoLock() const
 {
 	return PhysSystem->GetBodyInterfaceNoLock();
 }
+
+// ---------------------------------------------------------------------------
+// Rollback snapshot ring buffer
+// ---------------------------------------------------------------------------
+
+#ifdef TNX_ENABLE_ROLLBACK
+
+void JoltPhysics::SaveSnapshot(uint32_t frameNumber)
+{
+	auto& slot       = SnapshotRing[frameNumber % SnapshotCapacity];
+	slot.FrameNumber = frameNumber;
+
+	JPH::StateRecorderImpl recorder;
+	PhysSystem->SaveState(recorder, JPH::EStateRecorderState::All);
+	slot.Data = recorder.GetData();
+}
+
+bool JoltPhysics::RestoreSnapshot(uint32_t frameNumber)
+{
+	auto& slot = SnapshotRing[frameNumber % SnapshotCapacity];
+	if (slot.FrameNumber != frameNumber)
+	{
+		LOG_WARN_F("[JoltPhysics] Snapshot for frame %u not found (slot has frame %u)",
+				   frameNumber, slot.FrameNumber);
+		return false;
+	}
+
+	JPH::StateRecorderImpl recorder;
+	recorder.WriteBytes(slot.Data.data(), slot.Data.size());
+	recorder.Rewind();
+	PhysSystem->RestoreState(recorder);
+	return true;
+}
+
+#endif // TNX_ENABLE_ROLLBACK

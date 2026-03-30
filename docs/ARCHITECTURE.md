@@ -280,8 +280,12 @@ proper triple buffer. Changes made after determining that Logic and render no lo
 each.
 
 **Temporal** entities use an N-frame ring buffer where N = `max(8, rollback_depth_at_FixedUpdateHz)`.
-Full history for rollback netcode, lag compensation, and replay. Needs testing for rollback and dirty bit propagation as
-well as how Jolt interacts with rollback, particularly when it's ticking at 1/8th the Hz of the Logic thread.
+Full history for rollback netcode, lag compensation, and replay. Rollback determinism verified (2026-03-29): byte-perfect
+for both ECS (34MB field data) and Jolt physics (7KB snapshot) across 5-12 frame rollbacks with 100k entities + 56
+physics bodies. Resim takes ~18ms for 5 frames (full frame resim, no dirty propagation yet). Jolt interacts correctly
+with rollback at 1/8th Hz via per-boundary `SaveState`/`RestoreState` snapshots — rollback aligns to the nearest
+Flush+Pull boundary (`FrameNumber % PhysicsDivizor == PhysicsDivizor-1`). Dirty bit propagation for selective resim
+is designed but not yet wired.
 
 **Valuable Note:** If TNX_ENABLE_ROLLBACK is disabled, the temporal tier is not instantiated, instead any Temporal
 component is treated as Volatile instead. This saves a ton of memory for any game that doesn't require rollback
@@ -567,8 +571,15 @@ Jolt result float32   → int32 fixed-point     → our slab
 
 At cell-relative scale (≤±500m from cell center), float32 precision is ≈0.05mm — finer than our
 0.1mm unit definition. The bridge is lossless. When Jolt is replaced with a custom solver, the
-bridge goes away and the fixed-point data feeds the solver directly. Needs better testing, but puts
-a major wrinkle in our determinism.
+bridge goes away and the fixed-point data feeds the solver directly.
+
+**Determinism status (2026-03-29):** Jolt determinism is confirmed byte-perfect across rollback
+resimulation using `CROSS_PLATFORM_DETERMINISTIC` (enabled automatically when `TNX_ENABLE_ROLLBACK=ON`,
+disables FMA and sets precise floating-point) combined with `SaveState`/`RestoreState` via
+`StateRecorderImpl`. Per-frame Jolt snapshots (~7KB for 56 bodies) are stored in a ring buffer after
+each `PullActiveTransforms` and restored on rollback — preserving exact contact cache, solver
+warmstarting, and sleep states. Rebuild-from-slab (positions only) loses this internal state and
+diverges; snapshot restore is required for deterministic resim.
 
 ---
 

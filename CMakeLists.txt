@@ -29,6 +29,7 @@ option(TNX_ALIGN_64 "Use 64-byte alignment for field arrays (zero cache line spl
 option(TNX_ENABLE_ROLLBACK "Enable N-frame rollback history. Off = TNX_TEMPORAL_FIELDS components use Volatile (5-frame) storage." OFF)
 option(TNX_DETAILED_METRICS "Log per-frame latency breakdown (Buffer/Pipeline/Scanout). Noisy." OFF)
 option(TNX_ENABLE_EDITOR "Enable editor UI (ImGui integration). Adds editor panels and overlay." OFF)
+option(TNX_TESTING "Enable test harnesses (rollback determinism test, etc.). Debug/profiling tool." OFF)
 option(TNX_GPU_PICKING "Enable GPU-based entity picking (click-to-select). Requires editor." OFF)
 option(TNX_GPU_PICKING_FAST "Enable fast GPU picking mode (picks every frame at mouse cursor). Requires TNX_GPU_PICKING." OFF)
 
@@ -44,6 +45,13 @@ if (TNX_ENABLE_ROLLBACK)
     message(STATUS "Rollback history: ENABLED")
 else ()
     message(STATUS "Rollback history: DISABLED (Temporal fields stored in Volatile slab)")
+endif ()
+
+if (TNX_TESTING)
+    add_compile_definitions(TNX_TESTING)
+    message(STATUS "Test harnesses: ENABLED")
+else ()
+    message(STATUS "Test harnesses: DISABLED")
 endif ()
 
 if (TNX_ENABLE_EDITOR)
@@ -193,6 +201,13 @@ set(CPP_EXCEPTIONS_ENABLED OFF CACHE BOOL "" FORCE)
 set(ENABLE_OBJECT_STREAM OFF CACHE BOOL "" FORCE)
 set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
 set(PROFILER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+
+# When rollback is enabled, turn on Jolt's cross-platform deterministic mode.
+# This disables FMA and sets /fp:precise (MSVC) or -ffp-contract=off (Clang)
+# so that Jolt produces identical results across rebuild-from-slab resimulations.
+if (TNX_ENABLE_ROLLBACK)
+    set(CROSS_PLATFORM_DETERMINISTIC ON CACHE BOOL "" FORCE)
+endif ()
 
 add_subdirectory("${JOLT_PATH}/Build" jolt-build)
 

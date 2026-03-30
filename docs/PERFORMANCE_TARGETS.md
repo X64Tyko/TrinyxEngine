@@ -177,7 +177,23 @@ Target: 30Hz network tick (33ms per packet)
 | Delta Compression       | 70-90%        | XOR delta vs last acknowledged state       |
 | Prediction Accuracy     | >95%          | Client matches server within tolerance     |
 
-**Status:** ⏳ Not started - History Slab enables this architecture
+**Status:** Rollback substrate proven. Resim benchmarked at ~18ms for ~5 frames (100k entities + 56 physics bodies), no
+dirty propagation optimization yet. Byte-perfect determinism confirmed for both ECS and Jolt physics (2026-03-29).
+
+**Rollback Benchmark (2026-03-29):**
+
+| Metric                           | Result       | Notes                                             |
+|----------------------------------|--------------|---------------------------------------------------|
+| Resim (5 frames, 100k entities)  | ~18ms        | Full frame resim, no dirty propagation            |
+| Resim (12 frames, 100k entities) | ~28ms        | Crossing 2 physics boundaries                     |
+| Jolt RestoreSnapshot             | <1ms         | 7KB state via StateRecorderImpl                   |
+| ECS determinism                  | Byte-perfect | 34MB field data, verified via memcmp              |
+| Jolt determinism                 | Byte-perfect | 7,436 bytes, CROSS_PLATFORM_DETERMINISTIC enabled |
+| Per-frame SaveSnapshot overhead  | <0.1ms       | 7KB serialize after each PullActiveTransforms     |
+
+Full frame resim includes PrePhysics + Physics Step + FlushPendingBodies + PullActiveTransforms + PostPhysics +
+PropagateFrame for every frame in the rollback window. Dirty propagation (resimulating only corrected entities) is
+designed but not yet wired — expected to reduce resim cost by 10-100x for typical corrections affecting <1% of entities.
 
 ---
 
@@ -214,6 +230,8 @@ All benchmarks performed on:
 | Render (205k @ 60 FPS)    | —      | ~1.5ms steady, ~3.1ms settling   | ✅ Bonus     | ✅      |
 | Memory (100k, 128 pages)  | 685 MB | ~2.2GB w/ 10k Jolt bodies        | ⏳ Pending   | 🔄     |
 | Input Latency             | <16ms  | ~9ms on 240Hz monitor            | ✅ Achieved! | ✅      |
+| Rollback (5fr, 100k ent)  | <5ms   | ~18ms (full resim, no dirty opt) | ⏳ Pending   | 🔄     |
+| Rollback Determinism      | exact  | Byte-perfect ECS + Jolt          | ✅ Achieved! | ✅      |
 
 **Key Observations:**
 
@@ -226,5 +244,8 @@ All benchmarks performed on:
 - JoltBody moved from cold to volatile tier — FlushPendingBodies now iterates contiguous DUAL+PHYS slab region directly
 - 25-layer pyramid (5,526 entities) settling in ~14.67ms, steady state ~1ms — dense pyramid forms monolithic Jolt island
   limiting parallelism during settling
+- Rollback resim: ~18ms for 5 frames with 100k entities — full frame resim without dirty propagation optimization.
+  Jolt snapshot restore <1ms (7KB). Dirty propagation expected to bring this well under the <5ms target for typical
+  corrections.
 
 ---
