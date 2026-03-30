@@ -7,6 +7,7 @@
 #include <Jolt/Core/TempAllocator.h>
 #include <memory>
 #include <vector>
+#include <string>
 
 #include "TrinyxJobs.h"
 
@@ -74,6 +75,16 @@ public:
 	const JPH::BodyInterface& GetBodyInterfaceNoLock() const;
 	TrinyxJobs::JobCounter* GetJoltPhysCounter() { return &JoltPhysCounter; }
 
+#ifdef TNX_ENABLE_ROLLBACK
+	// --- State snapshot ring buffer ---
+	// Save a full physics snapshot at a Flush+Pull boundary frame.
+	void SaveSnapshot(uint32_t frameNumber);
+
+	// Restore physics to the exact state saved at frameNumber.
+	// Returns false if the requested frame is no longer in the ring buffer.
+	bool RestoreSnapshot(uint32_t frameNumber);
+#endif
+
 private:
 	// Jolt subsystems (order matters for destruction)
 	std::unique_ptr<JoltJobSystemAdapter> JobSystem;
@@ -87,7 +98,7 @@ private:
 	std::vector<JPH::BodyID> EntityToBody;
 	std::vector<uint32_t> BodyToEntity;
 
-	static constexpr uint32_t kInvalidEntityIndex = UINT32_MAX;
+	static constexpr uint32_t InvalidEntityIndex = UINT32_MAX;
 
 	const EngineConfig* ConfigPtr = nullptr;
 	std::vector<uint64_t> LiveEntityBits; // Bitplane: 1 bit per entity index, reused across FlushPendingBodies calls
@@ -101,4 +112,14 @@ private:
 	};
 
 	std::vector<SyncPair> syncList;
+
+#ifdef TNX_ENABLE_ROLLBACK
+	struct PhysicsSnapshot
+	{
+		uint32_t FrameNumber = UINT32_MAX;
+		std::string Data;
+	};
+	std::vector<PhysicsSnapshot> SnapshotRing; // Sized at Initialize from TemporalFrameCount
+	uint32_t SnapshotCapacity = 0;
+#endif
 };

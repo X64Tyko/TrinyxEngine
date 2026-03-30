@@ -54,6 +54,11 @@ public:
 	float GetFixedFPS() const { return FixedFPS.load(std::memory_order_relaxed); }
 	float GetFixedFrameMs() const { return FixedFrameMs.load(std::memory_order_relaxed); }
 
+#ifdef TNX_ENABLE_ROLLBACK
+	// Called from Sentinel thread (PumpEvents) on F5 press.
+	void RequestRollbackTest() { bRollbackTestRequested.store(true, std::memory_order_release); }
+#endif
+
 private:
 	void ThreadMain(); // Thread entry point
 
@@ -114,6 +119,23 @@ private:
 	std::atomic<float> LogicFrameMs{0.0f};
 	std::atomic<float> FixedFPS{0.0f};
 	std::atomic<float> FixedFrameMs{0.0f};
+
+#ifdef TNX_ENABLE_ROLLBACK
+	// --- Rollback ---
+	std::atomic<bool> bRollbackTestRequested{false};
+	static constexpr uint32_t RollbackFrameCount = 5;
+
+	void ExecuteRollbackTest();
+	void RecordFrameInput();                  // Copy SimInput into current frame header
+	void InjectFrameInput(uint32_t frameNum); // Restore from frame header into SimInput
+
+#ifdef TNX_TESTING
+	// Pre-allocated backup buffers for determinism validation (test harness only)
+	std::vector<uint8_t> TemporalSlabBackup;
+	std::vector<uint8_t> VolatileSlabBackup;
+	std::vector<uint8_t> GroundTruthBackup;
+#endif // TNX_TESTING
+#endif // TNX_ENABLE_ROLLBACK
 };
 
 inline void LogicThread::PrePhysics(double dt)

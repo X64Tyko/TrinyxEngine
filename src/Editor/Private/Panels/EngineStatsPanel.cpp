@@ -80,9 +80,14 @@ void EngineStatsPanel::Draw(EditorState& state)
 		ImGui::Text("%d", cfg.InputPollHz);
 		ImGui::NextColumn();
 
-		ImGui::Text("MAX_PHYSICS_ENTITIES");
+		ImGui::Text("MAX_RENDERABLE_ENTITIES");
 		ImGui::NextColumn();
-		ImGui::Text("%d", cfg.MAX_PHYSICS_ENTITIES);
+		ImGui::Text("%d", cfg.MAX_RENDERABLE_ENTITIES);
+		ImGui::NextColumn();
+
+		ImGui::Text("MAX_JOLT_BODIES");
+		ImGui::NextColumn();
+		ImGui::Text("%d", cfg.MAX_JOLT_BODIES);
 		ImGui::NextColumn();
 
 		ImGui::Text("MAX_CACHED_ENTITIES");

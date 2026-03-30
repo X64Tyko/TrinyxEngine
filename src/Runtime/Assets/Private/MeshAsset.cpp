@@ -55,13 +55,13 @@ bool LoadMeshAsset(MeshAsset& outAsset, const std::string& path)
 	TnxMeshHeader header;
 	file.read(reinterpret_cast<char*>(&header), sizeof(header));
 
-	if (header.Magic != kTnxMeshMagic)
+	if (header.Magic != TnxMeshMagic)
 	{
 		LOG_ERROR_F("[MeshAsset] Invalid magic in '%s'", path.c_str());
 		return false;
 	}
 
-	if (header.Version != kTnxMeshVersion)
+	if (header.Version != TnxMeshVersion)
 	{
 		LOG_ERROR_F("[MeshAsset] Unsupported version %u in '%s'", header.Version, path.c_str());
 		return false;

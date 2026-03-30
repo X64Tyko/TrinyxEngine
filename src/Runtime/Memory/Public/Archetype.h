@@ -50,8 +50,8 @@ public:
 		}
 	};
 
-	Archetype(const Signature& Sig, const ClassID& ID, const char* DebugName = "Archetype");
-	Archetype(const ArchetypeKey& ArchKey, const char* DebugName = "Archetype");
+	Archetype(const Signature& sig, const ClassID& id, const char* debugName = "Archetype");
+	Archetype(const ArchetypeKey& archKey, const char* debugName = "Archetype");
 	~Archetype();
 
 	// Component signature
@@ -74,10 +74,10 @@ public:
 
 	// Returns allocated slot count for a chunk (includes tombstoned). Use for iteration bounds —
 	// callers rely on bitplane/masked-store to skip dead slots.
-	uint32_t GetAllocatedChunkCount(size_t ChunkIndex) const;
+	uint32_t GetAllocatedChunkCount(size_t chunkIndex) const;
 
 	// Returns live (non-tombstoned) entity count for a chunk.
-	uint32_t GetLiveChunkCount(size_t ChunkIndex) const;
+	uint32_t GetLiveChunkCount(size_t chunkIndex) const;
 
 	// Slot descriptor returned by PushEntities — gives Registry everything it needs
 	// to populate an EntityRecord after allocating an archetype slot.
@@ -94,7 +94,7 @@ public:
 	std::vector<EntitySlot> InactiveEntitySlots;
 
 	// Get all field array base pointers for a given component type within a chunk (frame 0).
-	std::vector<void*> GetFieldArrays(Chunk* TargetChunk, ComponentTypeID TypeID);
+	std::vector<void*> GetFieldArrays(Chunk* targetChunk, ComponentTypeID typeId);
 
 	// Edge graph for archetype transitions (future optimization)
 	std::unordered_map<ComponentTypeID, Archetype*> AddEdges;    // Add component X -> go to archetype Y
@@ -155,13 +155,13 @@ public:
 	// its own modular read/write indices from its FrameCount, so Volatile (triple-buffer) and
 	// Temporal (N-frame) fields in the same archetype work correctly.
 	// Cold fields use frameCount=1, frameStride=0 so the math degenerates to base+0 (branchless).
-	void BuildFieldDualArrayTable(Chunk* chunk, void** outDualArrayTable, uint32_t absoluteFrame, uint32_t VolatileAbsoluteFrame) const
+	void BuildFieldDualArrayTable(Chunk* chunk, void** outDualArrayTable, uint32_t absoluteFrame, uint32_t volatileAbsoluteFrame) const
 	{
 		for (const auto& [fkey, fdesc] : ArchetypeFieldLayout)
 		{
 			size_t idx        = fdesc.fieldSlotIndex;
 			auto* base        = static_cast<uint8_t*>(chunk->Header.FieldPtrs[idx]);
-			uint32_t frame    = (fdesc.tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame);
+			uint32_t frame    = (fdesc.tier == CacheTier::Temporal ? absoluteFrame : volatileAbsoluteFrame);
 			uint32_t readIdx  = frame % fdesc.fieldFrameCount;
 			uint32_t writeIdx = (frame + 1) % fdesc.fieldFrameCount;
 
@@ -172,13 +172,13 @@ public:
 
 	// Build single field array table for a specific frame (used by update dispatch, serialization).
 	// Cold fields use frameCount=1, frameStride=0 so the math degenerates to base+0 (branchless).
-	void BuildFieldArrayTable(Chunk* chunk, void** outFieldArrayTable, uint32_t absoluteFrame, uint32_t VolatileAbsoluteFrame) const
+	void BuildFieldArrayTable(Chunk* chunk, void** outFieldArrayTable, uint32_t absoluteFrame, uint32_t volatileAbsoluteFrame) const
 	{
 		for (const auto& [fkey, fdesc] : ArchetypeFieldLayout)
 		{
 			size_t idx              = fdesc.fieldSlotIndex;
 			auto* base              = static_cast<uint8_t*>(chunk->Header.FieldPtrs[idx]);
-			uint32_t frame          = (fdesc.tier == CacheTier::Temporal ? absoluteFrame : VolatileAbsoluteFrame);
+			uint32_t frame          = (fdesc.tier == CacheTier::Temporal ? absoluteFrame : volatileAbsoluteFrame);
 			outFieldArrayTable[idx] = base + (frame % fdesc.fieldFrameCount) * fdesc.fieldFrameStride;
 		}
 	}
@@ -194,10 +194,10 @@ private:
 
 	// Entity slot allocation / removal — only Registry drives these.
 	void PushEntities(std::span<EntitySlot> outSlots);
-	void RemoveEntity(size_t ChunkIndex, uint32_t LocalIndex, uint32_t ArchetypeIdx);
+	void RemoveEntity(size_t chunkIndex, uint32_t localIndex, uint32_t archetypeIdx);
 
 	// Layout construction — called once by Registry after component metadata is known.
-	void BuildLayout(class Registry* reg, const std::vector<ComponentMetaEx>& Components, SystemID inArchSystemID = SystemID::None);
+	void BuildLayout(class Registry* reg, const std::vector<ComponentMetaEx>& components, SystemID inArchSystemID = SystemID::None);
 
 	static size_t AlignOffset(size_t offset, size_t alignment)
 	{

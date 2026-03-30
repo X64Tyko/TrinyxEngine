@@ -32,7 +32,7 @@ namespace TrinyxThreading
 	static bool s_HasSMT            = false;
 	static bool s_Initialized       = false;
 
-	static constexpr uint32_t kReservedCores = 3; // Sentinel, Brain, Encoder
+	static constexpr uint32_t ReservedCores = 3; // Sentinel, Brain, Encoder
 
 	// ---- Platform-specific topology scanning -----------------------------
 
@@ -288,7 +288,7 @@ namespace TrinyxThreading
 	uint32_t GetWorkerThreadCapacity()
 	{
 		uint32_t available = HasSMT() ? s_PhysicalCores : static_cast<uint32_t>(s_CoreList.size());
-		return (available > kReservedCores) ? (available - kReservedCores) : 0;
+		return (available > ReservedCores) ? (available - ReservedCores) : 0;
 	}
 
 	bool HasSMT() { return s_HasSMT; }

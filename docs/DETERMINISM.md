@@ -148,10 +148,36 @@ behavior in most networked games.
 
 ---
 
+## Empirical Validation (2026-03-29)
+
+Rollback determinism has been verified empirically with the F5 test harness (`TNX_ENABLE_ROLLBACK=ON`):
+
+| Component           | Result       | Data Size   | Notes                                        |
+|---------------------|--------------|-------------|----------------------------------------------|
+| ECS (temporal slab) | Byte-perfect | 34 MB       | All field data across 100k entities          |
+| Jolt physics        | Byte-perfect | 7,436 bytes | Full physics state (contacts, solver, sleep) |
+
+**Test conditions:** 100k entities (supercubes) + 56 physics bodies (5-layer pyramid), 512Hz fixed step,
+PhysicsDivizor=8 (64Hz physics), 5-12 frame rollbacks aligned to Flush+Pull boundaries.
+
+**Resim performance:** ~18ms for 5 frames of full-frame resimulation (no dirty propagation). This includes
+PrePhysics + Physics Step + FlushPendingBodies + PullActiveTransforms + PostPhysics + PropagateFrame for
+every frame. Dirty propagation (resimulating only corrected entities) is expected to reduce this by 10-100x.
+
+**Jolt determinism requirements:**
+
+- `CROSS_PLATFORM_DETERMINISTIC=ON` (auto-enabled by `TNX_ENABLE_ROLLBACK`): disables FMA, sets precise FP
+- `SaveState`/`RestoreState` via `StateRecorderImpl` snapshot ring buffer: preserves exact contact cache,
+  solver warmstarting, and sleep states. Rebuild-from-slab (positions only) diverges because fresh bodies
+  restart the solver cold (~48KB serialized vs 7KB for long-running state).
+- Per-frame snapshots saved after each `PullActiveTransforms`, restored on rollback.
+
+---
+
 ## Build Options (to be kept in sync with docs/BUILD_OPTIONS.md)
 
 - Determinism mode (enables deterministic policies; optionally disables defrag/compaction)
 - Fixed32 enable/disable (`SimFloat` mapping)
 - Static registration enable/disable (dev iteration vs baked-only startup)
-
-(TODO: link exact CMake options once finalized)
+- `TNX_ENABLE_ROLLBACK` — enables temporal slab, Jolt snapshots, `CROSS_PLATFORM_DETERMINISTIC`
+- `TNX_TESTING` — enables determinism test harness (F5 trigger, backup/compare/restore validation)

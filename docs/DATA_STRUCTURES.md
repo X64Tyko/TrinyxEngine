@@ -178,7 +178,7 @@ padding waste. Currently the engine defaults to 256-entity chunks.
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 class TestEntity : public EntityView<TestEntity, WIDTH>
 {
-	static constexpr uint32_t kEntitiesPerChunk = 16;
+	static constexpr uint32_t EntitiesPerChunk = 16;
 };
 ```
 

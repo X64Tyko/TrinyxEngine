@@ -4,13 +4,14 @@
 
 enum class TemporalFlagBits : int32_t
 {
-	Active = static_cast<int32_t>(1u << 31), ///< Entity is alive — GPU predicate reads this
-	Dirty  = static_cast<int32_t>(1u << 30), ///< Entity data changed this tick — triggers GPU upload
-	// Bits 29..0 available for game-layer flags (physics flags, visibility, team bits, etc.)
+	Active       = static_cast<int32_t>(1u << 31), ///< Entity is alive — GPU predicate reads this
+	Dirty        = static_cast<int32_t>(1u << 30), ///< Entity data changed — accumulates until render clears
+	DirtiedFrame = static_cast<int32_t>(1u << 29), ///< Entity dirtied THIS frame — cleared at frame start, used for per-frame logic reset
+	// Bits 28..0 available for game-layer flags
 };
 
-// EntityFlags Component - Flags for entity behavior
-// Aligned to 32 bytes for GPU upload
+// Per-entity flags in the SoA slab. GPU predicate reads Active (bit 31).
+// Dirty (bit 30) accumulates until render clears. DirtiedFrame (bit 29) is per-frame.
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct CacheSlotMeta : ComponentView<CacheSlotMeta, WIDTH>
 {

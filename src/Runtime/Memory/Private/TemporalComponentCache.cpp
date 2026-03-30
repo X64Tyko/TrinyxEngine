@@ -29,9 +29,9 @@ ComponentCacheBase::~ComponentCacheBase()
 
 size_t ComponentCacheBase::GetSystemAllocatorIndex(SystemID sysID, size_t size) const
 {
-	if (Equal(sysID, SystemID::Dual)) return MaxPhysicsBoundary - DualOffset - size;
-	if (Equal(sysID, SystemID::Render)) return MaxPhysicsBoundary + RenderOffset;
-	if (Equal(sysID, SystemID::Physics)) return PhysOffset;
+	if (Equal(sysID, SystemID::Dual)) return MaxRenderableBoundary - DualOffset - size;
+	if (Equal(sysID, SystemID::Physics)) return MaxRenderableBoundary + PhysOffset;
+	if (Equal(sysID, SystemID::Render)) return RenderOffset;
 	return MaxCachedBoundary - LogicOffset - size;
 }
 
@@ -48,17 +48,17 @@ size_t ComponentCacheBase::AdvanceSystemAllocatorIndex(SystemID sysID, size_t si
 	else if (Equal(sysID, SystemID::Dual))
 	{
 		DualOffset += size;
-		retSize    = MaxPhysicsBoundary - DualOffset;
-	}
-	else if (Equal(sysID, SystemID::Render))
-	{
-		retSize      = MaxPhysicsBoundary + RenderOffset;
-		RenderOffset += size;
+		retSize    = MaxRenderableBoundary - DualOffset;
 	}
 	else if (Equal(sysID, SystemID::Physics))
 	{
-		retSize    = PhysOffset;
+		retSize    = MaxRenderableBoundary + PhysOffset;
 		PhysOffset += size;
+	}
+	else if (Equal(sysID, SystemID::Render))
+	{
+		retSize      = RenderOffset;
+		RenderOffset += size;
 	}
 	else
 	{
@@ -66,8 +66,8 @@ size_t ComponentCacheBase::AdvanceSystemAllocatorIndex(SystemID sysID, size_t si
 		retSize     = MaxCachedBoundary - LogicOffset;
 	}
 
-	assert(PhysOffset + DualOffset <= MaxPhysicsBoundary);
-	assert(RenderOffset + LogicOffset <= MaxCachedBoundary);
+	assert(RenderOffset + DualOffset <= MaxRenderableBoundary);
+	assert(PhysOffset + LogicOffset <= MaxCachedBoundary);
 
 	return retSize / 4; // hardcoded 32-bit value...
 }
@@ -119,7 +119,7 @@ void ComponentCacheBase::InitializeInternal(const EngineConfig* Config, uint32_t
 	}
 
 	MaxCachedBoundary  = FieldAllocations[ValidFields[0]].TotalCapacity;
-	MaxPhysicsBoundary = static_cast<size_t>(FieldAllocations[ValidFields[0]].TotalCapacity * (static_cast<double>(Config->MAX_PHYSICS_ENTITIES) / Config->MAX_CACHED_ENTITIES));
+	MaxRenderableBoundary = static_cast<size_t>(FieldAllocations[ValidFields[0]].TotalCapacity * (static_cast<double>(Config->MAX_RENDERABLE_ENTITIES) / Config->MAX_CACHED_ENTITIES));
 
 	const size_t HeaderSize = sizeof(TemporalFrameHeader);
 	FrameDataCapacity       = totalFrameSize;
@@ -305,7 +305,8 @@ void ComponentCacheBase::UnlockFrameWrite()
 
 bool ComponentCacheBase::TryLockFrameForRead(uint32_t frameNum)
 {
-	uint32_t readFrame          = static_cast<int32_t>(frameNum) == -1 ? LastWrittenFrame : frameNum;
+	assert(static_cast<int32_t>(frameNum) != -1 && "TryLockFrameForRead: caller must pass a concrete frame number, not -1");
+	uint32_t readFrame          = frameNum;
 	TemporalFrameHeader* header = GetFrameHeader(readFrame);
 
 	// Frame is readable if no write lock is held (0x01 = LOGIC_WRITING)
@@ -320,7 +321,8 @@ bool ComponentCacheBase::TryLockFrameForRead(uint32_t frameNum)
 
 void ComponentCacheBase::UnlockFrameRead(uint32_t frameNum)
 {
-	uint32_t readFrame          = static_cast<int32_t>(frameNum) == -1 ? LastWrittenFrame : frameNum;
+	assert(static_cast<int32_t>(frameNum) != -1 && "UnlockFrameRead: caller must pass the same concrete frame number used to lock");
+	uint32_t readFrame          = frameNum;
 	TemporalFrameHeader* header = GetFrameHeader(readFrame);
 
 	// Release read lock (clear RENDER_READING bit)
@@ -346,9 +348,9 @@ void ComponentCacheBase::PropagateFrameData(uint32_t fromFrame, uint32_t toFrame
 		size_t size;
 	};
 	const Region regions[3] = {
-		{0, PhysOffset},                                              // Physics
-		{MaxPhysicsBoundary - DualOffset, DualOffset + RenderOffset}, // Dual + Render (adjacent)
-		{MaxCachedBoundary - LogicOffset, LogicOffset},               // Logic
+		{0, RenderOffset},                                             // Render (Arena 1, → from 0)
+		{MaxRenderableBoundary - DualOffset, DualOffset + PhysOffset}, // Dual + Phys (adjacent at boundary)
+		{MaxCachedBoundary - LogicOffset, LogicOffset},                // Logic (Arena 2, ← from MaxCached)
 	};
 
 	for (uint16_t idx : ValidFields)
@@ -377,3 +379,18 @@ size_t ComponentCacheBase::AlignSize(size_t size)
 {
 	return (size + FIELD_ARRAY_ALIGNMENT - 1) & ~(FIELD_ARRAY_ALIGNMENT - 1);
 }
+
+#ifdef TNX_ENABLE_ROLLBACK
+std::vector<ComponentCacheBase::FieldCompareInfo> ComponentCacheBase::GetValidFieldInfos() const
+{
+	std::vector<FieldCompareInfo> result;
+	result.reserve(ValidFields.size());
+	for (uint16_t idx : ValidFields)
+	{
+		const auto& fa = FieldAllocations[idx];
+		result.push_back({fa.CompType, fa.FieldIndex, fa.FieldName,
+						  fa.OffsetInFrame, fa.CurrentUsed, fa.FieldSize});
+	}
+	return result;
+}
+#endif

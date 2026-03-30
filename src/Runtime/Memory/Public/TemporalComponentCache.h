@@ -1,6 +1,7 @@
 #pragma once
 #include <atomic>
 #include <cstdint>
+#include <utility>
 #include <vector>
 #include <unordered_map>
 
@@ -55,8 +56,22 @@ struct alignas(64) TemporalFrameHeader
 	uint32_t ActiveEntityCount;
 	uint32_t TotalAllocatedEntities;
 
+#ifdef TNX_ENABLE_ROLLBACK
+	// Input snapshot for deterministic replay during rollback.
+	// Recorded after ProcessSimInput each tick; replayed during resimulation.
+	uint8_t InputKeyState[64];
+	float InputMouseDX;
+	float InputMouseDY;
+#endif
+
 	// Padding to cache line
-#if TNX_DEV_METRICS
+#if defined(TNX_ENABLE_ROLLBACK) && TNX_DEV_METRICS
+	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint32_t) * 3
+		+ sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(float) + 64 + sizeof(float) * 2) % 64];
+#elif defined(TNX_ENABLE_ROLLBACK)
+	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint32_t) * 3
+		+ sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(float) + 64 + sizeof(float) * 2) % 64];
+#elif TNX_DEV_METRICS
 	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(float)) % 64];
 #else
 	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(float)) % 64];
@@ -88,9 +103,9 @@ public:
 	bool TryLockFrameForWrite(uint32_t& outWriteFrame);
 	bool VerifyFrameReadable(uint32_t bufferIndex) const;
 	void UnlockFrameWrite();
-	bool TryLockFrameForRead(uint32_t frameNum = -1);
-	void UnlockFrameRead(uint32_t frameNum = -1);
-	
+	bool TryLockFrameForRead(uint32_t frameNum);
+	void UnlockFrameRead(uint32_t frameNum);
+
 	uint32_t GetActiveWriteFrame() const { return ActiveWriteFrame; }
 	uint32_t GetActiveReadFrame() const { return LastWrittenFrame; }
 
@@ -118,6 +133,17 @@ public:
 
 	uint32_t GetTotalFrameCount() const { return static_cast<uint32_t>(TemporalFrameCount); }
 	CacheTier GetTier() const { return Tier_; }
+	uint32_t GetMaxCachedEntityCount() const { return static_cast<uint32_t>(MaxCachedBoundary / sizeof(float)); }
+
+	// Returns [start, end) cache index range for the contiguous DUAL+PHYS partition.
+	// Physics systems iterate this as a single dense scan with no gap.
+	std::pair<uint32_t, uint32_t> GetPhysicsRange() const
+	{
+		return {
+			static_cast<uint32_t>((MaxRenderableBoundary - DualOffset) / 4),
+			static_cast<uint32_t>((MaxRenderableBoundary + PhysOffset) / 4)
+		};
+	}
 
 	// Returns a reference to the allocator offset for the given partition.
 	// Physics grows right from 0 (Arena 1); Dual grows left from MaxPhysics (Arena 1);
@@ -136,6 +162,27 @@ public:
 		FnPropagateFrame(this, counter);
 	}
 
+#ifdef TNX_ENABLE_ROLLBACK
+	// Rollback test support — direct manipulation of frame pointers and slab access.
+	void SetActiveWriteFrame(uint32_t frame) { ActiveWriteFrame = frame; }
+	void SetLastWrittenFrame(uint32_t frame) { LastWrittenFrame = frame; }
+	void* GetSlabPtr() const { return SlabPtr; }
+	size_t GetTotalSlabSize() const { return TotalSlabSize; }
+	size_t GetFrameDataCapacity() const { return FrameDataCapacity; }
+
+	struct FieldCompareInfo
+	{
+		ComponentTypeID CompType;
+		size_t FieldIndex;
+		const char* FieldName;
+		size_t OffsetInFrame;
+		size_t CurrentUsed;
+		size_t FieldSize;
+	};
+
+	std::vector<FieldCompareInfo> GetValidFieldInfos() const;
+#endif
+
 protected:
 	template <typename Derived>
 	friend class ComponentCacheImpl;
@@ -153,18 +200,18 @@ protected:
 	FnPropagateFramePtr FnPropagateFrame = nullptr;
 	
 	// Set by ComponentCacheImpl before calling InitializeInternal so GetTier() is valid immediately.
-	CacheTier Tier_ = CacheTier::Volatile;
-	uint32_t LastWrittenFrame = -1;
+	CacheTier Tier_           = CacheTier::Volatile;
+	uint32_t LastWrittenFrame = 0;
 	uint32_t ActiveWriteFrame = 0;
 
-	size_t MaxPhysicsBoundary = 0;
-	size_t MaxCachedBoundary  = 0;
+	size_t MaxRenderableBoundary = 0;
+	size_t MaxCachedBoundary     = 0;
 
 	// Per-partition allocation cursors (entity counts, not bytes).
 	// Converted to byte offsets at allocation time by multiplying by fieldSize.
-	size_t PhysOffset   = 0; // Arena 1, grows right from 0
+	size_t RenderOffset = 0; // Arena 1, grows right from 0
 	size_t DualOffset   = 0; // Arena 1, grows left  from MaxPhysics
-	size_t RenderOffset = 0; // Arena 2, grows right from MaxPhysics
+	size_t PhysOffset   = 0; // Arena 2, grows right from MaxPhysics
 	size_t LogicOffset  = 0; // Arena 2, grows left  from MaxCached
 
 private:
@@ -334,13 +381,14 @@ public:
 		}
 		else
 		{
-			bool stuck = false;
+			uint32_t spins = 0;
 			while (!base->LockFrameForWrite(targetSlot))
 			{
-				if (!stuck)
+				if (++spins > 10'000'000)
 				{
-					LOG_DEBUG("Stuck!");
-					stuck = true;
+					LOG_ERROR_F("[Temporal] PropagateFrame stuck — frame %u has leaked lock (flags=0x%02x)",
+								targetSlot, base->GetFrameHeader(targetSlot)->OwnershipFlags.load(std::memory_order_relaxed));
+					return;
 				}
 			}
 		}

@@ -2,10 +2,13 @@
 #include "FieldProxy.h"
 
 // Identifies which engine systems access a component's data each frame.
-//   Physics only          → Phys partition   (Arena 1, grows right from 0)
-//   Render only           → Render partition  (Arena 2, grows right from MAX_PHYSICS)
-//   Physics | Render      → Dual partition    (Arena 1, grows left from MAX_PHYSICS)
-//   Logic | None          → Logic partition   (Arena 2, grows left from MAX_CACHED)
+//   Render only           → Render partition  (Arena 1, grows right from 0)
+//   Physics | Render      → Dual partition    (Arena 1, grows left from MaxRenderable)
+//   Physics only          → Phys partition    (Arena 2, grows right from MaxRenderable)
+//   Logic | None          → Logic partition   (Arena 2, grows left from MaxCached)
+//
+// DUAL and PHYS are contiguous at the MaxRenderableBoundary seam — physics iterates
+// them as a single dense scan with no gap.
 enum class SystemID : uint8_t
 {
 	None    = 0,      // Partition-agnostic — doesn't influence group derivation (e.g. Transform)

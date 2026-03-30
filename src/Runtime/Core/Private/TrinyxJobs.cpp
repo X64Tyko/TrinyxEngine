@@ -15,10 +15,10 @@ namespace TrinyxJobs
 {
 	// ---- Internal state --------------------------------------------------
 
-	static constexpr uint32_t kQueueCount = static_cast<uint32_t>(Queue::COUNT);
+	static constexpr uint32_t QueueCount = static_cast<uint32_t>(Queue::COUNT);
 
 	// One ring buffer per queue
-	static TrinyxRingBuffer<Job> s_Queues[kQueueCount];
+	static TrinyxRingBuffer<Job> s_Queues[QueueCount];
 
 	// Worker threads
 	static std::vector<std::thread> s_Workers;
@@ -34,7 +34,7 @@ namespace TrinyxJobs
 	static std::atomic<uint32_t> s_WakeSignal{0};
 	
 	// TODO: make this configurable through ini
-	static uint64_t MaxSpins = 4000;
+	static uint64_t s_MaxSpins = 4000;
 
 	// ---- Internal helpers ------------------------------------------------
 
@@ -66,7 +66,7 @@ namespace TrinyxJobs
 	{
 		// create queue inices for worker affinity
 		std::vector<uint8_t> queues;
-		for (uint8_t id = 0; id < kQueueCount; ++id)
+		for (uint8_t id = 0; id < QueueCount; ++id)
 		{
 			if ((static_cast<uint8_t>(affinity) & (1 << id)) == (1 << id)) queues.push_back(id);
 		}
@@ -84,7 +84,11 @@ namespace TrinyxJobs
 				continue;
 			} // Got work — immediately try again, no delay.
 
-			if (++spinCount < MaxSpins) { _mm_pause(); continue; } // Spin for a bit to see if a job comes in.
+			if (++spinCount < s_MaxSpins)
+			{
+				_mm_pause();
+				continue;
+			} // Spin for a bit to see if a job comes in.
 
 			// No work available. Snapshot the wake signal, then check queues
 			// one more time before blocking (avoids missed-wake race).
@@ -111,7 +115,7 @@ namespace TrinyxJobs
 
 		const size_t queueCapacity = static_cast<size_t>(config->JobCacheSize);
 
-		for (uint32_t q = 0; q < kQueueCount; ++q)
+		for (uint32_t q = 0; q < QueueCount; ++q)
 		{
 			if (!s_Queues[q].Initialize(queueCapacity))
 			{
@@ -163,7 +167,7 @@ namespace TrinyxJobs
 		s_Workers.clear();
 		s_WorkerCount = 0;
 
-		for (uint32_t q = 0; q < kQueueCount; ++q) s_Queues[q].Shutdown();
+		for (uint32_t q = 0; q < QueueCount; ++q) s_Queues[q].Shutdown();
 
 		LOG_INFO("[Jobs] Shutdown complete");
 	}
@@ -171,7 +175,7 @@ namespace TrinyxJobs
 	void SubmitJob(const Job& job, Queue queue)
 	{
 		uint32_t idx = std::countr_zero(static_cast<uint32_t>(queue));
-		assert(idx < kQueueCount);
+		assert(idx < QueueCount);
 
 		bool pushed = s_Queues[idx].TryPush(job);
 
@@ -195,7 +199,7 @@ namespace TrinyxJobs
 	{
 		// create queue inices for worker affinity
 		std::vector<uint8_t> queues;
-		for (uint8_t id = 0; id < kQueueCount; ++id)
+		for (uint8_t id = 0; id < QueueCount; ++id)
 		{
 			if ((static_cast<uint8_t>(affinity) & (1 << id)) == (1 << id)) queues.push_back(id);
 		}

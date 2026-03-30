@@ -22,8 +22,9 @@ static void WriteDefaults(const char* path, const EngineConfig& cfg)
 		<< "FixedUpdateHz=" << cfg.FixedUpdateHz << "\n"
 		<< "NetworkUpdateHz=" << cfg.NetworkUpdateHz << "\n"
 		<< "InputPollHz=" << cfg.InputPollHz << "\n"
-		<< "MaxPhysicsEntities=" << cfg.MAX_PHYSICS_ENTITIES << "\n"
+		<< "MaxRenderableEntities=" << cfg.MAX_RENDERABLE_ENTITIES << "\n"
 		<< "MaxCachedEntities=" << cfg.MAX_CACHED_ENTITIES << "\n"
+		<< "MaxJoltBodies=" << cfg.MAX_JOLT_BODIES << "\n"
 		<< "TemporalFrameCount=" << cfg.TemporalFrameCount << "\n"
 		<< "jobCacheSize=" << cfg.JobCacheSize << "\n"
 		<< "PhysicsUpdateInterval=" << cfg.PhysicsUpdateInterval << "\n"
@@ -58,8 +59,9 @@ static void ApplyFromFile(const char* path, EngineConfig& cfg)
 		else if (key == "FixedUpdateHz") cfg.FixedUpdateHz = std::stoi(val);
 		else if (key == "NetworkUpdateHz") cfg.NetworkUpdateHz = std::stoi(val);
 		else if (key == "InputPollHz") cfg.InputPollHz = std::stoi(val);
-		else if (key == "MaxPhysicsEntities") cfg.MAX_PHYSICS_ENTITIES = std::stoi(val);
+		else if (key == "MaxRenderableEntities") cfg.MAX_RENDERABLE_ENTITIES = std::stoi(val);
 		else if (key == "MaxCachedEntities") cfg.MAX_CACHED_ENTITIES = std::stoi(val);
+		else if (key == "MaxJoltBodies") cfg.MAX_JOLT_BODIES = std::stoi(val);
 		else if (key == "TemporalFrameCount") cfg.TemporalFrameCount = std::stoi(val);
 		else if (key == "JobCacheSize") cfg.JobCacheSize = std::stoi(val);
 		else if (key == "PhysicsUpdateInterval") cfg.PhysicsUpdateInterval = std::stoi(val);

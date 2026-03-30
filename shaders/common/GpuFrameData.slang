@@ -6,25 +6,25 @@
 
 #pragma once
 
-static const uint kMaxGpuFields     = 128;
-static const uint kMaxMeshSlots     = 256;
-static const uint kGpuOutFieldCount = 16; // Flags + PosXYZ + RotQxyzw + ScaleXYZ + ColorRGBA + MeshID
+static const uint MaxGpuFields     = 128;
+static const uint MaxMeshSlots     = 256;
+static const uint GpuOutFieldCount = 16; // Flags + PosXYZ + RotQxyzw + ScaleXYZ + ColorRGBA + MeshID
 
 // GpuFieldSemantic constants (match C++ GpuFrameData.h, slot index = sem - 1)
-static const uint kSemGeneric = 0;
-static const uint kSemFlags   = 1;
-static const uint kSemPosX    = 2;  static const uint kSemPosY    = 3;  static const uint kSemPosZ    = 4;
-static const uint kSemRotQx   = 5;  static const uint kSemRotQy   = 6;  static const uint kSemRotQz   = 7;  static const uint kSemRotQw = 8;
-static const uint kSemScaleX  = 9;  static const uint kSemScaleY  = 10; static const uint kSemScaleZ  = 11;
-static const uint kSemColorR  = 12; static const uint kSemColorG  = 13; static const uint kSemColorB  = 14; static const uint kSemColorA = 15;
-static const uint kSemMeshID  = 16;
+static const uint SemGeneric = 0;
+static const uint SemFlags   = 1;
+static const uint SemPosX    = 2;  static const uint SemPosY    = 3;  static const uint SemPosZ    = 4;
+static const uint SemRotQx   = 5;  static const uint SemRotQy   = 6;  static const uint SemRotQz   = 7;  static const uint SemRotQw = 8;
+static const uint SemScaleX  = 9;  static const uint SemScaleY  = 10; static const uint SemScaleZ  = 11;
+static const uint SemColorR  = 12; static const uint SemColorG  = 13; static const uint SemColorB  = 14; static const uint SemColorA = 15;
+static const uint SemMeshID  = 16;
 
 // Under TNX_GPU_PICKING, scatter writes the entity's cache index into this
 // output SoA slot so the vertex/fragment pipeline can forward it to a uint
 // pick attachment. The CPU resolves cache index → EntityRecord on readback.
 #ifdef TNX_GPU_PICKING
-static const uint kGpuPickFieldCount = 17; // kGpuOutFieldCount + 1 (EntityCacheIdx)
-static const uint kSemEntityCacheIdx = 17;
+static const uint GpuPickFieldCount = 17; // GpuOutFieldCount + 1 (EntityCacheIdx)
+static const uint SemEntityCacheIdx = 17;
 #endif
 
 // GPU-side mesh slot — mirrors MeshManager::MeshSlot for GPU read.
@@ -56,8 +56,8 @@ struct GpuFrameData
     uint64_t MeshTableAddr;            // GpuMeshInfo[MeshCount]
     uint     MeshCount;                // number of registered mesh types
     uint     _pad0;
-    uint64_t PrevFieldAddrs[kMaxGpuFields];
-    uint64_t CurrFieldAddrs[kMaxGpuFields];
-    uint     FieldSemantics[kMaxGpuFields];
-    uint     FieldElementSize[kMaxGpuFields];
+    uint64_t PrevFieldAddrs[MaxGpuFields];
+    uint64_t CurrFieldAddrs[MaxGpuFields];
+    uint     FieldSemantics[MaxGpuFields];
+    uint     FieldElementSize[MaxGpuFields];
 };

@@ -13,6 +13,12 @@
 #include "TrinyxEngine.h"
 #include "JoltPhysics.h"
 
+#ifdef TNX_ENABLE_ROLLBACK
+#include <Jolt/Jolt.h>
+#include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Physics/StateRecorderImpl.h>
+#endif
+
 void LogicThread::Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
 							 InputBuffer* simInput, InputBuffer* vizInput, int windowWidth, int windowHeight)
 {
@@ -68,9 +74,9 @@ void LogicThread::ThreadMain()
 	const double fixedStepTime = ConfigPtr->GetFixedStepTime();
 
 	// Safety caps
-	constexpr double kMaxDt              = 0.25;
-	constexpr double kMaxAccumulatedTime = -0.25;
-	constexpr int kMaxPhysSubSteps       = 8;
+	constexpr double MaxDt              = 0.25;
+	constexpr double MaxAccumulatedTime = -0.25;
+	constexpr int MaxPhysSubSteps       = 8;
 
 	while (!TrinyxEngine::Get().GetJobsInitialized())
 	{
@@ -96,7 +102,7 @@ void LogicThread::ThreadMain()
 		double dt = static_cast<double>(counterElapsed) / static_cast<double>(perfFrequency);
 
 		// Spiral of death cap
-		if (dt > kMaxDt) dt = kMaxDt;
+		if (dt > MaxDt) dt = MaxDt;
 
 #if TNX_ENABLE_EDITOR
 		// When paused: still process input (camera) and publish frames
@@ -115,7 +121,7 @@ void LogicThread::ThreadMain()
 #endif
 
 		double acc = Accumulator.load(std::memory_order_relaxed) - dt;
-		if (acc < kMaxAccumulatedTime) acc = kMaxAccumulatedTime;
+		if (acc < MaxAccumulatedTime) acc = MaxAccumulatedTime;
 		Accumulator.store(acc, std::memory_order_relaxed);
 
 		// Fixed update loop with substepping
@@ -124,13 +130,16 @@ void LogicThread::ThreadMain()
 			TNX_ZONE_NC("Physics Loop", TNX_COLOR_LOGIC);
 
 			int steps = 0;
-			while (Accumulator.load(std::memory_order_relaxed) <= 0 && steps < kMaxPhysSubSteps)
+			while (Accumulator.load(std::memory_order_relaxed) <= 0 && steps < MaxPhysSubSteps)
 			{
 				// FPS tracking
 				FpsFixedCount++;
 				FpsFixedTimer += fixedStepTime;
 
 				ProcessSimInput(fixedStepTime);
+#ifdef TNX_ENABLE_ROLLBACK
+				RecordFrameInput();
+#endif
 				PrePhysics(fixedStepTime);
 
 				if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
@@ -146,6 +155,9 @@ void LogicThread::ThreadMain()
 				{
 					PhysicsPtr->FlushPendingBodies(RegistryPtr);
 					PhysicsPtr->PullActiveTransforms(RegistryPtr);
+#ifdef TNX_ENABLE_ROLLBACK
+					PhysicsPtr->SaveSnapshot(FrameNumber);
+#endif
 				}
 
 				PostPhysics(fixedStepTime);
@@ -158,6 +170,15 @@ void LogicThread::ThreadMain()
 				ProcessVizInput(fixedStepTime);
 				PublishCompletedFrame();
 				RegistryPtr->PropagateFrame(FrameNumber++);
+
+#ifdef TNX_ENABLE_ROLLBACK
+				if (bRollbackTestRequested.load(std::memory_order_acquire)
+					&& FrameNumber > RollbackFrameCount + PhysicsDivizor)
+				{
+					bRollbackTestRequested.store(false, std::memory_order_relaxed);
+					ExecuteRollbackTest();
+				}
+#endif
 			}
 			TrackFPS();
 			continue; // don't do the scalar update immediately.
@@ -192,9 +213,9 @@ void LogicThread::ProcessVizInput(double dt)
 	CamPitch -= VizInput->GetMouseDY() * CamMouseSens;
 
 	// Clamp pitch to avoid gimbal lock at poles
-	constexpr float kMaxPitch = 1.5533f; // ~89 degrees
-	if (CamPitch > kMaxPitch) CamPitch = kMaxPitch;
-	if (CamPitch < -kMaxPitch) CamPitch = -kMaxPitch;
+	constexpr float MaxPitch = 1.5533f; // ~89 degrees
+	if (CamPitch > MaxPitch) CamPitch = MaxPitch;
+	if (CamPitch < -MaxPitch) CamPitch = -MaxPitch;
 
 	// ── WASD movement (camera-relative, flying) ──────────────────────────
 	float sinYaw   = std::sin(CamYaw);
@@ -346,6 +367,7 @@ void LogicThread::PublishCompletedFrame()
 
 	// Publish frame number atomically - RenderThread can now read this frame
 	LastCompletedFrame.store(FrameNumber, std::memory_order_release);
+	RegistryPtr->LastPublishedFrame = FrameNumber;
 }
 
 void LogicThread::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)
@@ -362,11 +384,11 @@ void LogicThread::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)
 		const double remainingSec =
 			static_cast<double>(frameEnd - currentCounter) / static_cast<double>(perfFrequency);
 
-		constexpr double kSleepMarginSec = 0.002;
+		constexpr double SleepMarginSec = 0.002;
 
-		if (remainingSec > kSleepMarginSec)
+		if (remainingSec > SleepMarginSec)
 		{
-			const double sleepSec = remainingSec - kSleepMarginSec;
+			const double sleepSec = remainingSec - SleepMarginSec;
 			SDL_Delay(static_cast<uint32_t>(sleepSec * 1000.0));
 		}
 
@@ -407,3 +429,239 @@ void LogicThread::TrackFPS()
 		FpsFixedTimer = 0.0;
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rollback determinism test
+// ─────────────────────────────────────────────────────────────────────────────
+#ifdef TNX_ENABLE_ROLLBACK
+
+void LogicThread::RecordFrameInput()
+{
+	TemporalFrameHeader* header = TemporalCache->GetFrameHeader();
+	std::memcpy(header->InputKeyState, SimInput->KeyState[SimInput->ReadSlot], 64);
+	header->InputMouseDX = SimInput->GetMouseDX();
+	header->InputMouseDY = SimInput->GetMouseDY();
+}
+
+void LogicThread::InjectFrameInput(uint32_t frameNum)
+{
+	TemporalFrameHeader* header = TemporalCache->GetFrameHeader(frameNum);
+	uint8_t readSlot            = SimInput->ReadSlot;
+	std::memcpy(SimInput->KeyState[readSlot], header->InputKeyState, 64);
+	SimInput->MouseDX[readSlot]    = header->InputMouseDX;
+	SimInput->MouseDY[readSlot]    = header->InputMouseDY;
+	SimInput->EventCount[readSlot] = 0;
+	SimInput->ReadCursor           = 0;
+}
+
+void LogicThread::ExecuteRollbackTest()
+{
+	TNX_ZONE_N("Rollback_Test");
+
+	const uint32_t T              = FrameNumber - 1; // last completed frame
+	const uint32_t rollbackTarget = T - RollbackFrameCount;
+	const uint32_t frameCount     = TemporalCache->GetTotalFrameCount();
+	const double fixedStepTime    = ConfigPtr->GetFixedStepTime();
+
+	// Align rollback to most recent Flush+Pull boundary (FrameNumber % PhysicsDivizor == PhysicsDivizor-1)
+	const uint32_t alignedTarget    = rollbackTarget - ((rollbackTarget % PhysicsDivizor + 1) % PhysicsDivizor);
+	const uint32_t totalResimFrames = T - alignedTarget;
+
+	LOG_INFO_F("[Rollback] Rewind to frame %u (aligned from %u), resim %u frames to frame %u",
+			   alignedTarget, rollbackTarget, totalResimFrames, T);
+
+#ifdef TNX_TESTING
+	// ── Save ground truth (test harness only) ─────────────────────────────
+	const size_t fieldDataSize             = TemporalCache->GetFrameStride() - sizeof(TemporalFrameHeader);
+	const uint32_t groundTruthSlot         = TemporalCache->GetActiveReadFrame();
+	TemporalFrameHeader* groundTruthHeader = TemporalCache->GetFrameHeader(groundTruthSlot);
+	uint8_t* groundTruthFieldData          = reinterpret_cast<uint8_t*>(groundTruthHeader) + sizeof(TemporalFrameHeader);
+
+	ComponentCacheBase* volatileCache = RegistryPtr->GetVolatileCache();
+	const size_t temporalSlabSize     = TemporalCache->GetTotalSlabSize();
+	const size_t volatileSlabSize     = volatileCache->GetTotalSlabSize();
+
+	{
+		TNX_ZONE_N("Rollback_Backup");
+
+		GroundTruthBackup.resize(fieldDataSize);
+		std::memcpy(GroundTruthBackup.data(), groundTruthFieldData, fieldDataSize);
+
+		TemporalSlabBackup.resize(temporalSlabSize);
+		VolatileSlabBackup.resize(volatileSlabSize);
+		std::memcpy(TemporalSlabBackup.data(), TemporalCache->GetSlabPtr(), temporalSlabSize);
+		std::memcpy(VolatileSlabBackup.data(), volatileCache->GetSlabPtr(), volatileSlabSize);
+	}
+
+	const uint32_t savedTemporalWrite = TemporalCache->GetActiveWriteFrame();
+	const uint32_t savedTemporalRead  = TemporalCache->GetActiveReadFrame();
+	const uint32_t savedVolatileWrite = volatileCache->GetActiveWriteFrame();
+	const uint32_t savedVolatileRead  = volatileCache->GetActiveReadFrame();
+
+	JPH::StateRecorderImpl savedJolt;
+	{
+		TNX_ZONE_N("Rollback_SaveJolt");
+		PhysicsPtr->GetPhysicsSystem()->SaveState(savedJolt, JPH::EStateRecorderState::All);
+	}
+
+	const uint32_t savedFrameNumber = FrameNumber;
+	const double savedSimTime       = SimulationTime;
+#endif // TNX_TESTING
+
+	// ── Rewind ─────────────────────────────────────────────────────────────
+	{
+		TNX_ZONE_N("Rollback_Rewind");
+
+		TemporalCache->SetActiveWriteFrame(alignedTarget % frameCount);
+
+		TrinyxJobs::WaitForCounter(PhysicsPtr->GetJoltPhysCounter(), TrinyxJobs::Queue::Logic);
+
+		if (!PhysicsPtr->RestoreSnapshot(alignedTarget))
+		{
+			LOG_WARN("[Rollback] Snapshot not found, falling back to rebuild-from-slab");
+			PhysicsPtr->ResetAllBodies();
+			PhysicsPtr->FlushPendingBodies(RegistryPtr);
+		}
+
+		FrameNumber    = alignedTarget + 1;
+		SimulationTime = FrameNumber * fixedStepTime;
+	}
+
+	LOG_INFO_F("[Rollback] Jolt restored, starting resim from frame %u", FrameNumber);
+
+	// ── Resimulate ─────────────────────────────────────────────────────────
+	{
+		TNX_ZONE_N("Rollback_Resim");
+
+		for (uint32_t i = 0; i < totalResimFrames; ++i)
+		{
+			InjectFrameInput(FrameNumber);
+			PrePhysics(fixedStepTime);
+
+			if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
+			{
+				PhysicsPtr->Step(static_cast<float>(fixedStepTime * PhysicsDivizor));
+			}
+
+			if (FrameNumber % PhysicsDivizor == PhysicsDivizor - 1) [[unlikely]]
+			{
+				PhysicsPtr->FlushPendingBodies(RegistryPtr);
+				PhysicsPtr->PullActiveTransforms(RegistryPtr);
+			}
+
+			PostPhysics(fixedStepTime);
+			SimulationTime += fixedStepTime;
+
+			RegistryPtr->PropagateFrame(FrameNumber++);
+		}
+
+		LOG_INFO_F("[Rollback] Resimulation complete, frame %u", FrameNumber);
+	}
+
+#ifdef TNX_TESTING
+	// ── Compare (test harness only) ────────────────────────────────────────
+	{
+		TNX_ZONE_N("Rollback_Compare");
+
+		const uint32_t resimSlot         = TemporalCache->GetActiveReadFrame();
+		TemporalFrameHeader* resimHeader = TemporalCache->GetFrameHeader(resimSlot);
+		uint8_t* resimFieldData          = reinterpret_cast<uint8_t*>(resimHeader) + sizeof(TemporalFrameHeader);
+
+		int cmp = std::memcmp(GroundTruthBackup.data(), resimFieldData, fieldDataSize);
+		if (cmp == 0)
+		{
+			LOG_INFO_F("[Rollback] PASSED — byte-perfect determinism (%zu bytes, %u frames resimulated)",
+					   fieldDataSize, totalResimFrames);
+		}
+		else
+		{
+			LOG_WARN_F("[Rollback] FAILED — divergence detected (%u frames resimulated)", totalResimFrames);
+
+			auto fieldInfos = TemporalCache->GetValidFieldInfos();
+			for (const auto& info : fieldInfos)
+			{
+				if (info.CurrentUsed == 0) continue;
+
+				const uint8_t* truthField = GroundTruthBackup.data() + info.OffsetInFrame;
+				const uint8_t* resimField = resimFieldData + info.OffsetInFrame;
+
+				int fieldCmp = std::memcmp(truthField, resimField, info.CurrentUsed);
+				if (fieldCmp != 0)
+				{
+					size_t firstDiff = 0;
+					for (size_t b = 0; b < info.CurrentUsed; ++b)
+					{
+						if (truthField[b] != resimField[b])
+						{
+							firstDiff = b;
+							break;
+						}
+					}
+
+					size_t entityIdx   = firstDiff / info.FieldSize;
+					size_t byteInField = firstDiff % info.FieldSize;
+
+					size_t divergentBytes = 0;
+					for (size_t b = 0; b < info.CurrentUsed; ++b) divergentBytes += (truthField[b] != resimField[b]);
+
+					LOG_WARN_F("  DIVERGE: %s (comp=%u field=%zu) entity=%zu+%zu "
+							   "divergent=%zu/%zu (%.2f%%)",
+							   info.FieldName, info.CompType, info.FieldIndex,
+							   entityIdx, byteInField,
+							   divergentBytes, info.CurrentUsed,
+							   100.0 * static_cast<double>(divergentBytes) / static_cast<double>(info.CurrentUsed));
+				}
+			}
+		}
+
+		// Compare Jolt state
+		JPH::StateRecorderImpl resimJolt;
+		PhysicsPtr->GetPhysicsSystem()->SaveState(resimJolt, JPH::EStateRecorderState::All);
+		std::string resimJoltData = resimJolt.GetData();
+		std::string savedJoltData = savedJolt.GetData();
+
+		if (resimJoltData == savedJoltData)
+		{
+			LOG_INFO_F("[Rollback] Jolt physics: MATCH (%zu bytes)", resimJoltData.size());
+		}
+		else
+		{
+			LOG_WARN_F("[Rollback] Jolt physics: DIVERGED (truth=%zu bytes, resim=%zu bytes)",
+					   savedJoltData.size(), resimJoltData.size());
+			size_t minLen = std::min(savedJoltData.size(), resimJoltData.size());
+			for (size_t i = 0; i < minLen; ++i)
+			{
+				if (savedJoltData[i] != resimJoltData[i])
+				{
+					LOG_WARN_F("  First Jolt divergence at byte %zu: truth=0x%02x resim=0x%02x",
+							   i, static_cast<uint8_t>(savedJoltData[i]), static_cast<uint8_t>(resimJoltData[i]));
+					break;
+				}
+			}
+		}
+	}
+
+	// ── Restore (test harness only) ────────────────────────────────────────
+	{
+		TNX_ZONE_N("Rollback_Restore");
+
+		std::memcpy(TemporalCache->GetSlabPtr(), TemporalSlabBackup.data(), temporalSlabSize);
+		std::memcpy(volatileCache->GetSlabPtr(), VolatileSlabBackup.data(), volatileSlabSize);
+
+		TemporalCache->SetActiveWriteFrame(savedTemporalWrite);
+		TemporalCache->SetLastWrittenFrame(savedTemporalRead);
+		volatileCache->SetActiveWriteFrame(savedVolatileWrite);
+		volatileCache->SetLastWrittenFrame(savedVolatileRead);
+
+		savedJolt.Rewind();
+		PhysicsPtr->GetPhysicsSystem()->RestoreState(savedJolt);
+
+		FrameNumber    = savedFrameNumber;
+		SimulationTime = savedSimTime;
+	}
+
+	LOG_INFO("[Rollback] State restored, simulation continuing.");
+#endif // TNX_TESTING
+}
+
+#endif // TNX_ENABLE_ROLLBACK

@@ -21,9 +21,9 @@ struct Chunk
 	alignas(64) ChunkHeader Header;
 	alignas(64) uint8_t Data[DATA_SIZE - HEADER_SIZE]; // 64-byte alignment for cache line optimization
 
-	FORCE_INLINE uint8_t* GetBuffer(uint32_t Offset)
+	FORCE_INLINE uint8_t* GetBuffer(uint32_t offset)
 	{
-		return Data + Offset;
+		return Data + offset;
 	}
 
 	FORCE_INLINE void* GetFieldPtr(size_t fieldIndex)

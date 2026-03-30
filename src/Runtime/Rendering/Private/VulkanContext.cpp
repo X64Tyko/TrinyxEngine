@@ -109,19 +109,19 @@ bool VulkanContext::CreateInstance(SDL_Window* /*window*/, bool enableValidation
 		std::vector<const char*> extensions(sdlExts, sdlExts + sdlExtCount);
 		if (enableValidation) extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
-		static const char* kValidationLayer = "VK_LAYER_KHRONOS_validation";
+		static const char* ValidationLayer = "VK_LAYER_KHRONOS_validation";
 		std::vector<const char*> layers;
 		if (enableValidation)
 		{
 			auto available = VkContext.enumerateInstanceLayerProperties();
 			bool found     = false;
 			for (const auto& layer : available)
-				if (strcmp(layer.layerName, kValidationLayer) == 0)
+				if (strcmp(layer.layerName, ValidationLayer) == 0)
 				{
 					found = true;
 					break;
 				}
-			if (found) layers.push_back(kValidationLayer);
+			if (found) layers.push_back(ValidationLayer);
 			else
 				LOG_WARN("[VulkanContext] Validation layer requested but not available");
 		}
@@ -280,9 +280,9 @@ bool VulkanContext::SelectPhysicalDevice()
 			for (uint32_t j = 0; j < memProps.memoryTypeCount; ++j)
 			{
 				if (memProps.memoryTypes[j].heapIndex != i) continue;
-				constexpr auto kReBarFlags = vk::MemoryPropertyFlagBits::eDeviceLocal |
+				constexpr auto ReBarFlags = vk::MemoryPropertyFlagBits::eDeviceLocal |
 					vk::MemoryPropertyFlagBits::eHostVisible;
-				if ((memProps.memoryTypes[j].propertyFlags & kReBarFlags) == kReBarFlags)
+				if ((memProps.memoryTypes[j].propertyFlags & ReBarFlags) == ReBarFlags)
 				{
 					if (memProps.memoryHeaps[i].size >= 256ull * 1024 * 1024)
 					{

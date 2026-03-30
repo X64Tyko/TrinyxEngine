@@ -282,6 +282,13 @@ void TrinyxEngine::PumpEvents()
 					bIsRunning.store(false, std::memory_order_release);
 					break;
 				}
+#ifdef TNX_ENABLE_ROLLBACK
+				if (e.key.scancode == SDL_SCANCODE_F5 && !e.key.repeat)
+				{
+					if (Logic) Logic->RequestRollbackTest();
+					break;
+				}
+#endif
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
@@ -417,8 +424,8 @@ void TrinyxEngine::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)
 		const double remainingSec =
 			static_cast<double>(frameEnd - now) / static_cast<double>(perfFrequency);
 
-		constexpr double kSleepMarginSec = 0.002;
-		if (remainingSec > kSleepMarginSec) SDL_Delay(static_cast<uint32_t>((remainingSec - kSleepMarginSec) * 1000.0));
+		constexpr double SleepMarginSec = 0.002;
+		if (remainingSec > SleepMarginSec) SDL_Delay(static_cast<uint32_t>((remainingSec - SleepMarginSec) * 1000.0));
 
 		while (SDL_GetPerformanceCounter() < frameEnd)
 		{

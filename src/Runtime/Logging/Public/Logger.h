@@ -38,22 +38,22 @@ public:
 	}
 
 	// Initialize logger with file output
-	void Init(const std::string& LogFilePath = "TrinyxEngine.log", LogLevel inMinLevel = LogLevel::Debug);
+	void Init(const std::string& logFilePath = "TrinyxEngine.log", LogLevel inMinLevel = LogLevel::Debug);
 
 	// Shut down and flush file
 	void Shutdown();
 
 	// Set minimum log level filter
-	void SetMinLevel(LogLevel Level) { MinLevel = Level; }
+	void SetMinLevel(LogLevel level) { MinLevel = level; }
 
 	// Core logging function
-	void Log(LogLevel Level, const char* File, int Line, const std::string& Message);
+	void Log(LogLevel level, const char* file, int line, const std::string& message);
 
 	// --- Editor log ring buffer ---
-	static constexpr uint32_t kLogRingSize = 1024;
+	static constexpr uint32_t LogRingSize = 1024;
 
 	// Returns pointer to ring buffer and current write head.
-	// Reader should snapshot Head, then read entries [Head-kLogRingSize .. Head-1] (mod kLogRingSize).
+	// Reader should snapshot Head, then read entries [Head-LogRingSize .. Head-1] (mod LogRingSize).
 	const LogEntry* GetLogRing() const { return LogRing; }
 	uint32_t GetLogHead() const { return LogHead; }
 
@@ -64,8 +64,8 @@ private:
 	Logger& operator=(const Logger&) = delete;
 
 	std::string GetTimestamp();
-	std::string LevelToString(LogLevel Level);
-	std::string LevelToColor(LogLevel Level);
+	std::string LevelToString(LogLevel level);
+	std::string LevelToColor(LogLevel level);
 
 private:
 	std::ofstream LogFile;
@@ -74,7 +74,7 @@ private:
 	bool bInitialized = false;
 
 	// Ring buffer for editor consumption (written under Mutex)
-	LogEntry LogRing[kLogRingSize]{};
+	LogEntry LogRing[LogRingSize]{};
 	uint32_t LogHead = 0;
 };
 

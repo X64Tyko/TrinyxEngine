@@ -28,13 +28,15 @@ namespace JoltMotion
 // The engine pulls transforms from active (awake) bodies after each Step().
 // The ECS only overrides Jolt on spawn, teleport, or explicit impulse.
 //
-// Cold: SoA arrays live directly in archetype chunks (single-frame, no ring
-// buffer). Body settings are write-once config — no per-frame duplication.
+// Volatile: SoA arrays live in the volatile slab (Physics partition), enabling
+// direct slab iteration for FlushPendingBodies without archetype/chunk indirection.
+// Body settings are write-once config but stored in the slab so physics can
+// scan the contiguous DUAL+PHYS region as a single dense pass.
 // BodyID ↔ EntityIndex mapping lives in JoltPhysics as two lookup arrays.
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct JoltBody : ComponentView<JoltBody, WIDTH>
 {
-	TNX_REGISTER_FIELDS(JoltBody, Shape, HalfExtentX, HalfExtentY, HalfExtentZ,
+	TNX_VOLATILE_FIELDS(JoltBody, Physics, Shape, HalfExtentX, HalfExtentY, HalfExtentZ,
 						Motion, Mass, Friction, Restitution)
 
 	// Shape geometry

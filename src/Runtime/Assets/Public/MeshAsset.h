@@ -21,13 +21,13 @@
 //   64+V    I     Indices:  IndexCount  × 4 bytes (uint32)
 // -----------------------------------------------------------------------
 
-constexpr uint32_t kTnxMeshMagic   = 0x4D584E54; // "TNXM" little-endian
-constexpr uint32_t kTnxMeshVersion = 1;
+constexpr uint32_t TnxMeshMagic   = 0x4D584E54; // "TNXM" little-endian
+constexpr uint32_t TnxMeshVersion = 1;
 
 struct TnxMeshHeader
 {
-	uint32_t Magic       = kTnxMeshMagic;
-	uint32_t Version     = kTnxMeshVersion;
+	uint32_t Magic       = TnxMeshMagic;
+	uint32_t Version     = TnxMeshVersion;
 	uint32_t VertexCount = 0;
 	uint32_t IndexCount  = 0;
 	float AABBMin[3]     = {};
