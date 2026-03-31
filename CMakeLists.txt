@@ -242,6 +242,14 @@ if (TARGET GameNetworkingSockets_s AND NOT MSVC)
     target_compile_options(GameNetworkingSockets_s PRIVATE -w)
 endif ()
 
+# On systems where protobuf depends on abseil (e.g. Arch/Manjaro with protobuf 29+),
+# CMake's FindProtobuf doesn't propagate the transitive abseil dependency.
+# Detect and link it explicitly so the final executable resolves all symbols.
+find_package(absl QUIET)
+if (absl_FOUND AND TARGET GameNetworkingSockets_s)
+    target_link_libraries(GameNetworkingSockets_s PUBLIC absl::log_internal_check_op)
+endif ()
+
 # -----------------------------------------------------------------------------
 # 8. SUBDIRECTORIES (Projects in Solution)
 # -----------------------------------------------------------------------------

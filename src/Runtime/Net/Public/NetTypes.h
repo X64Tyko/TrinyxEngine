@@ -113,3 +113,52 @@ struct PacketHeader
 static_assert(sizeof(PacketHeader) == PacketHeader_ExpectedSize,
 			  "PacketHeader size mismatch — if you changed a *_Bytes constant, update the struct layout to match");
 static_assert(sizeof(PacketHeader) == 24, "PacketHeader must be 24 bytes");
+
+// ---------------------------------------------------------------------------
+// EntitySpawnPayload — server tells client to create an entity.
+//
+// Sent reliable with NetMessageType::EntitySpawn. One entity per message.
+// Client uses Manifest.ClassType to call CreateByClassID, then writes fields.
+// TODO: Replace ClassType-based spawning with PrefabID once the asset system supports it.
+// ---------------------------------------------------------------------------
+struct EntitySpawnPayload
+{
+	// Identity
+	uint32_t NetHandle; // EntityNetHandle.Value — network identity
+	uint32_t Manifest;  // EntityNetManifest.Value — ClassType + flags
+
+	// TransRot (Temporal)
+	float PosX, PosY, PosZ;
+	float RotQx, RotQy, RotQz, RotQw;
+
+	// Scale (Volatile)
+	float ScaleX, ScaleY, ScaleZ;
+
+	// Color (Volatile)
+	float ColorR, ColorG, ColorB, ColorA;
+
+	// Mesh (Volatile)
+	uint32_t MeshID;
+
+	uint32_t _Pad0; // Align to 72 bytes
+};
+
+static_assert(sizeof(EntitySpawnPayload) == 72, "EntitySpawnPayload must be 72 bytes");
+
+// ---------------------------------------------------------------------------
+// StateCorrectionEntry — one entity's authoritative transform.
+//
+// Batched: a StateCorrection message payload contains N of these.
+// Count = PacketHeader.PayloadSize / sizeof(StateCorrectionEntry).
+// Sent unreliable at NetworkUpdateHz.
+// ---------------------------------------------------------------------------
+struct StateCorrectionEntry
+{
+	uint32_t NetHandle; // EntityNetHandle.Value
+
+	// Authoritative position + rotation from server
+	float PosX, PosY, PosZ;
+	float RotQx, RotQy, RotQz, RotQw;
+};
+
+static_assert(sizeof(StateCorrectionEntry) == 32, "StateCorrectionEntry must be 32 bytes");

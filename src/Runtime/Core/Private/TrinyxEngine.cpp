@@ -163,6 +163,24 @@ void TrinyxEngine::Spawn(std::function<void(Registry*)> action)
 	if (DefaultWorld) DefaultWorld->Spawn(std::move(action));
 }
 
+bool TrinyxEngine::EnsureNetworking()
+{
+	if (Net) return true; // Already initialized
+
+	if (!GNS.IsInitialized())
+	{
+		if (!GNS.Initialize())
+		{
+			LOG_ERROR("[Engine] EnsureNetworking: GNS init failed");
+			return false;
+		}
+	}
+
+	Net = std::make_unique<NetThread>();
+	Net->Initialize(&GNS, &Config);
+	return true;
+}
+
 void TrinyxEngine::StartThreadsAndJobs()
 {
 	DefaultWorld->Start();
@@ -301,11 +319,14 @@ void TrinyxEngine::PumpEvents()
 			case SDL_EVENT_QUIT: bIsRunning.store(false, std::memory_order_release);
 				break;
 
-			case SDL_EVENT_KEY_DOWN: if (e.key.scancode == SDL_SCANCODE_ESCAPE)
+			case SDL_EVENT_KEY_DOWN:
+#if !defined(TNX_ENABLE_EDITOR)
+				if (e.key.scancode == SDL_SCANCODE_ESCAPE)
 				{
 					bIsRunning.store(false, std::memory_order_release);
 					break;
 				}
+#endif
 #ifdef TNX_ENABLE_ROLLBACK
 				if (e.key.scancode == SDL_SCANCODE_F5 && !e.key.repeat)
 				{

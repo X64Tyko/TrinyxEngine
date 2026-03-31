@@ -111,7 +111,8 @@ void NetConnectionManager::AcceptConnection(HSteamNetConnection conn)
 	}
 
 	AddConnection(conn);
-	LOG_INFO_F("[NetConnectionManager] Accepted connection %u", conn);
+	if (ConnectionInfo* ci = FindConnection(conn)) ci->bServerSide = true;
+	LOG_INFO_F("[NetConnectionManager] Accepted connection %u (server-side)", conn);
 }
 
 // ---------------------------------------------------------------------------

@@ -237,6 +237,8 @@ void RendererCore<Derived>::ThreadMain()
 			WriteToFrameSlab();
 		}
 
+		Self().UpdateViewportSlabs();
+
 		int8_t renderRes = RenderFrame();
 		if (renderRes < 0) break;
 		else if (renderRes == 0) continue;
@@ -332,7 +334,7 @@ int RendererCore<Derived>::RenderFrame()
 
 	{
 		TNX_ZONE_COARSE_NC("Render_Record", TNX_COLOR_RENDERING)
-		RecordCommandBuffer(frame, imageIndex);
+		Self().RecordFrame(frame, imageIndex);
 	}
 
 	// Submit (sync2 path)
@@ -1220,7 +1222,7 @@ void RendererCore<Derived>::FillGpuFrameData(FrameSync& frame)
 	std::memset(FrameData, 0, sizeof(GpuFrameData));
 
 	ComponentCacheBase* tc   = RegistryPtr->GetTemporalCache();
-	TemporalFrameHeader* hdr = tc->GetFrameHeader();
+	TemporalFrameHeader* hdr = tc->GetFrameHeader(LastTemporalFrame);
 	MultMat4(FrameData->ViewProj, hdr->ProjectionMatrix.m, hdr->ViewMatrix.m);
 
 	FrameData->VerticesAddr          = Meshes.GetVertexBufferAddr();

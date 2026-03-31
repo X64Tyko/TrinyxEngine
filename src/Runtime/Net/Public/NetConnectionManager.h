@@ -23,6 +23,7 @@ struct ConnectionInfo
 	uint32_t LastSeqIn         = 0; // Latest received sequence number (for ack piggybacking)
 	uint32_t AckBitfield       = 0; // Received-packet bitfield (for ack piggybacking)
 	bool bConnected            = false;
+	bool bServerSide           = false; // True for server-accepted handles, false for client-initiated
 };
 
 // ---------------------------------------------------------------------------

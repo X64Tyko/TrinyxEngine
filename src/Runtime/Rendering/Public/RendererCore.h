@@ -83,6 +83,9 @@ public:
 
 	void NotifyResize() { bResizeRequested.store(true, std::memory_order_release); }
 
+	/// Block until all submitted GPU work completes. Call before freeing in-flight resources.
+	void WaitForGPU() { if (Device) vkDeviceWaitIdle(Device); }
+
 protected:
 	Derived& Self() { return *static_cast<Derived*>(this); }
 
@@ -180,6 +183,11 @@ protected:
 	double DisplayRefreshMs = 0.0;
 #endif
 
+	// ── Methods accessible to derived renderers ────────────────────────
+	void FillGpuFrameData(FrameSync& frame);
+	void WriteToFrameSlab();
+	void RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex);
+
 private:
 	void ThreadMain();
 	int RenderFrame();
@@ -191,9 +199,6 @@ private:
 	bool CreatePipeline();
 	bool CreateComputePipelines();
 	bool CreateMeshBuffers();
-	void FillGpuFrameData(FrameSync& frame);
-	void WriteToFrameSlab();
-	void RecordCommandBuffer(FrameSync& frame, uint32_t imageIndex);
 	void TrackFPS();
 	void OnSwapchainResize();
 

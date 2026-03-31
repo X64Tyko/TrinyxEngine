@@ -15,6 +15,9 @@
 #include "MeshManager.h"
 #include "Registry.h"
 #include "CacheSlotMeta.h"
+#include "NetConnectionManager.h"
+#include "NetThread.h"
+#include "ReplicationSystem.h"
 #include "TemporalComponentCache.h"
 #include <cctype>
 #include <cmath>
@@ -29,8 +32,12 @@
 #include "Panels/LogPanel.h"
 #include "Panels/ContentBrowserPanel.h"
 
-EditorContext::EditorContext()  = default;
-EditorContext::~EditorContext() = default;
+EditorContext::EditorContext() = default;
+
+EditorContext::~EditorContext()
+{
+	if (bPIEActive) StopPIE();
+}
 
 void EditorContext::Initialize(TrinyxEngine* engine, LogicThread* logic, MeshManager* meshMgr)
 {
@@ -416,6 +423,18 @@ void EditorContext::BuildFrame()
 	DrawImportDialog();
 	DrawUnsavedWarning();
 
+	// PIE viewport panels
+	if (bPIEActive)
+	{
+		if (ServerViewport) DrawViewportPanel("Server", *ServerViewport);
+		for (size_t i = 0; i < PIEClients.size(); ++i)
+		{
+			char title[32];
+			snprintf(title, sizeof(title), "Client %zu", i + 1);
+			DrawViewportPanel(title, *PIEClients[i].Viewport);
+		}
+	}
+
 	// Debug windows
 	if (bShowDemoWindow) ImGui::ShowDemoWindow(&bShowDemoWindow);
 	if (bShowMetrics) ImGui::ShowMetricsWindow(&bShowMetrics);
@@ -424,8 +443,17 @@ void EditorContext::BuildFrame()
 	// Engine gets input when: right-click held in viewport, or Play is running.
 	const ImGuiIO& io         = ImGui::GetIO();
 	bool rightClickInViewport = ImGui::IsMouseDown(ImGuiMouseButton_Right) && !io.WantCaptureMouse;
-	bool playing              = LogicPtr && !LogicPtr->IsSimPaused() && bHasSnapshot;
-	EnginePtr->Render->SetEditorOwnsKeyboard(!rightClickInViewport && !playing);
+	bool playing              = (LogicPtr && !LogicPtr->IsSimPaused() && bHasSnapshot) || bPIEActive;
+	// Escape requests PIE stop — deferred to after the ImGui frame completes
+	// so we don't free GPU resources (descriptor sets, images) mid-frame.
+	if (bPIEActive&& ImGui::IsKeyPressed(ImGuiKey_Escape)) bPIEStopRequested = true;
+
+	// Shift+F1 toggles mouse between engine and editor during PIE/Play.
+	// When released, editor gets mouse for panel interaction; re-press to return control.
+	if (playing && ImGui::IsKeyPressed(ImGuiKey_F1) && io.KeyShift) bMouseReleasedDuringPlay = !bMouseReleasedDuringPlay;
+	if (!playing) bMouseReleasedDuringPlay = false;
+	bool engineGetsInput = (rightClickInViewport || playing) && !bMouseReleasedDuringPlay;
+	EnginePtr->Render->SetEditorOwnsKeyboard(!engineGetsInput);
 }
 
 void EditorContext::BuildDockspace()
@@ -587,7 +615,7 @@ void EditorContext::BuildMenuBar()
 	{
 		bool simPaused = !LogicPtr || LogicPtr->IsSimPaused();
 
-		if (ImGui::MenuItem("Play", nullptr, false, simPaused))
+		if (ImGui::MenuItem("Play (Local)", nullptr, false, simPaused && !bPIEActive))
 		{
 			if (LogicPtr)
 			{
@@ -595,15 +623,27 @@ void EditorContext::BuildMenuBar()
 				LogicPtr->SetSimPaused(false);
 			}
 		}
-		if (ImGui::MenuItem("Pause", nullptr, false, !simPaused))
+		if (ImGui::MenuItem("Pause", nullptr, false, !simPaused && !bPIEActive))
 		{
 			if (LogicPtr) LogicPtr->SetSimPaused(true);
 		}
-		if (ImGui::MenuItem("Stop", nullptr, false, bHasSnapshot))
+		if (ImGui::MenuItem("Stop (Local)", nullptr, false, bHasSnapshot && !bPIEActive))
 		{
 			if (LogicPtr) LogicPtr->SetSimPaused(true);
 			RestoreSnapshot();
 		}
+
+		ImGui::Separator();
+
+		if (ImGui::MenuItem("Play (Server + Client)", nullptr, false, !bPIEActive))
+		{
+			StartPIE();
+		}
+		if (ImGui::MenuItem("Stop PIE", nullptr, false, bPIEActive))
+		{
+			StopPIE();
+		}
+
 		ImGui::EndMenu();
 	}
 
@@ -1053,6 +1093,333 @@ void EditorContext::RestoreSnapshot()
 	PlaySnapshot.clear();
 	bHasSnapshot = false;
 	LOG_INFO("[Editor] Scene restored from snapshot");
+}
+
+// -----------------------------------------------------------------------
+// PIE — networked multi-world Play-In-Editor
+// -----------------------------------------------------------------------
+
+void EditorContext::StartPIE()
+{
+	if (bPIEActive) return;
+
+	Registry* editorReg = EnginePtr->GetRegistry();
+
+	// 1. Serialize editor scene to JSON
+	JsonValue sceneJson = EntityBuilder::SerializeScene(editorReg, "PIE");
+
+	// 2. Create server world
+	const EngineConfig& editorCfg = *EnginePtr->GetConfig();
+	ServerWorld                   = std::make_unique<World>();
+	if (!ServerWorld->Initialize(editorCfg))
+	{
+		LOG_ERROR("[PIE] Failed to initialize server world");
+		ServerWorld.reset();
+		return;
+	}
+
+	// 3. Load scene into server world via spawn handshake
+	ServerWorld->SetJobsInitialized(true);
+	ServerWorld->Spawn([&sceneJson](Registry* reg)
+	{
+		EntityBuilder::SpawnScene(reg, sceneJson);
+	});
+
+	// 4. Allocate server viewport (if visible)
+	EditorRenderer* renderer = EnginePtr->GetRenderer();
+	if (bServerVisible)
+	{
+		ServerViewport              = std::make_unique<WorldViewport>();
+		ServerViewport->TargetWorld = ServerWorld.get();
+		renderer->AllocateViewportResources(ServerViewport.get(), 960, 540);
+		renderer->AddViewport(ServerViewport.get());
+	}
+
+	// 5. Create client world (1 client for now)
+	{
+		PIEClient client;
+		client.ClientWorld = std::make_unique<World>();
+		if (!client.ClientWorld->Initialize(editorCfg))
+		{
+			LOG_ERROR("[PIE] Failed to initialize client world");
+			// Clean up server
+			if (ServerViewport)
+			{
+				renderer->RemoveViewport(ServerViewport.get());
+				renderer->FreeViewportResources(ServerViewport.get());
+				ServerViewport.reset();
+			}
+			ServerWorld->Shutdown();
+			ServerWorld.reset();
+			return;
+		}
+		client.ClientWorld->SetJobsInitialized(true);
+
+		client.Viewport              = std::make_unique<WorldViewport>();
+		client.Viewport->TargetWorld = client.ClientWorld.get();
+		renderer->AllocateViewportResources(client.Viewport.get(), 960, 540);
+		renderer->AddViewport(client.Viewport.get());
+
+		PIEClients.push_back(std::move(client));
+	}
+
+	// 6. Set up loopback networking (server + client in same process)
+	static constexpr uint16_t PIEPort = 27015;
+
+	if (!EnginePtr->EnsureNetworking())
+	{
+		LOG_ERROR("[PIE] Failed to initialize networking — aborting");
+		// Clean up viewports
+		for (auto& c : PIEClients)
+		{
+			renderer->RemoveViewport(c.Viewport.get());
+			renderer->FreeViewportResources(c.Viewport.get());
+		}
+		if (ServerViewport)
+		{
+			renderer->RemoveViewport(ServerViewport.get());
+			renderer->FreeViewportResources(ServerViewport.get());
+		}
+		for (auto& c : PIEClients) c.ClientWorld->Shutdown();
+		ServerWorld->Shutdown();
+		PIEClients.clear();
+		ServerViewport.reset();
+		ServerWorld.reset();
+		return;
+	}
+
+	NetThread* net                = EnginePtr->GetNetThread();
+	NetConnectionManager* connMgr = net->GetConnectionManager();
+
+	// Server: listen on PIE loopback port
+	if (!connMgr->Listen(PIEPort))
+	{
+		LOG_ERROR("[PIE] Failed to listen — aborting");
+		for (auto& c : PIEClients)
+		{
+			renderer->RemoveViewport(c.Viewport.get());
+			renderer->FreeViewportResources(c.Viewport.get());
+		}
+		if (ServerViewport)
+		{
+			renderer->RemoveViewport(ServerViewport.get());
+			renderer->FreeViewportResources(ServerViewport.get());
+		}
+		for (auto& c : PIEClients) c.ClientWorld->Shutdown();
+		ServerWorld->Shutdown();
+		PIEClients.clear();
+		ServerViewport.reset();
+		ServerWorld.reset();
+		return;
+	}
+
+	// Connect each client via loopback and discover server-side handles
+	std::vector<uint32_t> knownHandles;
+	for (const auto& ci : connMgr->GetConnections()) knownHandles.push_back(ci.Handle);
+
+	for (size_t i = 0; i < PIEClients.size(); ++i)
+	{
+		uint32_t clientHandle = connMgr->Connect("127.0.0.1", PIEPort);
+		if (clientHandle == 0)
+		{
+			LOG_ERROR_F("[PIE] Client %zu failed to connect — aborting", i);
+			connMgr->StopListening();
+			for (auto& c : PIEClients)
+			{
+				renderer->RemoveViewport(c.Viewport.get());
+				renderer->FreeViewportResources(c.Viewport.get());
+			}
+			if (ServerViewport)
+			{
+				renderer->RemoveViewport(ServerViewport.get());
+				renderer->FreeViewportResources(ServerViewport.get());
+			}
+			for (auto& c : PIEClients) c.ClientWorld->Shutdown();
+			ServerWorld->Shutdown();
+			PIEClients.clear();
+			ServerViewport.reset();
+			ServerWorld.reset();
+			return;
+		}
+		PIEClients[i].ClientHandle = clientHandle;
+		knownHandles.push_back(clientHandle);
+
+		// Pump GNS callbacks so the server accepts the connection
+		for (int j = 0; j < 20; ++j)
+		{
+			connMgr->RunCallbacks();
+			SDL_Delay(1);
+		}
+
+		// Find the new server-side accepted handle
+		for (const auto& ci : connMgr->GetConnections())
+		{
+			bool known = false;
+			for (uint32_t h : knownHandles)
+			{
+				if (h == ci.Handle)
+				{
+					known = true;
+					break;
+				}
+			}
+			if (!known)
+			{
+				PIEClients[i].ServerHandle = ci.Handle;
+				knownHandles.push_back(ci.Handle);
+				break;
+			}
+		}
+
+		if (PIEClients[i].ServerHandle == 0) LOG_WARN_F("[PIE] Could not identify server-side handle for client %zu", i);
+
+		// Assign OwnerID and map to client world (for future state replication routing)
+		uint8_t ownerID = static_cast<uint8_t>(i + 1);
+		connMgr->AssignOwnerID(PIEClients[i].ServerHandle, ownerID);
+		connMgr->AssignOwnerID(PIEClients[i].ClientHandle, ownerID);
+		net->MapConnectionToWorld(ownerID, PIEClients[i].ClientWorld.get());
+	}
+
+	// Map server world for OwnerID 0
+	net->MapConnectionToWorld(0, ServerWorld.get());
+
+	// Set up server-side replication system
+	Replicator = std::make_unique<ReplicationSystem>();
+	Replicator->Initialize(ServerWorld.get());
+	net->SetReplicationSystem(Replicator.get());
+
+	// Start NetThread (polls connections at NetworkUpdateHz)
+	if (!net->IsRunning()) net->Start();
+
+	// 7. Start logic threads
+	ServerWorld->Start();
+	for (auto& c : PIEClients)
+	{
+		c.ClientWorld->Start();
+	}
+
+	// 8. Pause editor world's logic thread
+	if (LogicPtr) LogicPtr->SetSimPaused(true);
+
+	bPIEActive = true;
+	State.ClearSelection();
+	LOG_INFO_F("[PIE] Started: 1 server%s + %zu client(s), port %u",
+			   bServerVisible ? " (visible)" : " (headless)",
+			   PIEClients.size(), PIEPort);
+}
+
+void EditorContext::StopPIE()
+{
+	if (!bPIEActive) return;
+
+	EditorRenderer* renderer = EnginePtr->GetRenderer();
+
+	// 1. Stop and join all PIE worlds
+	for (auto& client : PIEClients) client.ClientWorld->Stop();
+	ServerWorld->Stop();
+
+	for (auto& client : PIEClients) client.ClientWorld->Join();
+	ServerWorld->Join();
+
+	// 2. Tear down PIE networking
+	NetThread* net = EnginePtr->GetNetThread();
+	if (net)
+	{
+		// Detach replication before stopping net thread
+		net->SetReplicationSystem(nullptr);
+
+		// Stop NetThread so we can safely manipulate connections
+		if (net->IsRunning())
+		{
+			net->Stop();
+			net->Join();
+		}
+
+		NetConnectionManager* connMgr = net->GetConnectionManager();
+
+		// Close all PIE client connections (both sides)
+		for (auto& client : PIEClients)
+		{
+			if (client.ServerHandle != 0) connMgr->CloseConnection(client.ServerHandle, "PIE Stop");
+			if (client.ClientHandle != 0) connMgr->CloseConnection(client.ClientHandle, "PIE Stop");
+		}
+
+		// Clear world mappings
+		for (size_t i = 0; i < PIEClients.size(); ++i) net->MapConnectionToWorld(static_cast<uint8_t>(i + 1), nullptr);
+		net->MapConnectionToWorld(0, nullptr);
+
+		connMgr->StopListening();
+	}
+
+	// 3. Remove viewports from renderer and free GPU resources
+	renderer->WaitForGPU(); // Ensure in-flight frames finish before destroying images/descriptors
+	for (auto& client : PIEClients)
+	{
+		renderer->RemoveViewport(client.Viewport.get());
+		renderer->FreeViewportResources(client.Viewport.get());
+	}
+	if (ServerViewport)
+	{
+		renderer->RemoveViewport(ServerViewport.get());
+		renderer->FreeViewportResources(ServerViewport.get());
+	}
+
+	// 4. Shutdown and destroy worlds
+	for (auto& client : PIEClients) client.ClientWorld->Shutdown();
+	ServerWorld->Shutdown();
+
+	PIEClients.clear();
+	Replicator.reset();
+	ServerViewport.reset();
+	ServerWorld.reset();
+
+	// 5. Resume editor world
+	if (LogicPtr) LogicPtr->SetSimPaused(false);
+
+	bPIEActive = false;
+	LOG_INFO("[PIE] Stopped");
+}
+
+void EditorContext::DrawViewportPanel(const char* title, WorldViewport& vp)
+{
+	ImGui::SetNextWindowSize(ImVec2(static_cast<float>(vp.Width), static_cast<float>(vp.Height)), ImGuiCond_Appearing);
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+	if (ImGui::Begin(title))
+	{
+		ImVec2 panelSize = ImGui::GetContentRegionAvail();
+
+		if (vp.ImGuiTexture != VK_NULL_HANDLE && panelSize.x > 0 && panelSize.y > 0
+			&& vp.Width > 0 && vp.Height > 0)
+		{
+			// Fit the render target into the panel preserving aspect ratio
+			float rtAspect    = static_cast<float>(vp.Width) / static_cast<float>(vp.Height);
+			float panelAspect = panelSize.x / panelSize.y;
+
+			ImVec2 imageSize;
+			if (panelAspect > rtAspect)
+			{
+				// Panel is wider than RT — fit to height, center horizontally
+				imageSize.y = panelSize.y;
+				imageSize.x = panelSize.y * rtAspect;
+			}
+			else
+			{
+				// Panel is taller than RT — fit to width, center vertically
+				imageSize.x = panelSize.x;
+				imageSize.y = panelSize.x / rtAspect;
+			}
+
+			// Center the image within the panel
+			ImVec2 cursor = ImGui::GetCursorPos();
+			float offsetX = (panelSize.x - imageSize.x) * 0.5f;
+			float offsetY = (panelSize.y - imageSize.y) * 0.5f;
+			ImGui::SetCursorPos(ImVec2(cursor.x + offsetX, cursor.y + offsetY));
+
+			ImGui::Image(vp.ImGuiTexture, imageSize);
+		}
+	}
+	ImGui::End();
+	ImGui::PopStyleVar();
 }
 
 void EditorContext::DrawUnsavedWarning()

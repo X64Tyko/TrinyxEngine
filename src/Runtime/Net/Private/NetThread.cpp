@@ -1,12 +1,15 @@
 #include "NetThread.h"
 #include "GNSContext.h"
 #include "NetConnectionManager.h"
+#include "ReplicationSystem.h"
 #include "EngineConfig.h"
 #include "Input.h"
 #include "Logger.h"
 #include "Profiler.h"
 #include "ThreadPinning.h"
 #include "World.h"
+
+#include "Registry.h"
 
 #include <SDL3/SDL_timer.h>
 
@@ -104,6 +107,13 @@ void NetThread::Tick()
 		RouteMessage(msg);
 	}
 
+	// Server-side replication: send entity state to connected clients
+	if (Replicator)
+	{
+		static uint32_t replicationFrame = 0;
+		Replicator->Tick(ConnectionMgr.get(), replicationFrame++);
+	}
+
 	// FPS tracking
 	FpsFrameCount++;
 	const double now = SDL_GetPerformanceCounter() / static_cast<double>(SDL_GetPerformanceFrequency());
@@ -183,12 +193,70 @@ void NetThread::RouteMessage(const ReceivedMessage& msg)
 				break;
 			}
 
-		case NetMessageType::ConnectionHandshake:
-		case NetMessageType::StateCorrection:
 		case NetMessageType::EntitySpawn:
+			{
+				if (msg.Payload.size() < sizeof(EntitySpawnPayload))
+				{
+					LOG_WARN_F("[NetThread] EntitySpawn payload too small (%zu < %zu)",
+							   msg.Payload.size(), sizeof(EntitySpawnPayload));
+					break;
+				}
+
+				const auto* spawn = reinterpret_cast<const EntitySpawnPayload*>(msg.Payload.data());
+
+				// Find which client world this connection maps to
+				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+				uint8_t ownerID    = ci ? ci->OwnerID : 0;
+				World* clientWorld = WorldMap[ownerID];
+				if (!clientWorld)
+				{
+					LOG_WARN_F("[NetThread] EntitySpawn but no client world for OwnerID %u", ownerID);
+					break;
+				}
+
+				// Capture payload for the spawn lambda
+				EntitySpawnPayload spawnData = *spawn;
+
+				clientWorld->Spawn([spawnData](Registry* reg)
+				{
+					ReplicationSystem::HandleEntitySpawn(reg, spawnData);
+				});
+				break;
+			}
+
+		case NetMessageType::StateCorrection:
+			{
+				if (msg.Payload.size() < sizeof(StateCorrectionEntry))
+				{
+					LOG_WARN("[NetThread] StateCorrection payload too small");
+					break;
+				}
+
+				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+				uint8_t ownerID    = ci ? ci->OwnerID : 0;
+				World* clientWorld = WorldMap[ownerID];
+				if (!clientWorld) break;
+
+				const uint32_t entryCount = static_cast<uint32_t>(
+					msg.Payload.size() / sizeof(StateCorrectionEntry));
+				const auto* entries = reinterpret_cast<const StateCorrectionEntry*>(
+					msg.Payload.data());
+
+				// Batch all corrections into a single Spawn call for thread safety
+				std::vector<StateCorrectionEntry> corrections(entries, entries + entryCount);
+
+				clientWorld->Spawn([corrections](Registry* reg)
+				{
+					ReplicationSystem::HandleStateCorrections(
+						reg, corrections.data(), static_cast<uint32_t>(corrections.size()));
+				});
+				break;
+			}
+
+		case NetMessageType::ConnectionHandshake:
 		case NetMessageType::EntityDestroy:
 			{
-				// TODO: Phase 4+ message handling
+				// TODO: Not yet implemented
 				break;
 			}
 

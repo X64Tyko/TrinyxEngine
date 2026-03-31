@@ -87,6 +87,10 @@ public:
 	GNSContext* GetGNSContext() const { return const_cast<GNSContext*>(&GNS); }
 	NetThread* GetNetThread() const { return Net.get(); }
 
+	/// Lazy-init GNS + NetThread if not already active.
+	/// Used by editor PIE to enable networking from Standalone mode.
+	bool EnsureNetworking();
+
 private:
 #ifdef TNX_ENABLE_EDITOR
 	friend class EditorContext;

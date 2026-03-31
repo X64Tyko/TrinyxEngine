@@ -101,6 +101,9 @@ public:
 	// Reverse lookup: cache slot → record (read-only copy). Returns invalid record if not found.
 	EntityRecord GetRecordByCache(EntityCacheHandle cacheHandle) const;
 
+	// Lookup: EntityHandle → record (read-only copy). Returns invalid record if not found.
+	EntityRecord GetRecord(EntityHandle handle) const;
+
 	// Reverse lookup: cache slot → GHandle. Returns default GlobalEntityHandle() if not found.
 	GlobalEntityHandle FindEntityByLocation(EntityCacheHandle cacheHandle) const;
 
@@ -113,6 +116,7 @@ public:
 private:
 	friend class Archetype;
 	friend class LogicThread;
+	friend class ReplicationSystem;
 	friend struct EntityBuilder;
 	friend struct EntityRecord;
 	friend struct EntityArchive;

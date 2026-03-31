@@ -10,6 +10,7 @@ union SDL_Event;
 class EditorContext;
 class TrinyxEngine;
 struct ImGuiEventQueue;
+struct WorldViewport;
 
 // -----------------------------------------------------------------------
 // EditorRenderer — RendererCore + ImGui / editor overlay.
@@ -32,6 +33,12 @@ public:
 	bool EditorOwnsKeyboard() const { return bEditorOwnsKeyboard.load(std::memory_order_relaxed); }
 	void SetEditorOwnsKeyboard(bool owns) { bEditorOwnsKeyboard.store(owns, std::memory_order_relaxed); }
 
+	// ── Multi-viewport (PIE) ────────────────────────────────────────────
+	void AddViewport(WorldViewport* vp);
+	void RemoveViewport(WorldViewport* vp);
+	void AllocateViewportResources(WorldViewport* vp, uint32_t width, uint32_t height);
+	void FreeViewportResources(WorldViewport* vp);
+
 private:
 	friend class RendererCore<EditorRenderer>;
 
@@ -40,12 +47,20 @@ private:
 	void OnShutdown();
 	void OnPreRecord();
 	void RecordOverlay(VkCommandBuffer cmd);
+	void UpdateViewportSlabs();
+	void RecordFrame(FrameSync& frame, uint32_t imageIndex);
 
 	// ImGui lifecycle
 	bool InitImGui();
 	void ShutdownImGui();
 	void DrainImGuiEvents();
 	void BuildImGuiFrame();
+
+	// PIE viewport rendering
+	void WriteToViewportSlab(WorldViewport* vp);
+	void FillGpuFrameDataForViewport(WorldViewport* vp, FrameSync& frame);
+	void RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& frame, WorldViewport* vp);
+	void RecordPIEFrame(FrameSync& frame, uint32_t imageIndex);
 
 	// Editor-specific state
 	VkDescriptorPool ImGuiDescriptorPool = VK_NULL_HANDLE;
@@ -54,4 +69,7 @@ private:
 	EditorContext* Editor                = nullptr;
 	TrinyxEngine* EnginePtr              = nullptr;
 	std::atomic<bool> bEditorOwnsKeyboard{true};
+
+	// Multi-viewport state
+	std::vector<WorldViewport*> ActiveViewports;
 };

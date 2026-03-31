@@ -380,6 +380,14 @@ EntityRecord Registry::GetRecordByCache(EntityCacheHandle cacheHandle) const
 	return record;
 }
 
+EntityRecord Registry::GetRecord(EntityHandle handle) const
+{
+	GlobalEntityHandle gHandle = GlobalEntityRegistry.LookupGlobalHandle(handle);
+	EntityRecord record        = GlobalEntityRegistry.Records[gHandle.GetIndex()];
+	if (!record.IsValid() || record.GetGeneration() != gHandle.GetGeneration()) return EntityRecord{};
+	return record;
+}
+
 GlobalEntityHandle Registry::FindEntityByLocation(EntityCacheHandle cacheHandle) const
 {
 	GlobalEntityHandle gHandle = GlobalEntityRegistry.LookupGlobalHandle(cacheHandle);

@@ -10,6 +10,7 @@
 // Forward declarations
 class GNSContext;
 class NetConnectionManager;
+class ReplicationSystem;
 class World;
 struct InputBuffer;
 struct EngineConfig;
@@ -72,6 +73,10 @@ public:
 	/// Access the connection manager (for server Listen / client Connect).
 	NetConnectionManager* GetConnectionManager() { return ConnectionMgr.get(); }
 
+	/// Attach a server-side replication system. Called during PIE setup.
+	/// NetThread does NOT own this pointer — caller manages lifetime.
+	void SetReplicationSystem(ReplicationSystem* repl) { Replicator = repl; }
+
 	// FPS tracking
 	float GetNetFPS() const { return NetFPS.load(std::memory_order_relaxed); }
 	float GetNetFrameMs() const { return NetFrameMs.load(std::memory_order_relaxed); }
@@ -80,8 +85,9 @@ private:
 	void ThreadMain();
 	void RouteMessage(const struct ReceivedMessage& msg);
 
-	GNSContext* GNS            = nullptr;
-	const EngineConfig* Config = nullptr;
+	GNSContext* GNS               = nullptr;
+	const EngineConfig* Config    = nullptr;
+	ReplicationSystem* Replicator = nullptr;
 
 	std::unique_ptr<NetConnectionManager> ConnectionMgr;
 
