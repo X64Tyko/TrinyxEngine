@@ -1417,7 +1417,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 					uint64_t bits = dirtyPlane[w];
 					while (bits)
 					{
-						uint32_t bit = __builtin_ctzll(bits);
+						uint32_t bit = TNX_CTZ64(bits);
 						uint32_t idx = w * 64 + bit;
 						std::memcpy(dst + idx * sizeof(float), src + idx * sizeof(float), sizeof(float));
 						bits &= bits - 1;

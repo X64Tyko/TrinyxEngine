@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include "VulkanMemory.h"
+#include "RendererCore.h" // MaxFramesInFlight
 
 class World;
 
@@ -36,7 +37,10 @@ struct WorldViewport
 	VkDescriptorSet ImGuiTexture = VK_NULL_HANDLE; // For ImGui::Image()
 
 	// ── Per-viewport GpuFrameData (written by CPU, read by GPU via BDA) ─
-	VulkanBuffer GpuData;
+	// One buffer per FrameSync slot — prevents the CPU from overwriting
+	// slot N's GpuData while the GPU is still executing slot N-1 (which
+	// reads from the same buffer via BDA push constant).
+	VulkanBuffer GpuData[MaxFramesInFlight];
 
 	// ── Per-world field slabs (same count as main renderer) ─────────────
 	VulkanBuffer FieldSlabs[kViewportSlabCount];

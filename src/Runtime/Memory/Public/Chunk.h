@@ -14,7 +14,7 @@ struct Chunk
 	struct ChunkHeader
 	{
 		uint8_t FieldCount     = 0;        // Number of fields used
-		size_t CacheIndexStart = -1;       // The cache index for entities in this chunk -1 for no cache ID.
+		size_t CacheIndexStart = SIZE_MAX;       // The cache index for entities in this chunk SIZE_MAX for no cache ID.
 		void* FieldPtrs[MAX_CHUNK_FIELDS]; // Absolute pointers to frame 0 data
 	};
 

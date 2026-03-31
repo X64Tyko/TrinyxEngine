@@ -4,25 +4,25 @@
 			"uuid": 250561460025856.0,
 			"path": "SuperCube.prefab",
 			"type": 9.0,
-			"contentHash": 8.7755457743843297e+18
+			"contentHash": 1.4712376527175553e+19
 		},
 		{
 			"uuid": 244158004430592.0,
 			"path": "PhysicsPlayground.tnxscene",
 			"type": 8.0,
-			"contentHash": 1.1496185340112259e+18
+			"contentHash": 1.5819611441617074e+19
 		},
 		{
 			"uuid": 229137973718528.0,
 			"path": "MeshProp.prefab",
 			"type": 9.0,
-			"contentHash": 4.1942209795003228e+18
+			"contentHash": 1.6341901648916427e+19
 		},
 		{
 			"uuid": 103459177478656.0,
 			"path": "TestScene.tnxscene",
 			"type": 8.0,
-			"contentHash": 7.8163638047339848e+18
+			"contentHash": 5.2735016672819016e+18
 		},
 		{
 			"uuid": 33210079600128.0,

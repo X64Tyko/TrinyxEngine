@@ -224,6 +224,17 @@ void EditorRenderer::BuildImGuiFrame()
 {
 	DrainImGuiEvents();
 
+	// Process deferred PIE stop before opening a new ImGui frame.
+	// This runs one frame after bPIEStopRequested was set, ensuring the
+	// frame that emitted ImGui::Image() calls for the viewport textures has
+	// been fully recorded and submitted. StopPIE calls WaitForGPU() so the
+	// descriptor sets are only freed once the GPU is no longer referencing them.
+	if (Editor && Editor->bPIEStopRequested)
+	{
+		Editor->bPIEStopRequested = false;
+		Editor->StopPIE();
+	}
+
 	ImGui_ImplVulkan_NewFrame();
 	ImGui_ImplSDL3_NewFrame();
 	ImGui::NewFrame();
@@ -232,14 +243,6 @@ void EditorRenderer::BuildImGuiFrame()
 	if (Editor) Editor->BuildFrame();
 
 	ImGui::Render();
-
-	// Process deferred PIE stop after the ImGui frame is finalized —
-	// safe to free descriptor sets and images now.
-	if (Editor && Editor->bPIEStopRequested)
-	{
-		Editor->bPIEStopRequested = false;
-		Editor->StopPIE();
-	}
 }
 
 // -----------------------------------------------------------------------
@@ -298,12 +301,16 @@ void EditorRenderer::AllocateViewportResources(WorldViewport* vp, uint32_t width
 			true);
 	}
 
-	// Per-viewport GpuFrameData buffer (written by CPU, read by GPU via BDA push constant)
-	vp->GpuData = VkMem->AllocateBuffer(
-		sizeof(GpuFrameData),
-		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-		GpuMemoryDomain::PersistentMapped,
-		true);
+	// Per-viewport GpuFrameData buffers — one per FrameSync slot to avoid
+	// overwriting slot N's data while the GPU is still executing slot N-1.
+	for (auto& gd : vp->GpuData)
+	{
+		gd = VkMem->AllocateBuffer(
+			sizeof(GpuFrameData),
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+			GpuMemoryDomain::PersistentMapped,
+			true);
+	}
 
 	// Dirty tracking
 	vp->AllocateDirtyPlanes(DirtyWordCount);
@@ -338,7 +345,7 @@ void EditorRenderer::FreeViewportResources(WorldViewport* vp)
 
 	// Free field slabs and GpuData
 	for (auto& slab : vp->FieldSlabs) slab.Free();
-	vp->GpuData.Free();
+	for (auto& gd : vp->GpuData) gd.Free();
 
 	// Free offscreen images
 	vp->ColorTarget.Free();
@@ -486,7 +493,7 @@ static void MultMat4(float* out, const float* A, const float* B)
 
 void EditorRenderer::FillGpuFrameDataForViewport(WorldViewport* vp, FrameSync& frame)
 {
-	auto* data = static_cast<GpuFrameData*>(vp->GpuData.MappedPtr);
+	auto* data = static_cast<GpuFrameData*>(vp->GpuData[CurrentFrame].MappedPtr);
 	std::memset(data, 0, sizeof(GpuFrameData));
 
 	// ViewProj from viewport's world — use the same read frame that WriteToViewportSlab captured
@@ -582,7 +589,7 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 
 	// Compute dispatches — same pipelines, viewport's GpuData address
 	{
-		const uint64_t gpuDataAddr = vp->GpuData.DeviceAddr;
+		const uint64_t gpuDataAddr = vp->GpuData[CurrentFrame].DeviceAddr;
 		const uint32_t entityCount = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
 		const uint32_t dispatchX   = (entityCount + 63u) / 64u;
 
