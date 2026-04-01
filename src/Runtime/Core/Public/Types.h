@@ -62,6 +62,14 @@ enum class CacheTier : uint8_t
 	MAX
 };
 
+// Simulation scalar type — float by default, swappable to Fixed32 for
+// bit-identical determinism via TNX_DETERMINISTIC build flag.
+#if TNX_DETERMINISTIC
+using SimFloat = Fixed32;
+#else
+using SimFloat = float;
+#endif
+
 template <template <FieldWidth> class Derived, FieldWidth WIDTH = FieldWidth::Scalar>
 using MaskTemplate = Derived<WIDTH>;
 
@@ -162,7 +170,7 @@ union EntityID
 {
 	uint64_t Value;
 
-	// Bitfield layout
+// Bitfield layout
 	struct
 	{
 		uint64_t Index      : 20; // 1 Million entities (array slot)

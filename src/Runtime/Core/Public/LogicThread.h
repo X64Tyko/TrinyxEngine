@@ -2,10 +2,12 @@
 #include <thread>
 #include <atomic>
 
+#include "ConstructBatch.h"
 #include "Registry.h"
 #include "Types.h"
 
 // Forward declarations
+class ConstructRegistry;
 class Registry;
 class JoltPhysics;
 class SpawnSync;
@@ -35,6 +37,7 @@ public:
 	void Join();
 
 	bool IsRunning() const { return bIsRunning.load(std::memory_order_relaxed); }
+	void SetConstructRegistry(ConstructRegistry* cr) { ConstructsPtr = cr; }
 
 	// Simulation pause — when paused, camera/input/frame publishing still run
 	// but PrePhysics/PostPhysics/ScalarUpdate/physics are skipped.
@@ -57,6 +60,11 @@ public:
 	float GetFixedFPS() const { return FixedFPS.load(std::memory_order_relaxed); }
 	float GetFixedFrameMs() const { return FixedFrameMs.load(std::memory_order_relaxed); }
 
+	// Construct scalar tick batches — executed after the corresponding wide entity sweeps
+	ConstructBatch ScalarPrePhysicsBatch;
+	ConstructBatch ScalarPostPhysicsBatch;
+	ConstructBatch ScalarUpdateBatch;
+
 #ifdef TNX_ENABLE_ROLLBACK
 	// Called from Sentinel thread (PumpEvents) on F5 press.
 	void RequestRollbackTest() { bRollbackTestRequested.store(true, std::memory_order_release); }
@@ -66,11 +74,11 @@ private:
 	void ThreadMain(); // Thread entry point
 
 	// Lifecycle Methods
-	void ProcessSimInput(double dt); // Swap input buffer, update camera from WASD + mouse
-	void ProcessVizInput(double dt); // Swap FizInput buffer, update camera from WASD + mouse
-	void ScalarUpdate(double dt);    // Variable update (runs every frame)
-	void PrePhysics(double dt);      // Fixed update at FixedUpdateHz
-	void PostPhysics(double dt);     // Fixed update at FixedUpdateHz
+	void ProcessSimInput(SimFloat dt); // Swap input buffer, update camera from WASD + mouse
+	void ProcessVizInput(SimFloat dt); // Swap FizInput buffer, update camera from WASD + mouse
+	void ScalarUpdate(SimFloat dt);    // Variable update (runs every frame)
+	void PrePhysics(SimFloat dt);      // Fixed update at FixedUpdateHz
+	void PostPhysics(SimFloat dt);     // Fixed update at FixedUpdateHz
 
 	void PublishCompletedFrame(); // Publish last written frame number to mailbox
 	void WaitForTiming(uint64_t frameStart, uint64_t perfFrequency);
@@ -81,6 +89,7 @@ private:
 	const EngineConfig* ConfigPtr           = nullptr;
 	JoltPhysics* PhysicsPtr                 = nullptr;
 	class ComponentCacheBase* TemporalCache = nullptr;
+	ConstructRegistry* ConstructsPtr        = nullptr;
 	SpawnSync* SpawnerPtr                   = nullptr;
 	const std::atomic<bool>* JobsInitPtr    = nullptr;
 
@@ -143,21 +152,21 @@ private:
 #endif // TNX_ENABLE_ROLLBACK
 };
 
-inline void LogicThread::PrePhysics(double dt)
+inline void LogicThread::PrePhysics(SimFloat dt)
 {
 	TNX_ZONE_N("Logic_FixedUpdate");
 
 	RegistryPtr->InvokePrePhys(dt);
 }
 
-inline void LogicThread::ScalarUpdate(double dt)
+inline void LogicThread::ScalarUpdate(SimFloat dt)
 {
 	TNX_ZONE_N("Logic_Update");
 
 	RegistryPtr->InvokeScalarUpdate(dt);
 }
 
-inline void LogicThread::PostPhysics(double dt)
+inline void LogicThread::PostPhysics(SimFloat dt)
 {
 	TNX_ZONE_N("Logic_FixedUpdate");
 

@@ -39,6 +39,7 @@ bool World::Initialize(const EngineConfig& config, int windowWidth, int windowHe
 	Logic->Initialize(RegistryPtr.get(), &Config, Physics.get(),
 					  &SimInput, &VizInput, &Spawner, &bJobsInitialized,
 					  windowWidth, windowHeight);
+	Logic->SetConstructRegistry(&Constructs);
 
 	LOG_INFO("[World] Initialized");
 	return true;
@@ -65,6 +66,10 @@ void World::Shutdown()
 	Join();
 
 	// Destroy in reverse order of creation.
+	// Constructs must be torn down before Registry — their Views
+	// unbind defrag callbacks and destroy entities during shutdown.
+	Constructs.DestroyAll();
+
 	Logic.reset();
 	Physics.reset();
 	RegistryPtr.reset();

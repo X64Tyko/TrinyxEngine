@@ -23,7 +23,7 @@ public:
 	MeshRef<WIDTH> mesh;
 	JoltBody<WIDTH> physBody;
 
-	FORCE_INLINE void PrePhysics([[maybe_unused]] double dt)
+	FORCE_INLINE void PrePhysics([[maybe_unused]] SimFloat dt)
 	{
 	}
 };

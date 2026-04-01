@@ -79,9 +79,9 @@ public:
 
 	// --- Lifecycle dispatch (Brain thread) ---
 
-	void InvokeScalarUpdate(double dt);
-	void InvokePrePhys(double dt);
-	void InvokePostPhys(double dt);
+	void InvokeScalarUpdate(SimFloat dt);
+	void InvokePrePhys(SimFloat dt);
+	void InvokePostPhys(SimFloat dt);
 
 	// --- Slab accessors (used by LogicThread/RenderThread at init time) ---
 
@@ -103,6 +103,23 @@ public:
 
 	// Lookup: EntityHandle → record (read-only copy). Returns invalid record if not found.
 	EntityRecord GetRecord(EntityHandle handle) const;
+
+	// Bind/unbind a callback on an entity's OnCacheSlotChange (defrag listener).
+	template <typename T, void(T::*MemFn)(uint32_t, uint32_t)>
+	void BindOnCacheSlotChange(EntityHandle handle, T* obj)
+	{
+		GlobalEntityHandle gHandle = GlobalEntityRegistry.LookupGlobalHandle(handle);
+		EntityRecord* record       = GlobalEntityRegistry.Records[gHandle.GetIndex()];
+		if (record) record->OnCacheSlotChange.template Bind<T, MemFn>(obj);
+	}
+
+	template <typename T, void(T::*MemFn)(uint32_t, uint32_t)>
+	void UnbindOnCacheSlotChange(EntityHandle handle, T* obj)
+	{
+		GlobalEntityHandle gHandle = GlobalEntityRegistry.LookupGlobalHandle(handle);
+		EntityRecord* record       = GlobalEntityRegistry.Records[gHandle.GetIndex()];
+		if (record) record->OnCacheSlotChange.template Unbind<T, MemFn>(obj);
+	}
 
 	// Reverse lookup: cache slot → GHandle. Returns default GlobalEntityHandle() if not found.
 	GlobalEntityHandle FindEntityByLocation(EntityCacheHandle cacheHandle) const;
@@ -313,7 +330,7 @@ std::vector<Archetype*> Registry::ClassQuery()
 	return Results;
 }
 
-inline void Registry::InvokeScalarUpdate(double dt)
+inline void Registry::InvokeScalarUpdate(SimFloat dt)
 {
 	TNX_ZONE_C(TNX_COLOR_LOGIC);
 
@@ -370,7 +387,7 @@ inline void Registry::InvokeScalarUpdate(double dt)
 	VolatileSlab.UnlockFrameWrite();
 }
 
-inline void Registry::InvokePrePhys(double dt)
+inline void Registry::InvokePrePhys(SimFloat dt)
 {
 	TNX_ZONE_C(TNX_COLOR_LOGIC);
 
@@ -428,7 +445,7 @@ inline void Registry::InvokePrePhys(double dt)
 	VolatileSlab.UnlockFrameWrite();
 }
 
-inline void Registry::InvokePostPhys(double dt)
+inline void Registry::InvokePostPhys(SimFloat dt)
 {
 	TNX_ZONE_C(TNX_COLOR_LOGIC);
 

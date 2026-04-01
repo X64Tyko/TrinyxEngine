@@ -23,16 +23,14 @@ public:
 	ColorData<WIDTH> color;
 	MeshRef<WIDTH> mesh;
 
-	FORCE_INLINE void PrePhysics(double dt)
+	FORCE_INLINE void PrePhysics(SimFloat dt)
 	{
-		const float fdt = static_cast<float>(dt);
-
 		// Gentle idle rotation
-		transform.Rotation.RotateY(fdt * 0.3f);
-		transform.Rotation.RotateZ(fdt * 0.1f);
+		transform.Rotation.RotateY(dt * 0.3f);
+		transform.Rotation.RotateZ(dt * 0.1f);
 
 		// Slow color breathe
-		color.R = (color.R + fdt * 0.15f > 1.0f).Choose(0.0f, color.R + fdt * 0.15f);
+		color.R = (color.R + dt * 0.15f > 1.0f).Choose(0.0f, color.R + dt * 0.15f);
 	}
 };
 

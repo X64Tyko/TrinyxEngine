@@ -10,7 +10,7 @@ class Registry;
 class Archetype;
 struct Chunk;
 
-DEFINE_FIXED_MULTICALLBACK(EntityCacheSlotChange, 6, uint32_t, uint32_t)
+DEFINE_FIXED_MULTICALLBACK(EntityCacheSlotChange, 64, uint32_t, uint32_t)
 
 // Handle ID, maps the owner and an index into a Handle array to easily look up entities.
 // Handles are held in OOP land by Constructs to reference various entities.

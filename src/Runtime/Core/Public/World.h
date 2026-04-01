@@ -2,6 +2,7 @@
 #include <memory>
 #include <functional>
 
+#include "ConstructRegistry.h"
 #include "EngineConfig.h"
 #include "Input.h"
 #include "SpawnSync.h"
@@ -65,6 +66,7 @@ public:
 	InputBuffer* GetVizInput() { return &VizInput; }
 	const EngineConfig& GetConfig() const { return Config; }
 	EngineConfig& GetConfigMut() { return Config; }
+	ConstructRegistry* GetConstructRegistry() { return &Constructs; }
 
 	/// Set by engine after jobs are initialized. LogicThread polls this.
 	void SetJobsInitialized(bool v) { bJobsInitialized.store(v, std::memory_order_release); }
@@ -85,5 +87,6 @@ private:
 	InputBuffer VizInput;
 	SpawnSync Spawner;
 
+	ConstructRegistry Constructs;
 	std::atomic<bool> bJobsInitialized{false};
 };

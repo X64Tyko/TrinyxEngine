@@ -46,6 +46,9 @@ public:
 	/// Register the built-in cube mesh as slot 0.
 	uint32_t RegisterBuiltinCube();
 
+	/// Register a built-in capsule mesh (two hemispheres + cylinder body).
+	uint32_t RegisterBuiltinCapsule(float radius, float halfHeight, uint32_t segments);
+
 	uint64_t GetVertexBufferAddr() const { return VertexMegaBuffer.DeviceAddr; }
 	VkBuffer GetIndexBufferHandle() const { return static_cast<VkBuffer>(IndexMegaBuffer.Buffer); }
 	uint64_t GetMeshTableAddr() const { return MeshTableBuffer.DeviceAddr; }

@@ -22,7 +22,7 @@ public:
 	ColorData<WIDTH> color;
 	MeshRef<WIDTH> mesh;
 
-	FORCE_INLINE void PrePhysics([[maybe_unused]] double dt)
+	FORCE_INLINE void PrePhysics([[maybe_unused]] SimFloat dt)
 	{
 	}
 };
@@ -35,7 +35,7 @@ class CubeEntity : public BaseCube<CubeEntity, WIDTH>
 public:
 	JoltBody<WIDTH> physBody;
 
-	FORCE_INLINE void PrePhysics([[maybe_unused]] double dt)
+	FORCE_INLINE void PrePhysics([[maybe_unused]] SimFloat dt)
 	{
 	}
 };
@@ -53,9 +53,9 @@ public:
 	using Base::mesh;
 
 	// Logic
-	FORCE_INLINE void ScalarUpdate([[maybe_unused]] double dt)
+	FORCE_INLINE void ScalarUpdate([[maybe_unused]] SimFloat dt)
 	{
-		color.R = (color.R + (static_cast<float>(dt) * 0.5f) > 1.f) ? 0.f : color.R + (static_cast<float>(dt) * 0.5f);
-		color.B = ((color.B + static_cast<float>(dt)) > 1.f) ? 0.f : color.B + static_cast<float>(dt);
+		color.R = (color.R + (dt * 0.5f) > 1.f) ? 0.f : color.R + (dt * 0.5f);
+		color.B = ((color.B + dt) > 1.f) ? 0.f : color.B + dt;
 	}
 };

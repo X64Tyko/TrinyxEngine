@@ -22,13 +22,11 @@ public:
 	RigidBody<WIDTH> body;
 	ColorData<WIDTH> color;
 
-	FORCE_INLINE void PrePhysics(double dt)
+	FORCE_INLINE void PrePhysics(SimFloat dt)
 	{
-		const float fdt = static_cast<float>(dt);
-
-		transform.PosX += body.VelX * fdt;
-		transform.PosY += body.VelY * fdt;
-		transform.PosZ += body.VelZ * fdt;
+		transform.PosX += body.VelX * dt;
+		transform.PosY += body.VelY * dt;
+		transform.PosZ += body.VelZ * dt;
 
 		// Simple drag
 		body.VelX *= 0.999f;

@@ -20,18 +20,16 @@ public:
 	ColorData<WIDTH> color;
 
 	// Lifecycle hooks
-	FORCE_INLINE void PrePhysics([[maybe_unused]] double dt)
+	FORCE_INLINE void PrePhysics([[maybe_unused]] SimFloat dt)
 	{
-		const float fdt = static_cast<float>(dt);
-
-		transform.Position += velocity.Vel * fdt;
+		transform.Position += velocity.Vel * dt;
 		transform.PosX     = (transform.PosX > 50.f).Choose(-50.f, transform.PosX);
 
 		velocity.vX *= 0.98f;
 		velocity.vY *= 0.99f;
 
-		transform.Rotation.RotateY(fdt * 0.2f);
-		transform.Rotation.RotateZ(fdt * 0.4f);
+		transform.Rotation.RotateY(dt * 0.2f);
+		transform.Rotation.RotateZ(dt * 0.4f);
 	}
 };
 
@@ -44,7 +42,7 @@ public:
 	JoltBody<WIDTH> physBody;
 
 	// Logic
-	FORCE_INLINE void PrePhysics([[maybe_unused]] double dt)
+	FORCE_INLINE void PrePhysics([[maybe_unused]] SimFloat dt)
 	{
 	}
 };
@@ -60,9 +58,9 @@ public:
 	using Base::color;
 
 	// Logic
-	FORCE_INLINE void ScalarUpdate([[maybe_unused]] double dt)
+	FORCE_INLINE void ScalarUpdate([[maybe_unused]] SimFloat dt)
 	{
-		color.R = (color.R + (static_cast<float>(dt) * 0.5f) > 1.f) ? 0.f : color.R + (static_cast<float>(dt) * 0.5f);
-		color.B = ((color.B + static_cast<float>(dt)) > 1.f) ? 0.f : color.B + static_cast<float>(dt);
+		color.R = (color.R + (dt * 0.5f) > 1.f) ? 0.f : color.R + (dt * 0.5f);
+		color.B = ((color.B + dt) > 1.f) ? 0.f : color.B + dt;
 	}
 };

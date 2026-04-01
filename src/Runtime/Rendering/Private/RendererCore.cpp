@@ -1205,7 +1205,15 @@ bool RendererCore<Derived>::CreateMeshBuffers()
 		return false;
 	}
 
-	LOG_INFO_F("[Renderer] MeshManager ready — cube at slot %u", cubeSlot);
+	uint32_t capsuleSlot = Meshes.RegisterBuiltinCapsule(0.4f, 0.9f, 16);
+	if (capsuleSlot == UINT32_MAX)
+	{
+		LOG_ERROR("[Renderer] Failed to register built-in capsule mesh");
+		return false;
+	}
+
+	LOG_INFO_F("[Renderer] MeshManager ready — cube at slot %u, capsule at slot %u",
+			   cubeSlot, capsuleSlot);
 	return true;
 }
 

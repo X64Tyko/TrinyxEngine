@@ -1,20 +1,20 @@
 # -----------------------------------------------------------------------------
-# Game - Demo Application
+# Playground - Network Playtest Application
 # -----------------------------------------------------------------------------
-project(Game VERSION 0.1 LANGUAGES CXX)
+project(Playground VERSION 0.1 LANGUAGES CXX)
 
 # -----------------------------------------------------------------------------
 # SOURCE MANAGEMENT
 # -----------------------------------------------------------------------------
-file(GLOB_RECURSE GAME_SOURCES "src/*.cpp")
-file(GLOB_RECURSE GAME_HEADERS "src/*.h")
+file(GLOB_RECURSE PLAYGROUND_SOURCES "src/*.cpp")
+file(GLOB_RECURSE PLAYGROUND_HEADERS "src/*.h")
 
 # -----------------------------------------------------------------------------
 # EXECUTABLE DEFINITION
 # -----------------------------------------------------------------------------
 add_executable(${PROJECT_NAME}
-        ${GAME_SOURCES}
-        ${GAME_HEADERS}
+        ${PLAYGROUND_SOURCES}
+        ${PLAYGROUND_HEADERS}
 )
 
 # -----------------------------------------------------------------------------
@@ -26,7 +26,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang>:-Wl,--no-whole-archive>
 )
 
-# Game-specific includes
+# Playground-specific includes
 target_include_directories(${PROJECT_NAME} PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )

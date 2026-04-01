@@ -1,4 +1,5 @@
 ﻿#include "LogicThread.h"
+#include "ConstructRegistry.h"
 #include "FramePacket.h"
 #include "Registry.h"
 #include "EngineConfig.h"
@@ -74,8 +75,8 @@ void LogicThread::ThreadMain()
 	const uint64_t perfFrequency = SDL_GetPerformanceFrequency();
 	uint64_t lastCounter         = SDL_GetPerformanceCounter();
 
-	// Cache config values
-	const double fixedStepTime = ConfigPtr->GetFixedStepTime();
+	// Cache config values — SimFloat is float by default, Fixed32 when TNX_DETERMINISTIC
+	const SimFloat fixedStepTime = static_cast<SimFloat>(ConfigPtr->GetFixedStepTime());
 
 	// Safety caps
 	constexpr double MaxDt              = 0.25;
@@ -97,6 +98,7 @@ void LogicThread::ThreadMain()
 		// spawn entities, freeze here and let it write to the current frame.
 		SpawnerPtr->SyncPoint();
 		RegistryPtr->ProcessDeferredDestructions();
+		if (ConstructsPtr) ConstructsPtr->ProcessDeferredDestructions();
 
 		// Measure delta time
 		const uint64_t frameStartCounter = SDL_GetPerformanceCounter();
@@ -113,8 +115,8 @@ void LogicThread::ThreadMain()
 		// so the scene is visible, but skip all simulation.
 		if (bSimPaused.load(std::memory_order_acquire))
 		{
-			ProcessSimInput(dt);
-			ProcessVizInput(dt);
+			ProcessSimInput(static_cast<SimFloat>(dt));
+			ProcessVizInput(static_cast<SimFloat>(dt));
 			PublishCompletedFrame();
 			RegistryPtr->PropagateFrame(FrameNumber++);
 
@@ -145,6 +147,7 @@ void LogicThread::ThreadMain()
 				RecordFrameInput();
 #endif
 				PrePhysics(fixedStepTime);
+				ScalarPrePhysicsBatch.Execute(fixedStepTime);
 
 				if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
 				{
@@ -165,6 +168,7 @@ void LogicThread::ThreadMain()
 				}
 
 				PostPhysics(fixedStepTime);
+				ScalarPostPhysicsBatch.Execute(fixedStepTime);
 				Accumulator.store(Accumulator.load(std::memory_order_relaxed) + fixedStepTime,
 								  std::memory_order_relaxed);
 				++steps;
@@ -191,7 +195,8 @@ void LogicThread::ThreadMain()
 		// Scalar update only if we're pretty sure we have time.
 		if (dt > Accumulator.load(std::memory_order_relaxed)) [[likely]]
 		{
-			ScalarUpdate(dt);
+			ScalarUpdate(static_cast<SimFloat>(dt));
+			ScalarUpdateBatch.Execute(static_cast<SimFloat>(dt));
 			TrackFPS();
 		}
 
@@ -203,12 +208,12 @@ void LogicThread::ThreadMain()
 	}
 }
 
-void LogicThread::ProcessSimInput(double dt)
+void LogicThread::ProcessSimInput(SimFloat dt)
 {
 	SimInput->Swap();
 }
 
-void LogicThread::ProcessVizInput(double dt)
+void LogicThread::ProcessVizInput(SimFloat dt)
 {
 	VizInput->Swap();
 
@@ -541,6 +546,7 @@ void LogicThread::ExecuteRollbackTest()
 		{
 			InjectFrameInput(FrameNumber);
 			PrePhysics(fixedStepTime);
+			ScalarPrePhysicsBatch.Execute(fixedStepTime);
 
 			if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
 			{
@@ -554,6 +560,7 @@ void LogicThread::ExecuteRollbackTest()
 			}
 
 			PostPhysics(fixedStepTime);
+			ScalarPostPhysicsBatch.Execute(fixedStepTime);
 			SimulationTime += fixedStepTime;
 
 			RegistryPtr->PropagateFrame(FrameNumber++);

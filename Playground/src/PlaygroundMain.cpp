@@ -7,17 +7,18 @@
 #include <string>
 
 // ---------------------------------------------------------------------------
-// DemoGame — loads a scene file from content/ via EntityBuilder.
+// Playground — network playtest application.
+// Loads scene from content/ in non-editor builds.
 // ---------------------------------------------------------------------------
-class DemoGame : public GameManager<DemoGame>
+class PlaygroundGame : public GameManager<PlaygroundGame>
 {
 public:
-	const char* GetWindowTitle() const { return "Trinyx Demo"; }
+	const char* GetWindowTitle() const { return "Trinyx Playground"; }
 
 	bool PostInitialize(TrinyxEngine& engine)
 	{
 		(void)engine;
-		LOG_INFO("DemoGame initialized");
+		LOG_INFO("Playground initialized");
 		return true;
 	}
 
@@ -42,4 +43,4 @@ public:
 	}
 };
 
-TNX_IMPLEMENT_GAME(DemoGame)
+TNX_IMPLEMENT_GAME(PlaygroundGame)

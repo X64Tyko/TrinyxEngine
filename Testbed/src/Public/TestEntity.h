@@ -16,7 +16,7 @@ public:
 	TransRot<WIDTH> transform;
 	Velocity<WIDTH> velocity;
 
-	FORCE_INLINE void PrePhysics([[maybe_unused]] double dt)
+	FORCE_INLINE void PrePhysics([[maybe_unused]] SimFloat dt)
 	{
 		transform.PosX += velocity.vX;
 	}

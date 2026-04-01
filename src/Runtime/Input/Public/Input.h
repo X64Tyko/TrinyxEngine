@@ -14,6 +14,8 @@ enum class Action : uint8_t
 	MoveRight,
 	MoveUp,
 	MoveDown,
+	Fire,
+	ToggleCamera,
 	Count
 };
 

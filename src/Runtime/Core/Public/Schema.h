@@ -14,16 +14,16 @@ enum class SystemID : uint8_t;
 // Helper concept to detect if T has a specific method
 template <typename T> concept HasOnCreate = requires(T t) { t.OnCreate(); };
 template <typename T> concept HasOnDestroy = requires(T t) { t.OnDestroy(); };
-template <typename T> concept HasScalarUpdate = requires(T t, double dt) { t.ScalarUpdate(dt); };
-template <typename T> concept HasPrePhysics = requires(T t, double dt) { t.PrePhysics(dt); };
-template <typename T> concept HasPostPhysics = requires(T t, double dt) { t.PostPhysics(dt); };
+template <typename T> concept HasScalarUpdate = requires(T t, SimFloat dt) { t.ScalarUpdate(dt); };
+template <typename T> concept HasPrePhysics = requires(T t, SimFloat dt) { t.PrePhysics(dt); };
+template <typename T> concept HasPostPhysics = requires(T t, SimFloat dt) { t.PostPhysics(dt); };
 template <typename T> concept HasOnActivate = requires(T t) { t.OnActivate(); };
 template <typename T> concept HasOnDeactivate = requires(T t) { t.OnDeactivate(); };
 template <typename T> concept HasOnCollide = requires(T t) { t.OnCollide(); };
 template <typename T> concept HasDefineSchema = requires(T t) { t.DefineSchema(); };
 template <typename T> concept HasDefineFields = requires(T t) { t.DefineFields(); };
 
-using UpdateFunc = void(*)(double, void**, void*, uint32_t);
+using UpdateFunc = void(*)(SimFloat, void**, void*, uint32_t);
 
 #define REGISTER_ENTITY_PREPHYS(Type, ClassID) \
     case ClassID: InvokePrePhysicsImpl<Type>(dt, fieldArrayTable, componentCount); break;
@@ -62,7 +62,7 @@ struct EntityMeta
 };
 
 template <typename T>
-FORCE_INLINE void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
+FORCE_INLINE void InvokePrePhysicsImpl(SimFloat dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
 {
 	alignas(32) typename T::WideType viewBatch;
 
@@ -86,7 +86,7 @@ FORCE_INLINE void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, void* 
 }
 
 template <typename T>
-FORCE_INLINE void InvokeScalarUpdateImpl(double dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
+FORCE_INLINE void InvokeScalarUpdateImpl(SimFloat dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
 {
 	// Use Scalar for the update, this is where users can cross-reference entities and do non-SIMD things.
 	alignas(32) T viewBatch;
@@ -102,7 +102,7 @@ FORCE_INLINE void InvokeScalarUpdateImpl(double dt, void** fieldArrayTable, void
 }
 
 template <typename T>
-FORCE_INLINE void InvokePostPhysicsImpl(double dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
+FORCE_INLINE void InvokePostPhysicsImpl(SimFloat dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
 {
 	alignas(32) typename T::WideType viewBatch;
 

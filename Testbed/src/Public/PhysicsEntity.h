@@ -25,18 +25,16 @@ public:
 
 	static constexpr float Gravity = -9.81f;
 
-	FORCE_INLINE void PrePhysics(double dt)
+	FORCE_INLINE void PrePhysics(SimFloat dt)
 	{
-		const float fdt = static_cast<float>(dt);
-
 		// Accumulate gravity
 		forces.ForceY += body.VelY * 0.0f; // placeholder — Jolt will own this path
-		body.VelY     += Gravity * fdt;
+		body.VelY     += Gravity * dt;
 
 		// Integrate velocity into position
-		transform.PosX += body.VelX * fdt;
-		transform.PosY += body.VelY * fdt;
-		transform.PosZ += body.VelZ * fdt;
+		transform.PosX += body.VelX * dt;
+		transform.PosY += body.VelY * dt;
+		transform.PosZ += body.VelZ * dt;
 
 		// Simple floor bounce at Y = -50
 		body.VelY      = (transform.PosY < -50.0f).Choose(-body.VelY * 0.7f, body.VelY);
@@ -48,7 +46,7 @@ public:
 		color.G           = 1.0f - color.R;
 	}
 
-	FORCE_INLINE void PostPhysics([[maybe_unused]] double dt)
+	FORCE_INLINE void PostPhysics([[maybe_unused]] SimFloat dt)
 	{
 		forces.ForceX  = 0.0f;
 		forces.ForceY  = 0.0f;

@@ -17,6 +17,7 @@
 #include "NetThread.h"
 #include "World.h"
 #include "Input.h"
+#include "Public/PlayerConstruct.h"
 
 using namespace tnx::Testing;
 
@@ -689,6 +690,22 @@ RUNTIME_TEST(Runtime_EntityCountValid)
 	size_t totalEntities = Reg->GetTotalEntityCount();
 	LOG_ALWAYS_F("[RuntimeTest] Total entities alive: %zu", totalEntities);
 	ASSERT(totalEntities > 0);
+}
+
+// ---------------------------------------------------------------------------
+// PlayerConstruct — Proves the full Construct/View stack end-to-end.
+// Creates a PlayerConstruct with a DefaultView capsule entity.
+// ScalarUpdate oscillates position and pulses color.
+// ---------------------------------------------------------------------------
+RUNTIME_TEST(Spawn_PlayerConstruct)
+{
+	Engine.Spawn([&Engine](Registry*)
+	{
+		World* world = Engine.GetDefaultWorld();
+		world->GetConstructRegistry()->Create<PlayerConstruct>(world);
+	});
+
+	LOG_ALWAYS("[RuntimeTest] PlayerConstruct spawned — oscillating capsule with color pulse");
 }
 
 // ---------------------------------------------------------------------------
