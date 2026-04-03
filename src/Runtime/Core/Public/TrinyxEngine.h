@@ -4,6 +4,7 @@
 #include <memory>
 
 #include "EngineConfig.h"
+#include "Events.h"
 #include "GNSContext.h"
 #include "NetThread.h"
 #include "VulkanContext.h"
@@ -15,6 +16,8 @@ class RenderThread;
 class Registry;
 class LogicThread;
 class JoltPhysics;
+class NetConnectionManager;
+class ReplicationSystem;
 class World;
 
 // Compile-time renderer selection: EditorRenderer (ImGui overlay) or GameplayRenderer (no-op overlay).
@@ -47,6 +50,10 @@ public:
 	~TrinyxEngine();
 	TrinyxEngine(const TrinyxEngine&)            = delete;
 	TrinyxEngine& operator=(const TrinyxEngine&) = delete;
+
+	/// Parse CLI args into Config before Initialize().
+	/// Supports: --server, --client <ip>, --port <port>, --latency <ms>
+	void ParseCommandLine(int argc, char* argv[]);
 
 	bool Initialize(const char* title, int width, int height, const char* projectDir = nullptr);
 
@@ -90,6 +97,17 @@ public:
 	/// Lazy-init GNS + NetThread if not already active.
 	/// Used by editor PIE to enable networking from Standalone mode.
 	bool EnsureNetworking();
+
+	// Game-level PIE hooks — game code binds these in PostInitialize.
+	// EditorContext fires them during StartPIE/StopPIE and Play/Stop.
+	Callback<void, World*, NetConnectionManager*> OnPIEStarted;
+	Callback<void, NetConnectionManager*> OnPIEStopped;
+	Callback<void, World*> OnPlayStarted; // Fired when Play (Local) is clicked
+	Callback<void> OnPlayStopped;         // Fired when Stop (Local) is clicked
+
+	// Input routing — when set, PumpEvents writes to this world instead of DefaultWorld.
+	// EditorContext sets this during PIE/Play to route input to the active world.
+	World* InputTargetWorld = nullptr;
 
 private:
 #ifdef TNX_ENABLE_EDITOR

@@ -7,9 +7,9 @@
 // Consumed by the GPU predicate pass for frustum culling.
 // Volatile: derived per-frame, no rollback needed. Render partition group (Render).
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct BoundingVolume : ComponentView<BoundingVolume, WIDTH>
+struct CVolume : ComponentView<CVolume, WIDTH>
 {
-	TNX_VOLATILE_FIELDS(BoundingVolume, Physics, MinX, MinY, MinZ, MaxX, MaxY, MaxZ)
+	TNX_VOLATILE_FIELDS(CVolume, Physics, MinX, MinY, MinZ, MaxX, MaxY, MaxZ)
 
 	FloatProxy<WIDTH> MinX;
 	FloatProxy<WIDTH> MinY;
@@ -20,4 +20,4 @@ struct BoundingVolume : ComponentView<BoundingVolume, WIDTH>
 	FloatProxy<WIDTH> MaxZ;
 };
 
-TNX_REGISTER_COMPONENT(BoundingVolume)
+TNX_REGISTER_COMPONENT(CVolume)

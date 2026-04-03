@@ -141,6 +141,7 @@ private:
 	std::vector<PIEClient> PIEClients;
 	bool bPIEActive     = false;
 	bool bServerVisible = true; // false = headless server (no viewport)
+	int PIEClientCount  = 1;    // Number of client worlds to spawn in PIE
 
 	void DrawViewportPanel(const char* title, WorldViewport& vp);
 

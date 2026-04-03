@@ -621,6 +621,13 @@ void EditorContext::BuildMenuBar()
 			{
 				if (!bHasSnapshot) SnapshotScene();
 				LogicPtr->SetSimPaused(false);
+
+				// Route input to editor world and let game spawn a player
+				EnginePtr->InputTargetWorld = EnginePtr->GetDefaultWorld();
+				if (EnginePtr->OnPlayStarted.IsBound())
+				{
+					EnginePtr->OnPlayStarted(EnginePtr->GetDefaultWorld());
+				}
 			}
 		}
 		if (ImGui::MenuItem("Pause", nullptr, false, !simPaused && !bPIEActive))
@@ -629,14 +636,32 @@ void EditorContext::BuildMenuBar()
 		}
 		if (ImGui::MenuItem("Stop (Local)", nullptr, false, bHasSnapshot && !bPIEActive))
 		{
+			// Let game destroy its constructs before restoring snapshot
+			if (EnginePtr->OnPlayStopped.IsBound())
+			{
+				EnginePtr->OnPlayStopped();
+			}
+			EnginePtr->InputTargetWorld = nullptr;
+
 			if (LogicPtr) LogicPtr->SetSimPaused(true);
 			RestoreSnapshot();
 		}
 
 		ImGui::Separator();
 
+		ImGui::SetNextItemWidth(80);
+		ImGui::InputInt("Clients", &PIEClientCount, 1, 1);
+		if (PIEClientCount < 1) PIEClientCount = 1;
+		if (PIEClientCount > 4) PIEClientCount = 4;
+
 		if (ImGui::MenuItem("Play (Server + Client)", nullptr, false, !bPIEActive))
 		{
+			bServerVisible = true;
+			StartPIE();
+		}
+		if (ImGui::MenuItem("Play (Headless Server + Client)", nullptr, false, !bPIEActive))
+		{
+			bServerVisible = false;
 			StartPIE();
 		}
 		if (ImGui::MenuItem("Stop PIE", nullptr, false, bPIEActive))
@@ -1105,10 +1130,11 @@ void EditorContext::StartPIE()
 
 	Registry* editorReg = EnginePtr->GetRegistry();
 
-	// 1. Serialize editor scene to JSON
+	// Serialize editor scene to JSON
 	JsonValue sceneJson = EntityBuilder::SerializeScene(editorReg, "PIE");
 
-	// 2. Create server world
+	// Create server world
+	// to do, create a headless server config if set
 	const EngineConfig& editorCfg = *EnginePtr->GetConfig();
 	ServerWorld                   = std::make_unique<World>();
 	if (!ServerWorld->Initialize(editorCfg))
@@ -1118,14 +1144,14 @@ void EditorContext::StartPIE()
 		return;
 	}
 
-	// 3. Load scene into server world via spawn handshake
+	// Load scene into server world via spawn handshake
 	ServerWorld->SetJobsInitialized(true);
 	ServerWorld->Spawn([&sceneJson](Registry* reg)
 	{
 		EntityBuilder::SpawnScene(reg, sceneJson);
 	});
 
-	// 4. Allocate server viewport (if visible)
+	// Allocate server viewport (if visible)
 	EditorRenderer* renderer = EnginePtr->GetRenderer();
 	if (bServerVisible)
 	{
@@ -1135,25 +1161,39 @@ void EditorContext::StartPIE()
 		renderer->AddViewport(ServerViewport.get());
 	}
 
-	// 5. Create client world (1 client for now)
+	// Create client worlds
+	for (int ci = 0; ci < PIEClientCount; ++ci)
 	{
 		PIEClient client;
 		client.ClientWorld = std::make_unique<World>();
 		if (!client.ClientWorld->Initialize(editorCfg))
 		{
-			LOG_ERROR("[PIE] Failed to initialize client world");
-			// Clean up server
+			LOG_ERROR_F("[PIE] Failed to initialize client world %d", ci);
+			// Clean up server + already-created clients
+			for (auto& c : PIEClients)
+			{
+				renderer->RemoveViewport(c.Viewport.get());
+				renderer->FreeViewportResources(c.Viewport.get());
+			}
 			if (ServerViewport)
 			{
 				renderer->RemoveViewport(ServerViewport.get());
 				renderer->FreeViewportResources(ServerViewport.get());
 				ServerViewport.reset();
 			}
+			for (auto& c : PIEClients) c.ClientWorld->Shutdown();
+			PIEClients.clear();
 			ServerWorld->Shutdown();
 			ServerWorld.reset();
 			return;
 		}
 		client.ClientWorld->SetJobsInitialized(true);
+
+		// Spawn the level, static data won't be replicated in the future
+		client.ClientWorld->Spawn([&sceneJson](Registry* reg)
+		{
+			EntityBuilder::SpawnScene(reg, sceneJson);
+		});
 
 		client.Viewport              = std::make_unique<WorldViewport>();
 		client.Viewport->TargetWorld = client.ClientWorld.get();
@@ -1163,7 +1203,7 @@ void EditorContext::StartPIE()
 		PIEClients.push_back(std::move(client));
 	}
 
-	// 6. Set up loopback networking (server + client in same process)
+	// Set up loopback networking (server + client in same process)
 	static constexpr uint16_t PIEPort = 27015;
 
 	if (!EnginePtr->EnsureNetworking())
@@ -1277,6 +1317,7 @@ void EditorContext::StartPIE()
 		uint8_t ownerID = static_cast<uint8_t>(i + 1);
 		connMgr->AssignOwnerID(PIEClients[i].ServerHandle, ownerID);
 		connMgr->AssignOwnerID(PIEClients[i].ClientHandle, ownerID);
+		PIEClients[i].ClientWorld->LocalOwnerID = ownerID;
 		net->MapConnectionToWorld(ownerID, PIEClients[i].ClientWorld.get());
 	}
 
@@ -1291,14 +1332,27 @@ void EditorContext::StartPIE()
 	// Start NetThread (polls connections at NetworkUpdateHz)
 	if (!net->IsRunning()) net->Start();
 
-	// 7. Start logic threads
+	// Notify game code BEFORE starting logic threads — spawns run on the
+	//    fast path (LogicId not set yet) with no thread contention.
+	if (EnginePtr->OnPIEStarted.IsBound())
+	{
+		EnginePtr->OnPIEStarted(ServerWorld.get(), connMgr);
+	}
+
+	// 8. Start logic threads (constructs are already registered from the hooks above)
 	ServerWorld->Start();
 	for (auto& c : PIEClients)
 	{
 		c.ClientWorld->Start();
 	}
 
-	// 8. Pause editor world's logic thread
+	// 9. Default input to first client world until a viewport panel gets focus
+	if (!PIEClients.empty())
+	{
+		EnginePtr->InputTargetWorld = PIEClients[0].ClientWorld.get();
+	}
+
+	// 10. Pause editor world's logic thread
 	if (LogicPtr) LogicPtr->SetSimPaused(true);
 
 	bPIEActive = true;
@@ -1311,6 +1365,9 @@ void EditorContext::StartPIE()
 void EditorContext::StopPIE()
 {
 	if (!bPIEActive) return;
+
+	// Clear input routing immediately
+	EnginePtr->InputTargetWorld = nullptr;
 
 	EditorRenderer* renderer = EnginePtr->GetRenderer();
 
@@ -1337,12 +1394,24 @@ void EditorContext::StopPIE()
 
 		NetConnectionManager* connMgr = net->GetConnectionManager();
 
+		// Notify game code to unbind connection callbacks BEFORE closing connections
+		if (EnginePtr->OnPIEStopped.IsBound())
+		{
+			EnginePtr->OnPIEStopped(connMgr);
+		}
+
 		// Close all PIE client connections (both sides)
 		for (auto& client : PIEClients)
 		{
 			if (client.ServerHandle != 0) connMgr->CloseConnection(client.ServerHandle, "PIE Stop");
 			if (client.ClientHandle != 0) connMgr->CloseConnection(client.ClientHandle, "PIE Stop");
 		}
+
+		// Flush GNS so it processes the connection closures before we re-listen
+		connMgr->RunCallbacks();
+
+		// Reset the OnClientConnected multicallback to prevent stale bindings
+		connMgr->OnClientConnected.Reset();
 
 		// Clear world mappings
 		for (size_t i = 0; i < PIEClients.size(); ++i) net->MapConnectionToWorld(static_cast<uint8_t>(i + 1), nullptr);
@@ -1386,6 +1455,12 @@ void EditorContext::DrawViewportPanel(const char* title, WorldViewport& vp)
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
 	if (ImGui::Begin(title))
 	{
+		// Route input to whichever viewport panel is focused
+		if (ImGui::IsWindowFocused() && vp.TargetWorld)
+		{
+			EnginePtr->InputTargetWorld = vp.TargetWorld;
+		}
+
 		ImVec2 panelSize = ImGui::GetContentRegionAvail();
 
 		if (vp.ImGuiTexture != VK_NULL_HANDLE && panelSize.x > 0 && panelSize.y > 0

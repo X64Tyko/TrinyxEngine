@@ -6,6 +6,29 @@
 
 #include "Logger.h"
 
+// GNS constant aliases — clearer names without the k_/k prefixes
+namespace GNS
+{
+	// Connection states
+	constexpr auto Connecting             = k_ESteamNetworkingConnectionState_Connecting;
+	constexpr auto Connected              = k_ESteamNetworkingConnectionState_Connected;
+	constexpr auto ClosedByPeer           = k_ESteamNetworkingConnectionState_ClosedByPeer;
+	constexpr auto ProblemDetectedLocally = k_ESteamNetworkingConnectionState_ProblemDetectedLocally;
+
+	// Config keys
+	constexpr auto ConfigStatusCallback = k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged;
+
+	// Results
+	constexpr auto ResultOK = k_EResultOK;
+
+	// Send flags
+	constexpr auto SendReliable   = k_nSteamNetworkingSend_Reliable;
+	constexpr auto SendUnreliable = k_nSteamNetworkingSend_Unreliable;
+
+	// Polling
+	constexpr int MaxMessagesPerPoll = 64;
+}
+
 // Static instance for GNS callback routing
 NetConnectionManager* NetConnectionManager::s_Instance = nullptr;
 
@@ -67,9 +90,8 @@ bool NetConnectionManager::Listen(uint16_t port)
 	addr.Clear();
 	addr.m_port = port;
 
-	// Set the status callback for this listen socket
 	SteamNetworkingConfigValue_t opt;
-	opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged,
+	opt.SetPtr(GNS::ConfigStatusCallback,
 			   reinterpret_cast<void*>(&NetConnectionManager::OnConnectionStatusChanged));
 
 	ListenSocket = Sockets->CreateListenSocketIP(addr, 1, &opt);
@@ -97,7 +119,7 @@ void NetConnectionManager::AcceptConnection(HSteamNetConnection conn)
 {
 	if (!Sockets) return;
 
-	if (Sockets->AcceptConnection(conn) != k_EResultOK)
+	if (Sockets->AcceptConnection(conn) != GNS::ResultOK)
 	{
 		LOG_ERROR_F("[NetConnectionManager] Failed to accept connection %u", conn);
 		Sockets->CloseConnection(conn, 0, "AcceptFailed", false);
@@ -132,9 +154,8 @@ HSteamNetConnection NetConnectionManager::Connect(const char* address, uint16_t 
 	}
 	addr.m_port = port;
 
-	// Set the status callback for this connection
 	SteamNetworkingConfigValue_t opt;
-	opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged,
+	opt.SetPtr(GNS::ConfigStatusCallback,
 			   reinterpret_cast<void*>(&NetConnectionManager::OnConnectionStatusChanged));
 
 	HSteamNetConnection conn = Sockets->ConnectByIPAddress(addr, 1, &opt);
@@ -172,10 +193,9 @@ int NetConnectionManager::PollIncoming(std::vector<ReceivedMessage>& outMessages
 {
 	if (!Sockets || PollGroup == 0) return 0;
 
-	constexpr int kMaxMessages = 64;
-	SteamNetworkingMessage_t* incomingMsgs[kMaxMessages];
+	SteamNetworkingMessage_t* incomingMsgs[GNS::MaxMessagesPerPoll];
 
-	int numMsgs = Sockets->ReceiveMessagesOnPollGroup(PollGroup, incomingMsgs, kMaxMessages);
+	int numMsgs = Sockets->ReceiveMessagesOnPollGroup(PollGroup, incomingMsgs, GNS::MaxMessagesPerPoll);
 	if (numMsgs <= 0) return 0;
 
 	for (int i = 0; i < numMsgs; ++i)
@@ -235,12 +255,10 @@ bool NetConnectionManager::SendRaw(HSteamNetConnection conn, const uint8_t* data
 {
 	if (!Sockets) return false;
 
-	int flags = reliable
-					? k_nSteamNetworkingSend_Reliable
-					: k_nSteamNetworkingSend_Unreliable;
+	int flags = reliable ? GNS::SendReliable : GNS::SendUnreliable;
 
 	EResult result = Sockets->SendMessageToConnection(conn, data, size, flags, nullptr);
-	return result == k_EResultOK;
+	return result == GNS::ResultOK;
 }
 
 void NetConnectionManager::RunCallbacks()
@@ -309,7 +327,7 @@ void NetConnectionManager::OnConnectionStatusChanged(SteamNetConnectionStatusCha
 
 	switch (info->m_info.m_eState)
 	{
-		case k_ESteamNetworkingConnectionState_Connecting:
+		case GNS::Connecting:
 			{
 				// Only accept truly incoming connections (m_hListenSocket != 0).
 				// Outgoing connections (from ConnectByIPAddress) also start in
@@ -322,19 +340,24 @@ void NetConnectionManager::OnConnectionStatusChanged(SteamNetConnectionStatusCha
 				break;
 			}
 
-		case k_ESteamNetworkingConnectionState_Connected:
+		case GNS::Connected:
 			{
 				ConnectionInfo* ci = mgr->FindConnection(info->m_hConn);
 				if (ci)
 				{
 					ci->bConnected = true;
 					LOG_INFO_F("[NetConnectionManager] Connection %u established", info->m_hConn);
+
+					if (ci->bServerSide)
+					{
+						mgr->OnClientConnected(*ci);
+					}
 				}
 				break;
 			}
 
-		case k_ESteamNetworkingConnectionState_ClosedByPeer:
-		case k_ESteamNetworkingConnectionState_ProblemDetectedLocally:
+		case GNS::ClosedByPeer:
+		case GNS::ProblemDetectedLocally:
 			{
 				LOG_INFO_F("[NetConnectionManager] Connection %u closed: %s",
 						   info->m_hConn, info->m_info.m_szEndDebug);

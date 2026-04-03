@@ -149,7 +149,10 @@ body arrays are sized by `MAX_JOLT_BODIES` (separate from the arena boundary).
 
 ### Entity Group Auto-Derivation
 
-The partition group (Dual/Phys/Render/Logic) is computed automatically at `TNX_REGISTER_ENTITY` time from `SystemGroup` tags on components. There is no manual group annotation — it would be a footgun that shoots gaps into partition regions.
+The partition group (Dual/Phys/Render/Logic) is computed automatically from `SystemGroup` tags on components at both
+`TNX_REGISTER_ENTITY` time and runtime entity creation via `ConstructView`. The `ClassSystemID` is passed to
+`BuildLayout` in both `InitializeArchetypes` and `GetOrCreateArchetype`. There is no manual group annotation — it would
+be a footgun that shoots gaps into partition regions.
 
 ---
 
@@ -196,7 +199,7 @@ words, `FieldProxy` uses AVX2 masked loads/stores (8-wide, branchless).
 
 **Constructs** are singular, complex scalar objects — the things that think. A Player, a GameMode, a TurretBase, an
 AIDirector. They inherit from `Construct<T>` (CRTP) and compose Views to access ECS data. Created via
-`Registry::CreateConstruct<T>()`.
+`ConstructRegistry::Create<T>(world)`.
 
 **Entities** are raw ECS data for the horde — zombies, bullets, debris, particles. No bespoke logic. The engine sweeps
 them with wide SIMD. Registered via `TNX_REGISTER_ENTITY`.
@@ -207,8 +210,8 @@ CRTP base that owns the full lifecycle. Auto-registers ticks via `if constexpr` 
 method, get the tick. Don't implement it, pay nothing.
 
 ```cpp
-class Player : public Construct<Player>, public InstanceView<Player> { ... };
-class Decal  : public Construct<Decal>,  public RenderView<Decal> { ... };
+class Player   : public Construct<Player>   { ConstructView<EPlayer> Body; ... };
+class GameMode : public Construct<GameMode>  { /* no View — pure logic */ };
 ```
 
 ### Composition via Owned<T>
@@ -217,11 +220,12 @@ Complex Constructs compose via `Owned<T>` value members — compile-time ownersh
 automatic lifetime management:
 
 ```cpp
-class Turret : public Construct<Turret>, public InstanceView<Turret>
+class Turret : public Construct<Turret>
 {
-    Owned<BarrelAssembly>  Barrel;    // has its own InstanceView, own tick
-    Owned<TargetingSystem> Targeting; // pure logic, LogicView only
-    Owned<AmmoFeed>        Ammo;     // StatsView, no physics
+    ConstructView<EInstanced> Body;     // Physics + render in DUAL partition
+    Owned<BarrelAssembly>  Barrel;      // has its own ConstructView, own tick
+    Owned<TargetingSystem> Targeting;   // pure logic, no View needed
+    Owned<AmmoFeed>        Ammo;        // data-only, no physics
 };
 ```
 
@@ -229,19 +233,19 @@ Each owned Construct is exactly as heavy as it needs to be. `TargetingSystem` do
 doesn't tick unless it implements a tick method. C++20 concepts on `Owned<T>` enable compile-time interface contracts (
 `Targetable`, `Damageable`) — zero-cost replacement for runtime gameplay tag queries.
 
-### Views
+### ConstructView<TEntity>
 
-Views are CRTP lenses into ECS data. They hydrate FieldProxy cursors on initialization and register as defrag listeners
-so cursors stay valid if the allocator moves data.
+`ConstructView<TEntity>` is a generic template that creates a backing ECS entity of any EntityView type, hydrates
+FieldProxy cursors on initialization, and auto-rehydrates when the write frame advances or defrag relocates the entity.
+Partition is auto-derived from the entity type's component SystemGroup tags.
 
-| View         | Components                          | Partition |
-|--------------|-------------------------------------|-----------|
-| InstanceView | Transform + PhysBody + SkeletalMesh | DUAL      |
-| PhysView     | Transform + PhysBody                | PHYS      |
-| RenderView   | Transform + SkeletalMesh            | RENDER    |
-| LogicView    | Transform only                      | LOGIC     |
+| Entity Type | Components                                          | Partition |
+|-------------|-----------------------------------------------------|-----------|
+| EInstanced  | CTransform + CJoltBody + CScale + CColor + CMeshRef | DUAL      |
+| EPlayer     | CTransform + CScale + CColor + CMeshRef             | DUAL      |
+| EPoint      | CTransform only                                     | PHYS      |
 
-**Ownership chain:** Construct → Views → ECS Entities → Components → FieldArrays → FieldProxies
+**Ownership chain:** Construct → ConstructView → ECS Entity → Components → FieldArrays → FieldProxies
 
 ### Tick Dispatch — ConstructBatch
 
@@ -257,19 +261,26 @@ TickGroup is a fixed engine enum controlling execution order:
 enum class TickGroup : uint8_t { PreInput=0, Default=1, PostDefault=2, Camera=3, Late=4 };
 ```
 
-Brain thread tick sequence:
+Brain thread tick sequence (per fixed step):
 
 ```
-PrePhysics wide sweep → ScalarPrePhysics batch (Constructs)
-  → Physics step →
+ProcessSimInput → PrePhysics wide sweep → ScalarPrePhysics batch (Constructs)
+  → FlushPendingBodies → PushKinematicTransforms → ScalarPhysicsStep batch (Constructs)
+  → Jolt Step (async) → PullActiveTransforms →
 PostPhysics wide sweep → ScalarPostPhysics batch (Constructs)
-  → Entity ScalarUpdate (targeted writes from Constructs into entity fields)
-  → Construct ScalarUpdate batch (high-level OOP logic)
-  → Render publish
+  → PublishCompletedFrame → PropagateFrame
 ```
 
-The Entity ScalarUpdate slot is the bridge point: an AIDirector Construct thinks once, then writes target positions into
-zombie entity fields. The zombie has no bespoke logic — it's swept by the wide PrePhysics pass.
+Scalar update runs outside the fixed loop when time permits:
+
+```
+ScalarUpdate wide sweep → ScalarUpdate batch (Constructs — camera, UI, post-logic)
+```
+
+The ScalarPhysicsStep slot is where Constructs drive JoltCharacter or write kinematic targets.
+The Entity ScalarUpdate slot is the bridge point: an AIDirector Construct thinks once, then writes
+target positions into zombie entity fields. The zombie has no bespoke logic — it's swept by the
+wide PrePhysics pass.
 
 ### Serialization
 
@@ -318,6 +329,40 @@ Jolt Physics v5.5.0 runs at a configurable fraction of the logic rate. Default: 
 - **Jolt owns physics state.** The ECS does not push state to Jolt every frame. Jolt's integrator advances bodies internally. ECS only writes to Jolt on explicit overrides (spawn, teleport, impulse, kinematic target).
 - **Awake-only pull.** After each Jolt step, only awake bodies are pulled back into SoA WriteArrays. A scene with 50K bodies where 200 are moving pays for 200 pulls.
 - **Only transforms are pulled.** Velocities stay in Jolt. Gameplay logic that needs velocity queries Jolt directly during ScalarUpdate.
+
+### JoltCharacter (CharacterVirtual Wrapper)
+
+`JoltCharacter` wraps `JPH::CharacterVirtual` for Construct-driven character controllers. It is completely
+independent of the `CJoltBody` component — no Jolt body is created in the ECS. The Construct owns the
+JoltCharacter directly and drives it through the `PhysicsStep` tick:
+
+```cpp
+class Player : public Construct<Player>
+{
+    ConstructView<EPlayer> Body;
+    JoltCharacter CharacterController;
+
+    void InitializeViews() {
+        Body.Initialize(this);
+        CharacterController.Initialize(
+            GetWorld()->GetPhysics()->GetPhysicsSystem(),
+            JPH::RVec3(0, 5, 0), 0.3f, 0.7f);
+    }
+
+    void PhysicsStep(SimFloat dt) {
+        CharacterController.Update(desiredVelocity, gravity, dt,
+            *GetWorld()->GetPhysics()->GetTempAllocator());
+        // Write resolved position back to slab via FieldProxy
+        JPH::RVec3 pos = CharacterController.GetPosition();
+        Body.Transform.PosX = pos.GetX();
+        Body.Transform.PosY = pos.GetY();
+        Body.Transform.PosZ = pos.GetZ();
+    }
+};
+```
+
+`JoltLayers.h` provides shared layer constants (Static, Dynamic) used by both JoltPhysics and JoltCharacter.
+`JoltPhysics::GetTempAllocator()` exposes the Jolt temp allocator for CharacterVirtual's ExtendedUpdate.
 
 ### Rollback and Jolt
 
@@ -383,20 +428,22 @@ Anti-Events fade/decay over ~20ms rather than instant cull — visually continuo
 Two stages: **Foundation** (add remaining subsystems) then **Hardening** (lock down the substrate). See `docs/STATUS.md`
 for the authoritative status tracker.
 
-### Stage 1: Foundation (current)
+### Stage 1: Foundation
 
-1. **Editor (bare-bones)** — In progress. Scene hierarchy, entity inspection, reflected properties, save/load. ImGui
+1. **Editor (bare-bones)** — Complete. Scene hierarchy, entity inspection, reflected properties, save/load. ImGui
    docking, JSON serialization. Scope is explicitly limited to this definition.
-2. **Networking** — GNS wrapper, client/server authority model, PIE loopback. Rollback netcode uses existing Temporal
-   slab + Jolt snapshot.
-3. **Audio** — SDL3 thin wrapper first (handle-based for Anti-Event compatibility). Minimal — just enough for gameplay
-   feedback.
+2. **Construct/View OOP** — Complete. `Construct<T>`, `Owned<T>`, `ConstructView<TEntity>`, `ConstructBatch`,
+   JoltCharacter. PlayerConstruct proven.
+3. **Networking** — Functional. GNS wrapper, client/server authority model, PIE loopback, entity spawn replication,
+   state corrections. Delta compression and rollback netcode pending.
+4. **Audio** — Not started. SDL3 thin wrapper first (handle-based for Anti-Event compatibility).
+5. **Game Flow** — In progress. GameMode, travel/level loading, player spawn flow, session lifecycle.
 
 ### Stage 2: Hardening
 
-Once Editor + Networking + Audio are functional, the engine enters a dedicated cleanup, refactoring, and rewrite phase.
-The goal is to make the substrate as solid as possible before building the gameplay layer (Construct/View system,
-behavior trees, etc.) on top of it.
+Once the gameplay layer is proven with a test arena, the engine enters a dedicated cleanup, refactoring, and rewrite
+phase. The goal is to make the substrate as solid as possible before building behavior trees, AI directors, and
+higher-level systems.
 
 Targets include: dirty-bit GPU upload, Archetype/TemporalComponentCache deduplication, Fixed32/SimFloat, hot-path audit,
 constraint system, static entity tier, reflection robustness, `TNX_STRIP_NAMES` build option.
@@ -418,17 +465,24 @@ constraint system, static entity tier, reflection robustness, `TNX_STRIP_NAMES` 
 
 ## Key Files
 
-| Path | Purpose |
-|------|---------|
-| `src/Runtime/Core/Public/FieldProxy.h` | Core SoA field wrapper (Scalar/Wide/WideMask) |
-| `src/Runtime/Core/Public/SchemaValidation.h` | Compile-time component validation |
-| `src/Runtime/Core/Public/TemporalComponentCache.h` | N-frame SoA ring buffer (proto-History Slab) |
-| `src/Runtime/Memory/` | Archetype chunks, cold component storage |
-| `src/Runtime/Physics/` | Jolt integration (JoltJobSystemAdapter, JoltBody) |
-| `src/Runtime/Rendering/` | VulkanContext, VulkanMemory, VulkRender |
-| `shaders/` | Slang compute shaders (predicate, prefix_sum, scatter) |
-| `docs/ARCHITECTURE.md` | Full architecture reference |
-| `docs/PERFORMANCE_TARGETS.md` | Benchmark targets and testbed results |
+| Path                                               | Purpose                                                     |
+|----------------------------------------------------|-------------------------------------------------------------|
+| `src/Runtime/Core/Public/FieldProxy.h`             | Core SoA field wrapper (Scalar/Wide/WideMask)               |
+| `src/Runtime/Core/Public/SchemaValidation.h`       | Compile-time component validation                           |
+| `src/Runtime/Core/Public/TemporalComponentCache.h` | N-frame SoA ring buffer (proto-History Slab)                |
+| `src/Runtime/Construct/Public/Construct.h`         | Construct<T> CRTP base, tick auto-registration              |
+| `src/Runtime/Construct/Public/ConstructView.h`     | ConstructView<TEntity> — generic ECS lens for Constructs    |
+| `src/Runtime/Construct/Public/ConstructRegistry.h` | Type-erased Construct registry, deferred destruction        |
+| `src/Runtime/Memory/`                              | Archetype chunks, Registry, cold component storage          |
+| `src/Runtime/Physics/Public/JoltPhysics.h`         | Jolt integration (body management, step, pull)              |
+| `src/Runtime/Physics/Public/JoltCharacter.h`       | CharacterVirtual wrapper for Construct-driven controllers   |
+| `src/Runtime/Physics/Public/JoltLayers.h`          | Shared Jolt layer constants (Static, Dynamic)               |
+| `src/Runtime/Entities/Public/`                     | Entity types: EInstanced, EPlayer, EPoint                   |
+| `src/Runtime/Components/Public/`                   | Components: CTransform, CJoltBody, CColor, CScale, CMeshRef |
+| `src/Runtime/Rendering/`                           | VulkanContext, VulkanMemory, VulkRender                     |
+| `shaders/`                                         | Slang compute shaders (predicate, prefix_sum, scatter)      |
+| `docs/ARCHITECTURE.md`                             | Full architecture reference                                 |
+| `docs/PERFORMANCE_TARGETS.md`                      | Benchmark targets and testbed results                       |
 
 ---
 

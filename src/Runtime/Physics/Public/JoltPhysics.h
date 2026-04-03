@@ -51,6 +51,7 @@ public:
 	// Creates bodies from component settings + initial transform, stores mapping.
 	// Called once per physics tick (returns immediately if nothing pending).
 	void FlushPendingBodies(Registry* reg);
+	void PushKinematicTransforms(Registry* reg, float dt);
 
 	// Write transforms from awake Jolt bodies back into SoA WriteArrays.
 	// Called after Step(), before PostPhysics.
@@ -71,6 +72,7 @@ public:
 	// --- Accessors ---
 
 	JPH::PhysicsSystem* GetPhysicsSystem() { return PhysSystem.get(); }
+	JPH::TempAllocator* GetTempAllocator() { return TempAllocator.get(); }
 	JPH::BodyInterface& GetBodyInterface();
 	const JPH::BodyInterface& GetBodyInterfaceNoLock() const;
 	TrinyxJobs::JobCounter* GetJoltPhysCounter() { return &JoltPhysCounter; }

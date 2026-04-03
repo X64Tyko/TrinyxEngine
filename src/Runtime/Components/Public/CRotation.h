@@ -8,9 +8,9 @@
 // Use when an entity needs rotation but not position (rare — turrets, joints).
 // Most entities should prefer TransRot instead.
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct Rotation : ComponentView<Rotation, WIDTH>
+struct CRotation : ComponentView<CRotation, WIDTH>
 {
-	TNX_TEMPORAL_FIELDS(Rotation, Physics, RotQx, RotQy, RotQz, RotQw)
+	TNX_TEMPORAL_FIELDS(CRotation, Physics, RotQx, RotQy, RotQz, RotQw)
 
 	FloatProxy<WIDTH> RotQx;
 	FloatProxy<WIDTH> RotQy;
@@ -20,4 +20,4 @@ struct Rotation : ComponentView<Rotation, WIDTH>
 	QuatAccessor<WIDTH> Quat{RotQx, RotQy, RotQz, RotQw};
 };
 
-TNX_REGISTER_COMPONENT(Rotation)
+TNX_REGISTER_COMPONENT(CRotation)

@@ -6,9 +6,9 @@
 
 // Velocity Component — Linear velocity for movement.
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct Velocity : ComponentView<Velocity, WIDTH>
+struct CVelocity : ComponentView<CVelocity, WIDTH>
 {
-	TNX_TEMPORAL_FIELDS(Velocity, Physics, vX, vY, vZ)
+	TNX_TEMPORAL_FIELDS(CVelocity, Physics, vX, vY, vZ)
 
 	FloatProxy<WIDTH> vX;
 	FloatProxy<WIDTH> vY;
@@ -17,4 +17,4 @@ struct Velocity : ComponentView<Velocity, WIDTH>
 	Vec3Accessor<WIDTH> Vel{vX, vY, vZ};
 };
 
-TNX_REGISTER_COMPONENT(Velocity)
+TNX_REGISTER_COMPONENT(CVelocity)

@@ -8,9 +8,9 @@
 // Use when an entity needs position but not rotation (e.g. particles, UI elements).
 // Most entities should prefer TransRot instead.
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct Translation : ComponentView<Translation, WIDTH>
+struct CTranslation : ComponentView<CTranslation, WIDTH>
 {
-	TNX_TEMPORAL_FIELDS(Translation, Physics, PosX, PosY, PosZ)
+	TNX_TEMPORAL_FIELDS(CTranslation, Physics, PosX, PosY, PosZ)
 
 	FloatProxy<WIDTH> PosX;
 	FloatProxy<WIDTH> PosY;
@@ -19,4 +19,4 @@ struct Translation : ComponentView<Translation, WIDTH>
 	Vec3Accessor<WIDTH> Position{PosX, PosY, PosZ};
 };
 
-TNX_REGISTER_COMPONENT(Translation)
+TNX_REGISTER_COMPONENT(CTranslation)

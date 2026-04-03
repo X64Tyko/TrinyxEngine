@@ -214,6 +214,10 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		else return Traits::load(&WriteArray[index]);
 	}
 
+	// Scalar read accessor — returns a copy of the underlying value.
+	// Only available in Scalar width (compile error otherwise).
+	FieldType Value() const requires (WIDTH == FieldWidth::Scalar) { return WriteArray[index]; }
+
 	// Bind: point at the write frame (pre-frame memcpy already seeded old state into it).
 	// flagsArray is the CacheSlotMeta::Flags int32_t* from fieldArrayTable[0].
 	FORCE_INLINE void Bind(void* writeArray, void* flagsArray, uint32_t startIndex = 0, int32_t startCount = -1)

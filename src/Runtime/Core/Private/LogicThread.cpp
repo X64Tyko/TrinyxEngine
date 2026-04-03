@@ -10,6 +10,7 @@
 #include <SDL3/SDL.h>
 #include <cmath>
 
+#include "CameraConstruct.h"
 #include "SpawnSync.h"
 #include "ThreadPinning.h"
 #include "JoltPhysics.h"
@@ -151,16 +152,18 @@ void LogicThread::ThreadMain()
 
 				if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
 				{
+					PhysicsPtr->FlushPendingBodies(RegistryPtr);
+					PhysicsPtr->PushKinematicTransforms(RegistryPtr, fixedStepTime);
+					ScalarPhysicsStepBatch.Execute(fixedStepTime * PhysicsDivizor);
 					TrinyxJobs::Dispatch([this, fixedStepTime](uint32_t)
 					{
-						PhysicsPtr->Step(static_cast<float>(fixedStepTime * PhysicsDivizor));
+						PhysicsPtr->Step(fixedStepTime * PhysicsDivizor);
 					}, PhysicsPtr->GetJoltPhysCounter(), TrinyxJobs::Queue::Physics);
 				}
 
 				// Flush changes, then pull new transforms. This order means we remove orphans before pulling
 				if (FrameNumber % PhysicsDivizor == PhysicsDivizor - 1) [[unlikely]]
 				{
-					PhysicsPtr->FlushPendingBodies(RegistryPtr);
 					PhysicsPtr->PullActiveTransforms(RegistryPtr);
 #ifdef TNX_ENABLE_ROLLBACK
 					PhysicsPtr->SaveSnapshot(FrameNumber);
@@ -217,6 +220,10 @@ void LogicThread::ProcessVizInput(SimFloat dt)
 {
 	VizInput->Swap();
 
+	// When a Construct owns the camera, it handles mouse look and positioning.
+	// Free-fly is the fallback for editor/debug when no Construct is active.
+	if (ActiveCamera) return;
+
 	// ── Mouse look ───────────────────────────────────────────────────────
 	CamYaw   += VizInput->GetMouseDX() * CamMouseSens;
 	CamPitch -= VizInput->GetMouseDY() * CamMouseSens;
@@ -266,9 +273,22 @@ void LogicThread::PublishCompletedFrame()
 	header->ActiveEntityCount      = static_cast<uint32_t>(RegistryPtr->GetTotalEntityCount());
 	header->TotalAllocatedEntities = static_cast<uint32_t>(RegistryPtr->GetTotalEntityCount());
 
+	// Resolve camera source — ActiveCamera overrides free-fly locals
+	float activeFOV   = 60.0f;
+	float activeYaw   = CamYaw, activePitch = CamPitch;
+	Vector3 activePos = CamPos;
+
+	if (ActiveCamera)
+	{
+		ActiveCamera->GetPosition(activePos.x, activePos.y, activePos.z);
+		activeYaw   = ActiveCamera->GetYaw();
+		activePitch = ActiveCamera->GetPitch();
+		activeFOV   = ActiveCamera->GetFOV();
+	}
+
 	// Fill ViewState (basic perspective camera)
 	float AspectRatio = static_cast<float>(WindowWidth) / static_cast<float>(WindowHeight);
-	float Fov         = 60.0f * 3.14159f / 180.0f; // 60 degrees in radians
+	float Fov         = activeFOV * 3.14159f / 180.0f;
 	float ZNear       = 0.1f;
 	float ZFar        = 5000.0f;
 
@@ -318,10 +338,10 @@ void LogicThread::PublishCompletedFrame()
 	// View matrix rows = camera axes (transposed rotation), col 3 = -dot(axis, pos).
 	// Column-major layout: m[col*4 + row].
 
-	float sinYaw   = std::sin(CamYaw);
-	float cosYaw   = std::cos(CamYaw);
-	float sinPitch = std::sin(CamPitch);
-	float cosPitch = std::cos(CamPitch);
+	float sinYaw   = std::sin(activeYaw);
+	float cosYaw   = std::cos(activeYaw);
+	float sinPitch = std::sin(activePitch);
+	float cosPitch = std::cos(activePitch);
 
 	// Camera basis
 	Vector3 camForward{sinYaw * cosPitch, sinPitch, -cosYaw * cosPitch};
@@ -334,9 +354,9 @@ void LogicThread::PublishCompletedFrame()
 	};
 
 	// Translation = -dot(axis, position)
-	float tx = -(camRight.x * CamPos.x + camRight.y * CamPos.y + camRight.z * CamPos.z);
-	float ty = -(camUp.x * CamPos.x + camUp.y * CamPos.y + camUp.z * CamPos.z);
-	float tz = (camForward.x * CamPos.x + camForward.y * CamPos.y + camForward.z * CamPos.z);
+	float tx = -(camRight.x * activePos.x + camRight.y * activePos.y + camRight.z * activePos.z);
+	float ty = -(camUp.x * activePos.x + camUp.y * activePos.y + camUp.z * activePos.z);
+	float tz = (camForward.x * activePos.x + camForward.y * activePos.y + camForward.z * activePos.z);
 
 	auto& V = header->ViewMatrix;
 	V.m[0]  = camRight.x;
@@ -356,7 +376,7 @@ void LogicThread::PublishCompletedFrame()
 	V.m[14] = tz;
 	V.m[15] = 1.0f;
 
-	header->CameraPosition = CamPos;
+	header->CameraPosition = activePos;
 #if TNX_DEV_METRICS
 	header->InputTimestamp = VizInput->GetSwapPerfCount();
 #if TNX_DEV_METRICS_DETAILED

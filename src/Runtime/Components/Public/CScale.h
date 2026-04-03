@@ -9,9 +9,9 @@
 // to avoid burning 3 SoA fields × N history frames on data that
 // almost never changes.
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct Scale : ComponentView<Scale, WIDTH>
+struct CScale : ComponentView<CScale, WIDTH>
 {
-	TNX_VOLATILE_FIELDS(Scale, Render, ScaleX, ScaleY, ScaleZ)
+	TNX_VOLATILE_FIELDS(CScale, Render, ScaleX, ScaleY, ScaleZ)
 
 	FloatProxy<WIDTH> ScaleX;
 	FloatProxy<WIDTH> ScaleY;
@@ -20,4 +20,4 @@ struct Scale : ComponentView<Scale, WIDTH>
 	Vec3Accessor<WIDTH> Value{ScaleX, ScaleY, ScaleZ};
 };
 
-TNX_REGISTER_COMPONENT(Scale)
+TNX_REGISTER_COMPONENT(CScale)

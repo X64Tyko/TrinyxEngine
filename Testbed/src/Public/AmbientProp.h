@@ -1,9 +1,9 @@
 #pragma once
 
-#include "TransRot.h"
-#include "Scale.h"
-#include "ColorData.h"
-#include "MeshRef.h"
+#include "CTransform.h"
+#include "CScale.h"
+#include "CColor.h"
+#include "CMeshRef.h"
 #include "EntityView.h"
 #include "SchemaReflector.h"
 
@@ -18,10 +18,10 @@ class AmbientProp : public EntityView<AmbientProp, WIDTH>
 	TNX_REGISTER_SCHEMA(AmbientProp, EntityView, transform, scale, color, mesh)
 
 public:
-	TransRot<WIDTH> transform;
-	Scale<WIDTH> scale;
-	ColorData<WIDTH> color;
-	MeshRef<WIDTH> mesh;
+	CTransform<WIDTH> transform;
+	CScale<WIDTH> scale;
+	CColor<WIDTH> color;
+	CMeshRef<WIDTH> mesh;
 
 	FORCE_INLINE void PrePhysics(SimFloat dt)
 	{

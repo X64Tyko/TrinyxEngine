@@ -6,9 +6,9 @@
 // Temporal: stored in N-frame rollback ring buffer. Required for deterministic
 // resimulation during rollback netcode. Physics partition group (Phys).
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct RigidBody : ComponentView<RigidBody, WIDTH>
+struct CRigidBody : ComponentView<CRigidBody, WIDTH>
 {
-	TNX_TEMPORAL_FIELDS(RigidBody, Physics, VelX, VelY, VelZ, AngVelX, AngVelY, AngVelZ)
+	TNX_TEMPORAL_FIELDS(CRigidBody, Physics, VelX, VelY, VelZ, AngVelX, AngVelY, AngVelZ)
 
 	FloatProxy<WIDTH> VelX;
 	FloatProxy<WIDTH> VelY;
@@ -19,4 +19,4 @@ struct RigidBody : ComponentView<RigidBody, WIDTH>
 	FloatProxy<WIDTH> AngVelZ;
 };
 
-TNX_REGISTER_COMPONENT(RigidBody)
+TNX_REGISTER_COMPONENT(CRigidBody)

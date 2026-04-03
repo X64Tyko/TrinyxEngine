@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "Events.h"
 #include "NetTypes.h"
 
 // Forward declarations — avoid pulling GNS headers into every consumer
@@ -11,6 +12,9 @@ struct SteamNetConnectionStatusChangedCallback_t;
 typedef uint32_t HSteamNetConnection;
 typedef uint32_t HSteamListenSocket;
 typedef uint32_t HSteamNetPollGroup;
+
+// Max simultaneous connections, derived from NetOwnerID bit width.
+static constexpr size_t MaxNetConnections = 1 << NetOwnerID_Bits;
 
 // ---------------------------------------------------------------------------
 // ConnectionInfo — engine-side bookkeeping per connection.
@@ -22,6 +26,7 @@ struct ConnectionInfo
 	uint32_t NextSeqOut        = 0; // Next outgoing sequence number
 	uint32_t LastSeqIn         = 0; // Latest received sequence number (for ack piggybacking)
 	uint32_t AckBitfield       = 0; // Received-packet bitfield (for ack piggybacking)
+	float RTT_ms               = 0.0f; // Smoothed round-trip time in milliseconds
 	bool bConnected            = false;
 	bool bServerSide           = false; // True for server-accepted handles, false for client-initiated
 };
@@ -35,6 +40,8 @@ struct ReceivedMessage
 	std::vector<uint8_t> Payload;
 	HSteamNetConnection Connection = 0; // Which connection it arrived on
 };
+
+DEFINE_FIXED_MULTICALLBACK(OnClientConnectedEvent, MaxNetConnections, const ConnectionInfo&)
 
 // ---------------------------------------------------------------------------
 // NetConnectionManager
@@ -106,6 +113,10 @@ public:
 
 	/// Assign a NetOwnerID to a connection. Called during handshake.
 	void AssignOwnerID(HSteamNetConnection conn, uint8_t ownerID);
+
+	/// Fired when a server-side connection is fully confirmed (GNS handshake complete).
+	/// Fires on the NetThread during RunCallbacks(). Safe to call World::Spawn() from here.
+	OnClientConnectedEvent OnClientConnected;
 
 	/// GNS status callback — routes into this manager. Must be static for GNS.
 	static void OnConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t* info);

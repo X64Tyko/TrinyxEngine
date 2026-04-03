@@ -36,6 +36,31 @@ namespace Internal
 TrinyxEngine::TrinyxEngine()  = default;
 TrinyxEngine::~TrinyxEngine() = default;
 
+void TrinyxEngine::ParseCommandLine(int argc, char* argv[])
+{
+	for (int i = 1; i < argc; ++i)
+	{
+		if (strcmp(argv[i], "--server") == 0)
+		{
+			Config.Mode = EngineMode::Server;
+		}
+		else if (strcmp(argv[i], "--client") == 0 && i + 1 < argc)
+		{
+			Config.Mode = EngineMode::Client;
+			strncpy(Config.NetAddress, argv[++i], sizeof(Config.NetAddress) - 1);
+			Config.NetAddress[sizeof(Config.NetAddress) - 1] = '\0';
+		}
+		else if (strcmp(argv[i], "--listen") == 0)
+		{
+			Config.Mode = EngineMode::ListenServer;
+		}
+		else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc)
+		{
+			Config.NetPort = static_cast<uint16_t>(atoi(argv[++i]));
+		}
+	}
+}
+
 bool TrinyxEngine::Initialize(const char* title, int width, int height, const char* projectDir)
 {
 	TNX_ZONE_N("Engine_Init");
@@ -291,10 +316,11 @@ void TrinyxEngine::PumpEvents()
 {
 	TNX_ZONE_N("Input_Poll");
 
-	InputBuffer* SimInput = DefaultWorld->GetSimInput();
-	InputBuffer* VizInput = DefaultWorld->GetVizInput();
+	World* targetWorld    = InputTargetWorld ? InputTargetWorld : DefaultWorld.get();
+	InputBuffer* SimInput = targetWorld->GetSimInput();
+	InputBuffer* VizInput = targetWorld->GetVizInput();
 #ifdef TNX_ENABLE_ROLLBACK
-	LogicThread* Logic = DefaultWorld->GetLogicThread();
+	LogicThread* Logic = targetWorld->GetLogicThread();
 #endif
 
 #if TNX_ENABLE_EDITOR
@@ -360,10 +386,23 @@ void TrinyxEngine::PumpEvents()
 				VizInput->AddMouseDelta(e.motion.xrel, e.motion.yrel);
 				break;
 
+			case SDL_EVENT_MOUSE_BUTTON_DOWN:
 #if !TNX_ENABLE_EDITOR
-			case SDL_EVENT_MOUSE_BUTTON_DOWN: SDL_SetWindowRelativeMouseMode(EngineWindow, true);
-				break;
+				SDL_SetWindowRelativeMouseMode(EngineWindow, true);
+#else
+				if (!engineOwnsInput) break;
 #endif
+				SimInput->PushMouseButton(e.button.button, true);
+				VizInput->PushMouseButton(e.button.button, true);
+				break;
+
+			case SDL_EVENT_MOUSE_BUTTON_UP:
+#if TNX_ENABLE_EDITOR
+				if (!engineOwnsInput) break;
+#endif
+				SimInput->PushMouseButton(e.button.button, false);
+				VizInput->PushMouseButton(e.button.button, false);
+				break;
 
 			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
 			case SDL_EVENT_WINDOW_RESIZED: if (Render) Render->NotifyResize();

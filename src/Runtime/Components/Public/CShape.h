@@ -20,7 +20,7 @@ enum class ColliderShape : uint32_t
 // Cold component interface: plain POD fields, no FieldProxy.
 // Bind() is a no-op; chunk access goes through Archetype::GetComponentArray.
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct ShapeData : ComponentView<ShapeData, WIDTH>
+struct CShape : ComponentView<CShape, WIDTH>
 {
 	UIntProxy<WIDTH> Shape        = static_cast<uint32_t>(ColliderShape::Box);
 	FloatProxy<WIDTH> HalfExtentX = 0.5f;
@@ -30,7 +30,7 @@ struct ShapeData : ComponentView<ShapeData, WIDTH>
 	FloatProxy<WIDTH> Restitution = 0.3f; // Bounciness [0, 1]
 	FloatProxy<WIDTH> Friction    = 0.5f; // Surface friction [0, 1]
 
-	TNX_VOLATILE_FIELDS(ShapeData, Physics, Shape, HalfExtentsX, HalfExtentsY, HalfExtentsZ, Mass, Restitution, Friction)
+	TNX_VOLATILE_FIELDS(CShape, Physics, Shape, HalfExtentsX, HalfExtentsY, HalfExtentsZ, Mass, Restitution, Friction)
 };
 
-TNX_REGISTER_COMPONENT(ShapeData)
+TNX_REGISTER_COMPONENT(CShape)

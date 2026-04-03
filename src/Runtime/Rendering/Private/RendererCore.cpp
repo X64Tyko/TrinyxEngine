@@ -16,10 +16,10 @@
 #include "TemporalComponentCache.h"
 
 #include "CacheSlotMeta.h"
-#include "ColorData.h"
-#include "MeshRef.h"
-#include "Scale.h"
-#include "TransRot.h"
+#include "CColor.h"
+#include "CMeshRef.h"
+#include "CScale.h"
+#include "CTransform.h"
 
 #include <immintrin.h>
 #include "LogicThread.h"
@@ -1313,11 +1313,11 @@ void RendererCore<Derived>::WriteToFrameSlab()
 	TemporalFrameHeader* temporalHdr = temporalCache->GetFrameHeader(LastTemporalFrame);
 	TemporalFrameHeader* volatileHdr = volatileCache->GetFrameHeader(LastVolatileFrame);
 
-	const ComponentTypeID transformSlot = TransRot<>::StaticTemporalIndex();
-	const ComponentTypeID scaleSlot     = Scale<>::StaticTemporalIndex();
-	const ComponentTypeID colorSlot     = ColorData<>::StaticTemporalIndex();
+	const ComponentTypeID transformSlot = CTransform<>::StaticTemporalIndex();
+	const ComponentTypeID scaleSlot     = CScale<>::StaticTemporalIndex();
+	const ComponentTypeID colorSlot     = CColor<>::StaticTemporalIndex();
 	const ComponentTypeID flagsSlot     = CacheSlotMeta<>::StaticTemporalIndex();
-	const ComponentTypeID meshRefSlot   = MeshRef<>::StaticTemporalIndex();
+	const ComponentTypeID meshRefSlot   = CMeshRef<>::StaticTemporalIndex();
 
 	struct FieldDescription
 	{

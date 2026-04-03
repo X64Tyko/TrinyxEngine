@@ -39,6 +39,19 @@ public:
 	bool IsRunning() const { return bIsRunning.load(std::memory_order_relaxed); }
 	void SetConstructRegistry(ConstructRegistry* cr) { ConstructsPtr = cr; }
 
+	// Active camera — when set, ProcessVizInput free-fly is disabled and
+	// PublishCompletedFrame reads position/yaw/pitch from this camera.
+	class CameraConstruct* GetActiveCamera() const { return ActiveCamera; }
+	void SetActiveCamera(class CameraConstruct* cam) { ActiveCamera = cam; }
+
+	/// Set the free-fly camera position/orientation (used when ActiveCamera is null).
+	void SetFreeFlyCamera(float x, float y, float z, float yaw, float pitch)
+	{
+		CamPos   = {x, y, z};
+		CamYaw   = yaw;
+		CamPitch = pitch;
+	}
+
 	// Simulation pause — when paused, camera/input/frame publishing still run
 	// but PrePhysics/PostPhysics/ScalarUpdate/physics are skipped.
 	void SetSimPaused(bool paused) { bSimPaused.store(paused, std::memory_order_release); }
@@ -64,6 +77,7 @@ public:
 	ConstructBatch ScalarPrePhysicsBatch;
 	ConstructBatch ScalarPostPhysicsBatch;
 	ConstructBatch ScalarUpdateBatch;
+	ConstructBatch ScalarPhysicsStepBatch; // Runs during flush window (after Step completes)
 
 #ifdef TNX_ENABLE_ROLLBACK
 	// Called from Sentinel thread (PumpEvents) on F5 press.
@@ -90,6 +104,7 @@ private:
 	JoltPhysics* PhysicsPtr                 = nullptr;
 	class ComponentCacheBase* TemporalCache = nullptr;
 	ConstructRegistry* ConstructsPtr        = nullptr;
+	CameraConstruct* ActiveCamera           = nullptr;
 	SpawnSync* SpawnerPtr                   = nullptr;
 	const std::atomic<bool>* JobsInitPtr    = nullptr;
 

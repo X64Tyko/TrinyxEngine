@@ -24,29 +24,25 @@ Test meshes and rigs from https://www.3dfiggins.com/Store/
 
 ---
 
-## Current Status (2026-03)
+## Current Status (2026-04)
 
-**Performance: ~Old Metrics~**
-- **Sentinel (Main):** 1.0ms per frame (1000 Hz) ✅
-- **Brain (Logic):** ~1.7ms per frame (target: 1.95ms @ 512Hz)
-- **Encoder (Render):** Orange cube rendering at full rate via BDA pipeline ✅
-- **100k entities:** ~0.1ms PrePhysics, ~0.7ms full logic frame
+**Performance:**
 
-**New Metrics:**
-
-- **Sentinel (Main):** 1.0ms per frame, input polling with lock free double buffered input.
+- **Sentinel (Main):** 1.0ms per frame, input polling with lock-free double-buffered input.
 - **Brain (Logic):**
-    - **15 layer Pyramid - 1240 cubes - 512Hz Logic / 8 Lock step Physics:**
+    - **15-layer Pyramid (1,240 cubes), 512Hz Logic / 64Hz Physics:**
         - avg frame time: 1ms (capped at 1024 FPS)
         - avg physics time: 58μs, 105μs on Jolt pull update frames
-        - avg jolt step time: 4.13ms
-        - avg input->photon: 7.37ms
-    - **25 layer Pyramid - 5525 cubes - 512Hz Logic / 8 Lock step Physics:**
-        - avg frame time: 1ms (capped at 1024 FPS), max 15.58ms under load
+      - avg input-to-photon: 7.37ms
+    - **25-layer Pyramid (5,525 cubes), 512Hz Logic / 64Hz Physics:**
+        - avg frame time: 1ms, max 15.58ms under load
         - avg physics time: 1.16ms, 2.44ms on Jolt pull update frames
-        - avg jolt step time: 12.58ms
-        - avg input->photon: 13.25ms, max 18.08ms under load
-- **Encoder (Render):** 0.73ms per frame
+        - avg input-to-photon: 13.25ms, max 18.08ms under load
+    - **100k cubes + 25-layer pyramid (105k entities):**
+        - 0.73ms steady, 18.74ms settling. 1375 FPS steady.
+    - **205k entities (100k super + 5.5k physics):**
+        - ~1.4ms steady, 28ms settling. 512Hz maintained throughout.
+- **Encoder (Render):** 0.73ms per frame (100k entities), ~1.5ms (205k entities)
 
 **Architecture:**
 - ✅ Three-thread architecture (Sentinel/Brain/Encoder)
@@ -54,19 +50,17 @@ Test meshes and rigs from https://www.3dfiggins.com/Store/
 - ✅ SoA component decomposition (FieldProxy with Scalar/Wide/WideMask)
 - ✅ EntityView hydration (zero virtual calls)
 - ✅ SIMD-friendly batch processing (AVX2)
-- ✅ Dirty bit delta tracking
+- ✅ Dirty-bit selective GPU upload (RenderAck handshake, 5 dirty bitplanes, AVX2 scan)
 - ✅ GPU-driven compute pipeline (predicate → prefix_sum → scatter, Slang shaders)
-- ✅ Temporal component N-frame buffer (TemporalComponentCache, proto-slab)
-- ✅ VulkRender Steps 1–4: clear → indexed cube pipeline → GpuFrameData + BDA draw → entity data wired from
-  TemporalComponentCache
+- ✅ Temporal component N-frame buffer (TemporalComponentCache)
 - ✅ Lock-free job system (MPMC ring buffers, futex-based wake, per-chunk dispatch)
-- ✅ Core-aware thread pinning (physical cores first, SMT siblings second)
-- ✅ GameManager CRTP pattern (TNX_IMPLEMENT_GAME macro, minimal boilerplate project setup)
-- ✅ Project-relative INI config (*Defaults.ini scanning from source directory)
 - ✅ Tiered storage (dual-ended arena partition layout, 4 tiers: Cold/Static/Volatile/Temporal)
-- ✅ Rough Physics integration (Jolt Physics. pull physics data using AVX2 transpose and scatter, push to Jolt... it's
-  coming)
-- ✅ Input buffering (double buffered input, lock-free polling, store events and bitstate for querying)
+- ✅ Jolt Physics v5.5.0 (slab-direct iteration, awake-only pull, 512Hz/64Hz lockstep)
+- ✅ Rollback determinism (ECS + Jolt byte-perfect via snapshot ring buffer)
+- ✅ Construct/View OOP layer (Construct<T>, Owned<T>, ConstructView<TEntity>, JoltCharacter)
+- ✅ Editor (bare-bones): scene hierarchy, entity inspection, reflected properties, save/load, PIE
+- ✅ Networking: GNS, entity spawn replication, state corrections, PIE loopback
+- 🔧 Game flow: GameMode, travel/level loading, player spawn flow (in progress)
 
 ---
 
@@ -207,6 +201,72 @@ Users write natural OOP code while the engine handles SoA layout, double-bufferi
 `FieldProxy` has three width modes: `Scalar` (one entity/iteration), `Wide` (8 entities/AVX2 instruction),
 and `WideMask` (tail-masked partial lanes for non-multiples of 8).
 
+### Construct/View OOP Layer
+
+Two object types coexist:
+
+- **Constructs** — Singular complex OOP objects (`Construct<Player>`, `Construct<GameMode>`). Own Views into ECS data,
+  hold bespoke logic, auto-register ticks via C++20 concepts. Compose via `Owned<T>` members.
+- **Entities** — Raw ECS data for high-count homogeneous objects (zombies, bullets, particles). No bespoke logic. Engine
+  sweeps them with wide SIMD.
+
+```cpp
+class Player : public Construct<Player>
+{
+    DefaultView Body;                       // Physics capsule in DUAL partition
+    Owned<CameraConstruct> FirstPersonCam;  // Eye-height camera (LogicView)
+    Owned<CameraConstruct> ThirdPersonCam;  // Behind + above (LogicView)
+
+    void InitializeViews();               // Create Views, set up physics body
+    void PrePhysics(SimFloat dt);         // WASD → kinematic velocity
+    void PhysicsFlush(SimFloat dt);       // Push velocity to Jolt body
+    void ScalarUpdate(SimFloat dt);       // Mouse look, camera toggle, camera positioning
+};
+```
+
+Tick methods are detected at compile time — implement the method, get the tick. Don't implement it, pay nothing.
+ConstructBatch dispatches via type-erased function pointers (no virtual calls), sorted by TickGroup.
+
+Views are CRTP lenses into ECS data: DefaultView (physics + render), PhysView (physics only), RenderView (render only),
+LogicView (transform only). Each creates a backing ECS entity, hydrates FieldProxy cursors, and auto-rehydrates on
+defrag.
+
+### Networking
+
+Server-authoritative model with GNS (GameNetworkingSockets) transport:
+
+- **NetThread** polls connections at 30Hz, routes InputFrame messages to correct World via OwnerID
+- **ReplicationSystem** walks the server Registry each net tick:
+    - Sends EntitySpawn (reliable) for new entities — includes ClassID, transform, scale, color, mesh
+    - Sends batched StateCorrection (unreliable) with authoritative transforms
+- **PIE loopback** — editor creates server + N client Worlds in same process for local testing
+- **EntityNetHandle** — packed uint32 (NetOwnerID:8 + NetIndex:24) for network entity identity
+
+```bash
+# Playground networking modes
+Playground --server --port 27015
+Playground --client 127.0.0.1 --port 27015
+Playground                                    # standalone, local player
+```
+
+### Replay & Recording (Architectural Win)
+
+The slab-based SoA layout makes replay recording nearly free — all deterministic simulation state already lives in
+contiguous, trivially-copyable field arrays. Adding replay is just serialization in `PropagateFrame`.
+
+**Compression advantage:** Homogeneous float arrays (all `PosX`, all `PosY`, etc.) have high spatial coherence. Delta
+compression between frames yields mostly zeros. Far superior to AoS formats where mixed types destroy compression
+ratios.
+
+**Free wins from existing architecture:**
+
+- **Kill cam / rewind** — slab snapshots in ring buffer; rewind = index backward + re-render with different camera
+- **Spectator scrubbing** — random access seek via snapshot index, resume simulation forward
+- **Anti-cheat validation** — diff server vs client slab timelines; divergence flags cheating
+- **Bandwidth estimation** — compressed delta size = theoretical minimum sync payload for netcode
+- **Sub-tick precision** — input events timestamped at actual ms read time, not frame-quantized
+- **With rollback** — retroactive event insertion enables frame-perfect multiplayer reproduction from any perspective
+
 ---
 
 ## Architectural Constraints
@@ -321,11 +381,11 @@ See [docs/BUILD_OPTIONS.md](docs/BUILD_OPTIONS.md) for complete configuration re
 
 **Target:** 100,000 dynamic entities at 512Hz fixed update (1.95ms per frame)
 
-| Thread           | Target              | Current                                    |
-|------------------|---------------------|--------------------------------------------|
-| Sentinel         | 1.0ms (1000 Hz)     | ✅ Achieved                                 |
-| Brain (Logic)    | 1.95ms (512 Hz)     | ~0.3ms with frame Propagation              |
-| Encoder (Render) | 8-16ms (60-120 FPS) | 0.73ms. still needs dirty bit optimization |
+| Thread           | Target              | Current                                                  |
+|------------------|---------------------|----------------------------------------------------------|
+| Sentinel         | 1.0ms (1000 Hz)     | ✅ Achieved                                               |
+| Brain (Logic)    | 1.95ms (512 Hz)     | 0.73ms steady (100k entities), ~1.4ms (205k)             |
+| Encoder (Render) | 8-16ms (60-120 FPS) | 0.88ms (100k), 1.5ms (205k). Dirty-bit selective upload. |
 
 The tiered partition design eliminates the cross-archetype co-indexing problem: physics iterates
 DUAL→PHYS→STATIC as three dense SIMD passes; render iterates DUAL→RENDER→STATIC. No pointer chasing,

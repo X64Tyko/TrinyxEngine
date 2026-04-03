@@ -34,9 +34,9 @@ namespace JoltMotion
 // scan the contiguous DUAL+PHYS region as a single dense pass.
 // BodyID ↔ EntityIndex mapping lives in JoltPhysics as two lookup arrays.
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct JoltBody : ComponentView<JoltBody, WIDTH>
+struct CJoltBody : ComponentView<CJoltBody, WIDTH>
 {
-	TNX_VOLATILE_FIELDS(JoltBody, Physics, Shape, HalfExtentX, HalfExtentY, HalfExtentZ,
+	TNX_VOLATILE_FIELDS(CJoltBody, Physics, Shape, HalfExtentX, HalfExtentY, HalfExtentZ,
 						Motion, Mass, Friction, Restitution)
 
 	// Shape geometry
@@ -52,4 +52,4 @@ struct JoltBody : ComponentView<JoltBody, WIDTH>
 	FloatProxy<WIDTH> Restitution;
 };
 
-TNX_REGISTER_COMPONENT(JoltBody)
+TNX_REGISTER_COMPONENT(CJoltBody)

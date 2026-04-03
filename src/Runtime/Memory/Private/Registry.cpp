@@ -124,7 +124,11 @@ Archetype* Registry::GetOrCreateArchetype(const Signature& sig, const ClassID& i
 		}
 	}
 
-	NewArchetype->BuildLayout(this, Components);
+	SystemID sysID = SystemID::None;
+	auto sysIt     = MR.ClassSystemID.find(id);
+	if (sysIt != MR.ClassSystemID.end()) sysID = sysIt->second;
+
+	NewArchetype->BuildLayout(this, Components, sysID);
 
 	Archetypes[key] = NewArchetype;
 	return NewArchetype;

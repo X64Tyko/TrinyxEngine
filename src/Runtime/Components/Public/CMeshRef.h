@@ -10,14 +10,14 @@
 // Cold component interface: plain POD fields, no FieldProxy, no SoA allocation.
 // Bind() is a no-op; chunk access goes through Archetype::GetComponentArray.
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct MeshRef : ComponentView<MeshRef, WIDTH>
+struct CMeshRef : ComponentView<CMeshRef, WIDTH>
 {
 	UIntProxy<WIDTH> MeshID{};     // Asset system mesh handle (default 0)
 	UIntProxy<WIDTH> MaterialID{}; // Asset system material handle (default 0)
 	UIntProxy<WIDTH> LODCount{};   // Number of LOD levels available
 	UIntProxy<WIDTH> CastShadow{}; // 1 = participates in shadow passes
 
-	TNX_VOLATILE_FIELDS(MeshRef, Render, MeshID, MaterialID, LODCount, CastShadow)
+	TNX_VOLATILE_FIELDS(CMeshRef, Render, MeshID, MaterialID, LODCount, CastShadow)
 };
 
-TNX_REGISTER_COMPONENT(MeshRef)
+TNX_REGISTER_COMPONENT(CMeshRef)

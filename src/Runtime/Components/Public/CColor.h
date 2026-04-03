@@ -6,9 +6,9 @@
 
 // ColorData Component — RGBA color for rendering.
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct ColorData : ComponentView<ColorData, WIDTH>
+struct CColor : ComponentView<CColor, WIDTH>
 {
-	TNX_VOLATILE_FIELDS(ColorData, Render, R, G, B, A)
+	TNX_VOLATILE_FIELDS(CColor, Render, R, G, B, A)
 
 	FloatProxy<WIDTH> R;
 	FloatProxy<WIDTH> G;
@@ -18,4 +18,4 @@ struct ColorData : ComponentView<ColorData, WIDTH>
 	Vec4Accessor<WIDTH> Color{R, G, B, A};
 };
 
-TNX_REGISTER_COMPONENT(ColorData)
+TNX_REGISTER_COMPONENT(CColor)

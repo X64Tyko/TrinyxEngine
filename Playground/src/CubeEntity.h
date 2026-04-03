@@ -1,61 +1,28 @@
 #pragma once
 
-#include "TransRot.h"
-#include "Velocity.h"
-#include "Scale.h"
-#include "ColorData.h"
+#include "CTransform.h"
+#include "CScale.h"
+#include "CColor.h"
+#include "CMeshRef.h"
+#include "CJoltBody.h"
 #include "EntityView.h"
-#include "Schema.h"
 #include "SchemaReflector.h"
-#include "JoltBody.h"
-#include "MeshRef.h"
 
-template <template <FieldWidth> class T, FieldWidth WIDTH = FieldWidth::Scalar>
-class BaseCube : public EntityView<T, WIDTH>
+// CubeEntity — generic static prop with physics.
+// Used for level geometry: floors, walls, cover, etc.
+template <FieldWidth WIDTH = FieldWidth::Scalar>
+class CubeEntity : public EntityView<CubeEntity, WIDTH>
 {
-	TNX_REGISTER_SUPER_SCHEMA(BaseCube, EntityView, transform, velocity, scale, color, mesh)
+	TNX_REGISTER_SCHEMA(CubeEntity, EntityView, transform, scale, color, mesh, physBody)
 
 public:
-	TransRot<WIDTH> transform;
-	Velocity<WIDTH> velocity;
-	Scale<WIDTH> scale;
-	ColorData<WIDTH> color;
-	MeshRef<WIDTH> mesh;
+	CTransform<WIDTH> transform;
+	CScale<WIDTH> scale;
+	CColor<WIDTH> color;
+	CMeshRef<WIDTH> mesh;
+	CJoltBody<WIDTH> physBody;
 
 	FORCE_INLINE void PrePhysics([[maybe_unused]] SimFloat dt)
 	{
-	}
-};
-
-template <FieldWidth WIDTH = FieldWidth::Scalar>
-class CubeEntity : public BaseCube<CubeEntity, WIDTH>
-{
-	TNX_REGISTER_SCHEMA(CubeEntity, BaseCube, physBody)
-
-public:
-	JoltBody<WIDTH> physBody;
-
-	FORCE_INLINE void PrePhysics([[maybe_unused]] SimFloat dt)
-	{
-	}
-};
-
-template <FieldWidth WIDTH = FieldWidth::Scalar>
-class SuperCube : public BaseCube<SuperCube, WIDTH>
-{
-	TNX_REGISTER_SCHEMA(SuperCube, BaseCube)
-
-public:
-	using Base::transform;
-	using Base::velocity;
-	using Base::scale;
-	using Base::color;
-	using Base::mesh;
-
-	// Logic
-	FORCE_INLINE void ScalarUpdate([[maybe_unused]] SimFloat dt)
-	{
-		color.R = (color.R + (dt * 0.5f) > 1.f) ? 0.f : color.R + (dt * 0.5f);
-		color.B = ((color.B + dt) > 1.f) ? 0.f : color.B + dt;
 	}
 };

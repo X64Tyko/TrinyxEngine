@@ -1,23 +1,23 @@
 #pragma once
 
-#include "TransRot.h"
-#include "Scale.h"
-#include "ColorData.h"
+#include "CTransform.h"
+#include "CScale.h"
+#include "CColor.h"
 #include "EntityView.h"
 #include "Schema.h"
 #include "SchemaReflector.h"
 #include "FieldProxy.h"
-#include "JoltBody.h"
+#include "CJoltBody.h"
 
 template <template <FieldWidth> class T, FieldWidth WIDTH = FieldWidth::Scalar>
 class BaseCube : public EntityView<T, WIDTH>
 {
 	TNX_REGISTER_SUPER_SCHEMA(BaseCube, EntityView, transform, velocity, scale, color)
 public:
-	TransRot<WIDTH> transform;
-	Velocity<WIDTH> velocity;
-	Scale<WIDTH> scale;
-	ColorData<WIDTH> color;
+	CTransform<WIDTH> transform;
+	CVelocity<WIDTH> velocity;
+	CScale<WIDTH> scale;
+	CColor<WIDTH> color;
 
 	// Lifecycle hooks
 	FORCE_INLINE void PrePhysics([[maybe_unused]] SimFloat dt)
@@ -39,7 +39,7 @@ class CubeEntity : public BaseCube<CubeEntity, WIDTH>
 	TNX_REGISTER_SCHEMA(CubeEntity, BaseCube, physBody)
 
 public:
-	JoltBody<WIDTH> physBody;
+	CJoltBody<WIDTH> physBody;
 
 	// Logic
 	FORCE_INLINE void PrePhysics([[maybe_unused]] SimFloat dt)

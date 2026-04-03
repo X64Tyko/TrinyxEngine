@@ -12,17 +12,17 @@
 #include "imgui_impl_vulkan.h"
 
 #include "CacheSlotMeta.h"
-#include "ColorData.h"
+#include "CColor.h"
 #include "EditorContext.h"
 #include "GpuFrameData.h"
 #include "ImGuizmo.h"
 #include "Logger.h"
 #include "LogicThread.h"
-#include "MeshRef.h"
+#include "CMeshRef.h"
 #include "Registry.h"
-#include "Scale.h"
+#include "CScale.h"
 #include "TemporalComponentCache.h"
-#include "TransRot.h"
+#include "CTransform.h"
 #include "World.h"
 #include "WorldViewport.h"
 
@@ -428,11 +428,11 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 	const VkDeviceSize fieldStride = static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
 	uint8_t* slabPtr               = static_cast<uint8_t*>(vp->FieldSlabs[nextSlab].MappedPtr);
 
-	const ComponentTypeID transformSlot = TransRot<>::StaticTemporalIndex();
-	const ComponentTypeID scaleSlot     = Scale<>::StaticTemporalIndex();
-	const ComponentTypeID colorSlot     = ColorData<>::StaticTemporalIndex();
+	const ComponentTypeID transformSlot = CTransform<>::StaticTemporalIndex();
+	const ComponentTypeID scaleSlot     = CScale<>::StaticTemporalIndex();
+	const ComponentTypeID colorSlot     = CColor<>::StaticTemporalIndex();
 	const ComponentTypeID flagsSlot     = CacheSlotMeta<>::StaticTemporalIndex();
-	const ComponentTypeID meshRefSlot   = MeshRef<>::StaticTemporalIndex();
+	const ComponentTypeID meshRefSlot   = CMeshRef<>::StaticTemporalIndex();
 
 	struct FD
 	{

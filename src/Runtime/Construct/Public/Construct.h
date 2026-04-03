@@ -4,6 +4,14 @@
 #include "Schema.h"
 #include "World.h"
 
+struct ConstructViewRef
+{
+	void* View;
+	void (*HydrateFn)(void*);
+
+	void EnsureHydrated() { HydrateFn(View); }
+};
+
 // ---------------------------------------------------------------------------
 // Construct<T> — CRTP lifecycle base for singular OOP gameplay objects.
 //
@@ -47,19 +55,25 @@ public:
 
 		if constexpr (HasPrePhysics<Derived>)
 		{
-			Logic->ScalarPrePhysicsBatch.Register<Derived, &Derived::PrePhysics>(
+			Logic->ScalarPrePhysicsBatch.Register<Construct, &Construct::PrePhysBase>(
 				static_cast<Derived*>(this));
 		}
 
 		if constexpr (HasPostPhysics<Derived>)
 		{
-			Logic->ScalarPostPhysicsBatch.Register<Derived, &Derived::PostPhysics>(
+			Logic->ScalarPostPhysicsBatch.Register<Construct, &Construct::PostPhysBase>(
 				static_cast<Derived*>(this));
 		}
 
 		if constexpr (HasScalarUpdate<Derived>)
 		{
-			Logic->ScalarUpdateBatch.Register<Derived, &Derived::ScalarUpdate>(
+			Logic->ScalarUpdateBatch.Register<Construct, &Construct::ScalarUpdateBase>(
+				static_cast<Derived*>(this));
+		}
+
+		if constexpr (HasPhysicsStep<Derived>)
+		{
+			Logic->ScalarPhysicsStepBatch.Register<Construct, &Construct::PhysicsStepBase>(
 				static_cast<Derived*>(this));
 		}
 
@@ -77,6 +91,23 @@ public:
 
 		bInitialized = false;
 		OwnerWorld   = nullptr;
+	}
+
+	void RegisterView(ConstructViewRef ref)
+	{
+		Views[ViewCount++] = ref;
+	}
+
+	void DeregisterView(void* viewPtr)
+	{
+		for (uint32_t i = 0; i < ViewCount; ++i)
+		{
+			if (Views[i].View == viewPtr)
+			{
+				Views[i] = Views[--ViewCount]; // swap-remove
+				return;
+			}
+		}
 	}
 
 	World* GetWorld() const { return OwnerWorld; }
@@ -97,4 +128,37 @@ private:
 	World* OwnerWorld    = nullptr;
 	uint32_t ConstructID = 0;
 	bool bInitialized    = false;
+
+	static constexpr uint32_t MaxViews = 8;
+	ConstructViewRef Views[MaxViews];
+	uint32_t ViewCount = 0;
+
+	void HydrateAllViews()
+	{
+		for (uint32_t i = 0; i < ViewCount; ++i) Views[i].EnsureHydrated();
+	}
+
+	void PrePhysBase(SimFloat dt)
+	{
+		HydrateAllViews();
+		static_cast<Derived*>(this)->PrePhysics(dt);
+	}
+
+	void PostPhysBase(SimFloat dt)
+	{
+		HydrateAllViews();
+		static_cast<Derived*>(this)->PostPhysics(dt);
+	}
+
+	void ScalarUpdateBase(SimFloat dt)
+	{
+		HydrateAllViews();
+		static_cast<Derived*>(this)->ScalarUpdate(dt);
+	}
+
+	void PhysicsStepBase(SimFloat dt)
+	{
+		HydrateAllViews();
+		static_cast<Derived*>(this)->PhysicsStep(dt);
+	}
 };

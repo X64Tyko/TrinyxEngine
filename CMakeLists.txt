@@ -87,7 +87,13 @@ add_library(Slang::Compiler SHARED IMPORTED GLOBAL
         src/Runtime/Core/Public/ThreadPinning.h
         src/Runtime/Core/Public/TrinyxRingBuffer.h
         src/Runtime/Core/Public/RegistryTypes.h
-        src/Runtime/Core/Public/Events.h)
+        src/Runtime/Core/Public/Events.h
+        src/Runtime/Entities/Public/EInstanced.h
+        src/Runtime/Entities/Public/EPoint.h
+        src/Runtime/Physics/Public/JoltCharacter.h
+        src/Runtime/Physics/Public/JoltLayers.h
+        src/Runtime/Physics/Private/JoltCharacter.cpp
+        src/Runtime/Entities/Public/EPlayer.h)
 set_target_properties(Slang::Compiler PROPERTIES
         IMPORTED_LOCATION             "${SLANG_PATH}/lib/libslang-compiler.so"
         INTERFACE_INCLUDE_DIRECTORIES "${SLANG_PATH}/include"

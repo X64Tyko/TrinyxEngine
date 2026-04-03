@@ -1,8 +1,8 @@
 #pragma once
 
-#include "TransRot.h"
-#include "RigidBody.h"
-#include "ColorData.h"
+#include "CTransform.h"
+#include "CRigidBody.h"
+#include "CColor.h"
 #include "EntityView.h"
 #include "SchemaReflector.h"
 #include "FieldMath.h"
@@ -18,9 +18,9 @@ class Projectile : public EntityView<Projectile, WIDTH>
 	TNX_REGISTER_SCHEMA(Projectile, EntityView, transform, body, color)
 
 public:
-	TransRot<WIDTH> transform;
-	RigidBody<WIDTH> body;
-	ColorData<WIDTH> color;
+	CTransform<WIDTH> transform;
+	CRigidBody<WIDTH> body;
+	CColor<WIDTH> color;
 
 	FORCE_INLINE void PrePhysics(SimFloat dt)
 	{

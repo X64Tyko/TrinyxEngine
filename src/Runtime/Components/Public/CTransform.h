@@ -17,9 +17,9 @@
 //   transform.Rotation.RotateY(angle);
 //   transform.Rotation.SetIdentity();
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct TransRot : ComponentView<TransRot, WIDTH>
+struct CTransform : ComponentView<CTransform, WIDTH>
 {
-	TNX_TEMPORAL_FIELDS(TransRot, Physics, PosX, PosY, PosZ, RotQx, RotQy, RotQz, RotQw)
+	TNX_TEMPORAL_FIELDS(CTransform, Physics, PosX, PosY, PosZ, RotQx, RotQy, RotQz, RotQw)
 
 	FloatProxy<WIDTH> PosX;
 	FloatProxy<WIDTH> PosY;
@@ -38,4 +38,4 @@ struct TransRot : ComponentView<TransRot, WIDTH>
 	static uint8_t GetTemporalIndex() { return 1; }
 };
 
-TNX_REGISTER_COMPONENT(TransRot)
+TNX_REGISTER_COMPONENT(CTransform)

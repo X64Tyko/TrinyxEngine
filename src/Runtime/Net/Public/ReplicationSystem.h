@@ -7,6 +7,7 @@
 class World;
 class Registry;
 class NetConnectionManager;
+union EntityHandle;
 union GlobalEntityHandle;
 
 // ---------------------------------------------------------------------------
@@ -33,6 +34,12 @@ public:
 	/// Sends EntitySpawn + StateCorrection to all connected clients.
 	void Tick(NetConnectionManager* connMgr, uint32_t frameNumber);
 
+	/// Pre-register a server entity with a specific OwnerID. Allocates a NetIndex,
+	/// wires NetToRecord, and sets the record's NetworkID. SendSpawns will use the
+	/// pre-assigned NetHandle instead of assigning a new one.
+	/// Call within a Spawn() lambda on the server world.
+	void RegisterEntity(Registry* reg, EntityHandle localHandle, uint8_t ownerID);
+
 	/// Spawn an entity on the client Registry using a received EntitySpawnPayload.
 	/// Uses CreateInternal (GlobalEntityHandle), wires NetToRecord, writes field data.
 	static void HandleEntitySpawn(Registry* reg, const struct EntitySpawnPayload& payload);
@@ -46,7 +53,7 @@ private:
 
 	/// Assign an EntityNetHandle to a server entity that hasn't been replicated yet.
 	/// Allocates a NetIndex, wires NetToRecord, sets the record's NetworkID.
-	EntityNetHandle AssignNetHandle(Registry* reg, GlobalEntityHandle gHandle);
+	EntityNetHandle AssignNetHandle(Registry* reg, GlobalEntityHandle gHandle, uint8_t ownerID = 0);
 
 	World* ServerWorld = nullptr;
 

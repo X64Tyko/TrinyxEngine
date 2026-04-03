@@ -108,6 +108,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
         "${CMAKE_SOURCE_DIR}/src/Runtime/Assets/Public"
         "${CMAKE_SOURCE_DIR}/src/Runtime/Net/Public"
         "${CMAKE_SOURCE_DIR}/src/Runtime/Construct/Public"
+        "${CMAKE_SOURCE_DIR}/src/Runtime/Entities/Public"
         "${CMAKE_SOURCE_DIR}/src/Editor/Public"
 )
 

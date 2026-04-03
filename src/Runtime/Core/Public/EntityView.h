@@ -18,7 +18,7 @@ class EntityView
 {
 public:
 	Registry* Reg      = nullptr;
-	EntityHandle ID        = {};
+	EntityHandle ID    = {};
 	uint32_t ViewIndex = 0;
 
 	CacheSlotMeta<WIDTH> Flags;
@@ -51,7 +51,12 @@ public:
 		return view;
 	}
 
-    FORCE_INLINE void Advance(uint32_t step)
+	void SetFlags(TemporalFlagBits flagBits)
+	{
+		Flags |= flagBits;
+	}
+
+	FORCE_INLINE void Advance(uint32_t step)
 	{
 		ViewIndex += step;
 		Flags.Advance(step);
@@ -94,3 +99,17 @@ using InheritableBase = SUPER<CLASS<WIDTH>, WIDTH>;
 
 template <typename CLASS, template <typename, FieldWidth> class SUPER = EntityView, FieldWidth WIDTH = FieldWidth::Scalar>
 using FinalBase = SUPER<CLASS, WIDTH>;
+
+// Trait to detect any specialization of EntityView
+template <typename T>
+struct IsEntityView : std::false_type
+{
+};
+
+template <template <FieldWidth> class Derived, FieldWidth WIDTH>
+struct IsEntityView<EntityView<Derived, WIDTH>> : std::true_type
+{
+};
+
+template <typename T>
+concept EntityViewType = IsEntityView<std::remove_cvref_t<T>>::value;

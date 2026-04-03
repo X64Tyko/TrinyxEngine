@@ -1,9 +1,9 @@
 #pragma once
 
-#include "TransRot.h"
-#include "ColorData.h"
-#include "RigidBody.h"
-#include "Forces.h"
+#include "CTransform.h"
+#include "CColor.h"
+#include "CRigidBody.h"
+#include "CForces.h"
 #include "EntityView.h"
 #include "SchemaReflector.h"
 
@@ -18,10 +18,10 @@ class PhysicsEntity : public EntityView<PhysicsEntity, WIDTH>
 	TNX_REGISTER_SCHEMA(PhysicsEntity, EntityView, transform, body, forces, color)
 
 public:
-	TransRot<WIDTH> transform;
-	RigidBody<WIDTH> body;
-	Forces<WIDTH> forces;
-	ColorData<WIDTH> color;
+	CTransform<WIDTH> transform;
+	CRigidBody<WIDTH> body;
+	CForces<WIDTH> forces;
+	CColor<WIDTH> color;
 
 	static constexpr float Gravity = -9.81f;
 

@@ -72,6 +72,9 @@ public:
 	void SetJobsInitialized(bool v) { bJobsInitialized.store(v, std::memory_order_release); }
 	bool GetJobsInitialized() const { return bJobsInitialized.load(std::memory_order_relaxed); }
 
+	// --- Network ownership ---
+	uint8_t LocalOwnerID = 0; // This world's owner (0 = server, 1-255 = client)
+
 	// Test-only: hard-reset the registry (wipes all entities, handles, caches).
 	void ResetRegistry() const;
 	void ConfirmLocalRecycles() const;

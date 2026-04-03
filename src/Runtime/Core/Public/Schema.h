@@ -17,6 +17,15 @@ template <typename T> concept HasOnDestroy = requires(T t) { t.OnDestroy(); };
 template <typename T> concept HasScalarUpdate = requires(T t, SimFloat dt) { t.ScalarUpdate(dt); };
 template <typename T> concept HasPrePhysics = requires(T t, SimFloat dt) { t.PrePhysics(dt); };
 template <typename T> concept HasPostPhysics = requires(T t, SimFloat dt) { t.PostPhysics(dt); };
+// R&D workaround: PhysicsFlush lets Constructs push kinematic state to Jolt
+// during the flush window (after Step completes, before next Step dispatches).
+// This doesn't gel with the slab data model — kinematic state should flow
+// through ECS fields, not direct Jolt API calls. Needs redesign:
+//   - Flush must not change physics state that Pull is about to overwrite
+//   - Pull must not clobber kinematic state that Flush just wrote
+//   - Ideally: kinematic velocity lives in a slab field, engine pushes it
+//     to Jolt during FlushPendingBodies automatically (like body creation)
+template <typename T> concept HasPhysicsStep = requires(T t, SimFloat dt) { t.PhysicsStep(dt); };
 template <typename T> concept HasOnActivate = requires(T t) { t.OnActivate(); };
 template <typename T> concept HasOnDeactivate = requires(T t) { t.OnDeactivate(); };
 template <typename T> concept HasOnCollide = requires(T t) { t.OnCollide(); };

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <type_traits>
 
 // ---------------------------------------------------------------------------
@@ -26,11 +27,16 @@
 //   };
 // ---------------------------------------------------------------------------
 template <typename T>
+	requires requires(const T& t) { { t.IsInitialized() } -> std::same_as<bool>; }
 class Owned
 {
 public:
 	Owned()  = default;
-	~Owned() = default;
+
+	~Owned()
+	{
+		assert(Value.IsInitialized() && "Owned<T> destroyed without Initialize — did the parent forget to call Initialize()?");
+	}
 
 	Owned(const Owned&)            = delete;
 	Owned& operator=(const Owned&) = delete;

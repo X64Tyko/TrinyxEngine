@@ -8,9 +8,9 @@
 // Volatile: no rollback needed — forces are re-derived from inputs during resimulation.
 // Physics partition group (Phys).
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct Forces : ComponentView<Forces, WIDTH>
+struct CForces : ComponentView<CForces, WIDTH>
 {
-	TNX_VOLATILE_FIELDS(Forces, Physics, ForceX, ForceY, ForceZ, TorqueX, TorqueY, TorqueZ)
+	TNX_VOLATILE_FIELDS(CForces, Physics, ForceX, ForceY, ForceZ, TorqueX, TorqueY, TorqueZ)
 
 	FloatProxy<WIDTH> ForceX;
 	FloatProxy<WIDTH> ForceY;
@@ -21,4 +21,4 @@ struct Forces : ComponentView<Forces, WIDTH>
 	FloatProxy<WIDTH> TorqueZ;
 };
 
-TNX_REGISTER_COMPONENT(Forces)
+TNX_REGISTER_COMPONENT(CForces)

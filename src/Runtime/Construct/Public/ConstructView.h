@@ -19,39 +19,72 @@
 // physics, rendering, and replication. The ConstructView just provides a
 // persistent scalar lens into its fields.
 // ---------------------------------------------------------------------------
-template <typename Derived, template <FieldWidth> class ViewEntity>
-class ConstructView
+template <template <FieldWidth> class TEntity>
+class ConstructView : public TEntity<FieldWidth::Scalar>
 {
+	using TEntityView = TEntity<FieldWidth::Scalar>;
+
 public:
-	ConstructView() = default;
+	ConstructView()
+		: TEntityView()
+	{
+	}
+
 	~ConstructView() { Shutdown(); }
 
 	ConstructView(const ConstructView&)            = delete;
 	ConstructView& operator=(const ConstructView&) = delete;
 
-	void Initialize(Registry* InRegistry)
+	template <typename TConstruct>
+	void Initialize(TConstruct* owner)
 	{
-		Reg = InRegistry;
+		Reg         = owner->GetRegistry();
+		Handle      = Reg->Create<TEntity<FieldWidth::Scalar>>();
+		bOwnsEntity = true;
+		RehydrateCursors();
+		this->SetFlags(TemporalFlagBits::Active);
 
-		// Create the backing ECS entity
-		Handle = Reg->Create<ViewEntity<FieldWidth::Scalar>>();
+		using Self = ConstructView;
+		Reg->BindOnCacheSlotChange<Self, &Self::OnCacheSlotChanged>(Handle, this);
 
-		// Hydrate the scalar view at this entity's slot
+		// Auto-register with owning Construct
+		owner->RegisterView({
+			this,
+			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); }
+		});
+	}
+
+	// Attach does the same
+	template <typename TConstruct>
+	void Attach(TConstruct* owner, EntityHandle existing)
+	{
+		Reg         = owner->GetRegistry();
+		Handle      = existing;
+		bOwnsEntity = false;
 		RehydrateCursors();
 
-		// Mark entity active so GPU predicate includes it
-		View.Flags.Flags = static_cast<int32_t>(TemporalFlagBits::Active);
-
-		// Register for defrag — invalidate cursors when cache slot moves
-		using Self = ConstructView<Derived, ViewEntity>;
+		using Self = ConstructView;
 		Reg->BindOnCacheSlotChange<Self, &Self::OnCacheSlotChanged>(Handle, this);
+
+		owner->RegisterView({
+			this,
+			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); }
+		});
+	}
+
+	template <typename TConstruct>
+	void Detach(TConstruct* owner)
+	{
+		Handle      = {};
+		bOwnsEntity = false;
+		owner->DeregisterView(this);
 	}
 
 	void Shutdown()
 	{
 		if (Reg && Handle.IsValid())
 		{
-			using Self = ConstructView<Derived, ViewEntity>;
+			using Self = ConstructView;
 			Reg->UnbindOnCacheSlotChange<Self, &Self::OnCacheSlotChanged>(Handle, this);
 
 			Reg->Destroy(Handle);
@@ -65,18 +98,6 @@ public:
 	bool IsInitialized() const { return Reg != nullptr && Handle.IsValid(); }
 
 protected:
-	ViewEntity<FieldWidth::Scalar>& GetView()
-	{
-		EnsureHydrated();
-		return View;
-	}
-
-	const ViewEntity<FieldWidth::Scalar>& GetView() const
-	{
-		const_cast<ConstructView*>(this)->EnsureHydrated();
-		return View;
-	}
-
 	// Called by EntityRecord::OnCacheSlotChange when defrag relocates the entity.
 	// Invalidates cached frame numbers so the next GetView() forces a rehydrate.
 	void OnCacheSlotChanged([[maybe_unused]] uint32_t OldIndex, [[maybe_unused]] uint32_t NewIndex)
@@ -110,12 +131,12 @@ private:
 
 		void* FieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 		Record.Arch->BuildFieldArrayTable(Record.TargetChunk, FieldArrayTable, temporalWrite, volatileWrite);
-		View.Hydrate(FieldArrayTable, FieldArrayTable[0], Record.LocalIndex);
+		this->Hydrate(FieldArrayTable, FieldArrayTable[0], Record.LocalIndex);
 	}
 
 	Registry* Reg = nullptr;
 	EntityHandle Handle{};
-	ViewEntity<FieldWidth::Scalar> View;
 	uint32_t LastTemporalFrame = UINT32_MAX;
 	uint32_t LastVolatileFrame = UINT32_MAX;
+	bool bOwnsEntity;
 };

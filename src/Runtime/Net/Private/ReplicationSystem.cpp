@@ -2,15 +2,15 @@
 
 #include "Archetype.h"
 #include "CacheSlotMeta.h"
-#include "ColorData.h"
+#include "CColor.h"
 #include "Logger.h"
-#include "MeshRef.h"
+#include "CMeshRef.h"
 #include "NetConnectionManager.h"
 #include "NetTypes.h"
 #include "Registry.h"
-#include "Scale.h"
+#include "CScale.h"
 #include "TemporalComponentCache.h"
-#include "TransRot.h"
+#include "CTransform.h"
 #include "World.h"
 
 #include <cstring>
@@ -39,12 +39,23 @@ void ReplicationSystem::Tick(NetConnectionManager* connMgr, uint32_t frameNumber
 // AssignNetHandle — allocate a unique EntityNetHandle for a server entity
 // ---------------------------------------------------------------------------
 
-EntityNetHandle ReplicationSystem::AssignNetHandle(Registry* reg, GlobalEntityHandle gHandle)
+void ReplicationSystem::RegisterEntity(Registry* reg, EntityHandle localHandle, uint8_t ownerID)
+{
+	GlobalEntityHandle gHandle = reg->GlobalEntityRegistry.LookupGlobalHandle(localHandle);
+	if (gHandle.GetIndex() == 0)
+	{
+		LOG_WARN("[Replication] RegisterEntity: invalid handle");
+		return;
+	}
+	AssignNetHandle(reg, gHandle, ownerID);
+}
+
+EntityNetHandle ReplicationSystem::AssignNetHandle(Registry* reg, GlobalEntityHandle gHandle, uint8_t ownerID)
 {
 	uint32_t netIndex = reg->AllocateNetIndex();
 
 	EntityNetHandle netHandle{};
-	netHandle.NetOwnerID = 0; // Server-owned
+	netHandle.NetOwnerID = ownerID;
 	netHandle.NetIndex   = netIndex;
 
 	// Wire NetToRecord so we can look up the GlobalEntityHandle from the NetHandle
@@ -76,10 +87,10 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 
 	// Component slot indices
 	const ComponentTypeID flagsSlot     = CacheSlotMeta<>::StaticTemporalIndex();
-	const ComponentTypeID transformSlot = TransRot<>::StaticTemporalIndex();
-	const ComponentTypeID scaleSlot     = Scale<>::StaticTemporalIndex();
-	const ComponentTypeID colorSlot     = ColorData<>::StaticTemporalIndex();
-	const ComponentTypeID meshRefSlot   = MeshRef<>::StaticTemporalIndex();
+	const ComponentTypeID transformSlot = CTransform<>::StaticTemporalIndex();
+	const ComponentTypeID scaleSlot     = CScale<>::StaticTemporalIndex();
+	const ComponentTypeID colorSlot     = CColor<>::StaticTemporalIndex();
+	const ComponentTypeID meshRefSlot   = CMeshRef<>::StaticTemporalIndex();
 
 	// Read field arrays from caches
 	const auto* flags  = static_cast<const int32_t*>(temporalCache->GetFieldData(temporalHdr, flagsSlot, 0));
@@ -111,7 +122,7 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 	for (uint32_t i = 0; i < maxEntities; ++i)
 	{
 		// Skip inactive or already-replicated entities
-		if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Active))) continue;
+		if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Active)) || !(flags[i] & static_cast<int32_t>(TemporalFlagBits::Replicated))) continue;
 		if (Replicated[i]) continue;
 
 		// Look up the GlobalEntityHandle for this cache index
@@ -119,8 +130,9 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 		EntityRecord* record       = reg->GlobalEntityRegistry.Records[gHandle.GetIndex()];
 		if (!record || !record->IsValid()) continue;
 
-		// Assign a net handle to this entity
-		EntityNetHandle netHandle = AssignNetHandle(reg, gHandle);
+		// Use pre-assigned NetHandle (from RegisterEntity) or assign a new server-owned one
+		EntityNetHandle netHandle = record->NetworkID;
+		if (netHandle.NetIndex == 0) netHandle = AssignNetHandle(reg, gHandle);
 
 		// Build spawn payload
 		EntitySpawnPayload payload{};
@@ -186,7 +198,7 @@ void ReplicationSystem::SendStateCorrections(NetConnectionManager* connMgr, uint
 	TemporalFrameHeader* temporalHdr  = temporalCache->GetFrameHeader(temporalFrame);
 
 	const ComponentTypeID flagsSlot     = CacheSlotMeta<>::StaticTemporalIndex();
-	const ComponentTypeID transformSlot = TransRot<>::StaticTemporalIndex();
+	const ComponentTypeID transformSlot = CTransform<>::StaticTemporalIndex();
 
 	const auto* flags = static_cast<const int32_t*>(temporalCache->GetFieldData(temporalHdr, flagsSlot, 0));
 	const auto* posX  = static_cast<const float*>(temporalCache->GetFieldData(temporalHdr, transformSlot, 0));
@@ -309,7 +321,7 @@ void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayloa
 		{
 			if (fdesc.componentSlotIndex == 0) intArr[localIdx] = static_cast<int32_t>(TemporalFlagBits::Active);
 		}
-		else if (compID == TransRot<>::StaticTypeID())
+		else if (compID == CTransform<>::StaticTypeID())
 		{
 			switch (fdesc.componentSlotIndex)
 			{
@@ -330,7 +342,7 @@ void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayloa
 				default: break;
 			}
 		}
-		else if (compID == Scale<>::StaticTypeID())
+		else if (compID == CScale<>::StaticTypeID())
 		{
 			switch (fdesc.componentSlotIndex)
 			{
@@ -343,7 +355,7 @@ void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayloa
 				default: break;
 			}
 		}
-		else if (compID == ColorData<>::StaticTypeID())
+		else if (compID == CColor<>::StaticTypeID())
 		{
 			switch (fdesc.componentSlotIndex)
 			{
@@ -358,7 +370,7 @@ void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayloa
 				default: break;
 			}
 		}
-		else if (compID == MeshRef<>::StaticTypeID())
+		else if (compID == CMeshRef<>::StaticTypeID())
 		{
 			if (fdesc.componentSlotIndex == 0) uintArr[localIdx] = payload.MeshID;
 		}
@@ -398,7 +410,7 @@ void ReplicationSystem::HandleStateCorrections(Registry* reg, const StateCorrect
 
 		for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 		{
-			if (fdesc.componentID != TransRot<>::StaticTypeID()) continue;
+			if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
 
 			void* fieldBase = fieldArrayTable[fdesc.fieldSlotIndex];
 			if (!fieldBase) continue;

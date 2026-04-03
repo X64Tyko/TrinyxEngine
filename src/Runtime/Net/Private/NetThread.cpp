@@ -169,7 +169,7 @@ void NetThread::RouteMessage(const ReceivedMessage& msg)
 
 				// Write directly into the World's SimInput — same buffer LogicThread reads.
 				InputBuffer* simInput = world->GetSimInput();
-				simInput->InjectState(payload->KeyState, payload->MouseDX, payload->MouseDY);
+				simInput->InjectState(payload->KeyState, payload->MouseDX, payload->MouseDY, payload->MouseButtons);
 				break;
 			}
 
@@ -189,7 +189,17 @@ void NetThread::RouteMessage(const ReceivedMessage& msg)
 
 		case NetMessageType::Pong:
 			{
-				// TODO: Update RTT estimation from timestamp delta
+				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+				if (ci)
+				{
+					uint16_t now  = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
+					uint16_t sent = msg.Header.Timestamp;
+					// Wrapping 16-bit subtraction handles rollover correctly
+					float rtt = static_cast<float>(static_cast<uint16_t>(now - sent));
+					// Exponential moving average (alpha=0.125, same as TCP)
+					if (ci->RTT_ms <= 0.0f) ci->RTT_ms = rtt;
+					else ci->RTT_ms                    = ci->RTT_ms * 0.875f + rtt * 0.125f;
+				}
 				break;
 			}
 

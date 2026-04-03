@@ -61,6 +61,10 @@ struct EngineConfig
 	// Non-editor: initial game scene to load on startup (relative to ProjectDir/content/).
 	char InitialGameScene[256] = "";
 
+	// Networking — set via CLI args (--server, --client <ip>, --port <port>).
+	uint16_t NetPort     = 27015;
+	char NetAddress[128] = "127.0.0.1";
+
 	// --- Helpers ---
 	double GetTargetFrameTime() const
 	{
