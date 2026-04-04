@@ -34,7 +34,7 @@ public:
 		body.VelZ *= 0.999f;
 
 		// Fade alpha as the projectile slows — tests color write path
-		color.A = body.VelZ * body.VelZ * 0.001f;
+		color.A = body.VelZ * (body.VelZ * 0.001f);
 		color.A = FieldMath::Clamp(color.A, 0.0f, 1.0f);
 	}
 };

@@ -23,7 +23,7 @@ public:
 	ConstructView<EInstanced> Body;
 	Owned<CameraConstruct> FirstPersonCam;
 	Owned<CameraConstruct> ThirdPersonCam;
-
+	
 	void InitializeViews()
 	{
 		Body.Initialize(this);

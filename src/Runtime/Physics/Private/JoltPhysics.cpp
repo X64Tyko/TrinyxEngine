@@ -183,7 +183,7 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 #ifdef TNX_ENABLE_ROLLBACK
 	// Size snapshot ring to cover the full temporal rollback window.
 	// One snapshot per Flush+Pull boundary frame.
-	SnapshotCapacity = static_cast<uint32_t>(config->TemporalFrameCount);
+	SnapshotCapacity = static_cast<uint32_t>(config->TemporalFrameCount / config->PhysicsUpdateInterval);
 	SnapshotRing.resize(SnapshotCapacity);
 	LOG_INFO_F("[JoltPhysics] Snapshot ring: %u slots for rollback", SnapshotCapacity);
 #endif

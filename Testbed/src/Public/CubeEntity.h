@@ -33,6 +33,11 @@ public:
 	}
 };
 
+
+
+
+
+
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 class CubeEntity : public BaseCube<CubeEntity, WIDTH>
 {
@@ -46,6 +51,13 @@ public:
 	{
 	}
 };
+
+
+
+
+
+
+
 
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 class SuperCube : public BaseCube<SuperCube, WIDTH>
