@@ -1,6 +1,6 @@
 # Current Status (2026-04)
 
-> **Navigation:** [← Back to README](../README.md) | [← Configuration](CONFIGURATION.md)
+> **Navigation:** [← Back to README](../README.md) | [← Configuration](CONFIGURATION.md) | [Game Flow →](FLOW.md)
 
 ---
 
@@ -26,7 +26,7 @@ begins.
 | 2 | **Construct/View OOP**  | Complete    | `Construct<T>`, `Owned<T>`, `ConstructView<TEntity>`, `ConstructBatch` tick dispatch. PlayerConstruct proven with JoltCharacter. |
 | 3 | **Networking**          | Functional  | GNS wrapper, PIE loopback, entity spawn replication, state corrections. Client input routing. Delta compression pending.         |
 | 4 | **Audio**               | Not started | SDL3 thin wrapper first (handle-based for Anti-Event compatibility). Minimal — just enough for gameplay feedback.                |
-| 5 | **Game Flow**           | In progress | GameMode, travel/level loading, player spawn flow. Building on proven Construct/View + Networking foundation.                    |
+| 5 | **Game Flow**           | Designed    | Session lifecycle, Soul/Body pattern, FlowManager/FlowState, network connection flow, travel. See [FLOW.md](FLOW.md).           |
 
 ### Stage 2: Hardening
 
