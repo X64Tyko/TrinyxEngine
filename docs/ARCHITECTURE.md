@@ -1,6 +1,6 @@
 # TrinyxEngine Architecture
 
-> **Navigation:** [← Back to README](../README.md) | [Performance Targets →](PERFORMANCE_TARGETS.md)
+> **Navigation:** [← Back to README](../README.md) | [Performance Targets →](PERFORMANCE_TARGETS.md) | [Game Flow →](FLOW.md)
 
 ---
 
@@ -1269,5 +1269,30 @@ compression yields mostly zeros per tick. Far superior to AoS where mixed types 
 - [ ] Frustum culling (SIMD 6-plane test)
 - [ ] State-sorted rendering (64-bit sort keys, GPU radix sort)
 - [ ] Rollback netcode (Temporal slab rollback + dirty resimulation)
+
+---
+
+# Game Flow
+
+The gameplay framework layer — session lifecycle, level transitions, player identity persistence,
+and network-driven spawn flow — is designed and documented separately.
+
+**Key concepts:**
+
+- `FlowManager` (evolves `GameManager`) — owns the state stack, `ConstructRegistry`, and
+  `LocalSession`. Enforces declaration contracts on transitions. Drains `FlowEvent` messages from
+  NetThread on the Sentinel thread.
+- `FlowState` — declares what it requires (`RequiresWorld`, `RequiresNetSession`). `OnEnter` /
+  `OnExit` hooks drive World and NetSession lifecycle.
+- `ConstructLifetime` — `Level / World / Session / Persistent`. Determines what survives a World
+  reset. `Session`-lifetime Constructs (Souls, Mode) survive; `World`-lifetime Constructs (Bodies)
+  do not.
+- **Soul / Body pattern** — Soul (`Session` lifetime) holds player identity; Body (`World`
+  lifetime) holds world presence via `ConstructView`. Soul triggers a Body spawn when entering
+  gameplay; Body is destroyed on World reset, Soul is not.
+- **`FlowEvent`** — network payload for flow control (load level, client/server ready signals).
+  Added as `NetMessageType::FlowEvent = 7`.
+
+**Full design:** [docs/FLOW.md](FLOW.md)
 
 ---
