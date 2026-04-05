@@ -31,9 +31,9 @@ public:
 		tr.Rotation.SetIdentity();
 
 		auto& sc  = Body.Scale;
-		sc.ScaleX = 3.0f;
-		sc.ScaleY = 3.0f;
-		sc.ScaleZ = 3.0f;
+		sc.ScaleX = 1.0f;
+		sc.ScaleY = 1.0f;
+		sc.ScaleZ = 1.0f;
 
 		auto& col = Body.Color;
 		col.R     = 0.2f;

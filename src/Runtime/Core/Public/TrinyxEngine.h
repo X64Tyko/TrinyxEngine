@@ -5,6 +5,7 @@
 
 #include "EngineConfig.h"
 #include "Events.h"
+#include "FlowManager.h"
 #include "GNSContext.h"
 #include "NetThread.h"
 #include "VulkanContext.h"
@@ -151,6 +152,7 @@ private:
 	// --- Lifecycle ---
 	std::atomic<bool> bIsRunning{false};
 	std::atomic<bool> bJobsInitialized{false};
+	std::unique_ptr<FlowManager> FlowManager;
 
 	// --- FPS tracking ---
 	double FpsTimer     = 0.0;

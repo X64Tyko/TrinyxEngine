@@ -87,7 +87,7 @@ public:
 			using Self = ConstructView;
 			Reg->UnbindOnCacheSlotChange<Self, &Self::OnCacheSlotChanged>(Handle, this);
 
-			Reg->Destroy(Handle);
+			if (bOwnsEntity) Reg->Destroy(Handle);
 			Handle = EntityHandle{};
 			Reg    = nullptr;
 		}

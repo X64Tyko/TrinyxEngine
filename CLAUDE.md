@@ -295,6 +295,42 @@ state. Registration outside the window is deferred to the next handshake. One pa
 
 ---
 
+## Game Flow — States, Modes & Travel
+
+Three concepts drive the application above the ECS layer:
+
+- **State** — flow state, drives the app (menu, loading, gameplay, post-match)
+- **Mode** — rules runtime, drives the match (server authority while in-game)
+- **Level** — content chunk (`.tnxscene`)
+
+### FlowManager
+
+Owned by `TrinyxEngine`, runs on Sentinel thread. Manages a `GameState` stack and orchestrates World/GameMode/Level
+lifetimes based on each state's declared `StateRequirements` (NeedsWorld, NeedsLevel, NeedsNetSession).
+
+Bootstrap: `flow.RegisterState("name", factory)` in `PostInitialize`, then `flow.LoadDefaultState("MainMenu")`.
+User code owns the entire flow graph from there.
+
+### Travel: Composable Primitives
+
+Travel is three orthogonal levers, not a single policy:
+
+- **Lever A — Domain lifetime:** Keep World + Swap Level | Reset World | Keep nothing
+- **Lever B — Construct lifetime:** Persistent (survives everything via reinitialization) | World-scoped | Level-scoped
+- **Lever C — Network continuity:** Keep NetSession | Swap NetSession
+
+### GameState
+
+Virtual base class. `OnEnter`/`OnExit`/`Tick` hooks. Declares requirements — FlowManager enforces them during
+transitions (creates World if needed, destroys if not).
+
+### GameMode
+
+Inheritable virtual base class (NOT CRTP, NOT Construct). Users that need per-frame ticks also inherit Construct<T>:
+`class ArenaMode : public GameMode, public Construct<ArenaMode>`. Pure event-driven modes skip Construct overhead.
+
+---
+
 ## Entity Lifecycle
 
 ### Spawn
@@ -437,7 +473,10 @@ for the authoritative status tracker.
 3. **Networking** — Functional. GNS wrapper, client/server authority model, PIE loopback, entity spawn replication,
    state corrections. Delta compression and rollback netcode pending.
 4. **Audio** — Not started. SDL3 thin wrapper first (handle-based for Anti-Event compatibility).
-5. **Game Flow** — In progress. GameMode, travel/level loading, player spawn flow, session lifecycle.
+5. **Game Flow** — In progress. FlowManager (state stack + travel primitives), GameState (flow states with declared
+   requirements), GameMode (inheritable rules runtime). Toolbox travel model: three orthogonal levers (domain lifetime,
+   Construct lifetime, network continuity) composable per-game. Persistent Constructs survive World resets via
+   reinitialization. Bootstrap: engine loads one named default state, user code owns the flow graph.
 
 ### Stage 2: Hardening
 
@@ -452,8 +491,10 @@ constraint system, static entity tier, reflection robustness, `TNX_STRIP_NAMES` 
 
 ### Designed, Not Yet Implemented
 
-- Construct/View OOP layer (Construct<T>, Owned<T>, ConstructBatch, TickGroup, View family, defrag listeners)
-- Cumulative dirty bit array wired to GPU upload
+- ~~Construct/View OOP layer~~ ✅ Implemented (2026-04)
+- ~~Cumulative dirty bit array wired to GPU upload~~ ✅ Implemented (2026-03)
+- Game Flow implementation (FlowManager state transitions, World create/destroy wiring, level load/unload, GameMode
+  lifecycle, persistent Construct reinitialization)
 - `GetTemporalFieldWritePtr` migrated from Archetype to TemporalComponentCache
 - `TemporalFrameStride` removed from Archetype (duplicated state)
 - Presentation Reconciler (Anti-Events, speculative presentation diff)
@@ -473,6 +514,7 @@ constraint system, static entity tier, reflection robustness, `TNX_STRIP_NAMES` 
 | `src/Runtime/Construct/Public/Construct.h`         | Construct<T> CRTP base, tick auto-registration              |
 | `src/Runtime/Construct/Public/ConstructView.h`     | ConstructView<TEntity> — generic ECS lens for Constructs    |
 | `src/Runtime/Construct/Public/ConstructRegistry.h` | Type-erased Construct registry, deferred destruction        |
+| `src/Runtime/Flow/Public/`                         | FlowManager, GameState, GameMode — game flow layer          |
 | `src/Runtime/Memory/`                              | Archetype chunks, Registry, cold component storage          |
 | `src/Runtime/Physics/Public/JoltPhysics.h`         | Jolt integration (body management, step, pull)              |
 | `src/Runtime/Physics/Public/JoltCharacter.h`       | CharacterVirtual wrapper for Construct-driven controllers   |

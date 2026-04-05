@@ -58,8 +58,8 @@ struct EngineConfig
 	// Editor: default scene to load on startup (relative to ProjectDir/content/).
 	char DefaultScene[256] = "";
 
-	// Non-editor: initial game scene to load on startup (relative to ProjectDir/content/).
-	char InitialGameScene[256] = "";
+	// Default flow state to load on startup (registered name, e.g. "MainMenu").
+	char DefaultState[256] = "";
 
 	// Networking — set via CLI args (--server, --client <ip>, --port <port>).
 	uint16_t NetPort     = 27015;

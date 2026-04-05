@@ -60,7 +60,8 @@ Test meshes and rigs from https://www.3dfiggins.com/Store/
 - ✅ Construct/View OOP layer (Construct<T>, Owned<T>, ConstructView<TEntity>, JoltCharacter)
 - ✅ Editor (bare-bones): scene hierarchy, entity inspection, reflected properties, save/load, PIE
 - ✅ Networking: GNS, entity spawn replication, state corrections, PIE loopback
-- 🔧 Game flow: GameMode, travel/level loading, player spawn flow (in progress)
+- 🔧 Game flow: FlowManager, GameState, GameMode. Toolbox travel model (composable primitives, not single policy). In
+  progress.
 
 ---
 
@@ -213,13 +214,14 @@ Two object types coexist:
 ```cpp
 class Player : public Construct<Player>
 {
-    DefaultView Body;                       // Physics capsule in DUAL partition
-    Owned<CameraConstruct> FirstPersonCam;  // Eye-height camera (LogicView)
-    Owned<CameraConstruct> ThirdPersonCam;  // Behind + above (LogicView)
+    ConstructView<EPlayer> Body;            // Transform+mesh+color+scale in DUAL partition
+    JoltCharacter CharacterController;      // Capsule character (no ECS JoltBody)
+    Owned<CameraConstruct> FirstPersonCam;  // Eye-height camera
+    Owned<CameraConstruct> ThirdPersonCam;  // Behind + above
 
-    void InitializeViews();               // Create Views, set up physics body
-    void PrePhysics(SimFloat dt);         // WASD → kinematic velocity
-    void PhysicsFlush(SimFloat dt);       // Push velocity to Jolt body
+    void InitializeViews();               // Create Views, set up character controller
+    void PrePhysics(SimFloat dt);         // WASD → desired velocity
+    void PhysicsStep(SimFloat dt);        // Drive JoltCharacter, write position to slab
     void ScalarUpdate(SimFloat dt);       // Mouse look, camera toggle, camera positioning
 };
 ```
@@ -227,9 +229,9 @@ class Player : public Construct<Player>
 Tick methods are detected at compile time — implement the method, get the tick. Don't implement it, pay nothing.
 ConstructBatch dispatches via type-erased function pointers (no virtual calls), sorted by TickGroup.
 
-Views are CRTP lenses into ECS data: DefaultView (physics + render), PhysView (physics only), RenderView (render only),
-LogicView (transform only). Each creates a backing ECS entity, hydrates FieldProxy cursors, and auto-rehydrates on
-defrag.
+`ConstructView<TEntity>` is a generic template that works with any EntityView type. It creates a backing ECS entity,
+hydrates FieldProxy cursors, and auto-rehydrates on frame advance and defrag. Partition is auto-derived from component
+SystemGroup tags.
 
 ### Networking
 

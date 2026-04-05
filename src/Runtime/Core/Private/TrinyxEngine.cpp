@@ -6,6 +6,7 @@
 #include <SDL3/SDL_vulkan.h>
 
 #include "EngineConfig.h"
+#include "FlowManager.h"
 #include "Logger.h"
 #include "LogicThread.h"
 #include "Profiler.h"
@@ -129,6 +130,8 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	EditorTemporalFrameCount  = Config.TemporalFrameCount; // Stash for PIE
 	Config.TemporalFrameCount = 3;
 #endif
+
+	FlowManager = std::make_unique<FlowManager>();
 
 	// ---- GNS + NetThread -------------------------------------------------
 	if (Config.Mode != EngineMode::Standalone)

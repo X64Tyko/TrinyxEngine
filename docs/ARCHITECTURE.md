@@ -597,6 +597,137 @@ diverges; snapshot restore is required for deterministic resim.
 
 ---
 
+# Game Flow: States, Modes & Travel
+
+## Vocabulary
+
+| Concept   | What it is                            | Lifetime                   |
+|-----------|---------------------------------------|----------------------------|
+| **State** | Flow state — drives the app           | Until transition/pop       |
+| **Mode**  | Rules runtime — drives the match      | Scoped to World            |
+| **Level** | Content chunk (.tnxscene)             | Scoped to World, swappable |
+| **Body**  | World presence (ConstructView entity) | Scoped to World            |
+
+> State drives the app. Mode drives the match. Level drives the content.
+
+## FlowManager
+
+`FlowManager` is owned by `TrinyxEngine` and runs on the Sentinel thread. It manages a stack of
+`GameState` objects and orchestrates subsystem lifetimes (World, GameMode, Level) based on each
+state's declared requirements.
+
+### Bootstrap Contract
+
+```cpp
+class MyGame : public GameManager<MyGame>
+{
+    bool PostInitialize(TrinyxEngine& engine)
+    {
+        auto& flow = engine.GetFlowManager();
+        flow.RegisterState("MainMenu", [](){ return std::make_unique<MainMenuState>(); });
+        flow.RegisterState("InGame",   [](){ return std::make_unique<InGameState>(); });
+        flow.RegisterMode("Arena",     [](){ return std::make_unique<ArenaMode>(); });
+        flow.LoadDefaultState("MainMenu");
+        return true;
+    }
+};
+```
+
+Engine boots → loads one named state → user code owns the flow graph.
+
+### State Stack
+
+- `TransitionTo(name)` — replace the entire stack (menu → gameplay)
+- `PushState(name)` — overlay (pause menu over gameplay)
+- `PopState()` — return to previous state
+
+### StateRequirements
+
+Each `GameState` declares what it needs:
+
+```cpp
+struct StateRequirements
+{
+    bool NeedsWorld      = false;
+    bool NeedsLevel      = false;
+    bool NeedsNetSession = false;
+    bool AllowsSouls     = true;
+};
+```
+
+FlowManager uses these during transitions to create/destroy/preserve subsystems automatically.
+If a transition moves from a state that requires a World to one that doesn't, the World is
+destroyed and all World-scoped Constructs with it. If both states require a World, it survives.
+
+## Travel: Composable Primitives (Not a Single Policy)
+
+Travel is not a monolithic system. It's three orthogonal levers that games combine:
+
+### Lever A — Domain Lifetime (what survives?)
+
+| Choice                 | Effect                                             | Use case                           |
+|------------------------|----------------------------------------------------|------------------------------------|
+| Keep World, Swap Level | World survives, level entities despawned/respawned | Fast travel, seamless, same server |
+| Reset World            | Fresh World + Registry + Physics                   | New match, fresh sim               |
+| Keep nothing           | Full reset, only persistent Constructs survive     | Server handoff, return to menu     |
+
+### Lever B — Construct Lifetime (what survives?)
+
+| Scope      | Survives...                             |
+|------------|-----------------------------------------|
+| Persistent | Everything (reinitialized on new World) |
+| World      | Only if World survives                  |
+| Level      | Only if Level survives                  |
+
+Persistent Constructs survive World resets via a reinitialization mechanism — their C++ object
+stays alive, but their Views are torn down and rebuilt against the new World's Registry.
+
+### Lever C — Network Continuity
+
+| Choice          | Effect                                   |
+|-----------------|------------------------------------------|
+| Keep NetSession | Same server connection                   |
+| Swap NetSession | Handoff to new server (payload transfer) |
+
+### Examples
+
+- **Arena shooter:** Keep World, Swap Level → fast round transitions
+- **Roguelike:** Reset World often, persistent Constructs for meta-progression
+- **MMO zone travel:** Swap NetSession + Reset World, persistent Constructs carry over
+
+## GameState
+
+Base class with virtual hooks. Runs on Sentinel thread:
+
+```cpp
+class MainMenuState : public GameState
+{
+    void OnEnter(FlowManager& flow, World* world) override;
+    void OnExit(FlowManager& flow) override;
+    void Tick(float dt) override;
+    StateRequirements GetRequirements() const override { return {}; } // no World needed
+    const char* GetName() const override { return "MainMenu"; }
+};
+```
+
+## GameMode
+
+Inheritable base class for server-authoritative rules. NOT a Construct itself — users opt into
+Construct ticks via multiple inheritance when they need per-frame logic:
+
+```cpp
+class ArenaMode : public GameMode, public Construct<ArenaMode>
+{
+    void OnPlayerJoined(Soul& soul) override;  // spawn logic
+    void ScalarUpdate(SimFloat dt);            // win condition check
+};
+```
+
+GameModes that are pure event-driven logic (no per-frame tick) skip the Construct inheritance
+and pay no tick overhead.
+
+---
+
 # Constraint System
 
 ## Design: Constraint Pool (Separate AoS, Not in Temporal Slab)

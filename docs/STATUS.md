@@ -20,13 +20,13 @@ begins.
 
 ### Stage 1: Foundation (current)
 
-| # | Milestone               | Status      | Notes                                                                                                                            |
-|---|-------------------------|-------------|----------------------------------------------------------------------------------------------------------------------------------|
-| 1 | **Editor (bare-bones)** | Complete    | Scene hierarchy, entity inspection, reflected properties, save/load. ImGui docking, 6 panels. JSON serialization.                |
-| 2 | **Construct/View OOP**  | Complete    | `Construct<T>`, `Owned<T>`, `ConstructView<TEntity>`, `ConstructBatch` tick dispatch. PlayerConstruct proven with JoltCharacter. |
-| 3 | **Networking**          | Functional  | GNS wrapper, PIE loopback, entity spawn replication, state corrections. Client input routing. Delta compression pending.         |
-| 4 | **Audio**               | Not started | SDL3 thin wrapper first (handle-based for Anti-Event compatibility). Minimal — just enough for gameplay feedback.                |
-| 5 | **Game Flow**           | In progress | GameMode, travel/level loading, player spawn flow. Building on proven Construct/View + Networking foundation.                    |
+| # | Milestone               | Status      | Notes                                                                                                                                                                      |
+|---|-------------------------|-------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 | **Editor (bare-bones)** | Complete    | Scene hierarchy, entity inspection, reflected properties, save/load. ImGui docking, 6 panels. JSON serialization.                                                          |
+| 2 | **Construct/View OOP**  | Complete    | `Construct<T>`, `Owned<T>`, `ConstructView<TEntity>`, `ConstructBatch` tick dispatch. PlayerConstruct proven with JoltCharacter.                                           |
+| 3 | **Networking**          | Functional  | GNS wrapper, PIE loopback, entity spawn replication, state corrections. Client input routing. Delta compression pending.                                                   |
+| 4 | **Audio**               | Not started | SDL3 thin wrapper first (handle-based for Anti-Event compatibility). Minimal — just enough for gameplay feedback.                                                          |
+| 5 | **Game Flow**           | In progress | FlowManager, GameState, GameMode base classes. Toolbox travel model (composable primitives, not single policy). Building on proven Construct/View + Networking foundation. |
 
 ### Stage 2: Hardening
 
@@ -178,6 +178,20 @@ in the long run.
 - Fix: `GetOrCreateArchetype` now passes `ClassSystemID` to `BuildLayout` — entities created at runtime
   via ConstructView get correct partition placement (was defaulting to LOGIC partition)
 
+**Game Flow (2026-04 — in progress):**
+
+- `FlowManager` — state stack manager, travel primitives, World/Level/Mode lifetime management
+- `GameState` — base class for flow states (menu, loading, gameplay, post-match). Declares requirements
+  (NeedsWorld, NeedsLevel, NeedsNetSession). FlowManager enforces requirements during transitions.
+- `GameMode` — server-authoritative rules runtime. One per World. Inheritable base (not CRTP). Users
+  opt into Construct ticks via multiple inheritance when needed.
+- Travel toolbox model — three orthogonal levers (domain lifetime, Construct lifetime, network continuity)
+  instead of a single travel policy. Games compose primitives to build their flow.
+- Persistent Constructs survive World resets via reinitialization mechanism (replaces Soul concept).
+- Bootstrap contract: engine loads a single user-specified default state by name; user code owns the
+  entire flow graph from there.
+- Vocabulary: State (drives app), Mode (drives match), Level (content chunk)
+
 **Networking (2026-03 — in progress):**
 
 - `GNSContext` — GameNetworkingSockets wrapper (header isolation, static link)
@@ -282,6 +296,8 @@ in the long run.
 - [x] **Construct/View OOP layer** — `Construct<T>`, `Owned<T>`, `ConstructView<TEntity>`, `ConstructBatch`,
   `TickGroup`, JoltCharacter, defrag listeners, spawn handshake integration (2026-04)
 - [x] **Dirty-bit selective GPU upload** — RenderAck handshake, 5 dirty bitplanes, AVX2 scan + ctzll scatter (2026-03)
+- [ ] **Game Flow implementation** — FlowManager state transitions, World create/destroy wiring, level load/unload,
+  GameMode lifecycle, persistent Construct reinitialization
 - [ ] **Fixed-point coordinate system** — `Fixed32` value type (1 unit = 0.1mm), `FieldProxy<Fixed32, WIDTH>`, render thread conversion to camera-relative float32 at upload, Jolt bridge (int32↔float32 at cell boundary)
 - [ ] **ConstraintEntity system** — constraint entities in LOGIC partition, `ConstraintType` enum (Rigid/Hinge/BallSocket/Prismatic/Distance/Spring), render thread rigid attachment pass (2-pass depth ordering), physics root determination
 - [ ] **Space partition cell registry** — cell world origins as float64/int64, cell assignment at entity spawn, cross-cell reparenting

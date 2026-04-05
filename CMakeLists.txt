@@ -93,7 +93,8 @@ add_library(Slang::Compiler SHARED IMPORTED GLOBAL
         src/Runtime/Physics/Public/JoltCharacter.h
         src/Runtime/Physics/Public/JoltLayers.h
         src/Runtime/Physics/Private/JoltCharacter.cpp
-        src/Runtime/Entities/Public/EPlayer.h)
+        src/Runtime/Entities/Public/EPlayer.h
+        src/Runtime/Flow/Public/GameState.h)
 set_target_properties(Slang::Compiler PROPERTIES
         IMPORTED_LOCATION             "${SLANG_PATH}/lib/libslang-compiler.so"
         INTERFACE_INCLUDE_DIRECTORIES "${SLANG_PATH}/include"

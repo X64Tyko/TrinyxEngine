@@ -311,12 +311,12 @@ uint32_t MeshManager::RegisterBuiltinCapsule(float radius, float halfHeight, uin
 			uint32_t d = nextRingStart + s + 1;
 
 			indices.push_back(a);
-			indices.push_back(c);
 			indices.push_back(b);
+			indices.push_back(c);
 
 			indices.push_back(b);
-			indices.push_back(c);
 			indices.push_back(d);
+			indices.push_back(c);
 		}
 	}
 

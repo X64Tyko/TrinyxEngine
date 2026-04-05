@@ -87,6 +87,7 @@ public:
 		LogicThread* Logic = OwnerWorld->GetLogicThread();
 		Logic->ScalarPrePhysicsBatch.Deregister(static_cast<Derived*>(this));
 		Logic->ScalarPostPhysicsBatch.Deregister(static_cast<Derived*>(this));
+		Logic->ScalarPhysicsStepBatch.Deregister(static_cast<Derived*>(this));
 		Logic->ScalarUpdateBatch.Deregister(static_cast<Derived*>(this));
 
 		bInitialized = false;
