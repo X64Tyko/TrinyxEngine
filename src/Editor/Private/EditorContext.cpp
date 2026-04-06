@@ -107,7 +107,7 @@ void EditorContext::LoadScene(const std::string& path, bool bReset)
 /// Find a float field pointer by debug name in an archetype's field array table.
 static float* FindFieldFloat(Archetype* arch, void** fieldArrayTable, const char* name, uint32_t localIndex)
 {
-	const auto& cfr = ComponentFieldRegistry::Get();
+	const auto& cfr = ReflectionRegistry::Get();
 
 	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 	{
@@ -293,7 +293,7 @@ void EditorContext::DrawGizmo()
 		State.bSceneDirty = true;
 
 		// Mark entity dirty for GPU upload via CacheSlotMeta::Flags (bit 30)
-		Archetype::FieldKey flagKey{CacheSlotMeta<>::StaticTypeID(), ComponentFieldRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID()), 0};
+		Archetype::FieldKey flagKey{CacheSlotMeta<>::StaticTypeID(), ReflectionRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID()), 0};
 		auto* flagDesc = State.SelectedArchetype->ArchetypeFieldLayout.find(flagKey);
 		if (flagDesc)
 		{
@@ -1077,7 +1077,7 @@ void EditorContext::RestoreSnapshot()
 						   extraCount, archSnap.ArchClassID);
 
 				// Look up the Flags field descriptor once
-				Archetype::FieldKey flagKey{CacheSlotMeta<>::StaticTypeID(), ComponentFieldRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID()), 0};
+				Archetype::FieldKey flagKey{CacheSlotMeta<>::StaticTypeID(), ReflectionRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID()), 0};
 				auto* flagDesc = ownerArch->ArchetypeFieldLayout.find(flagKey);
 
 				uint32_t entityIdx = archSnap.TotalEntityCount;

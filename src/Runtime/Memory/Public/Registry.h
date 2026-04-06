@@ -8,6 +8,7 @@
 #include "Archetype.h"
 #include "EntityRecord.h"
 #include "FlatMap.h"
+#include "ReflectionRegistry.h"
 #include "Schema.h"
 #include "Signature.h"
 #include "TemporalComponentCache.h"
@@ -281,7 +282,7 @@ bool Registry::HasComponent(EntityHandle lHandle)
 {
 	constexpr ComponentTypeID typeID = T::StaticTypeID();
 	const ClassID classType          = lHandle.GetTypeID();
-	MetaRegistry& mr                 = MetaRegistry::Get();
+	auto& mr                         = ReflectionRegistry::Get();
 	return (mr.ClassToArchetype[classType] & typeID) == typeID;
 }
 
@@ -356,7 +357,7 @@ inline void Registry::InvokeScalarUpdate(SimFloat dt)
 
 	for (auto& [sig, arch] : Archetypes)
 	{
-		UpdateFunc ScalarUpdate = MetaRegistry::Get().EntityGetters[sig.ID].ScalarUpdate;
+		UpdateFunc ScalarUpdate = ReflectionRegistry::Get().EntityGetters[sig.ID].ScalarUpdate;
 		if (!ScalarUpdate) continue;
 
 		size_t size = arch->Chunks.size();
@@ -413,7 +414,7 @@ inline void Registry::InvokePrePhys(SimFloat dt)
 
 	for (auto& [sig, arch] : Archetypes)
 	{
-		UpdateFunc prePhys = MetaRegistry::Get().EntityGetters[sig.ID].PrePhys;
+		UpdateFunc prePhys = ReflectionRegistry::Get().EntityGetters[sig.ID].PrePhys;
 		if (!prePhys) continue;
 
 		// Capture only what fits in 48 bytes: 5 pointers/values = 40 bytes
@@ -471,7 +472,7 @@ inline void Registry::InvokePostPhys(SimFloat dt)
 
 	for (auto& [sig, arch] : Archetypes)
 	{
-		UpdateFunc PostPhys = MetaRegistry::Get().EntityGetters[sig.ID].PostPhys;
+		UpdateFunc PostPhys = ReflectionRegistry::Get().EntityGetters[sig.ID].PostPhys;
 		if (!PostPhys) continue;
 
 		size_t size = arch->Chunks.size();

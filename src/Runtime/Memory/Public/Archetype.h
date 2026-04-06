@@ -144,7 +144,7 @@ public:
 	// Get base pointer to a field array within a chunk (frame 0 for temporal/volatile fields).
 	void* GetFieldArray(Chunk* chunk, ComponentTypeID typeID, uint32_t fieldIndex)
 	{
-		FieldKey key{typeID, ComponentFieldRegistry::Get().GetCacheSlotIndex(typeID), fieldIndex};
+		FieldKey key{typeID, ReflectionRegistry::Get().GetCacheSlotIndex(typeID), fieldIndex};
 		auto* desc = ArchetypeFieldLayout.find(key);
 		return desc ? chunk->GetFieldPtr(desc->fieldSlotIndex) : nullptr;
 	}

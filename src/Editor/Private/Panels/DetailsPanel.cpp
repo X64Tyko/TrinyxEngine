@@ -113,7 +113,7 @@ void DetailsPanel::Draw(EditorState& state)
 	// --- Component List ---
 	if (ImGui::CollapsingHeader("Components", ImGuiTreeNodeFlags_DefaultOpen))
 	{
-		const auto& cfr = ComponentFieldRegistry::Get();
+		const auto& cfr = ReflectionRegistry::Get();
 
 		// Iterate field layout, group by component (fields are contiguous per component)
 		ComponentTypeID currentCompID = 0;
@@ -188,7 +188,7 @@ void DetailsPanel::Draw(EditorState& state)
 
 				arch->BuildFieldArrayTable(state.SelectedChunk, fieldArrayTable, temporalFrame, volatileFrame);
 
-				const auto& cfr = ComponentFieldRegistry::Get();
+				const auto& cfr = ReflectionRegistry::Get();
 
 				ImGui::Columns(2, "FieldValues", true);
 				ImGui::SetColumnWidth(0, 160.0f);

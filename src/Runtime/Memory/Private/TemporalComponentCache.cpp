@@ -74,7 +74,7 @@ size_t ComponentCacheBase::AdvanceSystemAllocatorIndex(SystemID sysID, size_t si
 
 void ComponentCacheBase::InitializeInternal(const EngineConfig* Config, uint32_t frameCount)
 {
-	ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
+	auto& CFR = ReflectionRegistry::Get();
 
 	// Pre-compute field allocation layout (field-major ordering)
 	// For each component in this tier, for each field, reserve a contiguous zone.

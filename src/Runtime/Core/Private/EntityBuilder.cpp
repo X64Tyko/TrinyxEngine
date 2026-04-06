@@ -107,7 +107,7 @@ struct FieldLookup
 static std::vector<std::pair<const char*, FieldLookup>> BuildFieldMap(const Archetype* arch)
 {
 	std::vector<std::pair<const char*, FieldLookup>> map;
-	const auto& cfr = ComponentFieldRegistry::Get();
+	const auto& cfr = ReflectionRegistry::Get();
 
 	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 	{
@@ -152,7 +152,7 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 	const std::string& typeName = typeVal->AsString();
 
 	// Resolve type name → ClassID
-	auto& MR        = MetaRegistry::Get();
+	auto& MR        = ReflectionRegistry::Get();
 	ClassID classID = MR.GetEntityByName(typeName);
 	if (classID == 0)
 	{
@@ -394,7 +394,7 @@ JsonValue EntityBuilder::SerializeEntity(Registry* reg, Archetype* arch, size_t 
 	JsonValue entity = JsonValue::Object();
 
 	// Entity type name
-	const auto& MR       = MetaRegistry::Get();
+	const auto& MR       = ReflectionRegistry::Get();
 	const char* typeName = MR.EntityGetters[arch->ArchClassID].Name;
 	entity["type"]       = JsonValue::String(typeName ? typeName : "unknown");
 
@@ -406,7 +406,7 @@ JsonValue EntityBuilder::SerializeEntity(Registry* reg, Archetype* arch, size_t 
 							   reg->GetVolatileCache()->GetActiveWriteFrame());
 
 	// Group fields by component
-	const auto& CFR      = ComponentFieldRegistry::Get();
+	const auto& CFR      = ReflectionRegistry::Get();
 	JsonValue components = JsonValue::Object();
 
 	// Track which component we're building — fields are contiguous per component

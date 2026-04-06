@@ -3,6 +3,7 @@
 #include "GameMode.h"
 #include "GameState.h"
 #include "Logger.h"
+#include "ReflectionRegistry.h"
 #include "World.h"
 
 #include <cstring>
@@ -301,22 +302,28 @@ bool FlowManager::HasWorld() const
 
 FlowManager::StateFactory FlowManager::FindStateFactory(const char* name) const
 {
+	// Check local overrides first (manual RegisterState calls)
 	for (uint32_t i = 0; i < RegisteredStateCount; ++i)
 	{
 		if (strcmp(RegisteredStates[i].Name, name) == 0)
 			return RegisteredStates[i].Factory;
 	}
-	return nullptr;
+
+	// Fall back to ReflectionRegistry (populated by TNX_REGISTER_STATE macros)
+	return ReflectionRegistry::Get().FindStateFactory(name);
 }
 
 FlowManager::ModeFactory FlowManager::FindModeFactory(const char* name) const
 {
+	// Check local overrides first (manual RegisterMode calls)
 	for (uint32_t i = 0; i < RegisteredModeCount; ++i)
 	{
 		if (strcmp(RegisteredModes[i].Name, name) == 0)
 			return RegisteredModes[i].Factory;
 	}
-	return nullptr;
+
+	// Fall back to ReflectionRegistry (populated by TNX_REGISTER_MODE macros)
+	return ReflectionRegistry::Get().FindModeFactory(name);
 }
 
 void FlowManager::EnforceRequirements(GameState* currentState, GameState* nextState)
