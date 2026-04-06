@@ -13,6 +13,17 @@ struct ConstructViewRef
 };
 
 // ---------------------------------------------------------------------------
+// Construct lifetime declaration macros.
+// Place one of these in the public section of a Construct-derived class.
+// They expand to the static constexpr Lifetime member and will be extended
+// with additional wiring (registry tags, concept constraints, etc.) later.
+// ---------------------------------------------------------------------------
+#define TNX_CONSTRUCT_LEVEL      static constexpr ConstructLifetime Lifetime = ConstructLifetime::Level;
+#define TNX_CONSTRUCT_WORLD      static constexpr ConstructLifetime Lifetime = ConstructLifetime::World;
+#define TNX_CONSTRUCT_SESSION    static constexpr ConstructLifetime Lifetime = ConstructLifetime::Session;
+#define TNX_CONSTRUCT_PERSISTENT static constexpr ConstructLifetime Lifetime = ConstructLifetime::Persistent;
+
+// ---------------------------------------------------------------------------
 // Construct<T> — CRTP lifecycle base for singular OOP gameplay objects.
 //
 // Constructs are the "things that think" — Player, GameMode, AIDirector.
@@ -40,6 +51,9 @@ template <typename Derived>
 class Construct
 {
 public:
+	// Default lifetime tier. Derived classes override via TNX_CONSTRUCT_SESSION, etc.
+	static constexpr ConstructLifetime Lifetime = ConstructLifetime::World;
+
 	void Initialize(World* InWorld)
 	{
 		OwnerWorld = InWorld;

@@ -152,7 +152,7 @@ private:
 	// --- Lifecycle ---
 	std::atomic<bool> bIsRunning{false};
 	std::atomic<bool> bJobsInitialized{false};
-	std::unique_ptr<FlowManager> FlowManager;
+	std::unique_ptr<FlowManager> Flow;
 
 	// --- FPS tracking ---
 	double FpsTimer     = 0.0;

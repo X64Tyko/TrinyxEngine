@@ -5,6 +5,8 @@
 #include "Registry.h"
 #include "JoltPhysics.h"
 
+World::World() = default;
+
 World::~World()
 {
 	// If not already shut down, clean up gracefully.
@@ -18,9 +20,11 @@ World::~World()
 	}
 }
 
-bool World::Initialize(const EngineConfig& config, int windowWidth, int windowHeight)
+bool World::Initialize(const EngineConfig& config, ConstructRegistry* constructRegistry,
+					   int windowWidth, int windowHeight)
 {
 	Config = config;
+	Constructs = constructRegistry;
 
 	// --- Registry ---
 	RegistryPtr = std::make_unique<Registry>(&Config);
@@ -39,7 +43,7 @@ bool World::Initialize(const EngineConfig& config, int windowWidth, int windowHe
 	Logic->Initialize(RegistryPtr.get(), &Config, Physics.get(),
 					  &SimInput, &VizInput, &Spawner, &bJobsInitialized,
 					  windowWidth, windowHeight);
-	Logic->SetConstructRegistry(&Constructs);
+	Logic->SetConstructRegistry(Constructs);
 
 	LOG_INFO("[World] Initialized");
 	return true;
@@ -65,15 +69,15 @@ void World::Shutdown()
 	Stop();
 	Join();
 
-	// Destroy in reverse order of creation.
-	// Constructs must be torn down before Registry — their Views
-	// unbind defrag callbacks and destroy entities during shutdown.
-	Constructs.DestroyAll();
+	// Note: ConstructRegistry is owned by FlowManager and outlives the World.
+	// World-lifetime and Level-lifetime Constructs are destroyed by FlowManager
+	// during transitions, not here.
 
 	Logic.reset();
 	Physics.reset();
 	RegistryPtr.reset();
 
+	Constructs = nullptr;
 	LOG_INFO("[World] Shut down");
 }
 

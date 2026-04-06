@@ -131,7 +131,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	Config.TemporalFrameCount = 3;
 #endif
 
-	FlowManager = std::make_unique<FlowManager>();
+	Flow = std::make_unique<FlowManager>();
 
 	// ---- GNS + NetThread -------------------------------------------------
 	if (Config.Mode != EngineMode::Standalone)
@@ -150,7 +150,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 
 	// ---- World (owns Registry, Physics, LogicThread, Input, SpawnSync) ---
 	DefaultWorld = std::make_unique<World>();
-	if (!DefaultWorld->Initialize(Config, width, height))
+	if (!DefaultWorld->Initialize(Config, Flow->GetConstructRegistry(), width, height))
 	{
 		std::cerr << "World::Initialize failed" << std::endl;
 		return false;

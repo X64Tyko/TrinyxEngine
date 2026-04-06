@@ -1137,7 +1137,7 @@ void EditorContext::StartPIE()
 	// to do, create a headless server config if set
 	const EngineConfig& editorCfg = *EnginePtr->GetConfig();
 	ServerWorld                   = std::make_unique<World>();
-	if (!ServerWorld->Initialize(editorCfg))
+	if (!ServerWorld->Initialize(editorCfg, nullptr))
 	{
 		LOG_ERROR("[PIE] Failed to initialize server world");
 		ServerWorld.reset();
@@ -1166,7 +1166,7 @@ void EditorContext::StartPIE()
 	{
 		PIEClient client;
 		client.ClientWorld = std::make_unique<World>();
-		if (!client.ClientWorld->Initialize(editorCfg))
+		if (!client.ClientWorld->Initialize(editorCfg, nullptr))
 		{
 			LOG_ERROR_F("[PIE] Failed to initialize client world %d", ci);
 			// Clean up server + already-created clients

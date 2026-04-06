@@ -4,9 +4,14 @@
 #include <functional>
 #include <memory>
 
+#include "ConstructRegistry.h"
+#include "Types.h"
+
 class GameState;
 class GameMode;
 class World;
+class TrinyxEngine;
+struct EngineConfig;
 
 // ---------------------------------------------------------------------------
 // FlowManager — Manages game flow state stack and travel primitives.
@@ -16,6 +21,7 @@ class World;
 //   - A stack of GameStates (menu, loading, in-game, pause overlay, etc.)
 //   - World lifetime (create/destroy based on state requirements)
 //   - GameMode lifetime (one per World, set by the active state)
+//   - ConstructRegistry (lives here so Session-lifetime Constructs survive)
 //   - Level loading/unloading
 //
 // Travel is not a single policy — it's a set of orthogonal tools:
@@ -35,7 +41,9 @@ class World;
 //     - Swap NetSession (server handoff)
 //
 // Bootstrap contract:
-//   Engine initializes → FlowManager::LoadState("default state name")
+//   Engine initializes → FlowManager::Initialize(engine)
+//   → game registers states in PostInitialize
+//   → LoadDefaultState("name") enters the first state
 //   → from there, user project code owns the entire flow graph.
 //
 // Vocabulary:
@@ -49,11 +57,16 @@ class World;
 class FlowManager
 {
 public:
-	FlowManager() = default;
+	FlowManager();
 	~FlowManager();
 
 	FlowManager(const FlowManager&)            = delete;
 	FlowManager& operator=(const FlowManager&) = delete;
+
+	/// Called once by TrinyxEngine after construction.
+	/// Stores engine back-pointer for World creation (config, window size).
+	void Initialize(TrinyxEngine* engine, const EngineConfig* config,
+					int windowWidth, int windowHeight);
 
 	// ----- State registration (code-driven, call in PostInitialize) -----
 
@@ -89,9 +102,11 @@ public:
 	/// Create a fresh World (Registry, Physics, Logic, Input).
 	/// Called automatically by TransitionTo when requirements demand it.
 	/// Can also be called manually for advanced flows.
-	void CreateWorld();
+	World* CreateWorld();
 
 	/// Destroy the current World and everything scoped to it.
+	/// Destroys Level-lifetime and World-lifetime Constructs.
+	/// Session-lifetime Constructs survive.
 	void DestroyWorld();
 
 	/// Load a level (.tnxscene) into the current World.
@@ -115,8 +130,9 @@ public:
 	// ----- Accessors -----
 
 	GameState* GetActiveState() const;
-	World* GetWorld() const { return ActiveWorld; }
-	bool HasWorld() const { return ActiveWorld != nullptr; }
+	World* GetWorld() const;
+	bool HasWorld() const;
+	ConstructRegistry* GetConstructRegistry() { return &ConstructReg; }
 
 private:
 	static constexpr uint32_t MaxStateStack       = 8;
@@ -146,12 +162,27 @@ private:
 	NamedModeFactory RegisteredModes[MaxRegisteredModes];
 	uint32_t RegisteredModeCount = 0;
 
+	// Construct Registry — lives here so Session-lifetime Constructs survive World reset
+	ConstructRegistry ConstructReg;
+
 	// Active subsystems
-	World* ActiveWorld = nullptr; // Non-owning — engine owns the World
+	std::unique_ptr<World> ActiveWorld;
 	std::unique_ptr<GameMode> ActiveMode;
+
+	// Engine back-pointer (for World creation parameters)
+	TrinyxEngine* Engine       = nullptr;
+	const EngineConfig* Config = nullptr;
+	int WindowWidth            = 1920;
+	int WindowHeight           = 1080;
 
 	// Internal helpers
 	StateFactory FindStateFactory(const char* name) const;
 	ModeFactory FindModeFactory(const char* name) const;
-	void EnforceRequirements(GameState* newState);
+
+	/// Compare current vs next state requirements and create/destroy
+	/// World and NetSession as needed.
+	void EnforceRequirements(GameState* currentState, GameState* nextState);
+
+	/// Destroy all Constructs at or below the given lifetime tier.
+	void DestroyConstructsBelowTier(ConstructLifetime minSurvivingTier);
 };

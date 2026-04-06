@@ -10,9 +10,9 @@ class World;
 // ConstructRegistry — Type-erased registry of all live Constructs.
 //
 // Tracks Construct lifetimes, assigns IDs, and handles deferred destruction.
-// World owns the ConstructRegistry. LogicThread calls
-// ProcessDeferredDestructions() at the top of each frame alongside the
-// entity equivalent.
+// FlowManager owns the ConstructRegistry so that Session-lifetime Constructs
+// survive World destruction. World holds a non-owning pointer passed at init.
+// LogicThread calls ProcessDeferredDestructions() at the top of each frame.
 //
 // Usage:
 //   auto* player = constructs->Create<PlayerConstruct>(world);

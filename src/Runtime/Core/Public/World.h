@@ -2,7 +2,6 @@
 #include <memory>
 #include <functional>
 
-#include "ConstructRegistry.h"
 #include "EngineConfig.h"
 #include "Input.h"
 #include "SpawnSync.h"
@@ -10,6 +9,7 @@
 class Registry;
 class LogicThread;
 class JoltPhysics;
+class ConstructRegistry;
 
 // ---------------------------------------------------------------------------
 // World — A self-contained simulation instance.
@@ -25,15 +25,17 @@ class JoltPhysics;
 class World
 {
 public:
-	World() = default;
+	World();
 	~World();
 
 	World(const World&)            = delete;
 	World& operator=(const World&) = delete;
 
 	/// Initialize all owned subsystems. Call before Start().
-	/// windowWidth/windowHeight are used for the camera aspect ratio.
-	bool Initialize(const EngineConfig& config, int windowWidth = 1920, int windowHeight = 1080);
+	/// ConstructRegistry is owned by FlowManager — passed in so Session-lifetime
+	/// Constructs survive World destruction.
+	bool Initialize(const EngineConfig& config, ConstructRegistry* constructRegistry,
+					int windowWidth = 1920, int windowHeight = 1080);
 
 	/// Start the LogicThread (Brain). Requires jobs to be initialized first.
 	void Start();
@@ -66,7 +68,7 @@ public:
 	InputBuffer* GetVizInput() { return &VizInput; }
 	const EngineConfig& GetConfig() const { return Config; }
 	EngineConfig& GetConfigMut() { return Config; }
-	ConstructRegistry* GetConstructRegistry() { return &Constructs; }
+	ConstructRegistry* GetConstructRegistry() { return Constructs; }
 
 	/// Set by engine after jobs are initialized. LogicThread polls this.
 	void SetJobsInitialized(bool v) { bJobsInitialized.store(v, std::memory_order_release); }
@@ -90,6 +92,6 @@ private:
 	InputBuffer VizInput;
 	SpawnSync Spawner;
 
-	ConstructRegistry Constructs;
+	ConstructRegistry* Constructs = nullptr; // Non-owning — FlowManager owns the registry
 	std::atomic<bool> bJobsInitialized{false};
 };

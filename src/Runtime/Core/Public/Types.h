@@ -62,6 +62,17 @@ enum class CacheTier : uint8_t
 	MAX
 };
 
+// Identifies the lifetime tier of a Construct — determines what survives
+// level transitions, World resets, and session teardown.
+// FlowManager uses this to enforce destruction/survival on transitions.
+enum class ConstructLifetime : uint8_t
+{
+	Level,      // Destroyed when the Level unloads
+	World,      // Destroyed when the World resets
+	Session,    // Survives World reset. Destroyed when the session ends.
+	Persistent, // Survives everything. Destroyed only explicitly.
+};
+
 // Simulation scalar type — float by default, swappable to Fixed32 for
 // bit-identical determinism via TNX_DETERMINISTIC build flag.
 #if TNX_DETERMINISTIC

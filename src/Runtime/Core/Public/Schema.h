@@ -4,136 +4,14 @@
 #include <string_view>
 #include <tuple>
 
+#include "EntityInvoke.h"
 #include "FieldMeta.h"
 #include "Profiler.h"
 #include "Signature.h"
 #include "Types.h"
 
-
-enum class SystemID : uint8_t;
-// Helper concept to detect if T has a specific method
-template <typename T> concept HasOnCreate = requires(T t) { t.OnCreate(); };
-template <typename T> concept HasOnDestroy = requires(T t) { t.OnDestroy(); };
-template <typename T> concept HasScalarUpdate = requires(T t, SimFloat dt) { t.ScalarUpdate(dt); };
-template <typename T> concept HasPrePhysics = requires(T t, SimFloat dt) { t.PrePhysics(dt); };
-template <typename T> concept HasPostPhysics = requires(T t, SimFloat dt) { t.PostPhysics(dt); };
-// R&D workaround: PhysicsFlush lets Constructs push kinematic state to Jolt
-// during the flush window (after Step completes, before next Step dispatches).
-// This doesn't gel with the slab data model — kinematic state should flow
-// through ECS fields, not direct Jolt API calls. Needs redesign:
-//   - Flush must not change physics state that Pull is about to overwrite
-//   - Pull must not clobber kinematic state that Flush just wrote
-//   - Ideally: kinematic velocity lives in a slab field, engine pushes it
-//     to Jolt during FlushPendingBodies automatically (like body creation)
-template <typename T> concept HasPhysicsStep = requires(T t, SimFloat dt) { t.PhysicsStep(dt); };
-template <typename T> concept HasOnActivate = requires(T t) { t.OnActivate(); };
-template <typename T> concept HasOnDeactivate = requires(T t) { t.OnDeactivate(); };
-template <typename T> concept HasOnCollide = requires(T t) { t.OnCollide(); };
-template <typename T> concept HasDefineSchema = requires(T t) { t.DefineSchema(); };
-template <typename T> concept HasDefineFields = requires(T t) { t.DefineFields(); };
-
-using UpdateFunc = void(*)(SimFloat, void**, void*, uint32_t);
-
 #define REGISTER_ENTITY_PREPHYS(Type, ClassID) \
     case ClassID: InvokePrePhysicsImpl<Type>(dt, fieldArrayTable, componentCount); break;
-
-struct EntityMeta
-{
-	const char* Name = nullptr; // Stringified entity type name (from registration macro)
-	size_t ViewSize  = 0;
-
-	UpdateFunc PrePhys      = nullptr;
-	UpdateFunc PostPhys     = nullptr;
-	UpdateFunc ScalarUpdate = nullptr;
-
-	uint32_t EntitiesPerChunk = 256;
-
-	EntityMeta()
-	{
-	}
-
-	EntityMeta(const size_t inViewSize, const UpdateFunc prePhys, const UpdateFunc postPhys, const UpdateFunc scalarUpdate)
-		: ViewSize(inViewSize)
-		, PrePhys(prePhys)
-		, PostPhys(postPhys)
-		, ScalarUpdate(scalarUpdate)
-	{
-	}
-
-	EntityMeta(const EntityMeta& rhs)
-		: ViewSize(rhs.ViewSize)
-		, PrePhys(rhs.PrePhys)
-		, PostPhys(rhs.PostPhys)
-		, ScalarUpdate(rhs.ScalarUpdate)
-		, EntitiesPerChunk(rhs.EntitiesPerChunk)
-	{
-	}
-};
-
-template <typename T>
-FORCE_INLINE void InvokePrePhysicsImpl(SimFloat dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
-{
-	alignas(32) typename T::WideType viewBatch;
-
-	constexpr uint32_t SIMD_BATCH = 8;
-	const uint32_t batchCount     = componentCount / SIMD_BATCH;
-
-	viewBatch.Hydrate(fieldArrayTable, FlagBase);
-
-	// Process batches
-	for (uint32_t i = 0; i < batchCount; i++)
-	{
-		viewBatch.PrePhysics(dt);
-		viewBatch.Advance(SIMD_BATCH);
-	}
-
-	// perform the last batch with a mask.
-	alignas(32) typename T::MaskedType tailBatch;
-	// Handle the tail with a mask
-	tailBatch.Hydrate(fieldArrayTable, FlagBase, SIMD_BATCH * batchCount, componentCount % SIMD_BATCH);
-	tailBatch.PrePhysics(dt);
-}
-
-template <typename T>
-FORCE_INLINE void InvokeScalarUpdateImpl(SimFloat dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
-{
-	// Use Scalar for the update, this is where users can cross-reference entities and do non-SIMD things.
-	alignas(32) T viewBatch;
-
-	viewBatch.Hydrate(fieldArrayTable, FlagBase);
-
-	// Process batches
-	for (uint32_t i = 0; i < componentCount; i++)
-	{
-		viewBatch.ScalarUpdate(dt);
-		viewBatch.Advance(1);
-	}
-}
-
-template <typename T>
-FORCE_INLINE void InvokePostPhysicsImpl(SimFloat dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
-{
-	alignas(32) typename T::WideType viewBatch;
-
-	constexpr uint32_t SIMD_BATCH = 8;
-	const uint32_t batchCount     = componentCount / SIMD_BATCH;
-
-	viewBatch.Hydrate(fieldArrayTable, FlagBase);
-
-	// Process batches
-	for (uint32_t i = 0; i < batchCount; i++)
-	{
-		viewBatch.PostPhysics(dt);
-		viewBatch.Advance(SIMD_BATCH);
-	}
-
-	TNX_ZONE_FINE_N("Tail Batch")
-	// perform the last batch with a mask.
-	alignas(32) typename T::MaskedType tailBatch;
-	// Handle the tail with a mask
-	tailBatch.Hydrate(fieldArrayTable, FlagBase, SIMD_BATCH * batchCount, componentCount % SIMD_BATCH);
-	tailBatch.PostPhysics(dt);
-}
 
 class MetaRegistry
 {
@@ -171,19 +49,16 @@ public:
 
 		if constexpr (HasScalarUpdate<T>)
 		{
-			// Then in RegisterEntity:
 			EntityGetters[ID].ScalarUpdate = InvokeScalarUpdateImpl<T>;
 		}
 
 		if constexpr (HasPrePhysics<T>)
 		{
-			// Then in RegisterEntity:
 			EntityGetters[ID].PrePhys = InvokePrePhysicsImpl<T>;
 		}
 
 		if constexpr (HasPostPhysics<T>)
 		{
-			// Then in RegisterEntity:
 			EntityGetters[ID].PostPhys = InvokePostPhysicsImpl<T>;
 		}
 
@@ -209,9 +84,6 @@ public:
 		ClassToComponentList[ID].push_back(TypeID);
 		if constexpr (requires { T::SystemTypeID; }) ClassSystemID[ID] = ClassSystemID[ID] | T::SystemTypeID;
 
-		// Store the per-slab slot index derived from StaticTemporalIndex().
-		// StaticTemporalIndex() caches its result, so this is safe to call here even though
-		// RegisterPrefabComponent may fire once per entity type that uses this component.
 		if constexpr (requires { T::StaticTemporalIndex(); })
 		{
 			//ComponentFieldRegistry::Get().SetCacheSlotIndex(TypeID, T::StaticTemporalIndex());
