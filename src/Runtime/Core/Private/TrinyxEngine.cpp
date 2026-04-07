@@ -7,6 +7,7 @@
 
 #include "EngineConfig.h"
 #include "FlowManager.h"
+#include "ReflectionRegistry.h"
 #include "Logger.h"
 #include "LogicThread.h"
 #include "Profiler.h"
@@ -131,7 +132,12 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	Config.TemporalFrameCount = 3;
 #endif
 
+	// Publish all static-init registered types (states, modes, entity types)
+	// to the AssetRegistry so they're resolvable by name at runtime.
+	ReflectionRegistry::Get().PublishToAssetRegistry();
+
 	Flow = std::make_unique<FlowManager>();
+	Flow->Initialize(this, &Config, width, height);
 
 	// ---- GNS + NetThread -------------------------------------------------
 	if (Config.Mode != EngineMode::Standalone)
@@ -148,13 +154,13 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 		}
 	}
 
-	// ---- World (owns Registry, Physics, LogicThread, Input, SpawnSync) ---
-	DefaultWorld = std::make_unique<World>();
-	if (!DefaultWorld->Initialize(Config, Flow->GetConstructRegistry(), width, height))
+	// ---- World (owned by FlowManager) ------------------------------------
+	if (!Flow->CreateWorld())
 	{
-		std::cerr << "World::Initialize failed" << std::endl;
+		std::cerr << "FlowManager::CreateWorld failed" << std::endl;
 		return false;
 	}
+	DefaultWorld = Flow->GetWorld();
 	Pacer.Initialize(GpuDevice);
 
 	// ---- Renderer --------------------------------------------------------
@@ -211,7 +217,7 @@ bool TrinyxEngine::EnsureNetworking()
 
 void TrinyxEngine::StartThreadsAndJobs()
 {
-	DefaultWorld->Start();
+	Flow->StartWorld();
 	Render->Start();
 
 	while (!DefaultWorld->GetLogicThread()->IsRunning() || !Render->IsRunning())
@@ -238,12 +244,15 @@ void TrinyxEngine::StartThreadsAndJobs()
 void TrinyxEngine::RunMainLoop()
 {
 	const uint64_t perfFrequency = SDL_GetPerformanceFrequency();
+	LastFrameCounter             = SDL_GetPerformanceCounter();
 
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
 		TNX_ZONE_N("Main_Frame");
 
 		const uint64_t frameStart = SDL_GetPerformanceCounter();
+		const float dt            = static_cast<float>(static_cast<double>(frameStart - LastFrameCounter) / static_cast<double>(perfFrequency));
+		LastFrameCounter          = frameStart;
 
 #if defined(TNX_DEDICATED_SERVER)
 		// Dedicated server: main thread is the network poller.
@@ -257,6 +266,9 @@ void TrinyxEngine::RunMainLoop()
 		// Shipping client/standalone: always pump SDL events.
 		PumpEvents();
 #endif
+
+		// Tick the flow state machine — drives GameState::Tick() on the active state
+		Flow->Tick(dt);
 
 		if (DefaultWorld->GetLogicThread() && !DefaultWorld->GetLogicThread()->IsRunning())
 		{
@@ -280,11 +292,11 @@ void TrinyxEngine::Shutdown()
 {
 	LOG_INFO("TrinyxEngine shutting down");
 
-	// Stop threads
-	DefaultWorld->Stop();
+	// Stop threads — FlowManager owns World lifecycle
+	Flow->StopWorld();
 	if (Render) Render->Stop();
 	if (Net) Net->Stop();
-	DefaultWorld->Join();
+	Flow->JoinWorld();
 	if (Render) Render->Join();
 	if (Net) Net->Join();
 
@@ -294,8 +306,10 @@ void TrinyxEngine::Shutdown()
 	// Destroy thread objects BEFORE Vulkan teardown.
 	// RenderThread owns GPU resources that call vmaDestroy* in their destructors.
 	Render.reset();
-	DefaultWorld->Shutdown();
-	DefaultWorld.reset();
+
+	// FlowManager owns the World — destroy it (and all Constructs) here.
+	DefaultWorld = nullptr;
+	Flow.reset();
 
 	// Tear down networking
 	Net.reset();
@@ -319,7 +333,7 @@ void TrinyxEngine::PumpEvents()
 {
 	TNX_ZONE_N("Input_Poll");
 
-	World* targetWorld    = InputTargetWorld ? InputTargetWorld : DefaultWorld.get();
+	World* targetWorld    = InputTargetWorld ? InputTargetWorld : DefaultWorld;
 	InputBuffer* SimInput = targetWorld->GetSimInput();
 	InputBuffer* VizInput = targetWorld->GetVizInput();
 #ifdef TNX_ENABLE_ROLLBACK

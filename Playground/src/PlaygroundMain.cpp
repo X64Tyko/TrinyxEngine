@@ -1,14 +1,14 @@
 #include "TrinyxEngine.h"
 #include "GameManager.h"
-#include "EntityBuilder.h"
+#include "FlowManager.h"
 #include "Logger.h"
-#include "Registry.h"
 
-#include <string>
+#include "GameplayState.h" // Pulls in TNX_REGISTER_STATE(GameplayState) via static init
 
 // ---------------------------------------------------------------------------
 // Playground — network playtest application.
-// Loads scene from content/ in non-editor builds.
+// Scene loading is handled by the flow system: EngineConfig::DefaultState
+// names a GameState, and the state's OnEnter loads the level.
 // ---------------------------------------------------------------------------
 class PlaygroundGame : public GameManager<PlaygroundGame>
 {
@@ -20,27 +20,6 @@ public:
 		(void)engine;
 		LOG_INFO("Playground initialized");
 		return true;
-	}
-
-	void PostStart(TrinyxEngine& engine)
-	{
-#if !TNX_ENABLE_EDITOR
-		// Non-editor builds load the default scene from config.
-		// Editor builds load it via EditorContext which also tracks the path.
-		// TODO: Once FlowManager is wired, replace this with DefaultState loading.
-		const EngineConfig* cfg = engine.GetConfig();
-		if (cfg->DefaultScene[0] != '\0' && cfg->ProjectDir[0] != '\0')
-		{
-			std::string scenePath = std::string(cfg->ProjectDir) + "/content/" + cfg->DefaultScene;
-			LOG_INFO_F("Loading scene: %s", scenePath.c_str());
-			engine.Spawn([scenePath](Registry* reg)
-			{
-				EntityBuilder::SpawnFromFile(reg, scenePath.c_str());
-			});
-		}
-#else
-		(void)engine;
-#endif
 	}
 };
 

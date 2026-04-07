@@ -17,6 +17,14 @@ struct CMeshRef : ComponentView<CMeshRef, WIDTH>
 	UIntProxy<WIDTH> LODCount{};   // Number of LOD levels available
 	UIntProxy<WIDTH> CastShadow{}; // 1 = participates in shadow passes
 
+	// Per-field asset type annotation — editor displays name instead of raw index
+	static constexpr auto FieldRefTypes = std::array{
+		AssetType::StaticMesh, // MeshID
+		AssetType::Material,   // MaterialID
+		AssetType::Invalid,    // LODCount
+		AssetType::Invalid,    // CastShadow
+	};
+
 	TNX_VOLATILE_FIELDS(CMeshRef, Render, MeshID, MaterialID, LODCount, CastShadow)
 };
 

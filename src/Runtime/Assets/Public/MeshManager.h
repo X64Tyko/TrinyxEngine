@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 
 #include "GpuFrameData.h"
 #include "VulkanMemory.h"
@@ -41,7 +42,7 @@ public:
 
 	/// Register a MeshAsset — copies vertex/index data into the mega-buffers.
 	/// Returns the slot ID, or UINT32_MAX on failure.
-	uint32_t RegisterMesh(const MeshAsset& asset, const std::string& name = {});
+	uint32_t RegisterMesh(const MeshAsset& asset, const std::string& name = {}, int64_t uuid = 0);
 
 	/// Register the built-in cube mesh as slot 0.
 	uint32_t RegisterBuiltinCube();
@@ -62,7 +63,15 @@ public:
 		return UINT32_MAX;
 	}
 
+	/// Find a mesh slot by UUID. Returns UINT32_MAX if not found.
+	uint32_t FindSlotByUUID(int64_t uuid) const
+	{
+		auto it = UUIDToSlot.find(uuid);
+		return it != UUIDToSlot.end() ? it->second : UINT32_MAX;
+	}
+
 	const std::string& GetSlotName(uint32_t id) const { return SlotNames[id]; }
+	int64_t GetSlotUUID(uint32_t id) const { return SlotUUIDs[id]; }
 
 private:
 	VulkanBuffer VertexMegaBuffer;
@@ -74,4 +83,6 @@ private:
 	uint32_t MeshCount        = 0;
 	MeshSlot Slots[MAX_MESH_SLOTS]{};
 	std::string SlotNames[MAX_MESH_SLOTS];
+	int64_t SlotUUIDs[MAX_MESH_SLOTS]{};
+	std::unordered_map<int64_t, uint32_t> UUIDToSlot;
 };

@@ -51,6 +51,7 @@ struct AssetSidecar
 struct AssetDatabaseEntry
 {
 	int64_t UUID = 0;
+	std::string Name; // human-readable display name (default = filename stem)
 	std::string Path; // relative to content root
 	AssetType Type       = AssetType::Invalid;
 	uint64_t ContentHash = 0;
@@ -92,9 +93,15 @@ public:
 	// Lookup by relative path.
 	const AssetDatabaseEntry* FindByPath(const std::string& relativePath) const;
 
+	// Rename an asset's display name. Updates database and runtime registry.
+	bool Rename(int64_t uuid, const std::string& newName);
+
 private:
-	// Generate a random 40-bit UUID (masked to the UUID bit range of AssetID).
-	static int64_t GenerateUUID();
+	// Generate a sequential UUID for the given asset type (counter-based, dev builds).
+	int64_t GenerateUUID(AssetType type);
+
+	// Derive display name from filename (stem without extension).
+	static std::string NameFromPath(const std::string& path);
 
 	// Hash file contents for integrity checking.
 	static uint64_t HashFileContents(const char* filePath);
@@ -112,4 +119,8 @@ private:
 	std::vector<AssetDatabaseEntry> Entries;
 	std::unordered_map<int64_t, size_t> UUIDIndex;     // UUID -> Entries index
 	std::unordered_map<std::string, size_t> PathIndex; // relative path -> Entries index
+
+	// Per-type monotonic counters for structured UUID generation.
+	// Index is the uint8_t value of AssetType.
+	uint32_t NextCounter[256] = {};
 };

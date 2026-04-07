@@ -114,13 +114,21 @@ static FieldMeta ExtractFieldMeta(FieldType<Type, WIDTH> Derived::* member)
 
 	const char* name = (Index < Derived::FieldNames.size()) ? Derived::FieldNames[Index] : "unknown";
 
+	// Read asset type annotation if the component provides FieldRefTypes
+	AssetType refType = AssetType::Invalid;
+	if constexpr (requires { Derived::FieldRefTypes; })
+	{
+		if constexpr (Index < std::tuple_size_v<std::remove_cvref_t<decltype(Derived::FieldRefTypes)>>) refType = Derived::FieldRefTypes[Index];
+	}
+
 	return FieldMeta{
 		sizeof(Type),
 		FIELD_ARRAY_ALIGNMENT, // 32 or 64 bytes depending on CMake option
 		offset,
 		0, // OffsetInChunk computed later by Archetype::BuildLayout
 		name,
-		DeduceFieldValueType<Type>()
+		DeduceFieldValueType<Type>(),
+		refType
 	};
 }
 

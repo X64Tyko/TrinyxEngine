@@ -20,6 +20,7 @@
 struct AssetEntry
 {
 	AssetID ID;
+	std::string Name; // human-readable display name (e.g., "helmet", "FreeForAll")
 	std::string Path; // relative to content root (runtime: pak-relative)
 	AssetType Type         = AssetType::Invalid;
 	AssetFlags Flags       = AssetFlags::None;
@@ -42,23 +43,32 @@ public:
 	// void IngestManifest(const AssetManifest& manifest);  // TODO: cooked manifest
 
 	// --- Registration (editor/import pipeline) ---
-	void Register(const AssetID& id, const std::string& path, AssetType type,
-				  uint32_t schemaVersion = 0, AssetFlags flags = AssetFlags::None)
+	void Register(const AssetID& id, const std::string& name, const std::string& path,
+				  AssetType type, uint32_t schemaVersion = 0, AssetFlags flags = AssetFlags::None)
 	{
 		int64_t uuid        = id.GetUUID();
 		AssetEntry& entry   = Entries[uuid];
 		entry.ID            = id;
+		entry.Name          = name;
 		entry.Path          = path;
 		entry.Type          = type;
 		entry.SchemaVersion = schemaVersion;
 		entry.Flags         = flags;
 		entry.State         = RuntimeFlags::None;
+
+		if (!name.empty()) NameIndex[name] = uuid;
 	}
 
 	// --- Lookup ---
 	const AssetEntry* Find(const AssetID& id) const
 	{
 		return FindByUUID(ResolveAlias(id.GetUUID()));
+	}
+
+	const AssetEntry* FindByName(const std::string& name) const
+	{
+		auto it = NameIndex.find(name);
+		return it != NameIndex.end() ? FindByUUID(it->second) : nullptr;
 	}
 
 	AssetEntry* FindMutable(const AssetID& id)
@@ -139,6 +149,7 @@ public:
 	{
 		Entries.clear();
 		AliasTable.clear();
+		NameIndex.clear();
 	}
 
 private:
@@ -172,4 +183,5 @@ private:
 
 	std::unordered_map<int64_t, int64_t> AliasTable;
 	std::unordered_map<int64_t, AssetEntry> Entries;
+	std::unordered_map<std::string, int64_t> NameIndex; // display name → UUID
 };

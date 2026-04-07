@@ -73,7 +73,8 @@ public:
 	}
 
 	// --- World access ---
-	World* GetDefaultWorld() const { return DefaultWorld.get(); }
+	World* GetDefaultWorld() const { return DefaultWorld; }
+	FlowManager* GetFlowManager() const { return Flow.get(); }
 
 	// Convenience: access the default world's registry.
 	Registry* GetRegistry() const;
@@ -143,8 +144,8 @@ private:
 	int EditorTemporalFrameCount = 8; // User's original value, stashed for PIE worlds
 #endif
 
-	// --- World (owns Registry, Physics, Logic, Input, SpawnSync) ---
-	std::unique_ptr<World> DefaultWorld;
+	// --- World (owned by FlowManager, cached here for fast access) ---
+	World* DefaultWorld = nullptr;
 
 	// --- Renderer (shared, reads from active world) ---
 	std::unique_ptr<RendererType> Render;
@@ -154,10 +155,11 @@ private:
 	std::atomic<bool> bJobsInitialized{false};
 	std::unique_ptr<FlowManager> Flow;
 
-	// --- FPS tracking ---
-	double FpsTimer     = 0.0;
-	double LastFPSCheck = 0.0;
-	int FrameCount      = 0;
+	// --- Frame timing ---
+	uint64_t LastFrameCounter = 0; // SDL performance counter from previous frame
+	double FpsTimer           = 0.0;
+	double LastFPSCheck       = 0.0;
+	int FrameCount            = 0;
 };
 
 template <typename GameClass>
@@ -165,6 +167,15 @@ void TrinyxEngine::Run(GameClass& game)
 {
 	StartThreadsAndJobs(); // Pin Logic/Render, init workers
 	game.PostStart(*this); // Spawns via Engine.Spawn() — syncs with Brain
+
+	// Auto-load the default flow state if configured.
+	// World already exists (created in Initialize), so EnforceRequirements is a no-op
+	// for NeedsWorld states. The state's OnEnter drives level loading and mode activation.
+	if (Config.DefaultState[0] != '\0')
+	{
+		Flow->LoadDefaultState(Config.DefaultState);
+	}
+
 	RunMainLoop();
 	Shutdown();
 }

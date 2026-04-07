@@ -80,6 +80,19 @@ void ContentBrowserPanel::Draw(EditorState& state)
 			}
 		}
 
+		// Drag source for meshes — payload is the slot index
+		if (entry.Type == AssetType::StaticMesh && state.MeshMgrPtr)
+		{
+			if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID))
+			{
+				std::string meshName = std::filesystem::path(entry.Path).stem().string();
+				uint32_t meshSlot    = state.MeshMgrPtr->FindSlotByName(meshName);
+				ImGui::SetDragDropPayload("MESH_SLOT", &meshSlot, sizeof(meshSlot));
+				ImGui::Text("Mesh: %s", entry.Name.empty() ? meshName.c_str() : entry.Name.c_str());
+				ImGui::EndDragDropSource();
+			}
+		}
+
 		// Double-click: load scenes; prefabs will open prefab editor (TODO)
 		if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
 		{

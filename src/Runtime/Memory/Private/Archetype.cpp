@@ -88,6 +88,7 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& c
 													  typeID,
 													  temporalTier,
 													  field.ValueType,
+													  field.RefAssetType,
 													  field.Size,
 													  temporalCache ? temporalCache->GetTotalFrameCount() : 1, // 1 frame for cold — makes frame % 1 == 0, no branch needed
 													  temporalCache ? temporalCache->GetFrameStride() : 0,

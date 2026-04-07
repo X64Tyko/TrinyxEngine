@@ -32,7 +32,12 @@ enum class AssetType : uint8_t
 	Animation    = 0x07,
 	Level        = 0x08, // scene files
 	Prefab       = 0x09,
-	// room for 246 more
+	// 0x0A-0xEF reserved for file-based asset types
+
+	// Code-registered types (not file assets — registered via macros)
+	GameState  = 0xF0,
+	GameMode   = 0xF1,
+	EntityType = 0xF2,
 };
 
 enum class AssetLoadPriority : uint8_t
@@ -210,6 +215,9 @@ inline const char* AssetTypeName(AssetType type)
 		case AssetType::Animation: return "Animation";
 		case AssetType::Level: return "Level";
 		case AssetType::Prefab: return "Prefab";
+		case AssetType::GameState: return "Game State";
+		case AssetType::GameMode: return "Game Mode";
+		case AssetType::EntityType: return "Entity Type";
 		default: return "Unknown";
 	}
 }

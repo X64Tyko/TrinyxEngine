@@ -1,6 +1,7 @@
 #pragma once
 #include <string_view>
 #include <vector>
+#include "AssetTypes.h"
 #include "MemoryDefines.h"
 #include "Types.h"
 
@@ -26,6 +27,7 @@ struct FieldMeta
 	size_t OffsetInChunk;  // Where this field array starts in the chunk (computed by BuildLayout)
 	const char* Name;      // Field name for debugging
 	FieldValueType ValueType = FieldValueType::Unknown;
+	AssetType RefAssetType   = AssetType::Invalid; // Non-Invalid = this uint32 field references an asset of this type
 };
 
 // Enhanced component metadata with field decomposition support

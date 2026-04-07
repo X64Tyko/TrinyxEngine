@@ -1,5 +1,6 @@
 #include "FlowManager.h"
 
+#include "EntityBuilder.h"
 #include "GameMode.h"
 #include "GameState.h"
 #include "Logger.h"
@@ -207,8 +208,13 @@ void FlowManager::DestroyWorld()
 	// Destroy Mode first — it may reference World state
 	ActiveMode.reset();
 
-	// Destroy Level-lifetime and World-lifetime Constructs
-	DestroyConstructsBelowTier(ConstructLifetime::Session);
+	// Notify surviving Constructs (Session+Persistent) that the World is going away.
+	// This calls OnWorldTeardown() then Shutdown() (deregisters ticks from old LogicThread).
+	ConstructReg.NotifyWorldTeardown(ConstructLifetime::Session);
+
+	// Destroy Level-lifetime and World-lifetime Constructs.
+	// Their destructors call Shutdown() which deregisters ticks.
+	ConstructReg.DestroyByLifetime(ConstructLifetime::Session);
 
 	ActiveWorld->Shutdown();
 	ActiveWorld.reset();
@@ -216,20 +222,58 @@ void FlowManager::DestroyWorld()
 	LOG_INFO("[FlowManager] World destroyed");
 }
 
-void FlowManager::LoadLevel(const char* levelName)
+void FlowManager::StartWorld()
 {
-	// TODO: implement level loading (.tnxscene by name/UUID)
-	(void)levelName;
-	LOG_INFO_F("[FlowManager] LoadLevel stub: %s", levelName);
+	if (ActiveWorld) ActiveWorld->Start();
+}
+
+void FlowManager::StopWorld()
+{
+	if (ActiveWorld) ActiveWorld->Stop();
+}
+
+void FlowManager::JoinWorld()
+{
+	if (ActiveWorld) ActiveWorld->Join();
+}
+
+void FlowManager::LoadLevel(const char* levelPath)
+{
+	if (!ActiveWorld)
+	{
+		LOG_ERROR("[FlowManager] LoadLevel called with no active World");
+		return;
+	}
+
+	if (!levelPath || levelPath[0] == '\0')
+	{
+		LOG_ERROR("[FlowManager] LoadLevel called with empty path");
+		return;
+	}
+
+	ActiveLevelPath = levelPath;
+
+	// Spawn entities from the scene file via the World's SpawnSync handshake.
+	std::string path = ActiveLevelPath;
+	ActiveWorld->Spawn([path](Registry* reg)
+	{
+		size_t count = EntityBuilder::SpawnFromFile(reg, path.c_str());
+		LOG_INFO_F("[FlowManager] LoadLevel: spawned %zu entities from %s", count, path.c_str());
+	});
+
+	LOG_INFO_F("[FlowManager] Level loaded: %s", levelPath);
 }
 
 void FlowManager::UnloadLevel()
 {
 	// Destroy Level-lifetime Constructs
-	DestroyConstructsBelowTier(ConstructLifetime::World);
+	ConstructReg.DestroyByLifetime(ConstructLifetime::Level);
 
-	// TODO: despawn level-placed entities from the World
-	LOG_INFO("[FlowManager] UnloadLevel stub");
+	// TODO: despawn level-placed entities — needs a "level-scoped entity" tag
+	// which doesn't exist yet. For now, entities persist until World destruction.
+
+	ActiveLevelPath.clear();
+	LOG_INFO("[FlowManager] Level unloaded");
 }
 
 // ---------------------------------------------------------------------------
@@ -348,17 +392,3 @@ void FlowManager::EnforceRequirements(GameState* currentState, GameState* nextSt
 	// TODO: NetSession creation when next.NeedsNetSession && !NetSession
 }
 
-void FlowManager::DestroyConstructsBelowTier(ConstructLifetime minSurvivingTier)
-{
-	// Collect IDs of Constructs that should be destroyed.
-	// We can't destroy during iteration — collect first, then batch-destroy.
-	// For now, ConstructRegistry doesn't expose lifetime queries, so we use
-	// ForEach with a type-erased approach. This will be refined when
-	// ConstructRegistry gains lifetime-aware iteration (step 4 territory).
-
-	// TODO: ConstructRegistry needs to store and expose ConstructLifetime
-	// per entry so we can filter here. For now this is a no-op placeholder
-	// that will be wired in step 4 when OnWorldTeardown/OnWorldInitialized
-	// callbacks are added.
-	(void)minSurvivingTier;
-}

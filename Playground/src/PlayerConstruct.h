@@ -9,6 +9,9 @@
 
 #include <cmath>
 
+#include "EPlayer.h"
+#include "JoltCharacter.h"
+
 // ---------------------------------------------------------------------------
 // PlayerConstruct — Playground player with physics capsule and dual cameras.
 //
@@ -20,10 +23,12 @@
 class PlayerConstruct : public Construct<PlayerConstruct>
 {
 public:
-	ConstructView<EInstanced> Body;
+	ConstructView<EPlayer> Body;
 	Owned<CameraConstruct> FirstPersonCam;
 	Owned<CameraConstruct> ThirdPersonCam;
-	
+
+	JoltCharacter CharacterController;
+
 	void InitializeViews()
 	{
 		Body.Initialize(this);
@@ -32,6 +37,8 @@ public:
 		tr.PosX  = 0.0f;
 		tr.PosY  = 5.0f;
 		tr.PosZ  = 0.0f;
+
+		tr.Rotation.SetIdentity();
 
 		auto& sc  = Body.Scale;
 		sc.ScaleX = 1.0f;
@@ -47,16 +54,14 @@ public:
 		auto& mesh  = Body.Mesh;
 		mesh.MeshID = 1u; // Capsule (slot 0=Cube, slot 1=Capsule)
 
-		auto& jolt       = Body.PhysBody;
-		jolt.Shape       = JoltShapeType::Capsule;
-		jolt.HalfExtentX = 0.4f; // radius
-		jolt.HalfExtentY = 0.9f; // half-height
-		jolt.Motion      = JoltMotion::Kinematic;
-		jolt.Mass        = 80.0f;
-		jolt.Friction    = 0.5f;
-		jolt.Restitution = 0.1f;
-
 		Body.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Replicated);
+
+		auto* phys = GetWorld()->GetPhysics();
+		CharacterController.Initialize(
+			phys->GetPhysicsSystem(),
+			JPH::RVec3(tr.PosX.Value(), tr.PosY.Value(), tr.PosZ.Value()),
+			0.3f,  // capsule radius
+			0.7f); // capsule half height
 
 		// Initialize cameras
 		FirstPersonCam->Initialize(GetWorld());
@@ -65,6 +70,22 @@ public:
 		// Default to third-person (better for visualizing corrections)
 		ActiveCam = ThirdPersonCam.Get();
 		GetWorld()->GetLogicThread()->SetActiveCamera(ActiveCam);
+	}
+	
+	void PhysicsStep(SimFloat dt)
+	{
+		// Let Jolt handle collision, slopes, stairs, grounding
+		CharacterController.Update(
+			JPH::Vec3(DesiredVelX, 0, DesiredVelZ),
+			JPH::Vec3(0, -9.81f, 0),
+			static_cast<float>(dt),
+			*GetWorld()->GetPhysics()->GetTempAllocator());
+
+		// Write the resolved position back to the slab
+		JPH::RVec3 pos      = CharacterController.GetPosition();
+		Body.Transform.PosX = pos.GetX();
+		Body.Transform.PosY = pos.GetY();
+		Body.Transform.PosZ = pos.GetZ();
 	}
 
 	// ── PrePhysics: read input, accumulate desired velocity ──────────────

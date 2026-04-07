@@ -1,5 +1,7 @@
 #include "ReflectionRegistry.h"
 
+#include "AssetRegistry.h"
+#include "AssetTypes.h"
 #include "FieldMeta.h"
 #include "Logger.h"
 
@@ -91,12 +93,14 @@ void ReflectionRegistry::SetCacheSlotIndex(ComponentTypeID typeID, uint8_t slot)
 
 void ReflectionRegistry::RegisterState(const char* name, StateFactory factory)
 {
-	// Check for duplicate
 	for (const auto& entry : RegisteredStates)
 	{
 		if (strcmp(entry.Name, name) == 0) return;
 	}
-	RegisteredStates.push_back({name, std::move(factory)});
+	int64_t uuid = UUIDFromName(name);
+	size_t idx   = RegisteredStates.size();
+	RegisteredStates.push_back({name, uuid, std::move(factory)});
+	StateUUIDIndex[uuid] = idx;
 }
 
 void ReflectionRegistry::RegisterMode(const char* name, ModeFactory factory)
@@ -105,7 +109,10 @@ void ReflectionRegistry::RegisterMode(const char* name, ModeFactory factory)
 	{
 		if (strcmp(entry.Name, name) == 0) return;
 	}
-	RegisteredModes.push_back({name, std::move(factory)});
+	int64_t uuid = UUIDFromName(name);
+	size_t idx   = RegisteredModes.size();
+	RegisteredModes.push_back({name, uuid, std::move(factory)});
+	ModeUUIDIndex[uuid] = idx;
 }
 
 ReflectionRegistry::StateFactory ReflectionRegistry::FindStateFactory(const char* name) const
@@ -124,4 +131,48 @@ ReflectionRegistry::ModeFactory ReflectionRegistry::FindModeFactory(const char* 
 		if (strcmp(entry.Name, name) == 0) return entry.Factory;
 	}
 	return nullptr;
+}
+
+ReflectionRegistry::StateFactory ReflectionRegistry::FindStateByUUID(int64_t uuid) const
+{
+	auto it = StateUUIDIndex.find(uuid);
+	return it != StateUUIDIndex.end() ? RegisteredStates[it->second].Factory : nullptr;
+}
+
+ReflectionRegistry::ModeFactory ReflectionRegistry::FindModeByUUID(int64_t uuid) const
+{
+	auto it = ModeUUIDIndex.find(uuid);
+	return it != ModeUUIDIndex.end() ? RegisteredModes[it->second].Factory : nullptr;
+}
+
+int64_t ReflectionRegistry::UUIDFromName(const char* name)
+{
+	// FNV-1a 32-bit hash
+	uint32_t hash = 2166136261u;
+	for (const char* p = name; *p; ++p) hash = (hash ^ static_cast<uint8_t>(*p)) * 16777619u;
+	return static_cast<int64_t>(hash) << 8;
+}
+
+void ReflectionRegistry::PublishToAssetRegistry() const
+{
+	AssetRegistry& registry = AssetRegistry::Get();
+
+	for (const auto& entry : RegisteredStates)
+	{
+		AssetID id = AssetID::Create(entry.UUID, AssetType::GameState);
+		registry.Register(id, entry.Name, "", AssetType::GameState);
+	}
+
+	for (const auto& entry : RegisteredModes)
+	{
+		AssetID id = AssetID::Create(entry.UUID, AssetType::GameMode);
+		registry.Register(id, entry.Name, "", AssetType::GameMode);
+	}
+
+	for (const auto& [name, classID] : NameToClassID)
+	{
+		int64_t uuid = UUIDFromName(name.c_str());
+		AssetID id   = AssetID::Create(uuid, AssetType::EntityType);
+		registry.Register(id, name, "", AssetType::EntityType);
+	}
 }

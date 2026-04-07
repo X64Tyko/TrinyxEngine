@@ -61,7 +61,6 @@ static void WriteFieldValue(void* dst, size_t fieldSize, FieldValueType valueTyp
 				break;
 			}
 		default:
-			// Fallback: dispatch on size (legacy behavior for Unknown types)
 			switch (fieldSize)
 			{
 				case 4:
@@ -455,10 +454,22 @@ JsonValue EntityBuilder::SerializeEntity(Registry* reg, Archetype* arch, size_t 
 	return entity;
 }
 
-JsonValue EntityBuilder::SerializeScene(Registry* reg, const char* sceneName)
+EntityBuilder::SceneMeta EntityBuilder::ParseSceneMeta(const JsonValue& sceneJson)
+{
+	SceneMeta meta;
+	if (const auto* v = sceneJson.Find("name"); v && v->IsString()) meta.Name = v->AsString();
+	if (const auto* v = sceneJson.Find("defaultState"); v && v->IsString()) meta.DefaultState = v->AsString();
+	if (const auto* v = sceneJson.Find("defaultMode"); v && v->IsString()) meta.DefaultMode = v->AsString();
+	return meta;
+}
+
+JsonValue EntityBuilder::SerializeScene(Registry* reg, const char* sceneName,
+										const char* defaultState, const char* defaultMode)
 {
 	JsonValue scene = JsonValue::Object();
 	scene["name"]   = JsonValue::String(sceneName);
+	if (defaultState && defaultState[0]) scene["defaultState"] = JsonValue::String(defaultState);
+	if (defaultMode && defaultMode[0]) scene["defaultMode"] = JsonValue::String(defaultMode);
 
 	JsonValue entities = JsonValue::Array();
 
@@ -499,9 +510,10 @@ JsonValue EntityBuilder::SerializeScene(Registry* reg, const char* sceneName)
 	return scene;
 }
 
-bool EntityBuilder::SaveToFile(Registry* reg, const char* sceneName, const char* filePath)
+bool EntityBuilder::SaveToFile(Registry* reg, const char* sceneName, const char* filePath,
+							   const char* defaultState, const char* defaultMode)
 {
-	JsonValue scene  = SerializeScene(reg, sceneName);
+	JsonValue scene  = SerializeScene(reg, sceneName, defaultState, defaultMode);
 	std::string json = JsonWrite(scene, true);
 
 	std::ofstream file(filePath);

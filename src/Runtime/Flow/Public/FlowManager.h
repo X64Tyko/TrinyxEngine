@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
 
 #include "ConstructRegistry.h"
 #include "Types.h"
@@ -109,6 +110,15 @@ public:
 	/// Session-lifetime Constructs survive.
 	void DestroyWorld();
 
+	/// Start the World's LogicThread (call after jobs are initialized).
+	void StartWorld();
+
+	/// Signal the World's LogicThread to stop.
+	void StopWorld();
+
+	/// Join the World's LogicThread.
+	void JoinWorld();
+
 	/// Load a level (.tnxscene) into the current World.
 	void LoadLevel(const char* levelName);
 
@@ -133,6 +143,7 @@ public:
 	World* GetWorld() const;
 	bool HasWorld() const;
 	ConstructRegistry* GetConstructRegistry() { return &ConstructReg; }
+	const std::string& GetActiveLevelPath() const { return ActiveLevelPath; }
 
 private:
 	static constexpr uint32_t MaxStateStack       = 8;
@@ -168,6 +179,7 @@ private:
 	// Active subsystems
 	std::unique_ptr<World> ActiveWorld;
 	std::unique_ptr<GameMode> ActiveMode;
+	std::string ActiveLevelPath; // Path of currently loaded level (empty = none)
 
 	// Engine back-pointer (for World creation parameters)
 	TrinyxEngine* Engine       = nullptr;
@@ -182,7 +194,4 @@ private:
 	/// Compare current vs next state requirements and create/destroy
 	/// World and NetSession as needed.
 	void EnforceRequirements(GameState* currentState, GameState* nextState);
-
-	/// Destroy all Constructs at or below the given lifetime tier.
-	void DestroyConstructsBelowTier(ConstructLifetime minSurvivingTier);
 };

@@ -67,11 +67,25 @@ public:
 	using StateFactory = std::function<std::unique_ptr<GameState>()>;
 	using ModeFactory  = std::function<std::unique_ptr<GameMode>()>;
 
-	struct StateEntry { const char* Name; StateFactory Factory; };
-	struct ModeEntry  { const char* Name; ModeFactory Factory; };
+	struct StateEntry
+	{
+		const char* Name;
+		int64_t UUID;
+		StateFactory Factory;
+	};
+
+	struct ModeEntry
+	{
+		const char* Name;
+		int64_t UUID;
+		ModeFactory Factory;
+	};
 
 	std::vector<StateEntry> RegisteredStates;
 	std::vector<ModeEntry>  RegisteredModes;
+
+	std::unordered_map<int64_t, size_t> StateUUIDIndex; // UUID → RegisteredStates index
+	std::unordered_map<int64_t, size_t> ModeUUIDIndex;  // UUID → RegisteredModes index
 
 	// ===== Entity registration (called at static init) =====
 
@@ -150,6 +164,14 @@ public:
 
 	[[nodiscard]] StateFactory FindStateFactory(const char* name) const;
 	[[nodiscard]] ModeFactory FindModeFactory(const char* name) const;
+	[[nodiscard]] StateFactory FindStateByUUID(int64_t uuid) const;
+	[[nodiscard]] ModeFactory FindModeByUUID(int64_t uuid) const;
+
+	/// Compute a deterministic UUID from a type + name (FNV-1a hash).
+	static int64_t UUIDFromName(const char* name);
+
+	/// Publish code-registered types (states, modes, entities) into AssetRegistry.
+	void PublishToAssetRegistry() const;
 
 	// ===== Bake / Snapshot / Diff (Step 5-6, stubs for now) =====
 

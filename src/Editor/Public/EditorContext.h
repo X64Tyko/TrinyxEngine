@@ -13,6 +13,7 @@
 #include "WorldViewport.h"
 
 class EditorPanel;
+class FlowManager;
 class LogicThread;
 class MeshManager;
 class ReplicationSystem;
@@ -129,13 +130,13 @@ private:
 	// N clients each get their own World + viewport.
 	struct PIEClient
 	{
-		std::unique_ptr<World> ClientWorld;
+		std::unique_ptr<FlowManager> Flow;
 		std::unique_ptr<WorldViewport> Viewport;
 		uint32_t ClientHandle = 0; // Client-side GNS connection handle (outgoing)
 		uint32_t ServerHandle = 0; // Server-side accepted handle (for replication)
 	};
 
-	std::unique_ptr<World> ServerWorld;
+	std::unique_ptr<FlowManager> ServerFlow;
 	std::unique_ptr<WorldViewport> ServerViewport; // nullptr if headless
 	std::unique_ptr<ReplicationSystem> Replicator;
 	std::vector<PIEClient> PIEClients;

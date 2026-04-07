@@ -1,10 +1,36 @@
 #include "Panels/DetailsPanel.h"
 #include "EditorState.h"
 #include "Archetype.h"
+#include "AssetTypes.h"
+#include "CacheSlotMeta.h"
 #include "FieldMeta.h"
 #include "LogicThread.h"
+#include "MeshManager.h"
 #include "Registry.h"
 #include "imgui.h"
+
+// Mark an entity's flags field dirty so the render pipeline uploads the change.
+static void MarkEntityDirty(EditorState& state)
+{
+	Archetype* arch = state.SelectedArchetype;
+	if (!arch || !state.SelectedChunk || !state.RegistryPtr) return;
+
+	Archetype::FieldKey flagKey{
+		CacheSlotMeta<>::StaticTypeID(),
+		ReflectionRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID()),
+		0
+	};
+	auto* flagDesc = arch->ArchetypeFieldLayout.find(flagKey);
+	if (!flagDesc) return;
+
+	auto* base = static_cast<uint8_t*>(state.SelectedChunk->GetFieldPtr(flagDesc->fieldSlotIndex));
+	if (!base) return;
+
+	// CacheSlotMeta is always temporal tier — use the public accessor
+	uint32_t writeFrame             = state.RegistryPtr->GetTemporalCache()->GetActiveWriteFrame();
+	auto* flags                     = reinterpret_cast<int32_t*>(base + writeFrame * flagDesc->fieldFrameStride);
+	flags[state.SelectedLocalIndex] |= static_cast<int32_t>(TemporalFlagBits::Dirty);
+}
 
 bool DetailsPanel::EditFieldValue(const char* label, size_t fieldSize, void* fieldArray,
 								  uint32_t entityIndex, uint8_t valueType)
@@ -208,7 +234,63 @@ void DetailsPanel::Draw(EditorState& state)
 
 					if (fieldArrayTable[idx])
 					{
-						if (simPaused)
+						// Asset-ref fields: combo selector when paused, name display when running
+						if (fdesc.refAssetType != AssetType::Invalid && state.MeshMgrPtr)
+						{
+							uint8_t* base                = static_cast<uint8_t*>(fieldArrayTable[idx]);
+							uint32_t* slotPtr            = reinterpret_cast<uint32_t*>(base + state.SelectedLocalIndex * fdesc.fieldSize);
+							uint32_t slotIdx             = *slotPtr;
+							const std::string& assetName = state.MeshMgrPtr->GetSlotName(slotIdx);
+
+							ImGui::PushID(fieldName);
+
+							if (simPaused)
+							{
+								// Combo dropdown of available assets of this type
+								const char* preview = assetName.empty() ? "(none)" : assetName.c_str();
+								ImGui::SetNextItemWidth(-1);
+								if (ImGui::BeginCombo("##asset", preview))
+								{
+									uint32_t meshCount = state.MeshMgrPtr->GetMeshCount();
+									for (uint32_t i = 0; i < meshCount; ++i)
+									{
+										const std::string& name = state.MeshMgrPtr->GetSlotName(i);
+										const char* label       = name.empty() ? "(unnamed)" : name.c_str();
+										bool selected           = (i == slotIdx);
+										if (ImGui::Selectable(label, selected))
+										{
+											*slotPtr          = i;
+											state.bSceneDirty = true;
+											MarkEntityDirty(state);
+										}
+										if (selected) ImGui::SetItemDefaultFocus();
+									}
+									ImGui::EndCombo();
+								}
+
+								// Drop target: accept mesh drags from content browser
+								if (ImGui::BeginDragDropTarget())
+								{
+									if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("MESH_SLOT"))
+									{
+										uint32_t droppedSlot = *static_cast<const uint32_t*>(payload->Data);
+										*slotPtr             = droppedSlot;
+										state.bSceneDirty    = true;
+										MarkEntityDirty(state);
+									}
+									ImGui::EndDragDropTarget();
+								}
+							}
+							else
+							{
+								// Read-only name display when sim is running
+								if (!assetName.empty()) ImGui::Text("%s", assetName.c_str());
+								else ImGui::Text("slot %u", slotIdx);
+							}
+
+							ImGui::PopID();
+						}
+						else if (simPaused)
 						{
 							bool edited = EditFieldValue(
 								fieldName, fdesc.fieldSize, fieldArrayTable[idx],
@@ -218,6 +300,7 @@ void DetailsPanel::Draw(EditorState& state)
 							if (edited)
 							{
 								state.bSceneDirty = true;
+								MarkEntityDirty(state);
 							}
 						}
 						else

@@ -130,7 +130,7 @@ bool MeshManager::Initialize(VulkanMemory* vkMem)
 // RegisterMesh
 // -----------------------------------------------------------------------
 
-uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& name)
+uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& name, int64_t uuid)
 {
 	if (MeshCount >= MAX_MESH_SLOTS)
 	{
@@ -164,6 +164,8 @@ uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& na
 	// Fill slot
 	uint32_t slotID   = MeshCount++;
 	SlotNames[slotID] = name;
+	SlotUUIDs[slotID] = uuid;
+	if (uuid != 0) UUIDToSlot[uuid] = slotID;
 	MeshSlot& slot    = Slots[slotID];
 	slot.FirstIndex   = NextIndexOffset;
 	slot.IndexCount   = static_cast<uint32_t>(asset.Indices.size());

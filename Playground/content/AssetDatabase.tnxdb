@@ -2,15 +2,21 @@
 	"assets": [
 		{
 			"uuid": 33210079600128.0,
+			"name": "Don_char",
 			"path": "Don_char.tnxmesh",
 			"type": 2.0,
 			"contentHash": 1.2562013559474485e+19
 		},
 		{
 			"uuid": 90730764758016.0,
+			"name": "Arena",
 			"path": "Arena.tnxscene",
 			"type": 8.0,
 			"contentHash": 1.0741203410600913e+19
 		}
-	]
+	],
+	"counters": {
+		"2": 877854559.0,
+		"8": 2229731565.0
+	}
 }
