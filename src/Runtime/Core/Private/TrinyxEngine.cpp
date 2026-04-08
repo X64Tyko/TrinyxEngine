@@ -116,21 +116,17 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	}
 
 	// ---- Config ----------------------------------------------------------
-	if (projectDir && projectDir[0] != '\0')
-	{
-		Config = EngineConfig::LoadFromDirectory(projectDir);
-		snprintf(Config.ProjectDir, sizeof(Config.ProjectDir), "%s", projectDir);
-	}
-	else
-	{
-		Config = EngineConfig::LoadFromFile("TrinyxDefaults.ini");
-	}
-#if TNX_ENABLE_EDITOR && defined(TNX_ENABLE_ROLLBACK)
-	// Editor's edit-mode world uses Volatile-equivalent frame count to save RAM.
-	// PIE will create its own Registry with the user's original TemporalFrameCount.
-	EditorTemporalFrameCount  = Config.TemporalFrameCount; // Stash for PIE
-	Config.TemporalFrameCount = 3;
+	GameConfig = EngineConfig::LoadProjectConfig(projectDir);
+	snprintf(GameConfig.ProjectDir, sizeof(GameConfig.ProjectDir), "%s",
+			 (projectDir && projectDir[0] != '\0') ? projectDir : "");
+
+#if TNX_ENABLE_EDITOR
+	// Editor config: EditorDefaults.ini overrides (e.g. lower TemporalFrameCount for edit-mode).
+	Config = EngineConfig::LoadEditorConfig(projectDir, GameConfig);
+#else
+	Config = GameConfig;
 #endif
+	snprintf(Config.ProjectDir, sizeof(Config.ProjectDir), "%s", GameConfig.ProjectDir);
 
 	// Publish all static-init registered types (states, modes, entity types)
 	// to the AssetRegistry so they're resolvable by name at runtime.

@@ -111,8 +111,11 @@ public:
 	/// Number of active connections.
 	int GetConnectionCount() const { return static_cast<int>(Connections.size()); }
 
-	/// Assign a NetOwnerID to a connection. Called during handshake.
+	/// Assign a NetOwnerID to a connection.
 	void AssignOwnerID(HSteamNetConnection conn, uint8_t ownerID);
+
+	/// Generate and Assign a NetOwnerID to a connection. Called during handshake.
+	void GenerateNetID(HSteamNetConnection conn);
 
 	/// Fired when a server-side connection is fully confirmed (GNS handshake complete).
 	/// Fires on the NetThread during RunCallbacks(). Safe to call World::Spawn() from here.

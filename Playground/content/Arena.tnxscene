@@ -1,111 +1,869 @@
 {
 	"name": "Arena",
+	"defaultState": "GameplayState",
 	"entities": [
 		{
 			"type": "CubeEntity",
 			"components": {
-				"TransRot": { "PosX": 0.0, "PosY": -0.5, "PosZ": 0.0, "RotQw": 1.0 },
-				"Scale": { "ScaleX": 30.0, "ScaleY": 1.0, "ScaleZ": 30.0 },
-				"ColorData": { "R": 0.4, "G": 0.4, "B": 0.4, "A": 1.0 },
-				"JoltBody": {
-					"Shape": 0, "HalfExtentX": 15.0, "HalfExtentY": 0.5, "HalfExtentZ": 15.0,
-					"Motion": 0, "Mass": 0.0, "Friction": 0.5, "Restitution": 0.3
+				"CTransform": {
+					"PosX": 0.0,
+					"PosY": -0.5,
+					"PosZ": 0.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 30.0,
+					"ScaleY": 1.0,
+					"ScaleZ": 30.0
+				},
+				"CColor": {
+					"R": 0.40000000596046448,
+					"G": 0.40000000596046448,
+					"B": 0.40000000596046448,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 15.0,
+					"HalfExtentY": 0.5,
+					"HalfExtentZ": 15.0,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
 				}
 			}
 		},
 		{
 			"type": "CubeEntity",
 			"components": {
-				"TransRot": { "PosX": 0.0, "PosY": 2.0, "PosZ": -15.5, "RotQw": 1.0 },
-				"Scale": { "ScaleX": 30.0, "ScaleY": 4.0, "ScaleZ": 1.0 },
-				"ColorData": { "R": 0.5, "G": 0.5, "B": 0.55, "A": 1.0 },
-				"JoltBody": {
-					"Shape": 0, "HalfExtentX": 15.0, "HalfExtentY": 2.0, "HalfExtentZ": 0.5,
-					"Motion": 0, "Mass": 0.0, "Friction": 0.5, "Restitution": 0.3
+				"CTransform": {
+					"PosX": 0.0,
+					"PosY": 2.0,
+					"PosZ": -15.5,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 30.0,
+					"ScaleY": 4.0,
+					"ScaleZ": 1.0
+				},
+				"CColor": {
+					"R": 0.5,
+					"G": 0.5,
+					"B": 0.55000001192092896,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 15.0,
+					"HalfExtentY": 2.0,
+					"HalfExtentZ": 0.5,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
 				}
 			}
 		},
 		{
 			"type": "CubeEntity",
 			"components": {
-				"TransRot": { "PosX": 0.0, "PosY": 2.0, "PosZ": 15.5, "RotQw": 1.0 },
-				"Scale": { "ScaleX": 30.0, "ScaleY": 4.0, "ScaleZ": 1.0 },
-				"ColorData": { "R": 0.5, "G": 0.5, "B": 0.55, "A": 1.0 },
-				"JoltBody": {
-					"Shape": 0, "HalfExtentX": 15.0, "HalfExtentY": 2.0, "HalfExtentZ": 0.5,
-					"Motion": 0, "Mass": 0.0, "Friction": 0.5, "Restitution": 0.3
+				"CTransform": {
+					"PosX": 0.0,
+					"PosY": 2.0,
+					"PosZ": 15.5,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 30.0,
+					"ScaleY": 4.0,
+					"ScaleZ": 1.0
+				},
+				"CColor": {
+					"R": 0.5,
+					"G": 0.5,
+					"B": 0.55000001192092896,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 15.0,
+					"HalfExtentY": 2.0,
+					"HalfExtentZ": 0.5,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
 				}
 			}
 		},
 		{
 			"type": "CubeEntity",
 			"components": {
-				"TransRot": { "PosX": -15.5, "PosY": 2.0, "PosZ": 0.0, "RotQw": 1.0 },
-				"Scale": { "ScaleX": 1.0, "ScaleY": 4.0, "ScaleZ": 30.0 },
-				"ColorData": { "R": 0.5, "G": 0.5, "B": 0.55, "A": 1.0 },
-				"JoltBody": {
-					"Shape": 0, "HalfExtentX": 0.5, "HalfExtentY": 2.0, "HalfExtentZ": 15.0,
-					"Motion": 0, "Mass": 0.0, "Friction": 0.5, "Restitution": 0.3
+				"CTransform": {
+					"PosX": -15.5,
+					"PosY": 2.0,
+					"PosZ": 0.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 1.0,
+					"ScaleY": 4.0,
+					"ScaleZ": 30.0
+				},
+				"CColor": {
+					"R": 0.5,
+					"G": 0.5,
+					"B": 0.55000001192092896,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 0.5,
+					"HalfExtentY": 2.0,
+					"HalfExtentZ": 15.0,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
 				}
 			}
 		},
 		{
 			"type": "CubeEntity",
 			"components": {
-				"TransRot": { "PosX": 15.5, "PosY": 2.0, "PosZ": 0.0, "RotQw": 1.0 },
-				"Scale": { "ScaleX": 1.0, "ScaleY": 4.0, "ScaleZ": 30.0 },
-				"ColorData": { "R": 0.5, "G": 0.5, "B": 0.55, "A": 1.0 },
-				"JoltBody": {
-					"Shape": 0, "HalfExtentX": 0.5, "HalfExtentY": 2.0, "HalfExtentZ": 15.0,
-					"Motion": 0, "Mass": 0.0, "Friction": 0.5, "Restitution": 0.3
+				"CTransform": {
+					"PosX": 15.5,
+					"PosY": 2.0,
+					"PosZ": 0.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 1.0,
+					"ScaleY": 4.0,
+					"ScaleZ": 30.0
+				},
+				"CColor": {
+					"R": 0.5,
+					"G": 0.5,
+					"B": 0.55000001192092896,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 0.5,
+					"HalfExtentY": 2.0,
+					"HalfExtentZ": 15.0,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
 				}
 			}
 		},
 		{
 			"type": "CubeEntity",
 			"components": {
-				"TransRot": { "PosX": -5.0, "PosY": 1.0, "PosZ": -4.0, "RotQw": 1.0 },
-				"Scale": { "ScaleX": 4.0, "ScaleY": 2.0, "ScaleZ": 0.5 },
-				"ColorData": { "R": 0.6, "G": 0.45, "B": 0.35, "A": 1.0 },
-				"JoltBody": {
-					"Shape": 0, "HalfExtentX": 2.0, "HalfExtentY": 1.0, "HalfExtentZ": 0.25,
-					"Motion": 0, "Mass": 0.0, "Friction": 0.5, "Restitution": 0.3
+				"CTransform": {
+					"PosX": -5.0,
+					"PosY": 1.0,
+					"PosZ": -4.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 4.0,
+					"ScaleY": 2.0,
+					"ScaleZ": 0.5
+				},
+				"CColor": {
+					"R": 0.60000002384185791,
+					"G": 0.44999998807907104,
+					"B": 0.34999999403953552,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 2.0,
+					"HalfExtentY": 1.0,
+					"HalfExtentZ": 0.25,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
 				}
 			}
 		},
 		{
 			"type": "CubeEntity",
 			"components": {
-				"TransRot": { "PosX": 6.0, "PosY": 1.0, "PosZ": 3.0, "RotQw": 1.0 },
-				"Scale": { "ScaleX": 0.5, "ScaleY": 2.0, "ScaleZ": 5.0 },
-				"ColorData": { "R": 0.6, "G": 0.45, "B": 0.35, "A": 1.0 },
-				"JoltBody": {
-					"Shape": 0, "HalfExtentX": 0.25, "HalfExtentY": 1.0, "HalfExtentZ": 2.5,
-					"Motion": 0, "Mass": 0.0, "Friction": 0.5, "Restitution": 0.3
+				"CTransform": {
+					"PosX": 6.0,
+					"PosY": 1.0,
+					"PosZ": 3.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 0.5,
+					"ScaleY": 2.0,
+					"ScaleZ": 5.0
+				},
+				"CColor": {
+					"R": 0.60000002384185791,
+					"G": 0.44999998807907104,
+					"B": 0.34999999403953552,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 0.25,
+					"HalfExtentY": 1.0,
+					"HalfExtentZ": 2.5,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
 				}
 			}
 		},
 		{
 			"type": "CubeEntity",
 			"components": {
-				"TransRot": { "PosX": 0.0, "PosY": 1.0, "PosZ": 7.0, "RotQw": 1.0 },
-				"Scale": { "ScaleX": 3.0, "ScaleY": 2.0, "ScaleZ": 0.5 },
-				"ColorData": { "R": 0.6, "G": 0.45, "B": 0.35, "A": 1.0 },
-				"JoltBody": {
-					"Shape": 0, "HalfExtentX": 1.5, "HalfExtentY": 1.0, "HalfExtentZ": 0.25,
-					"Motion": 0, "Mass": 0.0, "Friction": 0.5, "Restitution": 0.3
+				"CTransform": {
+					"PosX": 0.0,
+					"PosY": 1.0,
+					"PosZ": 7.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 3.0,
+					"ScaleY": 2.0,
+					"ScaleZ": 0.5
+				},
+				"CColor": {
+					"R": 0.60000002384185791,
+					"G": 0.44999998807907104,
+					"B": 0.34999999403953552,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 1.5,
+					"HalfExtentY": 1.0,
+					"HalfExtentZ": 0.25,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
 				}
 			}
 		},
 		{
 			"type": "CubeEntity",
 			"components": {
-				"TransRot": { "PosX": -8.0, "PosY": 1.0, "PosZ": 6.0, "RotQw": 1.0 },
-				"Scale": { "ScaleX": 0.5, "ScaleY": 2.0, "ScaleZ": 3.0 },
-				"ColorData": { "R": 0.6, "G": 0.45, "B": 0.35, "A": 1.0 },
-				"JoltBody": {
-					"Shape": 0, "HalfExtentX": 0.25, "HalfExtentY": 1.0, "HalfExtentZ": 1.5,
-					"Motion": 0, "Mass": 0.0, "Friction": 0.5, "Restitution": 0.3
+				"CTransform": {
+					"PosX": -8.0,
+					"PosY": 1.0,
+					"PosZ": 6.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 0.5,
+					"ScaleY": 2.0,
+					"ScaleZ": 3.0
+				},
+				"CColor": {
+					"R": 0.60000002384185791,
+					"G": 0.44999998807907104,
+					"B": 0.34999999403953552,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 0.25,
+					"HalfExtentY": 1.0,
+					"HalfExtentZ": 1.5,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"CTransform": {
+					"PosX": 0.0,
+					"PosY": -0.5,
+					"PosZ": 0.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 30.0,
+					"ScaleY": 1.0,
+					"ScaleZ": 30.0
+				},
+				"CColor": {
+					"R": 0.40000000596046448,
+					"G": 0.40000000596046448,
+					"B": 0.40000000596046448,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 15.0,
+					"HalfExtentY": 0.5,
+					"HalfExtentZ": 15.0,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"CTransform": {
+					"PosX": 0.0,
+					"PosY": 2.0,
+					"PosZ": -15.5,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 30.0,
+					"ScaleY": 4.0,
+					"ScaleZ": 1.0
+				},
+				"CColor": {
+					"R": 0.5,
+					"G": 0.5,
+					"B": 0.55000001192092896,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 15.0,
+					"HalfExtentY": 2.0,
+					"HalfExtentZ": 0.5,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"CTransform": {
+					"PosX": 0.0,
+					"PosY": 2.0,
+					"PosZ": 15.5,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 30.0,
+					"ScaleY": 4.0,
+					"ScaleZ": 1.0
+				},
+				"CColor": {
+					"R": 0.5,
+					"G": 0.5,
+					"B": 0.55000001192092896,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 15.0,
+					"HalfExtentY": 2.0,
+					"HalfExtentZ": 0.5,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"CTransform": {
+					"PosX": -15.5,
+					"PosY": 2.0,
+					"PosZ": 0.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 1.0,
+					"ScaleY": 4.0,
+					"ScaleZ": 30.0
+				},
+				"CColor": {
+					"R": 0.5,
+					"G": 0.5,
+					"B": 0.55000001192092896,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 0.5,
+					"HalfExtentY": 2.0,
+					"HalfExtentZ": 15.0,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"CTransform": {
+					"PosX": 15.5,
+					"PosY": 2.0,
+					"PosZ": 0.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 1.0,
+					"ScaleY": 4.0,
+					"ScaleZ": 30.0
+				},
+				"CColor": {
+					"R": 0.5,
+					"G": 0.5,
+					"B": 0.55000001192092896,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 0.5,
+					"HalfExtentY": 2.0,
+					"HalfExtentZ": 15.0,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"CTransform": {
+					"PosX": -5.0,
+					"PosY": 1.0,
+					"PosZ": -4.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 4.0,
+					"ScaleY": 2.0,
+					"ScaleZ": 0.5
+				},
+				"CColor": {
+					"R": 0.60000002384185791,
+					"G": 0.44999998807907104,
+					"B": 0.34999999403953552,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 2.0,
+					"HalfExtentY": 1.0,
+					"HalfExtentZ": 0.25,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"CTransform": {
+					"PosX": 6.0,
+					"PosY": 1.0,
+					"PosZ": 3.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 0.5,
+					"ScaleY": 2.0,
+					"ScaleZ": 5.0
+				},
+				"CColor": {
+					"R": 0.60000002384185791,
+					"G": 0.44999998807907104,
+					"B": 0.34999999403953552,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 0.25,
+					"HalfExtentY": 1.0,
+					"HalfExtentZ": 2.5,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"CTransform": {
+					"PosX": 0.0,
+					"PosY": 1.0,
+					"PosZ": 7.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 3.0,
+					"ScaleY": 2.0,
+					"ScaleZ": 0.5
+				},
+				"CColor": {
+					"R": 0.60000002384185791,
+					"G": 0.44999998807907104,
+					"B": 0.34999999403953552,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 1.5,
+					"HalfExtentY": 1.0,
+					"HalfExtentZ": 0.25,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
+				}
+			}
+		},
+		{
+			"type": "CubeEntity",
+			"components": {
+				"CTransform": {
+					"PosX": -8.0,
+					"PosY": 1.0,
+					"PosZ": 6.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 0.5,
+					"ScaleY": 2.0,
+					"ScaleZ": 3.0
+				},
+				"CColor": {
+					"R": 0.60000002384185791,
+					"G": 0.44999998807907104,
+					"B": 0.34999999403953552,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 0.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CJoltBody": {
+					"Shape": 0.0,
+					"HalfExtentX": 0.25,
+					"HalfExtentY": 1.0,
+					"HalfExtentZ": 1.5,
+					"Motion": 0.0,
+					"Mass": 0.0,
+					"Friction": 0.5,
+					"Restitution": 0.30000001192092896
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
+				}
+			}
+		},
+		{
+			"type": "EPoint",
+			"components": {
+				"CTransform": {
+					"PosX": 0.0,
+					"PosY": 0.0,
+					"PosZ": 0.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 0.0
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
+				}
+			}
+		},
+		{
+			"type": "EPoint",
+			"components": {
+				"CTransform": {
+					"PosX": 0.0,
+					"PosY": 0.0,
+					"PosZ": 0.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 0.0
+				},
+				"CacheSlotMeta": {
+					"Flags": -2147483648.0
+				}
+			}
+		},
+		{
+			"type": "EPlayer",
+			"components": {
+				"CTransform": {
+					"PosX": 0.0,
+					"PosY": 5.0,
+					"PosZ": 0.0,
+					"RotQx": 0.0,
+					"RotQy": 0.0,
+					"RotQz": 0.0,
+					"RotQw": 1.0
+				},
+				"CScale": {
+					"ScaleX": 1.0,
+					"ScaleY": 1.0,
+					"ScaleZ": 1.0
+				},
+				"CColor": {
+					"R": 0.20000000298023224,
+					"G": 0.80000001192092896,
+					"B": 0.20000000298023224,
+					"A": 1.0
+				},
+				"CMeshRef": {
+					"MeshID": 1.0,
+					"MaterialID": 0.0,
+					"LODCount": 0.0,
+					"CastShadow": 0.0
+				},
+				"CacheSlotMeta": {
+					"Flags": -1879048192.0
+				},
+				"CVelocity": {
+					"vX": 0.0,
+					"vY": 0.0,
+					"vZ": 0.0
 				}
 			}
 		}

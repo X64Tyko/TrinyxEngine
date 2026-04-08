@@ -142,6 +142,7 @@ public:
 	GameState* GetActiveState() const;
 	World* GetWorld() const;
 	bool HasWorld() const;
+	const EngineConfig* GetConfig() const { return Config; }
 	ConstructRegistry* GetConstructRegistry() { return &ConstructReg; }
 	const std::string& GetActiveLevelPath() const { return ActiveLevelPath; }
 

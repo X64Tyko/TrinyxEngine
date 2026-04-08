@@ -15,6 +15,7 @@ file(GLOB_RECURSE PLAYGROUND_HEADERS "src/*.h")
 add_executable(${PROJECT_NAME}
         ${PLAYGROUND_SOURCES}
         ${PLAYGROUND_HEADERS}
+        src/ArenaMode.h
 )
 
 # -----------------------------------------------------------------------------

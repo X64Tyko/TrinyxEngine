@@ -79,6 +79,7 @@ public:
 	// Convenience: access the default world's registry.
 	Registry* GetRegistry() const;
 	const EngineConfig* GetConfig() const { return &Config; }
+	const EngineConfig* GetGameConfig() const { return &GameConfig; }
 	bool GetJobsInitialized() const { return bJobsInitialized.load(std::memory_order_relaxed); }
 
 	// Test-only: hard-reset the registry (wipes all entities, handles, caches).
@@ -139,10 +140,8 @@ private:
 	VulkanMemory VkMem;
 
 	// --- Config ---
-	EngineConfig Config;
-#if TNX_ENABLE_EDITOR && defined(TNX_ENABLE_ROLLBACK)
-	int EditorTemporalFrameCount = 8; // User's original value, stashed for PIE worlds
-#endif
+	EngineConfig Config;     // Active config (editor config when TNX_ENABLE_EDITOR, else game config)
+	EngineConfig GameConfig; // Pure game config (no editor overrides) — used by PIE for server/client worlds
 
 	// --- World (owned by FlowManager, cached here for fast access) ---
 	World* DefaultWorld = nullptr;

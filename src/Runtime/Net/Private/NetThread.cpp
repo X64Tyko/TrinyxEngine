@@ -264,6 +264,47 @@ void NetThread::RouteMessage(const ReceivedMessage& msg)
 			}
 
 		case NetMessageType::ConnectionHandshake:
+			{
+				auto connection = msg.Connection;
+				auto* ci        = ConnectionMgr->FindConnection(connection);
+				if (!ci)
+				{
+					LOG_WARN_F("[NetThread] ConnectionHandshake from unknown connection %ui",
+							   connection);
+					break;
+				}
+
+				if (ci->bServerSide)
+				{
+					if (msg.Header.SenderID != 0)
+					{
+						LOG_WARN_F("[NetThread] ConnectionHandshake from client with existing ownerID %ui", msg.Header.SenderID);
+						break;
+					}
+
+					ConnectionMgr->GenerateNetID(connection);
+					PacketHeader handshakeHeader{};
+					handshakeHeader.Type        = static_cast<uint8_t>(NetMessageType::ConnectionHandshake);
+					handshakeHeader.Flags       = PacketFlag::HasAck;
+					handshakeHeader.SequenceNum = 2;
+					handshakeHeader.FrameNumber = 0;
+					handshakeHeader.SenderID    = ci->OwnerID;
+					handshakeHeader.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
+					handshakeHeader.PayloadSize = 0;
+					ConnectionMgr->Send(connection, handshakeHeader, nullptr, true);
+				}
+				else
+				{
+					if (msg.Header.SenderID == 0)
+					{
+						LOG_WARN_F("[NetThread] Invalid connection handshake from server with existing ownerID %ui", msg.Header.SenderID);
+						break;
+					}
+					ConnectionMgr->AssignOwnerID(connection, msg.Header.SenderID);
+					LOG_INFO_F("[NetThread] Assigned OwnerID %u to connection %u", msg.Header.SenderID, connection);
+				}
+				break;
+			}
 		case NetMessageType::EntityDestroy:
 			{
 				// TODO: Not yet implemented

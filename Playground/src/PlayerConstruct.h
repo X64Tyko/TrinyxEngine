@@ -86,6 +86,10 @@ public:
 		Body.Transform.PosX = pos.GetX();
 		Body.Transform.PosY = pos.GetY();
 		Body.Transform.PosZ = pos.GetZ();
+
+		// reset our desired velocity so we can begin accumulating again.
+		DesiredVelX = 0.0f;
+		DesiredVelZ = 0.0f;
 	}
 
 	// ── PrePhysics: read input, accumulate desired velocity ──────────────
@@ -127,13 +131,8 @@ public:
 		float len = std::sqrt(moveX * moveX + moveZ * moveZ);
 		if (len > 0.001f)
 		{
-			DesiredVelX = moveX / len * MoveSpeed;
-			DesiredVelZ = moveZ / len * MoveSpeed;
-		}
-		else
-		{
-			DesiredVelX = 0.0f;
-			DesiredVelZ = 0.0f;
+			DesiredVelX += moveX / len * MoveSpeed;
+			DesiredVelZ += moveZ / len * MoveSpeed;
 		}
 	}
 
@@ -195,6 +194,6 @@ private:
 	float DesiredVelZ = 0.0f;
 	bool bToggleHeld  = false;
 
-	static constexpr float MoveSpeed = 8.0f;
+	static constexpr float MoveSpeed = 1.0f;
 	static constexpr float EyeHeight = 1.5f;
 };

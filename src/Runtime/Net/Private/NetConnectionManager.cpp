@@ -1,4 +1,7 @@
 #include "NetConnectionManager.h"
+
+#include <SDL3/SDL_timer.h>
+
 #include "GNSContext.h"
 
 #include <steam/isteamnetworkingsockets.h>
@@ -292,6 +295,17 @@ void NetConnectionManager::AssignOwnerID(HSteamNetConnection conn, uint8_t owner
 	}
 }
 
+void NetConnectionManager::GenerateNetID(HSteamNetConnection conn)
+{
+	static uint32_t netID = 1;
+	ConnectionInfo* ci    = FindConnection(conn);
+	if (ci)
+	{
+		ci->OwnerID = static_cast<uint8_t>(netID++);
+		LOG_INFO_F("[NetConnectionManager] Generated OwnerID %u for connection %u", ci->OwnerID, conn);
+	}
+}
+
 void NetConnectionManager::AddConnection(HSteamNetConnection conn)
 {
 	// Don't add duplicates
@@ -351,6 +365,19 @@ void NetConnectionManager::OnConnectionStatusChanged(SteamNetConnectionStatusCha
 					if (ci->bServerSide)
 					{
 						mgr->OnClientConnected(*ci);
+					}
+					else
+					{
+						// Begin handshake
+						PacketHeader handshakeHeader{};
+						handshakeHeader.Type        = static_cast<uint8_t>(NetMessageType::ConnectionHandshake);
+						handshakeHeader.Flags       = PacketFlag::HasAck;
+						handshakeHeader.SequenceNum = 1;
+						handshakeHeader.FrameNumber = 0;
+						handshakeHeader.SenderID    = 0;
+						handshakeHeader.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
+						handshakeHeader.PayloadSize = 0;
+						mgr->Send(info->m_hConn, handshakeHeader, nullptr, true);
 					}
 				}
 				break;

@@ -23,7 +23,28 @@ void JoltCharacter::Initialize(JPH::PhysicsSystem* system, JPH::RVec3 position,
 void JoltCharacter::Update(JPH::Vec3 desiredVelocity, JPH::Vec3 gravity, float dt,
 						   JPH::TempAllocator& allocator)
 {
-	Character->SetLinearVelocity(Character->GetLinearVelocity() + desiredVelocity + gravity * dt);
+	JPH::Vec3 current_vertical_velocity = Character->GetLinearVelocity().Dot(Character->GetUp()) * Character->GetUp();
+	JPH::Vec3 ground_velocity           = Character->GetGroundVelocity();
+	JPH::Vec3 new_velocity;
+
+	if (Character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround
+		&& (current_vertical_velocity.GetY() - ground_velocity.GetY()) < 0.1f)
+	{
+		// On ground: adopt ground velocity (kills gravity accumulation)
+		new_velocity = ground_velocity;
+	}
+	else
+	{
+		// In air: keep current vertical velocity (gravity keeps accumulating)
+		new_velocity = current_vertical_velocity;
+	}
+
+	// Apply gravity (accumulate every frame)
+	new_velocity += gravity * dt;
+
+	// Add horizontal player input
+	new_velocity += desiredVelocity;
+	Character->SetLinearVelocity(new_velocity);
 
 	// Extended update handles grounding, stepping, slope sliding
 	JPH::CharacterVirtual::ExtendedUpdateSettings updateSettings;

@@ -3,7 +3,6 @@
 #include "GameState.h"
 #include "FlowManager.h"
 #include "EngineConfig.h"
-#include "TrinyxEngine.h"
 #include "Logger.h"
 #include "SchemaReflector.h"
 #include "PlayerConstruct.h"
@@ -27,7 +26,7 @@ public:
 		(void)world;
 
 		// Load the default scene if configured
-		const EngineConfig* cfg = TrinyxEngine::Get().GetConfig();
+		const EngineConfig* cfg = flow.GetConfig();
 		if (cfg->DefaultScene[0] != '\0' && cfg->ProjectDir[0] != '\0')
 		{
 			std::string scenePath = std::string(cfg->ProjectDir) + "/content/" + cfg->DefaultScene;

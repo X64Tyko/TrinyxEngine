@@ -481,7 +481,7 @@ void EditorContext::BuildFrame()
 	bool playing              = (LogicPtr && !LogicPtr->IsSimPaused() && bHasSnapshot) || bPIEActive;
 	// Escape requests PIE stop — deferred to after the ImGui frame completes
 	// so we don't free GPU resources (descriptor sets, images) mid-frame.
-	if (bPIEActive&& ImGui::IsKeyPressed(ImGuiKey_Escape)) bPIEStopRequested = true;
+	if (bPIEActive && ImGui::IsKeyPressed(ImGuiKey_Escape)) bPIEStopRequested = true;
 
 	// Shift+F1 toggles mouse between engine and editor during PIE/Play.
 	// When released, editor gets mouse for panel interaction; re-press to return control.
@@ -928,7 +928,7 @@ uint32_t EditorContext::ImportMeshAsset(const std::string& gltfPath)
 	uint32_t slot = MeshMgr->RegisterMesh(asset, stem, uuid);
 	if (slot != UINT32_MAX)
 		LOG_INFO_F("[Editor] Registered mesh '%s' at slot %u (UUID: %lld)",
-				   stem.c_str(), slot, static_cast<long long>(uuid >> 8));
+			   stem.c_str(), slot, static_cast<long long>(uuid >> 8));
 
 	return slot;
 }
@@ -998,7 +998,8 @@ void EditorContext::HandleDroppedFile(const std::string& path)
 				std::string dropName    = dropEntry ? dropEntry->Name : p.stem().string();
 
 				uint32_t slot = MeshMgr->RegisterMesh(asset, dropName, dropUUID);
-				if (slot != UINT32_MAX) LOG_INFO_F("[Editor] Loaded dropped mesh '%s' → slot %u", dropName.c_str(), slot);
+				if (slot != UINT32_MAX)
+					LOG_INFO_F("[Editor] Loaded dropped mesh '%s' → slot %u", dropName.c_str(), slot);
 			}
 		}
 	}
@@ -1231,10 +1232,13 @@ void EditorContext::StartPIE()
 	// Serialize editor scene to JSON
 	JsonValue sceneJson = EntityBuilder::SerializeScene(editorReg, "PIE");
 
+	// Build server and client configs from the game config (no editor overrides)
+	ServerConfig      = *EnginePtr->GetGameConfig();
+	ServerConfig.Mode = bServerVisible ? EngineMode::ListenServer : EngineMode::Server;
+
 	// Create server flow (owns server world + constructs)
-	const EngineConfig& editorCfg = *EnginePtr->GetConfig();
-	ServerFlow                    = std::make_unique<FlowManager>();
-	ServerFlow->Initialize(EnginePtr, &editorCfg, 960, 540);
+	ServerFlow = std::make_unique<FlowManager>();
+	ServerFlow->Initialize(EnginePtr, &ServerConfig, 960, 540);
 	if (!ServerFlow->CreateWorld())
 	{
 		LOG_ERROR("[PIE] Failed to initialize server world");
@@ -1264,8 +1268,10 @@ void EditorContext::StartPIE()
 	for (int ci = 0; ci < PIEClientCount; ++ci)
 	{
 		PIEClient client;
-		client.Flow = std::make_unique<FlowManager>();
-		client.Flow->Initialize(EnginePtr, &editorCfg, 960, 540);
+		client.Config      = *EnginePtr->GetGameConfig();
+		client.Config.Mode = EngineMode::Client;
+		client.Flow        = std::make_unique<FlowManager>();
+		client.Flow->Initialize(EnginePtr, &client.Config, 960, 540);
 		if (!client.Flow->CreateWorld())
 		{
 			LOG_ERROR_F("[PIE] Failed to initialize client world %d", ci);
@@ -1381,6 +1387,7 @@ void EditorContext::StartPIE()
 		for (int j = 0; j < 20; ++j)
 		{
 			connMgr->RunCallbacks();
+			net->Tick();
 			SDL_Delay(1);
 		}
 
@@ -1400,18 +1407,18 @@ void EditorContext::StartPIE()
 			{
 				PIEClients[i].ServerHandle = ci.Handle;
 				knownHandles.push_back(ci.Handle);
+
+				// Assign OwnerID and map to client world (for future state replication routing)
+				auto& ownerID                                = ci.OwnerID;
+				PIEClients[i].Flow->GetWorld()->LocalOwnerID = ownerID;
+				net->MapConnectionToWorld(ownerID, PIEClients[i].Flow->GetWorld());
+
 				break;
 			}
 		}
 
-		if (PIEClients[i].ServerHandle == 0) LOG_WARN_F("[PIE] Could not identify server-side handle for client %zu", i);
-
-		// Assign OwnerID and map to client world (for future state replication routing)
-		uint8_t ownerID = static_cast<uint8_t>(i + 1);
-		connMgr->AssignOwnerID(PIEClients[i].ServerHandle, ownerID);
-		connMgr->AssignOwnerID(PIEClients[i].ClientHandle, ownerID);
-		PIEClients[i].Flow->GetWorld()->LocalOwnerID = ownerID;
-		net->MapConnectionToWorld(ownerID, PIEClients[i].Flow->GetWorld());
+		if (PIEClients[i].ServerHandle == 0)
+			LOG_WARN_F("[PIE] Could not identify server-side handle for client %zu", i);
 	}
 
 	// Map server world for OwnerID 0
