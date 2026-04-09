@@ -147,8 +147,10 @@ endif ()
 target_link_libraries(${PROJECT_NAME} PUBLIC Vulkan::Vulkan)
 
 # D. Jolt Physics
-target_link_libraries(${PROJECT_NAME} PUBLIC Jolt)
-target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC "${JOLT_PATH}")
+# Jolt::Jolt works whether Jolt was found via find_package (installed/vcpkg)
+# or built from the vendored submodule (source build creates a Jolt::Jolt alias).
+# Include dirs come from the target's interface — no manual path needed.
+target_link_libraries(${PROJECT_NAME} PUBLIC Jolt::Jolt)
 
 # F. GameNetworkingSockets (static)
 if (TARGET GameNetworkingSockets_s)
@@ -268,11 +270,26 @@ endif ()
 add_custom_target(TrinyxShaders ALL DEPENDS ${SLANG_SPIRV_OUTPUTS})
 add_dependencies(${PROJECT_NAME} TrinyxShaders)
 
-# E. Tracy platform-specific libraries
+# E. Tracy — target-scoped includes, definitions, and platform link libraries.
+# Kept here (not in root CMakeLists) so Tracy headers/defs don't leak into
+# third-party subprojects (GNS, Jolt, etc.).
 if(ENABLE_TRACY)
+    target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC "${TRACY_PATH}/public")
+    target_compile_definitions(${PROJECT_NAME} PUBLIC
+        TRACY_ENABLE
+        TRACY_PROFILE_LEVEL=${TRACY_PROFILE_LEVEL}
+        TRACY_ON_DEMAND
+        TRACY_NO_ROCTRACER=1
+        TRACY_NO_ROCPROF=1
+    )
     if(WIN32)
         target_link_libraries(${PROJECT_NAME} PUBLIC ws2_32 dbghelp)
     elseif(UNIX)
         target_link_libraries(${PROJECT_NAME} PUBLIC pthread dl)
+        # Some toolchains / distros still put clock_gettime in librt
+        find_library(_librt rt)
+        if (_librt)
+            target_link_libraries(${PROJECT_NAME} PUBLIC rt)
+        endif ()
     endif()
 endif()
