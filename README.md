@@ -24,6 +24,10 @@ Test meshes and rigs from https://www.3dfiggins.com/Store/
 
 ---
 
+Sync and Build: [docs/BUILD_OPTIONS.md](docs/BUILD_OPTIONS.md)
+
+---
+
 ## Current Status (2026-04)
 
 **Performance:**

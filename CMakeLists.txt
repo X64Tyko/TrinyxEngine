@@ -252,7 +252,75 @@ else ()
 endif ()
 
 # -----------------------------------------------------------------------------
-# 7. GAMENETWORKINGSOCKETS (vendored, built from source)
+# 7. PROTOBUF (vendored submodule — required by GameNetworkingSockets)
+# -----------------------------------------------------------------------------
+set(ABSL_PROPAGATE_CXX_STD         ON  CACHE BOOL "" FORCE)
+set(protobuf_BUILD_TESTS           OFF CACHE BOOL "" FORCE)
+set(protobuf_BUILD_CONFORMANCE     OFF CACHE BOOL "" FORCE)
+set(protobuf_BUILD_EXAMPLES        OFF CACHE BOOL "" FORCE)
+# NOTE: protobuf_INSTALL must remain ON (the default). The install.cmake it
+# guards contains the configure_file() calls that generate protobuf-config.cmake
+# into the build tree. Without that file, find_package(Protobuf CONFIG) finds
+# nothing and falls back to the system FindProtobuf.cmake, which fails.
+set(protobuf_WITH_ZLIB             OFF CACHE BOOL "" FORCE)
+set(protobuf_MSVC_STATIC_RUNTIME   OFF CACHE BOOL "" FORCE)
+set(protobuf_BUILD_SHARED_LIBS     OFF CACHE BOOL "" FORCE)
+set(protobuf_BUILD_PROTOC_BINARIES ON  CACHE BOOL "" FORCE)
+set(protobuf_BUILD_LIBUPB          OFF CACHE BOOL "" FORCE)
+# GNS uses protobuf_generate_cpp(), which is defined in protobuf-module.cmake.
+# That file is only included in protobuf-config.cmake when MODULE_COMPATIBLE=ON.
+set(protobuf_MODULE_COMPATIBLE     ON  CACHE BOOL "" FORCE)
+
+add_subdirectory("${CMAKE_SOURCE_DIR}/libs/protobuf" protobuf-build)
+
+# Match the DLL runtime for all protobuf targets.
+if (MSVC)
+    foreach(_pb_tgt libprotobuf libprotobuf-lite libprotoc protoc)
+        if (TARGET ${_pb_tgt})
+            set_property(TARGET ${_pb_tgt} PROPERTY
+                MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+            target_compile_options(${_pb_tgt} PRIVATE /w)
+        endif ()
+    endforeach()
+endif ()
+
+# protobuf-config.cmake unconditionally includes protobuf-targets.cmake, which
+# is normally produced only by cmake --install (install(EXPORT protobuf-targets
+# ...)). For build-tree usage we write a stub — all protobuf::* targets are
+# already defined as ALIAS targets by add_subdirectory above, so no IMPORTED
+# target definitions are needed.
+set(_pb_cmake_dir "${CMAKE_BINARY_DIR}/protobuf-build/cmake/protobuf")
+file(WRITE "${_pb_cmake_dir}/protobuf-targets.cmake"
+    "# Stub: all protobuf::* targets were defined as ALIAS targets by\n"
+    "# add_subdirectory(libs/protobuf). No IMPORTED targets needed.\n"
+)
+
+# Point find_package(Protobuf) to our build-tree config file.
+# protobuf_CMAKE_SUBDIR = "cmake/protobuf", so the config lives at
+# <binary_dir>/cmake/protobuf/protobuf-config.cmake.
+set(Protobuf_DIR "${_pb_cmake_dir}" CACHE PATH "" FORCE)
+
+# By default find_package tries Module mode (FindProtobuf.cmake) first. That
+# module raises FATAL_ERROR before Config mode gets a chance — even with
+# Protobuf_DIR set. PREFER_CONFIG reverses the order so our Config file runs
+# first, before the system FindProtobuf.cmake can abort configure.
+set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ON)
+
+# protobuf-module.cmake (the FindProtobuf compat layer, included when
+# protobuf_MODULE_COMPATIBLE=ON) tries to populate Protobuf_LIBRARIES and
+# Protobuf_PROTOC_EXECUTABLE by reading LOCATION_* properties from targets.
+# Reading LOCATION from non-IMPORTED (build) targets is forbidden in modern
+# CMake (CMP0026). Pre-setting these variables triggers the early-exit guard
+# in _protobuf_find_libraries() and skips all LOCATION reads.
+# Note: protobuf_generate() uses protobuf::protoc directly — it does NOT
+# read Protobuf_PROTOC_EXECUTABLE at build time — so any non-empty value works.
+set(Protobuf_LIBRARIES        "protobuf::libprotobuf"      CACHE STRING   "" FORCE)
+set(Protobuf_LITE_LIBRARIES   "protobuf::libprotobuf-lite" CACHE STRING   "" FORCE)
+set(Protobuf_PROTOC_LIBRARIES "protobuf::libprotoc"        CACHE STRING   "" FORCE)
+set(Protobuf_PROTOC_EXECUTABLE "$<TARGET_FILE:protoc>"     CACHE FILEPATH "" FORCE)
+
+# -----------------------------------------------------------------------------
+# 8. GAMENETWORKINGSOCKETS (vendored, built from source)
 # -----------------------------------------------------------------------------
 # On Windows use BCrypt (built-in Windows API) — eliminates the OpenSSL
 # install requirement entirely. Linux/macOS keep the default (OpenSSL via
@@ -262,14 +330,18 @@ if (WIN32)
 endif ()
 
 # Static lib only — we link it into Trinyx, don't ship a shared lib.
-set(BUILD_STATIC_LIB  ON  CACHE BOOL "" FORCE)
-set(BUILD_SHARED_LIB  OFF CACHE BOOL "" FORCE)
-set(BUILD_EXAMPLES    OFF CACHE BOOL "" FORCE)
-set(BUILD_TESTS       OFF CACHE BOOL "" FORCE)
-set(BUILD_TOOLS       OFF CACHE BOOL "" FORCE)
-set(ENABLE_ICE        OFF CACHE BOOL "" FORCE)
-set(USE_STEAMWEBRTC   OFF CACHE BOOL "" FORCE)
-set(LTO               OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC_LIB        ON  CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIB        OFF CACHE BOOL "" FORCE)
+set(BUILD_EXAMPLES          OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTS             OFF CACHE BOOL "" FORCE)
+set(BUILD_TOOLS             OFF CACHE BOOL "" FORCE)
+set(ENABLE_ICE              OFF CACHE BOOL "" FORCE)
+set(USE_STEAMWEBRTC         OFF CACHE BOOL "" FORCE)
+set(LTO                     OFF CACHE BOOL "" FORCE)
+# protobuf is built as a static lib. Tell GNS so it doesn't add PROTOBUF_USE_DLLS,
+# which would decorate all symbol references with __declspec(dllimport) and cause
+# LNK4286 / LNK1120 unresolved externals when linking against libprotobuf.lib.
+set(Protobuf_USE_STATIC_LIBS ON  CACHE BOOL "" FORCE)
 
 add_subdirectory("${GNS_PATH}" gns-build)
 
@@ -283,7 +355,7 @@ if (TARGET GameNetworkingSockets_s)
 endif ()
 
 # -----------------------------------------------------------------------------
-# 8. SUBDIRECTORIES (Projects in Solution)
+# 9. SUBDIRECTORIES (Projects in Solution)
 # -----------------------------------------------------------------------------
 add_subdirectory(Trinyx)
 add_subdirectory(Testbed)

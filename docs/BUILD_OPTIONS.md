@@ -16,10 +16,19 @@
 **⚠️ Important:** All dependencies are managed as git submodules. You **must** initialize them before building.
 
 ```bash
-# If cloning for the first time
-git clone --recursive https://github.com/YourRepo/TrinyxEngine.git
+# Stable (default branch)
+git clone --recursive https://github.com/X64Tyko/TrinyxEngine.git
 
-# If already cloned without submodules
+# Dev stream (latest Dev-Main — may be unstable / broken)
+git clone --recursive --branch Dev-Main --single-branch https://github.com/X64Tyko/TrinyxEngine.git
+
+# If you already cloned without --recursive (or submodules are missing)
+cd TrinyxEngine
+git submodule update --init --recursive
+
+# If you cloned stable but want to switch to Dev-Main later
+git checkout Dev-Main
+git pull
 git submodule update --init --recursive
 ```
 
@@ -45,6 +54,46 @@ git submodule update --init --recursive
 - `libs/volk` — Volk (Vulkan meta-loader)
 - `libs/vma` — Vulkan Memory Allocator
 - `libs/slang` — Slang shader compiler
+
+---
+
+## Visual Studio / Rider (Solution + `.vcxproj`) Build
+
+If you prefer working with a generated **`.sln` + `.vcxproj`** (instead of opening the folder as a CMake project), configure and build with:
+
+```bash
+cmake -S . -B build-vs -G "Visual Studio 17 2022" -A x64
+cmake --build build-vs --config RelWithDebInfo
+```
+
+This creates `build-vs/TrinyxSolution.sln` (open it in **Visual Studio** or **Rider**).
+
+### Common variants
+
+**Debug build**
+```bash
+cmake --build build-vs --config Debug
+```
+
+**Editor build (ImGui + GPU picking)**
+```bash
+cmake -S . -B build-vs -G "Visual Studio 17 2022" -A x64 -DTNX_ENABLE_EDITOR=ON
+cmake --build build-vs --config RelWithDebInfo
+```
+
+**Rollback build**
+```bash
+cmake -S . -B build-vs -G "Visual Studio 17 2022" -A x64 -DTNX_ENABLE_ROLLBACK=ON
+cmake --build build-vs --config RelWithDebInfo
+```
+
+### Notes
+- If you change CMake options, re-run the **configure** command (the first line).
+- If you run into a “stale cache” or dependency detection issue, delete the build folder and reconfigure:
+  ```bash
+  rmdir /s /q build-vs
+  cmake -S . -B build-vs -G "Visual Studio 17 2022" -A x64
+  ```
 
 ---
 
