@@ -2,6 +2,7 @@
 
 #include "Json.h"
 #include "Types.h"
+#include <string>
 #include <vector>
 
 #include "EntityRecord.h"
@@ -40,6 +41,18 @@ struct EntityBuilder
 	// Returns the number of entities spawned (1 for prefab, N for scene).
 	static size_t SpawnFromFile(Registry* reg, const char* filePath);
 
+	// --- Scene metadata ---
+
+	struct SceneMeta
+	{
+		std::string Name;
+		std::string DefaultState; // GameState to load (empty = none)
+		std::string DefaultMode;  // GameMode to activate (empty = none)
+	};
+
+	// Parse scene-level metadata from a JSON scene without spawning entities.
+	static SceneMeta ParseSceneMeta(const JsonValue& sceneJson);
+
 	// --- Save ---
 
 	// Serialize a single entity at the given local index within a chunk.
@@ -47,9 +60,11 @@ struct EntityBuilder
 	static JsonValue SerializeEntity(Registry* reg, Archetype* arch, size_t chunkIdx, uint32_t localIndex);
 
 	// Serialize all entities in the registry into a scene JSON.
-	// Returns: { "name": "...", "entities": [ ... ] }
-	static JsonValue SerializeScene(Registry* reg, const char* sceneName);
+	// Returns: { "name": "...", "entities": [ ... ], "defaultState": "...", "defaultMode": "..." }
+	static JsonValue SerializeScene(Registry* reg, const char* sceneName,
+									const char* defaultState = nullptr, const char* defaultMode = nullptr);
 
 	// Save a scene to disk. Returns true on success.
-	static bool SaveToFile(Registry* reg, const char* sceneName, const char* filePath);
+	static bool SaveToFile(Registry* reg, const char* sceneName, const char* filePath,
+						   const char* defaultState = nullptr, const char* defaultMode = nullptr);
 };

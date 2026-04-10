@@ -26,9 +26,10 @@
 #include <Jolt/Physics/StateRecorderImpl.h>
 #endif
 
+#include "JoltLayers.h"
 #include "Registry.h"
-#include "JoltBody.h"
-#include "TransRot.h"
+#include "CJoltBody.h"
+#include "CTransform.h"
 
 JPH_SUPPRESS_WARNINGS
 
@@ -55,24 +56,6 @@ static bool JoltAssertFailedImpl(const char* inExpression, const char* inMessage
 	return true; // trigger debugger breakpoint
 }
 #endif
-
-// ---------------------------------------------------------------------------
-// Layer configuration
-// ---------------------------------------------------------------------------
-
-namespace JoltLayers
-{
-	static constexpr JPH::ObjectLayer Static  = 0;
-	static constexpr JPH::ObjectLayer Dynamic = 1;
-	static constexpr JPH::uint NumLayers      = 2;
-}
-
-namespace JoltBroadPhaseLayers
-{
-	static constexpr JPH::BroadPhaseLayer Static(0);
-	static constexpr JPH::BroadPhaseLayer Dynamic(1);
-	static constexpr JPH::uint NumLayers = 2;
-}
 
 // Using the Table implementations — no virtual overrides needed, just a lookup table.
 // These must outlive the PhysicsSystem, so they're file-static singletons initialized in Initialize().
@@ -200,7 +183,7 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 #ifdef TNX_ENABLE_ROLLBACK
 	// Size snapshot ring to cover the full temporal rollback window.
 	// One snapshot per Flush+Pull boundary frame.
-	SnapshotCapacity = static_cast<uint32_t>(config->TemporalFrameCount);
+	SnapshotCapacity = static_cast<uint32_t>(config->TemporalFrameCount / config->PhysicsUpdateInterval);
 	SnapshotRing.resize(SnapshotCapacity);
 	LOG_INFO_F("[JoltPhysics] Snapshot ring: %u slots for rollback", SnapshotCapacity);
 #endif
@@ -270,7 +253,7 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 	TemporalFrameHeader* volHeader = VC->GetFrameHeader();
 	TemporalFrameHeader* tmpHeader = TC->GetFrameHeader();
 
-	const uint8_t bodySlot = JoltBody<>::StaticTemporalIndex();
+	const uint8_t bodySlot = CJoltBody<>::StaticTemporalIndex();
 	auto* slabShape        = static_cast<uint32_t*>(VC->GetFieldData(volHeader, bodySlot, 0));
 	auto* slabHalfX        = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 1));
 	auto* slabHalfY        = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 2));
@@ -280,7 +263,7 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 	auto* slabFriction     = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 6));
 	auto* slabRestit       = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 7));
 
-	const uint8_t transSlot = TransRot<>::StaticTemporalIndex();
+	const uint8_t transSlot = CTransform<>::StaticTemporalIndex();
 	auto* slabPosX          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 0));
 	auto* slabPosY          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 1));
 	auto* slabPosZ          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 2));
@@ -404,6 +387,44 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 	}
 }
 
+void JoltPhysics::PushKinematicTransforms(Registry* reg, float dt)
+{
+	TNX_ZONE_NC("Jolt_PushKinematics", TNX_COLOR_JOLT);
+
+	JPH::BodyInterface& bi = PhysSystem->GetBodyInterfaceNoLock();
+
+	auto* TC                       = reg->GetTemporalCache();
+	TemporalFrameHeader* tmpHeader = TC->GetFrameHeader();
+
+	const uint8_t transSlot = CTransform<>::StaticTemporalIndex();
+	auto* posX              = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 0));
+	auto* posY              = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 1));
+	auto* posZ              = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 2));
+	auto* rotX              = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 3));
+	auto* rotY              = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 4));
+	auto* rotZ              = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 5));
+	auto* rotW              = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 6));
+
+	auto* VC                       = reg->GetVolatileCache();
+	TemporalFrameHeader* volHeader = VC->GetFrameHeader();
+	const uint8_t bodySlot         = CJoltBody<>::StaticTemporalIndex();
+	auto* slabMotion               = static_cast<uint32_t*>(VC->GetFieldData(volHeader, bodySlot, 4));
+
+	for (uint32_t idx = 0; idx < EntityToBody.size(); ++idx)
+	{
+		if (EntityToBody[idx].IsInvalid()) continue;
+		if (slabMotion[idx] != JoltMotion::Kinematic) continue;
+
+		JPH::RVec3 pos(posX[idx], posY[idx], posZ[idx]);
+		JPH::Quat rot(rotX[idx], rotY[idx], rotZ[idx], rotW[idx]);
+
+		if (rot.LengthSq() < 1.0e-6f) rot = JPH::Quat::sIdentity();
+		else rot                          = rot.Normalized();
+
+		bi.MoveKinematic(EntityToBody[idx], pos, rot, dt);
+	}
+}
+
 void JoltPhysics::PullActiveTransforms(Registry* reg)
 {
 	TNX_ZONE_NC("Jolt_PullTransforms", TNX_COLOR_JOLT);
@@ -489,7 +510,7 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 		float* fieldPtr = fieldScratch[i].data();
 		TrinyxJobs::Dispatch([this, TC, i, fieldPtr](uint32_t)
 		{
-			float* fieldArr = static_cast<float*>(TC->GetFieldData(TC->GetFrameHeader(), TransRot<>::StaticTemporalIndex(), i));
+			float* fieldArr = static_cast<float*>(TC->GetFieldData(TC->GetFrameHeader(), CTransform<>::StaticTemporalIndex(), i));
 			int idx         = 0;
 			for (auto& Entity : syncList)
 			{

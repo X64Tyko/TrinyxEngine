@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -rn function.*protobuf_generate_cpp /c/TrinyxEngine/libs/protobuf/)"
+    ]
+  }
+}

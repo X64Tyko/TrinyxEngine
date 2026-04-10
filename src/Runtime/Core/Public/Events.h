@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <type_traits>
 
 #include "RegistryTypes.h"
 #include "Logger.h"
@@ -66,17 +67,22 @@ struct FixedMultiCallback
 		
 		LOG_ERROR("FixedMultiCallback::Bind - No free slots available for binding");
 	}
-	
-	FORCE_INLINE Ret operator()(Args... args) const
+
+	FORCE_INLINE void operator()(Args... args) const requires std::is_void_v<Ret>
 	{
 		for (auto& CB : Bindings)
 		{
-			if (CB.IsBound())
-			{
-				return CB(args...);
-			}
+			if (CB.IsBound()) CB(args...);
 		}
-		
+	}
+
+	FORCE_INLINE Ret operator()(Args... args) const requires (!std::is_void_v<Ret>)
+	{
+		for (auto& CB : Bindings)
+		{
+			if (CB.IsBound()) return CB(args...);
+		}
+
 		LOG_ERROR("FixedMultiCallback::operator() - No bound callbacks to invoke");
 		return Ret();
 	}

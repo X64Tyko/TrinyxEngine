@@ -74,6 +74,7 @@ protected:
 	int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])                   \
 	{                                                                                    \
 		TrinyxEngine& engine = TrinyxEngine::Get();                                      \
+		engine.ParseCommandLine(argc, argv);                                             \
 		GameClass game;                                                                  \
 		if (engine.Initialize(game.GetWindowTitle(),                                     \
 		                      game.GetWindowWidth(),                                     \

@@ -3,6 +3,7 @@
 #include "VertexFormat.h"
 #include "Logger.h"
 
+#include <cmath>
 #include <cstring>
 
 // -----------------------------------------------------------------------
@@ -129,7 +130,7 @@ bool MeshManager::Initialize(VulkanMemory* vkMem)
 // RegisterMesh
 // -----------------------------------------------------------------------
 
-uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& name)
+uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& name, int64_t uuid)
 {
 	if (MeshCount >= MAX_MESH_SLOTS)
 	{
@@ -163,6 +164,8 @@ uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& na
 	// Fill slot
 	uint32_t slotID   = MeshCount++;
 	SlotNames[slotID] = name;
+	SlotUUIDs[slotID] = uuid;
+	if (uuid != 0) UUIDToSlot[uuid] = slotID;
 	MeshSlot& slot    = Slots[slotID];
 	slot.FirstIndex   = NextIndexOffset;
 	slot.IndexCount   = static_cast<uint32_t>(asset.Indices.size());
@@ -203,7 +206,140 @@ uint32_t MeshManager::RegisterBuiltinCube()
 	cube.AABBMax[1] = 0.5f;
 	cube.AABBMax[2] = 0.5f;
 
-	RegisterMesh(cube, "Cube1");
+	return RegisterMesh(cube, "Cube");
+}
 
-	return RegisterMesh(cube, "Cube2");
+// -----------------------------------------------------------------------
+// RegisterBuiltinCapsule — procedural capsule (two hemispheres + cylinder)
+// -----------------------------------------------------------------------
+
+uint32_t MeshManager::RegisterBuiltinCapsule(float radius, float halfHeight, uint32_t segments)
+{
+	constexpr float PI = 3.14159265358979323846f;
+
+	// Ring count for each hemisphere (latitude subdivisions)
+	const uint32_t hemiRings = segments / 4;
+	if (hemiRings < 2) return UINT32_MAX;
+
+	// Total latitude rings: top hemisphere + cylinder equator (2 rings) + bottom hemisphere
+	// Vertices: (segments+1) per ring, plus 2 pole vertices
+	const uint32_t slices = segments; // longitude subdivisions
+
+	std::vector<Vertex> vertices;
+	std::vector<uint32_t> indices;
+
+	auto pushVert = [&](float px, float py, float pz, float nx, float ny, float nz)
+	{
+		Vertex v{};
+		v.px        = px;
+		v.py        = py;
+		v.pz        = pz;
+		v.n_oct16x2 = OctEncode(nx, ny, nz);
+		v.u         = 0.0f;
+		v.v         = 0.0f;
+		v.t_oct16x2 = OctEncode(0.0f, 0.0f, 1.0f);
+		v.mask      = 0;
+		v.flags     = 0;
+		v.pad       = 0;
+		vertices.push_back(v);
+	};
+
+	// --- Top pole ---
+	pushVert(0.0f, halfHeight + radius, 0.0f, 0.0f, 1.0f, 0.0f);
+
+	// --- Top hemisphere rings (from pole down to equator) ---
+	for (uint32_t ring = 1; ring <= hemiRings; ++ring)
+	{
+		float phi = (PI * 0.5f) * (1.0f - static_cast<float>(ring) / static_cast<float>(hemiRings));
+		float cy  = sinf(phi) * radius + halfHeight; // center Y offset
+		float cr  = cosf(phi) * radius;              // ring radius
+
+		float ny = sinf(phi);
+		float nr = cosf(phi);
+
+		for (uint32_t s = 0; s <= slices; ++s)
+		{
+			float theta = 2.0f * PI * static_cast<float>(s) / static_cast<float>(slices);
+			float nx    = nr * cosf(theta);
+			float nz    = nr * sinf(theta);
+			pushVert(cr * cosf(theta), cy, cr * sinf(theta), nx, ny, nz);
+		}
+	}
+
+	// --- Bottom hemisphere rings (from equator down to pole) ---
+	for (uint32_t ring = 1; ring <= hemiRings; ++ring)
+	{
+		float phi = -(PI * 0.5f) * static_cast<float>(ring) / static_cast<float>(hemiRings);
+		float cy  = sinf(phi) * radius - halfHeight;
+		float cr  = cosf(phi) * radius;
+
+		float ny = sinf(phi);
+		float nr = cosf(phi);
+
+		for (uint32_t s = 0; s <= slices; ++s)
+		{
+			float theta = 2.0f * PI * static_cast<float>(s) / static_cast<float>(slices);
+			float nx    = nr * cosf(theta);
+			float nz    = nr * sinf(theta);
+			pushVert(cr * cosf(theta), cy, cr * sinf(theta), nx, ny, nz);
+		}
+	}
+
+	// --- Bottom pole ---
+	pushVert(0.0f, -(halfHeight + radius), 0.0f, 0.0f, -1.0f, 0.0f);
+
+	uint32_t bottomPole = static_cast<uint32_t>(vertices.size()) - 1;
+	uint32_t totalRings = hemiRings * 2; // top hemi rings + bottom hemi rings
+
+	// --- Indices: top pole fan ---
+	for (uint32_t s = 0; s < slices; ++s)
+	{
+		indices.push_back(0);         // top pole
+		indices.push_back(1 + s);     // current ring vertex
+		indices.push_back(1 + s + 1); // next ring vertex
+	}
+
+	// --- Indices: ring strips ---
+	for (uint32_t ring = 0; ring < totalRings - 1; ++ring)
+	{
+		uint32_t ringStart     = 1 + ring * (slices + 1);
+		uint32_t nextRingStart = 1 + (ring + 1) * (slices + 1);
+
+		for (uint32_t s = 0; s < slices; ++s)
+		{
+			uint32_t a = ringStart + s;
+			uint32_t b = ringStart + s + 1;
+			uint32_t c = nextRingStart + s;
+			uint32_t d = nextRingStart + s + 1;
+
+			indices.push_back(a);
+			indices.push_back(b);
+			indices.push_back(c);
+
+			indices.push_back(b);
+			indices.push_back(d);
+			indices.push_back(c);
+		}
+	}
+
+	// --- Indices: bottom pole fan ---
+	uint32_t lastRingStart = 1 + (totalRings - 1) * (slices + 1);
+	for (uint32_t s = 0; s < slices; ++s)
+	{
+		indices.push_back(bottomPole);
+		indices.push_back(lastRingStart + s + 1);
+		indices.push_back(lastRingStart + s);
+	}
+
+	MeshAsset capsule;
+	capsule.Vertices   = std::move(vertices);
+	capsule.Indices    = std::move(indices);
+	capsule.AABBMin[0] = -radius;
+	capsule.AABBMin[1] = -(halfHeight + radius);
+	capsule.AABBMin[2] = -radius;
+	capsule.AABBMax[0] = radius;
+	capsule.AABBMax[1] = halfHeight + radius;
+	capsule.AABBMax[2] = radius;
+
+	return RegisterMesh(capsule, "Capsule");
 }

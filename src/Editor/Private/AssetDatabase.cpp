@@ -5,7 +5,6 @@
 
 #include <filesystem>
 #include <fstream>
-#include <random>
 
 namespace fs = std::filesystem;
 
@@ -43,12 +42,33 @@ bool AssetSidecar::Write(const char* sidecarPath, const AssetSidecar& sidecar)
 // AssetDatabase
 // -----------------------------------------------------------------------
 
-int64_t AssetDatabase::GenerateUUID()
+int64_t AssetDatabase::GenerateUUID(AssetType type)
 {
-	static std::mt19937_64 rng(std::random_device{}());
-	int64_t raw = static_cast<int64_t>(rng());
-	// Mask to UUID bit range [47:8]
-	return raw & 0x0000FFFFFFFFFF00LL;
+	uint8_t typeIdx  = static_cast<uint8_t>(type);
+	uint32_t counter = ++NextCounter[typeIdx];
+	// Pack counter into UUID bit range [47:8]
+	return static_cast<int64_t>(counter) << 8;
+}
+
+std::string AssetDatabase::NameFromPath(const std::string& path)
+{
+	return fs::path(path).stem().string();
+}
+
+bool AssetDatabase::Rename(int64_t uuid, const std::string& newName)
+{
+	auto it = UUIDIndex.find(uuid);
+	if (it == UUIDIndex.end()) return false;
+
+	AssetDatabaseEntry& entry = Entries[it->second];
+	entry.Name                = newName;
+
+	// Update runtime registry
+	AssetRegistry& registry = AssetRegistry::Get();
+	AssetEntry* rtEntry     = registry.FindMutable(AssetID::Create(uuid, entry.Type));
+	if (rtEntry) rtEntry->Name = newName;
+
+	return true;
 }
 
 uint64_t AssetDatabase::HashFileContents(const char* filePath)
@@ -198,7 +218,7 @@ void AssetDatabase::Reconcile()
 				continue;
 			}
 
-			int64_t uuid  = GenerateUUID();
+			int64_t uuid  = GenerateUUID(type);
 			uint64_t hash = HashFileContents(absPath.c_str());
 
 			// Write sidecar
@@ -212,6 +232,7 @@ void AssetDatabase::Reconcile()
 			// Add to database
 			AssetDatabaseEntry entry;
 			entry.UUID        = uuid;
+			entry.Name        = NameFromPath(relPath);
 			entry.Path        = relPath;
 			entry.Type        = type;
 			entry.ContentHash = hash;
@@ -246,6 +267,7 @@ bool AssetDatabase::Save() const
 	{
 		JsonValue asset      = JsonValue::Object();
 		asset["uuid"]        = JsonValue::Number(static_cast<double>(entry.UUID));
+		asset["name"]        = JsonValue::String(entry.Name);
 		asset["path"]        = JsonValue::String(entry.Path);
 		asset["type"]        = JsonValue::Number(static_cast<double>(static_cast<uint8_t>(entry.Type)));
 		asset["contentHash"] = JsonValue::Number(static_cast<double>(entry.ContentHash));
@@ -253,6 +275,18 @@ bool AssetDatabase::Save() const
 	}
 
 	root["assets"] = std::move(assets);
+
+	// Persist per-type counters
+	JsonValue counters = JsonValue::Object();
+	for (int i = 0; i < 256; ++i)
+	{
+		if (NextCounter[i] > 0)
+		{
+			std::string key = std::to_string(i);
+			counters[key]   = JsonValue::Number(static_cast<double>(NextCounter[i]));
+		}
+	}
+	root["counters"] = std::move(counters);
 
 	std::string dbPath = (fs::path(ContentRoot) / "AssetDatabase.tnxdb").string();
 	std::string json   = JsonWrite(root, true);
@@ -294,6 +328,7 @@ bool AssetDatabase::Load()
 		AssetDatabaseEntry entry;
 
 		const JsonValue* uuid = item.Find("uuid");
+		const JsonValue* name = item.Find("name");
 		const JsonValue* path = item.Find("path");
 		const JsonValue* type = item.Find("type");
 		const JsonValue* hash = item.Find("contentHash");
@@ -301,6 +336,7 @@ bool AssetDatabase::Load()
 		if (!uuid || !path) continue;
 
 		entry.UUID        = static_cast<int64_t>(uuid->AsNumber());
+		entry.Name        = (name && name->IsString()) ? name->AsString() : NameFromPath(path->AsString());
 		entry.Path        = path->AsString();
 		entry.Type        = type ? static_cast<AssetType>(type->AsInt()) : AssetType::Invalid;
 		entry.ContentHash = hash ? static_cast<uint64_t>(hash->AsNumber()) : 0;
@@ -309,6 +345,25 @@ bool AssetDatabase::Load()
 		Entries.push_back(entry);
 		UUIDIndex[entry.UUID] = idx;
 		PathIndex[entry.Path] = idx;
+	}
+
+	// Load per-type counters
+	const JsonValue* counters = root.Find("counters");
+	if (counters && counters->IsObject())
+	{
+		for (auto& [key, val] : counters->AsObject())
+		{
+			int typeIdx = std::stoi(key);
+			if (typeIdx >= 0 && typeIdx < 256) NextCounter[typeIdx] = static_cast<uint32_t>(val.AsInt());
+		}
+	}
+
+	// Recover counters from existing entries (handles legacy databases without counters)
+	for (auto& entry : Entries)
+	{
+		uint8_t typeIdx = static_cast<uint8_t>(entry.Type);
+		uint32_t seq    = static_cast<uint32_t>((entry.UUID >> 8) & 0xFFFFFFFF);
+		if (seq >= NextCounter[typeIdx]) NextCounter[typeIdx] = seq + 1;
 	}
 
 	LOG_INFO_F("[AssetDB] Loaded %zu entries from %s", Entries.size(), dbPath.c_str());
@@ -334,6 +389,6 @@ void AssetDatabase::PublishToRegistry() const
 	for (auto& entry : Entries)
 	{
 		AssetID id = AssetID::Create(entry.UUID, entry.Type);
-		registry.Register(id, entry.Path, entry.Type);
+		registry.Register(id, entry.Name, entry.Path, entry.Type);
 	}
 }

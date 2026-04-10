@@ -1,6 +1,6 @@
 # TrinyxEngine Architecture
 
-> **Navigation:** [← Back to README](../README.md) | [Performance Targets →](PERFORMANCE_TARGETS.md)
+> **Navigation:** [← Back to README](../README.md) | [Performance Targets →](PERFORMANCE_TARGETS.md) | [Game Flow →](FLOW.md)
 
 ---
 
@@ -114,7 +114,7 @@ The gameplay layer splits cleanly into two categories:
 
 1. **Constructs** — Singular, complex scalar OOP objects. One Player, one GameMode, one TurretBase.
    They own Views (CRTP lenses into ECS data), hold bespoke logic, and auto-register ticks via C++20
-   concept detection. Created via `Registry::CreateConstruct<T>()`.
+   concept detection. Created via `ConstructRegistry::Create<T>(world)`.
 
 2. **Entities** — Raw ECS data for the horde. Zombies, bullets, debris, particles. No bespoke logic.
    The engine sweeps them with wide SIMD. Registered via `TNX_REGISTER_ENTITY`.
@@ -125,13 +125,13 @@ Singular → Construct. Horde → Entity.
 ## Construct<T>
 
 CRTP base that owns the full lifecycle. Auto-registers ticks via `if constexpr` — implement the method,
-get the tick. Don't implement it, pay nothing.
+get the tick. Don't implement it, pay nothing. Each Construct is owned by a World and ticks on that
+World's LogicThread.
 
 ```cpp
-class Player    : public Construct<Player>,    public InstanceView<Player> {};
-class Goblin    : public Construct<Goblin>,    public InstanceView<Goblin> {};
-class Trigger   : public Construct<Trigger>,   public PhysView<Trigger> {};
-class Decal     : public Construct<Decal>,     public RenderView<Decal> {};
+class Player    : public Construct<Player>  { ConstructView<EPlayer> Body; ... };
+class Trigger   : public Construct<Trigger> { ConstructView<EInstanced> Body; ... };
+class Decal     : public Construct<Decal>   { ConstructView<EPoint> Body; ... };
 class GameMode  : public Construct<GameMode> {};  // no View needed — pure logic
 ```
 
@@ -140,40 +140,54 @@ template <typename Derived>
 class Construct
 {
 public:
-    void Initialize()
+    void Initialize(World* InWorld)
     {
-        static_cast<Derived*>(this)->InitializeViews();
+        OwnerWorld = InWorld;
+        if constexpr (requires { static_cast<Derived*>(this)->InitializeViews(); })
+            static_cast<Derived*>(this)->InitializeViews();
 
-        if constexpr (HasScalarPrePhysics<Derived>)
-            Engine::ScalarPrePhysicsBatch.Register<&Derived::PrePhysics>(this);
-        if constexpr (HasScalarPostPhysics<Derived>)
-            Engine::ScalarPostPhysicsBatch.Register<&Derived::PostPhysics>(this);
+        LogicThread* Logic = OwnerWorld->GetLogicThread();
+        if constexpr (HasPrePhysics<Derived>)
+            Logic->ScalarPrePhysicsBatch.Register<Construct, &Construct::PrePhysBase>(this);
+        if constexpr (HasPostPhysics<Derived>)
+            Logic->ScalarPostPhysicsBatch.Register<Construct, &Construct::PostPhysBase>(this);
+        if constexpr (HasPhysicsStep<Derived>)
+            Logic->ScalarPhysicsStepBatch.Register<Construct, &Construct::PhysicsStepBase>(this);
         if constexpr (HasScalarUpdate<Derived>)
-            Engine::ScalarUpdateBatch.Register<&Derived::ScalarUpdate>(this);
-    }
-
-    ~Construct()
-    {
-        Engine::ScalarPrePhysicsBatch.Deregister(this);
-        Engine::ScalarPostPhysicsBatch.Deregister(this);
-        Engine::ScalarUpdateBatch.Deregister(this);
+            Logic->ScalarUpdateBatch.Register<Construct, &Construct::ScalarUpdateBase>(this);
     }
 };
 ```
 
-## Views — CRTP Lenses into ECS
+Four tick hooks, all optional:
 
-Views hydrate FieldProxy cursors on initialization and register as defrag listeners so cursors stay
-valid if the allocator moves data:
+- `PrePhysics(SimFloat dt)` — after wide entity PrePhysics sweep
+- `PostPhysics(SimFloat dt)` — after wide entity PostPhysics sweep
+- `PhysicsStep(SimFloat dt)` — during physics tick window (runs at physics rate, not logic rate)
+- `ScalarUpdate(SimFloat dt)` — after entity ScalarUpdate (camera, UI, post-logic)
 
-| View         | Components                          | Partition |
-|--------------|-------------------------------------|-----------|
-| InstanceView | Transform + PhysBody + SkeletalMesh | DUAL      |
-| PhysView     | Transform + PhysBody                | PHYS      |
-| RenderView   | Transform + SkeletalMesh            | RENDER    |
-| LogicView    | Transform only                      | LOGIC     |
+## ConstructView<TEntity> — Generic ECS Lens
 
-**Ownership chain:** Construct → Views → ECS Entities → Components → FieldArrays → FieldProxies
+`ConstructView<TEntity>` is a single generic template that works with any EntityView type. It creates
+one backing ECS entity, hydrates FieldProxy cursors on initialization, and auto-rehydrates when
+the write frame advances or defrag relocates the entity. The partition is auto-derived from the
+entity type's component SystemGroup tags — no manual annotation.
+
+```cpp
+ConstructView<EInstanced> Body;  // CTransform(Phys) + CJoltBody(Phys) + CScale + CColor + CMeshRef(Render) → DUAL
+ConstructView<EPlayer> Body;     // CTransform(Phys) + CScale + CColor + CMeshRef(Render) → DUAL (no JoltBody)
+ConstructView<EPoint> Body;      // CTransform(Phys) only → PHYS
+```
+
+Common entity types and their derived partitions:
+
+| Entity Type | Components                                          | Partition |
+|-------------|-----------------------------------------------------|-----------|
+| EInstanced  | CTransform + CJoltBody + CScale + CColor + CMeshRef | DUAL      |
+| EPlayer     | CTransform + CScale + CColor + CMeshRef             | DUAL      |
+| EPoint      | CTransform only                                     | PHYS      |
+
+**Ownership chain:** Construct → ConstructView → ECS Entity → Components → FieldArrays → FieldProxies
 
 ## Composition via Owned<T>
 
@@ -583,6 +597,137 @@ diverges; snapshot restore is required for deterministic resim.
 
 ---
 
+# Game Flow: States, Modes & Travel
+
+## Vocabulary
+
+| Concept   | What it is                            | Lifetime                   |
+|-----------|---------------------------------------|----------------------------|
+| **State** | Flow state — drives the app           | Until transition/pop       |
+| **Mode**  | Rules runtime — drives the match      | Scoped to World            |
+| **Level** | Content chunk (.tnxscene)             | Scoped to World, swappable |
+| **Body**  | World presence (ConstructView entity) | Scoped to World            |
+
+> State drives the app. Mode drives the match. Level drives the content.
+
+## FlowManager
+
+`FlowManager` is owned by `TrinyxEngine` and runs on the Sentinel thread. It manages a stack of
+`GameState` objects and orchestrates subsystem lifetimes (World, GameMode, Level) based on each
+state's declared requirements.
+
+### Bootstrap Contract
+
+```cpp
+class MyGame : public GameManager<MyGame>
+{
+    bool PostInitialize(TrinyxEngine& engine)
+    {
+        auto& flow = engine.GetFlowManager();
+        flow.RegisterState("MainMenu", [](){ return std::make_unique<MainMenuState>(); });
+        flow.RegisterState("InGame",   [](){ return std::make_unique<InGameState>(); });
+        flow.RegisterMode("Arena",     [](){ return std::make_unique<ArenaMode>(); });
+        flow.LoadDefaultState("MainMenu");
+        return true;
+    }
+};
+```
+
+Engine boots → loads one named state → user code owns the flow graph.
+
+### State Stack
+
+- `TransitionTo(name)` — replace the entire stack (menu → gameplay)
+- `PushState(name)` — overlay (pause menu over gameplay)
+- `PopState()` — return to previous state
+
+### StateRequirements
+
+Each `GameState` declares what it needs:
+
+```cpp
+struct StateRequirements
+{
+    bool NeedsWorld      = false;
+    bool NeedsLevel      = false;
+    bool NeedsNetSession = false;
+    bool AllowsSouls     = true;
+};
+```
+
+FlowManager uses these during transitions to create/destroy/preserve subsystems automatically.
+If a transition moves from a state that requires a World to one that doesn't, the World is
+destroyed and all World-scoped Constructs with it. If both states require a World, it survives.
+
+## Travel: Composable Primitives (Not a Single Policy)
+
+Travel is not a monolithic system. It's three orthogonal levers that games combine:
+
+### Lever A — Domain Lifetime (what survives?)
+
+| Choice                 | Effect                                             | Use case                           |
+|------------------------|----------------------------------------------------|------------------------------------|
+| Keep World, Swap Level | World survives, level entities despawned/respawned | Fast travel, seamless, same server |
+| Reset World            | Fresh World + Registry + Physics                   | New match, fresh sim               |
+| Keep nothing           | Full reset, only persistent Constructs survive     | Server handoff, return to menu     |
+
+### Lever B — Construct Lifetime (what survives?)
+
+| Scope      | Survives...                             |
+|------------|-----------------------------------------|
+| Persistent | Everything (reinitialized on new World) |
+| World      | Only if World survives                  |
+| Level      | Only if Level survives                  |
+
+Persistent Constructs survive World resets via a reinitialization mechanism — their C++ object
+stays alive, but their Views are torn down and rebuilt against the new World's Registry.
+
+### Lever C — Network Continuity
+
+| Choice          | Effect                                   |
+|-----------------|------------------------------------------|
+| Keep NetSession | Same server connection                   |
+| Swap NetSession | Handoff to new server (payload transfer) |
+
+### Examples
+
+- **Arena shooter:** Keep World, Swap Level → fast round transitions
+- **Roguelike:** Reset World often, persistent Constructs for meta-progression
+- **MMO zone travel:** Swap NetSession + Reset World, persistent Constructs carry over
+
+## GameState
+
+Base class with virtual hooks. Runs on Sentinel thread:
+
+```cpp
+class MainMenuState : public GameState
+{
+    void OnEnter(FlowManager& flow, World* world) override;
+    void OnExit(FlowManager& flow) override;
+    void Tick(float dt) override;
+    StateRequirements GetRequirements() const override { return {}; } // no World needed
+    const char* GetName() const override { return "MainMenu"; }
+};
+```
+
+## GameMode
+
+Inheritable base class for server-authoritative rules. NOT a Construct itself — users opt into
+Construct ticks via multiple inheritance when they need per-frame logic:
+
+```cpp
+class ArenaMode : public GameMode, public Construct<ArenaMode>
+{
+    void OnPlayerJoined(Soul& soul) override;  // spawn logic
+    void ScalarUpdate(SimFloat dt);            // win condition check
+};
+```
+
+GameModes that are pure event-driven logic (no per-frame tick) skip the Construct inheritance
+and pay no tick overhead.
+
+---
+
 # Constraint System
 
 ## Design: Constraint Pool (Separate AoS, Not in Temporal Slab)
@@ -989,6 +1134,81 @@ dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
 
 ---
 
+# Networking Architecture
+
+## Overview
+
+Server-authoritative model with GameNetworkingSockets (GNS) transport. Designed for PIE loopback first,
+dedicated server later.
+
+## Components
+
+**GNSContext** — Thin wrapper around GNS library initialization and teardown. Isolates GNS headers from
+the rest of the engine. Statically linked.
+
+**NetConnectionManager** — Server/client socket API. `Listen(port)` / `Connect(address, port)`,
+`PollIncoming()` / `Send()`. Per-connection state: `ConnectionInfo` tracks GNS handle, OwnerID,
+sequence numbers, RTT, ack bitfield. `OnClientConnected` callback fires when GNS handshake completes.
+Max simultaneous connections derived from `NetOwnerID_Bits` (currently 8 → 256 connections).
+
+**NetThread** — Dedicated network poller running at `NetworkUpdateHz` (default 30Hz, configurable via INI).
+Routes messages by type:
+
+- `InputFrame` → World::GetSimInput() buffer (via OwnerID → World mapping)
+- `EntitySpawn` → ReplicationSystem::HandleEntitySpawn() on client world
+- `StateCorrection` → ReplicationSystem::HandleStateCorrections() on client world
+- `Ping/Pong` → RTT estimation (EWMA, 0.875/0.125 weights)
+
+**ReplicationSystem** — Server-side entity replication. Walks Registry each net tick:
+
+1. `SendSpawns()` — reliable EntitySpawn for entities not yet replicated (ClassID, transform, scale, color, mesh)
+2. `SendStateCorrections()` — unreliable batched transforms for all live entities
+3. `RegisterEntity()` — pre-assign EntityNetHandle with OwnerID before replication picks it up
+
+## Network Identity
+
+**EntityNetHandle** — packed uint32: `NetOwnerID:8 | NetIndex:24`. OwnerID 0 = server/unassigned,
+1-255 = client connections. NetIndex is allocated per entity on the server, wired into `NetToRecord`
+mapping for bidirectional lookup.
+
+**Three handle spaces in Registry:**
+
+- GlobalEntityHandle (internal) — generation + index into Records array
+- EntityHandle (local) — LocalToRecord mapping, for local OOP code
+- EntityNetHandle (network) — NetToRecord mapping, for replication
+
+## PIE Loopback
+
+Editor creates server + N client Worlds in the same process with loopback GNS connections.
+Each client World gets its own OwnerID, viewport, field slab, and InputBuffer. The server World
+runs headless (no renderer). Input routes to the focused viewport's World via `InputTargetWorld`.
+
+## Replay & Recording (Architectural Win)
+
+The slab-based SoA layout makes replay recording nearly free. All deterministic simulation state lives in
+contiguous, trivially-copyable field arrays. Replay = serialization in `PropagateFrame`.
+
+**Compression:** Homogeneous float arrays (all PosX, all PosY) have high spatial coherence. Delta
+compression yields mostly zeros per tick. Far superior to AoS where mixed types destroy ratios.
+
+**Free wins:**
+
+- Kill cam / rewind — slab snapshots in ring buffer, rewind = index backward + re-render
+- Spectator scrubbing — random access seek via snapshot index
+- Anti-cheat — diff server vs client slab timelines
+- Bandwidth estimation — compressed delta = theoretical minimum sync payload
+- Sub-tick precision — input events timestamped at actual ms, not frame-quantized
+- With rollback — retroactive event insertion enables frame-perfect multiplayer reproduction
+
+## Known Gaps
+
+- No delta compression (full state every tick)
+- No interest management / relevancy culling
+- No entity destruction replication
+- No client-side owned entity detection + follow camera (in progress)
+
+---
+
 # Migration Status
 
 ## Implemented (2026-03)
@@ -1028,9 +1248,11 @@ dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
 
 ## Designed, Not Yet Implemented
 
-- [ ] **Construct/View OOP layer** — `Construct<T>`, `Owned<T>`, `ConstructBatch`, `TickGroup`, View family, defrag
-  listeners, spawn handshake registration
-- [ ] **Cumulative dirty bit array wired to GPU upload** (tracking functional, not yet driving upload path)
+- [x] **Construct/View OOP layer** — `Construct<T>`, `Owned<T>`, `ConstructBatch`, `TickGroup`, 4 View types, defrag
+  listeners, spawn handshake registration (2026-04)
+- [x] **Networking (basic)** — GNS wrapper, NetThread, ReplicationSystem (EntitySpawn + StateCorrection), PIE loopback,
+  focus-based input routing, EntityNetHandle ownership model (2026-04, in progress)
+- [x] **Cumulative dirty bit array wired to GPU upload** (2026-03-29)
 - [ ] `GetTemporalFieldWritePtr` migrated from Archetype to TemporalComponentCache
 - [ ] `TemporalFrameStride` removed from Archetype (duplicated state — call cache->GetFrameStride())
 - [ ] `GetLiveChunkCount` needs per-chunk live counters or Active flag scanning (currently approximation from global
@@ -1041,9 +1263,36 @@ dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
 
 ## Planned (Next Phase)
 
-- [ ] Render pipeline optimization (dirty-bit-driven GPU upload)
+- [x] Render pipeline optimization (dirty-bit selective GPU upload, 2026-03-29)
+- [ ] Delta compression for state replication
+- [ ] Client-side owned entity detection + camera attachment
 - [ ] Frustum culling (SIMD 6-plane test)
 - [ ] State-sorted rendering (64-bit sort keys, GPU radix sort)
 - [ ] Rollback netcode (Temporal slab rollback + dirty resimulation)
+
+---
+
+# Game Flow
+
+The gameplay framework layer — session lifecycle, level transitions, player identity persistence,
+and network-driven spawn flow — is designed and documented separately.
+
+**Key concepts:**
+
+- `FlowManager` (evolves `GameManager`) — owns the state stack, `ConstructRegistry`, and
+  `LocalSession`. Enforces declaration contracts on transitions. Drains `FlowEvent` messages from
+  NetThread on the Sentinel thread.
+- `FlowState` — declares what it requires (`RequiresWorld`, `RequiresNetSession`). `OnEnter` /
+  `OnExit` hooks drive World and NetSession lifecycle.
+- `ConstructLifetime` — `Level / World / Session / Persistent`. Determines what survives a World
+  reset. `Session`-lifetime Constructs (Souls, Mode) survive; `World`-lifetime Constructs (Bodies)
+  do not.
+- **Soul / Body pattern** — Soul (`Session` lifetime) holds player identity; Body (`World`
+  lifetime) holds world presence via `ConstructView`. Soul triggers a Body spawn when entering
+  gameplay; Body is destroyed on World reset, Soul is not.
+- **`FlowEvent`** — network payload for flow control (load level, client/server ready signals).
+  Added as `NetMessageType::FlowEvent = 7`.
+
+**Full design:** [docs/FLOW.md](FLOW.md)
 
 ---

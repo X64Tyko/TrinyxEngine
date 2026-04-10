@@ -1,217 +1,12 @@
 #pragma once
 #include <functional>
-#include <Logger.h>
 #include <string_view>
 #include <tuple>
 
-#include "FieldMeta.h"
-#include "Profiler.h"
-#include "Signature.h"
-#include "Types.h"
-
-
-enum class SystemID : uint8_t;
-// Helper concept to detect if T has a specific method
-template <typename T> concept HasOnCreate = requires(T t) { t.OnCreate(); };
-template <typename T> concept HasOnDestroy = requires(T t) { t.OnDestroy(); };
-template <typename T> concept HasScalarUpdate = requires(T t, double dt) { t.ScalarUpdate(dt); };
-template <typename T> concept HasPrePhysics = requires(T t, double dt) { t.PrePhysics(dt); };
-template <typename T> concept HasPostPhysics = requires(T t, double dt) { t.PostPhysics(dt); };
-template <typename T> concept HasOnActivate = requires(T t) { t.OnActivate(); };
-template <typename T> concept HasOnDeactivate = requires(T t) { t.OnDeactivate(); };
-template <typename T> concept HasOnCollide = requires(T t) { t.OnCollide(); };
-template <typename T> concept HasDefineSchema = requires(T t) { t.DefineSchema(); };
-template <typename T> concept HasDefineFields = requires(T t) { t.DefineFields(); };
-
-using UpdateFunc = void(*)(double, void**, void*, uint32_t);
+#include "ReflectionRegistry.h"
 
 #define REGISTER_ENTITY_PREPHYS(Type, ClassID) \
     case ClassID: InvokePrePhysicsImpl<Type>(dt, fieldArrayTable, componentCount); break;
-
-struct EntityMeta
-{
-	const char* Name = nullptr; // Stringified entity type name (from registration macro)
-	size_t ViewSize  = 0;
-
-	UpdateFunc PrePhys      = nullptr;
-	UpdateFunc PostPhys     = nullptr;
-	UpdateFunc ScalarUpdate = nullptr;
-
-	uint32_t EntitiesPerChunk = 256;
-
-	EntityMeta()
-	{
-	}
-
-	EntityMeta(const size_t inViewSize, const UpdateFunc prePhys, const UpdateFunc postPhys, const UpdateFunc scalarUpdate)
-		: ViewSize(inViewSize)
-		, PrePhys(prePhys)
-		, PostPhys(postPhys)
-		, ScalarUpdate(scalarUpdate)
-	{
-	}
-
-	EntityMeta(const EntityMeta& rhs)
-		: ViewSize(rhs.ViewSize)
-		, PrePhys(rhs.PrePhys)
-		, PostPhys(rhs.PostPhys)
-		, ScalarUpdate(rhs.ScalarUpdate)
-		, EntitiesPerChunk(rhs.EntitiesPerChunk)
-	{
-	}
-};
-
-template <typename T>
-FORCE_INLINE void InvokePrePhysicsImpl(double dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
-{
-	alignas(32) typename T::WideType viewBatch;
-
-	constexpr uint32_t SIMD_BATCH = 8;
-	const uint32_t batchCount     = componentCount / SIMD_BATCH;
-
-	viewBatch.Hydrate(fieldArrayTable, FlagBase);
-
-	// Process batches
-	for (uint32_t i = 0; i < batchCount; i++)
-	{
-		viewBatch.PrePhysics(dt);
-		viewBatch.Advance(SIMD_BATCH);
-	}
-
-	// perform the last batch with a mask.
-	alignas(32) typename T::MaskedType tailBatch;
-	// Handle the tail with a mask
-	tailBatch.Hydrate(fieldArrayTable, FlagBase, SIMD_BATCH * batchCount, componentCount % SIMD_BATCH);
-	tailBatch.PrePhysics(dt);
-}
-
-template <typename T>
-FORCE_INLINE void InvokeScalarUpdateImpl(double dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
-{
-	// Use Scalar for the update, this is where users can cross-reference entities and do non-SIMD things.
-	alignas(32) T viewBatch;
-
-	viewBatch.Hydrate(fieldArrayTable, FlagBase);
-
-	// Process batches
-	for (uint32_t i = 0; i < componentCount; i++)
-	{
-		viewBatch.ScalarUpdate(dt);
-		viewBatch.Advance(1);
-	}
-}
-
-template <typename T>
-FORCE_INLINE void InvokePostPhysicsImpl(double dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
-{
-	alignas(32) typename T::WideType viewBatch;
-
-	constexpr uint32_t SIMD_BATCH = 8;
-	const uint32_t batchCount     = componentCount / SIMD_BATCH;
-
-	viewBatch.Hydrate(fieldArrayTable, FlagBase);
-
-	// Process batches
-	for (uint32_t i = 0; i < batchCount; i++)
-	{
-		viewBatch.PostPhysics(dt);
-		viewBatch.Advance(SIMD_BATCH);
-	}
-
-	TNX_ZONE_FINE_N("Tail Batch")
-	// perform the last batch with a mask.
-	alignas(32) typename T::MaskedType tailBatch;
-	// Handle the tail with a mask
-	tailBatch.Hydrate(fieldArrayTable, FlagBase, SIMD_BATCH * batchCount, componentCount % SIMD_BATCH);
-	tailBatch.PostPhysics(dt);
-}
-
-class MetaRegistry
-{
-public:
-	static MetaRegistry& Get()
-	{
-		static MetaRegistry instance; // Thread-safe magic static
-		return instance;
-	}
-
-	std::unordered_map<ClassID, ComponentSignature> ClassToArchetype;
-	std::unordered_map<ClassID, std::vector<ComponentTypeID>> ClassToComponentList;
-	std::unordered_map<Signature, std::vector<ClassID>> ArchetypeToClass;
-	std::unordered_map<ClassID, SystemID> ClassSystemID;
-	EntityMeta EntityGetters[4096];
-
-	// Reverse lookup: entity name → ClassID. Returns 0 if not found.
-	[[nodiscard]] ClassID GetEntityByName(std::string_view name) const
-	{
-		auto it = NameToClassID.find(name);
-		return it != NameToClassID.end() ? it->second : 0;
-	}
-
-	template <typename T>
-	void RegisterPrefab()
-	{
-		const ClassID ID           = T::StaticClassID();
-		EntityGetters[ID].ViewSize = sizeof(T);
-
-		if constexpr (requires { T::EntityTypeName; })
-		{
-			EntityGetters[ID].Name                             = T::EntityTypeName;
-			NameToClassID[std::string_view(T::EntityTypeName)] = ID;
-		}
-
-		if constexpr (HasScalarUpdate<T>)
-		{
-			// Then in RegisterEntity:
-			EntityGetters[ID].ScalarUpdate = InvokeScalarUpdateImpl<T>;
-		}
-
-		if constexpr (HasPrePhysics<T>)
-		{
-			// Then in RegisterEntity:
-			EntityGetters[ID].PrePhys = InvokePrePhysicsImpl<T>;
-		}
-
-		if constexpr (HasPostPhysics<T>)
-		{
-			// Then in RegisterEntity:
-			EntityGetters[ID].PostPhys = InvokePostPhysicsImpl<T>;
-		}
-
-		if constexpr (requires { T::EntitiesPerChunk; })
-		{
-			EntityGetters[ID].EntitiesPerChunk = T::EntitiesPerChunk;
-		}
-	}
-
-	template <typename C, typename T>
-	void RegisterPrefabComponent()
-	{
-		const ClassID ID             = C::StaticClassID();
-		const ComponentTypeID TypeID = T::StaticTypeID();
-		ComponentSignature& Def      = ClassToArchetype[ID];
-		Def.set(TypeID - 1);
-
-		for (auto& component : ClassToComponentList[ID])
-		{
-			if (component == TypeID) return;
-		}
-
-		ClassToComponentList[ID].push_back(TypeID);
-		if constexpr (requires { T::SystemTypeID; }) ClassSystemID[ID] = ClassSystemID[ID] | T::SystemTypeID;
-
-		// Store the per-slab slot index derived from StaticTemporalIndex().
-		// StaticTemporalIndex() caches its result, so this is safe to call here even though
-		// RegisterPrefabComponent may fire once per entity type that uses this component.
-		if constexpr (requires { T::StaticTemporalIndex(); })
-		{
-			//ComponentFieldRegistry::Get().SetCacheSlotIndex(TypeID, T::StaticTemporalIndex());
-		}
-	}
-
-private:
-	std::unordered_map<std::string_view, ClassID> NameToClassID;
-};
 
 // The container for member pointers
 template <typename... Members>
@@ -253,15 +48,12 @@ private:
 	template <typename Current, typename Target, typename Replacement>
 	static constexpr auto ResolveReplacement(Current current, Target target, Replacement replacement)
 	{
-		// 1. Check if types match first (Optimization + Safety)
 		if constexpr (std::is_same_v<Current, Target>)
 		{
-			// 2. Check value - use ternary to ensure consistent return type
 			return (current == target) ? replacement : current;
 		}
 		else
 		{
-			// Not the droid we are looking for. Keep existing.
 			return current;
 		}
 	}

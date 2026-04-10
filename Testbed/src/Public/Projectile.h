@@ -1,8 +1,8 @@
 #pragma once
 
-#include "TransRot.h"
-#include "RigidBody.h"
-#include "ColorData.h"
+#include "CTransform.h"
+#include "CRigidBody.h"
+#include "CColor.h"
 #include "EntityView.h"
 #include "SchemaReflector.h"
 #include "FieldMath.h"
@@ -18,17 +18,15 @@ class Projectile : public EntityView<Projectile, WIDTH>
 	TNX_REGISTER_SCHEMA(Projectile, EntityView, transform, body, color)
 
 public:
-	TransRot<WIDTH> transform;
-	RigidBody<WIDTH> body;
-	ColorData<WIDTH> color;
+	CTransform<WIDTH> transform;
+	CRigidBody<WIDTH> body;
+	CColor<WIDTH> color;
 
-	FORCE_INLINE void PrePhysics(double dt)
+	FORCE_INLINE void PrePhysics(SimFloat dt)
 	{
-		const float fdt = static_cast<float>(dt);
-
-		transform.PosX += body.VelX * fdt;
-		transform.PosY += body.VelY * fdt;
-		transform.PosZ += body.VelZ * fdt;
+		transform.PosX += body.VelX * dt;
+		transform.PosY += body.VelY * dt;
+		transform.PosZ += body.VelZ * dt;
 
 		// Simple drag
 		body.VelX *= 0.999f;
@@ -36,7 +34,7 @@ public:
 		body.VelZ *= 0.999f;
 
 		// Fade alpha as the projectile slows — tests color write path
-		color.A = body.VelZ * body.VelZ * 0.001f;
+		color.A = body.VelZ * (body.VelZ * 0.001f);
 		color.A = FieldMath::Clamp(color.A, 0.0f, 1.0f);
 	}
 };

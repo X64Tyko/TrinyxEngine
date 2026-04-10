@@ -12,28 +12,28 @@ static std::string Trim(const std::string& s)
 	return (start == std::string::npos) ? "" : s.substr(start, end - start + 1);
 }
 
-static void WriteDefaults(const char* path, const EngineConfig& cfg)
+static void WriteDefaults(const char* path)
 {
 	std::ofstream out(path);
 	if (!out.is_open()) return;
 
 	out << "[Engine]\n"
-		<< "TargetFPS=" << cfg.TargetFPS << "\n"
-		<< "FixedUpdateHz=" << cfg.FixedUpdateHz << "\n"
-		<< "NetworkUpdateHz=" << cfg.NetworkUpdateHz << "\n"
-		<< "InputPollHz=" << cfg.InputPollHz << "\n"
-		<< "MaxRenderableEntities=" << cfg.MAX_RENDERABLE_ENTITIES << "\n"
-		<< "MaxCachedEntities=" << cfg.MAX_CACHED_ENTITIES << "\n"
-		<< "MaxJoltBodies=" << cfg.MAX_JOLT_BODIES << "\n"
-		<< "TemporalFrameCount=" << cfg.TemporalFrameCount << "\n"
-		<< "jobCacheSize=" << cfg.JobCacheSize << "\n"
-		<< "PhysicsUpdateInterval=" << cfg.PhysicsUpdateInterval << "\n"
-		<< "DefaultScene=" << cfg.DefaultScene << "\n"
-		<< "InitialGameScene=" << cfg.InitialGameScene << "\n";
+		<< "TargetFPS=0\n"
+		<< "FixedUpdateHz=128\n"
+		<< "NetworkUpdateHz=30\n"
+		<< "InputPollHz=1000\n"
+		<< "MaxRenderableEntities=11000\n"
+		<< "MaxCachedEntities=25000\n"
+		<< "MaxJoltBodies=11000\n"
+		<< "TemporalFrameCount=8\n"
+		<< "JobCacheSize=16384\n"
+		<< "PhysicsUpdateInterval=8\n"
+		<< "DefaultScene=\n"
+		<< "DefaultState=\n";
 }
 
-// Apply key=value pairs from a single INI file onto an existing config.
-static void ApplyFromFile(const char* path, EngineConfig& cfg)
+// Fill fields from an INI file. Only writes fields that are still at sentinel (Unset / empty).
+static void FillFromFile(const char* path, EngineConfig& cfg)
 {
 	std::ifstream file(path);
 	if (!file.is_open()) return;
@@ -55,19 +55,150 @@ static void ApplyFromFile(const char* path, EngineConfig& cfg)
 		std::string val = Trim(line.substr(eq + 1));
 		if (val.empty()) continue;
 
-		if (key == "TargetFPS") cfg.TargetFPS = std::stoi(val);
-		else if (key == "FixedUpdateHz") cfg.FixedUpdateHz = std::stoi(val);
-		else if (key == "NetworkUpdateHz") cfg.NetworkUpdateHz = std::stoi(val);
-		else if (key == "InputPollHz") cfg.InputPollHz = std::stoi(val);
-		else if (key == "MaxRenderableEntities") cfg.MAX_RENDERABLE_ENTITIES = std::stoi(val);
-		else if (key == "MaxCachedEntities") cfg.MAX_CACHED_ENTITIES = std::stoi(val);
-		else if (key == "MaxJoltBodies") cfg.MAX_JOLT_BODIES = std::stoi(val);
-		else if (key == "TemporalFrameCount") cfg.TemporalFrameCount = std::stoi(val);
-		else if (key == "JobCacheSize") cfg.JobCacheSize = std::stoi(val);
-		else if (key == "PhysicsUpdateInterval") cfg.PhysicsUpdateInterval = std::stoi(val);
-		else if (key == "DefaultScene") snprintf(cfg.DefaultScene, sizeof(cfg.DefaultScene), "%s", val.c_str());
-		else if (key == "InitialGameScene") snprintf(cfg.InitialGameScene, sizeof(cfg.InitialGameScene), "%s", val.c_str());
+		// Only fill if the field is still unset
+		if (key == "TargetFPS" && cfg.TargetFPS == EngineConfig::Unset) cfg.TargetFPS = std::stoi(val);
+		else if (key == "FixedUpdateHz" && cfg.FixedUpdateHz == EngineConfig::Unset) cfg.FixedUpdateHz = std::stoi(val);
+		else if (key == "NetworkUpdateHz" && cfg.NetworkUpdateHz == EngineConfig::Unset) cfg.NetworkUpdateHz = std::stoi(val);
+		else if (key == "InputPollHz" && cfg.InputPollHz == EngineConfig::Unset) cfg.InputPollHz = std::stoi(val);
+		else if (key == "MaxRenderableEntities" && cfg.MAX_RENDERABLE_ENTITIES == EngineConfig::Unset) cfg.MAX_RENDERABLE_ENTITIES = std::stoi(val);
+		else if (key == "MaxCachedEntities" && cfg.MAX_CACHED_ENTITIES == EngineConfig::Unset) cfg.MAX_CACHED_ENTITIES = std::stoi(val);
+		else if (key == "MaxJoltBodies" && cfg.MAX_JOLT_BODIES == EngineConfig::Unset) cfg.MAX_JOLT_BODIES = std::stoi(val);
+		else if (key == "TemporalFrameCount" && cfg.TemporalFrameCount == EngineConfig::Unset) cfg.TemporalFrameCount = std::stoi(val);
+		else if (key == "JobCacheSize" && cfg.JobCacheSize == EngineConfig::Unset) cfg.JobCacheSize = std::stoi(val);
+		else if (key == "PhysicsUpdateInterval" && cfg.PhysicsUpdateInterval == EngineConfig::Unset) cfg.PhysicsUpdateInterval = std::stoi(val);
+		else if (key == "DefaultScene" && cfg.DefaultScene[0] == '\0') snprintf(cfg.DefaultScene, sizeof(cfg.DefaultScene), "%s", val.c_str());
+		else if (key == "DefaultState" && cfg.DefaultState[0] == '\0') snprintf(cfg.DefaultState, sizeof(cfg.DefaultState), "%s", val.c_str());
 	}
+}
+
+// Walk up from startDir looking for TrinyxDefaults.ini. Returns the directory it was found in, or empty.
+static std::filesystem::path FindEngineRoot(const std::filesystem::path& startDir)
+{
+	namespace fs = std::filesystem;
+
+	fs::path dir = fs::absolute(startDir);
+	for (int depth = 0; depth < 10; ++depth)
+	{
+		fs::path candidate = dir / "TrinyxDefaults.ini";
+		if (fs::exists(candidate)) return dir;
+
+		fs::path parent = dir.parent_path();
+		if (parent == dir) break; // hit filesystem root
+		dir = parent;
+	}
+	return {};
+}
+
+// Derive project name from the last component of the directory path.
+static std::string DeriveProjectName(const char* projectDir)
+{
+	namespace fs = std::filesystem;
+	fs::path p(projectDir);
+	// Remove trailing separator if present
+	if (p.has_filename()) return p.filename().string();
+	return p.parent_path().filename().string();
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+void EngineConfig::ApplyDefaults()
+{
+	if (TargetFPS == Unset) TargetFPS = 0;
+	if (FixedUpdateHz == Unset) FixedUpdateHz = 128;
+	if (PhysicsUpdateInterval == Unset) PhysicsUpdateInterval = 8;
+	if (NetworkUpdateHz == Unset) NetworkUpdateHz = 30;
+	if (InputPollHz == Unset) InputPollHz = 1000;
+	if (MAX_RENDERABLE_ENTITIES == Unset) MAX_RENDERABLE_ENTITIES = 11000;
+	if (MAX_CACHED_ENTITIES == Unset) MAX_CACHED_ENTITIES = 25000;
+	if (MAX_JOLT_BODIES == Unset) MAX_JOLT_BODIES = 11000;
+	if (TemporalFrameCount == Unset) TemporalFrameCount = 8;
+	if (JobCacheSize == Unset) JobCacheSize = 16 * 1024;
+}
+
+void EngineConfig::FillFrom(const EngineConfig& other)
+{
+	if (TargetFPS == Unset && other.TargetFPS != Unset) TargetFPS = other.TargetFPS;
+	if (FixedUpdateHz == Unset && other.FixedUpdateHz != Unset) FixedUpdateHz = other.FixedUpdateHz;
+	if (PhysicsUpdateInterval == Unset && other.PhysicsUpdateInterval != Unset) PhysicsUpdateInterval = other.PhysicsUpdateInterval;
+	if (NetworkUpdateHz == Unset && other.NetworkUpdateHz != Unset) NetworkUpdateHz = other.NetworkUpdateHz;
+	if (InputPollHz == Unset && other.InputPollHz != Unset) InputPollHz = other.InputPollHz;
+	if (MAX_RENDERABLE_ENTITIES == Unset && other.MAX_RENDERABLE_ENTITIES != Unset) MAX_RENDERABLE_ENTITIES = other.MAX_RENDERABLE_ENTITIES;
+	if (MAX_CACHED_ENTITIES == Unset && other.MAX_CACHED_ENTITIES != Unset) MAX_CACHED_ENTITIES = other.MAX_CACHED_ENTITIES;
+	if (MAX_JOLT_BODIES == Unset && other.MAX_JOLT_BODIES != Unset) MAX_JOLT_BODIES = other.MAX_JOLT_BODIES;
+	if (TemporalFrameCount == Unset && other.TemporalFrameCount != Unset) TemporalFrameCount = other.TemporalFrameCount;
+	if (JobCacheSize == Unset && other.JobCacheSize != Unset) JobCacheSize = other.JobCacheSize;
+
+	if (DefaultScene[0] == '\0' && other.DefaultScene[0] != '\0') snprintf(DefaultScene, sizeof(DefaultScene), "%s", other.DefaultScene);
+	if (DefaultState[0] == '\0' && other.DefaultState[0] != '\0') snprintf(DefaultState, sizeof(DefaultState), "%s", other.DefaultState);
+}
+
+EngineConfig EngineConfig::LoadProjectConfig(const char* projectDir)
+{
+	namespace fs = std::filesystem;
+
+	EngineConfig cfg;
+
+	if (projectDir && projectDir[0] != '\0')
+	{
+		// 1. Most specific: {ProjectName}Defaults.ini in the project directory
+		std::string projectName = DeriveProjectName(projectDir);
+		fs::path projectIni     = fs::path(projectDir) / (projectName + "Defaults.ini");
+		if (fs::exists(projectIni))
+		{
+			FillFromFile(projectIni.string().c_str(), cfg);
+		}
+
+		// 2. Less specific: TrinyxDefaults.ini — walk up from project dir
+		fs::path engineRoot = FindEngineRoot(projectDir);
+		if (!engineRoot.empty())
+		{
+			fs::path engineIni = engineRoot / "TrinyxDefaults.ini";
+			FillFromFile(engineIni.string().c_str(), cfg);
+		}
+	}
+	else
+	{
+		// No project dir — try TrinyxDefaults.ini in CWD
+		FillFromFile("TrinyxDefaults.ini", cfg);
+	}
+
+	// 3. Compiled-in defaults fill anything still unset
+	cfg.ApplyDefaults();
+	return cfg;
+}
+
+EngineConfig EngineConfig::LoadEditorConfig(const char* projectDir, const EngineConfig& gameConfig)
+{
+	namespace fs = std::filesystem;
+
+	EngineConfig cfg;
+
+	if (projectDir && projectDir[0] != '\0')
+	{
+		// 1. Most specific: EditorDefaults.ini in the project directory
+		fs::path projectEditorIni = fs::path(projectDir) / "EditorDefaults.ini";
+		if (fs::exists(projectEditorIni))
+		{
+			FillFromFile(projectEditorIni.string().c_str(), cfg);
+		}
+
+		// 2. Less specific: EditorDefaults.ini at engine root
+		fs::path engineRoot = FindEngineRoot(projectDir);
+		if (!engineRoot.empty())
+		{
+			fs::path engineEditorIni = engineRoot / "EditorDefaults.ini";
+			FillFromFile(engineEditorIni.string().c_str(), cfg);
+		}
+	}
+
+	// 3. Game config fills all remaining gaps
+	cfg.FillFrom(gameConfig);
+
+	// 4. Compiled-in defaults (shouldn't be needed, but safety net)
+	cfg.ApplyDefaults();
+	return cfg;
 }
 
 EngineConfig EngineConfig::LoadFromFile(const char* path)
@@ -77,49 +208,13 @@ EngineConfig EngineConfig::LoadFromFile(const char* path)
 	std::ifstream probe(path);
 	if (!probe.is_open())
 	{
-		WriteDefaults(path, cfg);
+		WriteDefaults(path);
+		cfg.ApplyDefaults();
 		return cfg;
 	}
 	probe.close();
 
-	ApplyFromFile(path, cfg);
-	return cfg;
-}
-
-EngineConfig EngineConfig::LoadFromDirectory(const char* dir)
-{
-	namespace fs = std::filesystem;
-
-	EngineConfig cfg;
-
-	fs::path dirPath(dir);
-	if (dir[0] == '\0' || !fs::exists(dirPath) || !fs::is_directory(dirPath)) return cfg; // empty or invalid dir — return defaults
-
-	// Collect all *Defaults.ini files, sorted for deterministic load order
-	const std::string suffix = "Defaults.ini";
-	std::vector<fs::path> iniFiles;
-	for (const auto& entry : fs::directory_iterator(dirPath))
-	{
-		if (!entry.is_regular_file()) continue;
-		const auto name = entry.path().filename().string();
-		if (name.size() >= suffix.size() &&
-			name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0)
-		{
-			iniFiles.push_back(entry.path());
-		}
-	}
-	std::sort(iniFiles.begin(), iniFiles.end());
-
-	if (iniFiles.empty())
-	{
-		// No config found — write defaults as EngineDefaults.ini in the project dir
-		fs::path defaultPath = dirPath / "EngineDefaults.ini";
-		WriteDefaults(defaultPath.string().c_str(), cfg);
-		return cfg;
-	}
-
-	// Apply each file in order; later values override earlier ones
-	for (const auto& iniFile : iniFiles) ApplyFromFile(iniFile.string().c_str(), cfg);
-
+	FillFromFile(path, cfg);
+	cfg.ApplyDefaults();
 	return cfg;
 }

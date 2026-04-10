@@ -16,15 +16,15 @@
 #include "TemporalComponentCache.h"
 
 #include "CacheSlotMeta.h"
-#include "ColorData.h"
-#include "MeshRef.h"
-#include "Scale.h"
-#include "TransRot.h"
+#include "CColor.h"
+#include "CMeshRef.h"
+#include "CScale.h"
+#include "CTransform.h"
 
 #include <immintrin.h>
 #include "LogicThread.h"
 #include "TrinyxEngine.h"
-#include "../../Core/Private/ThreadPinning.h"
+#include "ThreadPinning.h"
 
 // -----------------------------------------------------------------------
 // Helpers
@@ -237,6 +237,8 @@ void RendererCore<Derived>::ThreadMain()
 			WriteToFrameSlab();
 		}
 
+		Self().UpdateViewportSlabs();
+
 		int8_t renderRes = RenderFrame();
 		if (renderRes < 0) break;
 		else if (renderRes == 0) continue;
@@ -332,7 +334,7 @@ int RendererCore<Derived>::RenderFrame()
 
 	{
 		TNX_ZONE_COARSE_NC("Render_Record", TNX_COLOR_RENDERING)
-		RecordCommandBuffer(frame, imageIndex);
+		Self().RecordFrame(frame, imageIndex);
 	}
 
 	// Submit (sync2 path)
@@ -1203,7 +1205,15 @@ bool RendererCore<Derived>::CreateMeshBuffers()
 		return false;
 	}
 
-	LOG_INFO_F("[Renderer] MeshManager ready — cube at slot %u", cubeSlot);
+	uint32_t capsuleSlot = Meshes.RegisterBuiltinCapsule(0.4f, 0.9f, 16);
+	if (capsuleSlot == UINT32_MAX)
+	{
+		LOG_ERROR("[Renderer] Failed to register built-in capsule mesh");
+		return false;
+	}
+
+	LOG_INFO_F("[Renderer] MeshManager ready — cube at slot %u, capsule at slot %u",
+			   cubeSlot, capsuleSlot);
 	return true;
 }
 
@@ -1220,7 +1230,7 @@ void RendererCore<Derived>::FillGpuFrameData(FrameSync& frame)
 	std::memset(FrameData, 0, sizeof(GpuFrameData));
 
 	ComponentCacheBase* tc   = RegistryPtr->GetTemporalCache();
-	TemporalFrameHeader* hdr = tc->GetFrameHeader();
+	TemporalFrameHeader* hdr = tc->GetFrameHeader(LastTemporalFrame);
 	MultMat4(FrameData->ViewProj, hdr->ProjectionMatrix.m, hdr->ViewMatrix.m);
 
 	FrameData->VerticesAddr          = Meshes.GetVertexBufferAddr();
@@ -1303,11 +1313,11 @@ void RendererCore<Derived>::WriteToFrameSlab()
 	TemporalFrameHeader* temporalHdr = temporalCache->GetFrameHeader(LastTemporalFrame);
 	TemporalFrameHeader* volatileHdr = volatileCache->GetFrameHeader(LastVolatileFrame);
 
-	const ComponentTypeID transformSlot = TransRot<>::StaticTemporalIndex();
-	const ComponentTypeID scaleSlot     = Scale<>::StaticTemporalIndex();
-	const ComponentTypeID colorSlot     = ColorData<>::StaticTemporalIndex();
+	const ComponentTypeID transformSlot = CTransform<>::StaticTemporalIndex();
+	const ComponentTypeID scaleSlot     = CScale<>::StaticTemporalIndex();
+	const ComponentTypeID colorSlot     = CColor<>::StaticTemporalIndex();
 	const ComponentTypeID flagsSlot     = CacheSlotMeta<>::StaticTemporalIndex();
-	const ComponentTypeID meshRefSlot   = MeshRef<>::StaticTemporalIndex();
+	const ComponentTypeID meshRefSlot   = CMeshRef<>::StaticTemporalIndex();
 
 	struct FieldDescription
 	{
@@ -1415,7 +1425,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 					uint64_t bits = dirtyPlane[w];
 					while (bits)
 					{
-						uint32_t bit = __builtin_ctzll(bits);
+						uint32_t bit = TNX_CTZ64(bits);
 						uint32_t idx = w * 64 + bit;
 						std::memcpy(dst + idx * sizeof(float), src + idx * sizeof(float), sizeof(float));
 						bits &= bits - 1;

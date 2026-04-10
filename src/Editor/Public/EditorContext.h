@@ -10,11 +10,16 @@
 
 #include "AssetDatabase.h"
 #include "EditorState.h"
+#include "EngineConfig.h"
+#include "WorldViewport.h"
 
 class EditorPanel;
+class FlowManager;
 class LogicThread;
 class MeshManager;
+class ReplicationSystem;
 class TrinyxEngine;
+class World;
 
 /// EditorContext — owns all editor UI state and panel drawing.
 ///
@@ -52,6 +57,12 @@ public:
 
 	/// Delete the currently selected entity (deferred via Spawn handshake).
 	void DeleteSelectedEntity();
+
+	/// PIE (Play-In-Editor) networked mode: server + client worlds.
+	void StartPIE();
+	void StopPIE();
+	bool IsPIEActive() const { return bPIEActive; }
+	bool bPIEStopRequested = false; // Set by BuildFrame (Escape), consumed after ImGui::Render
 
 	/// Register a panel. EditorContext takes ownership.
 	template <typename T, typename... Args>
@@ -115,8 +126,32 @@ private:
 	std::vector<ArchetypeSnapshot> PlaySnapshot;
 	bool bHasSnapshot = false;
 
+	// --- PIE (networked multi-world) ---
+	// Server may be headless (no viewport) or rendered.
+	// N clients each get their own World + viewport.
+	struct PIEClient
+	{
+		std::unique_ptr<FlowManager> Flow;
+		std::unique_ptr<WorldViewport> Viewport;
+		EngineConfig Config;       // Client-mode config (game config + Mode=Client)
+		uint32_t ClientHandle = 0; // Client-side GNS connection handle (outgoing)
+		uint32_t ServerHandle = 0; // Server-side accepted handle (for replication)
+	};
+
+	std::unique_ptr<FlowManager> ServerFlow;
+	std::unique_ptr<WorldViewport> ServerViewport; // nullptr if headless
+	std::unique_ptr<ReplicationSystem> Replicator;
+	EngineConfig ServerConfig; // Server-mode config (game config + Mode=Server/ListenServer)
+	std::vector<PIEClient> PIEClients;
+	bool bPIEActive     = false;
+	bool bServerVisible = true; // false = headless server (no viewport)
+	int PIEClientCount  = 1;    // Number of client worlds to spawn in PIE
+
+	void DrawViewportPanel(const char* title, WorldViewport& vp);
+
 	enum class PendingActionType : uint8_t { None, OpenScene };
 
+	bool bMouseReleasedDuringPlay   = false;
 	bool bShowDemoWindow            = false;
 	bool bShowMetrics               = false;
 	bool bFirstFrame                = true;

@@ -1,7 +1,7 @@
 ﻿#pragma once
 
-#include "TransRot.h"
-#include "Velocity.h"
+#include "CTransform.h"
+#include "CVelocity.h"
 #include "EntityView.h"
 #include "SchemaReflector.h"
 
@@ -13,10 +13,10 @@ class TestEntity : public EntityView<TestEntity, WIDTH>
 	TNX_REGISTER_SCHEMA(TestEntity, EntityView, transform, velocity)
 
 public:
-	TransRot<WIDTH> transform;
-	Velocity<WIDTH> velocity;
+	CTransform<WIDTH> transform;
+	CVelocity<WIDTH> velocity;
 
-	FORCE_INLINE void PrePhysics([[maybe_unused]] double dt)
+	FORCE_INLINE void PrePhysics([[maybe_unused]] SimFloat dt)
 	{
 		transform.PosX += velocity.vX;
 	}

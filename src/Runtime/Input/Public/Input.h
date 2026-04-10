@@ -14,6 +14,8 @@ enum class Action : uint8_t
 	MoveRight,
 	MoveUp,
 	MoveDown,
+	Fire,
+	ToggleCamera,
 	Count
 };
 
@@ -30,8 +32,14 @@ inline constexpr ActionBinding DefaultBindings[] = {
 	{SDL_SCANCODE_D, Action::MoveRight},
 	{SDL_SCANCODE_SPACE, Action::MoveUp},
 	{SDL_SCANCODE_LCTRL, Action::MoveDown},
+	{SDL_SCANCODE_V, Action::ToggleCamera},
 };
 inline constexpr int DefaultBindingCount = static_cast<int>(sizeof(DefaultBindings) / sizeof(DefaultBindings[0]));
+
+// Mouse button indices (SDL convention)
+inline constexpr uint8_t MOUSE_BUTTON_LEFT  = 1;
+inline constexpr uint8_t MOUSE_BUTTON_RIGHT = 3;
+inline constexpr uint8_t MAX_MOUSE_BUTTONS  = 5; // SDL supports 1-5
 
 // ── Event queue entry ────────────────────────────────────────────────────────
 struct InputData
@@ -64,9 +72,10 @@ struct InputBuffer
 	// 512 bits (64 bytes) per slot — covers all SDL scancodes
 	alignas(64) uint8_t KeyState[2][64]{};
 
-	// ── Mouse delta (continuous) ─────────────────────────────────────────
+	// ── Mouse state (continuous) ─────────────────────────────────────────
 	alignas(16) float MouseDX[2]{};
 	float MouseDY[2]{};
+	uint8_t MouseButtons[2]{}; // bitmask per slot: bit N = button N+1
 
 	// ── Slot management ──────────────────────────────────────────────────
 	uint64_t SwapTime = 0;
@@ -118,6 +127,30 @@ struct InputBuffer
 		MouseDY[slot] += dy;
 	}
 
+	void PushMouseButton(uint8_t button, bool down)
+	{
+		if (button == 0 || button > MAX_MOUSE_BUTTONS) return;
+		uint8_t slot = WriteSlot.load(std::memory_order_relaxed);
+		uint8_t bit  = static_cast<uint8_t>(1u << (button - 1));
+		if (down) MouseButtons[slot] |= bit;
+		else MouseButtons[slot]      &= static_cast<uint8_t>(~bit);
+	}
+
+	// ── Network-side (writer) ───────────────────────────────────────────
+	// Bulk state injection for network-sourced input. NetThread deserializes
+	// an InputFrame message and writes the full state in one shot.
+	// Same write slot as Sentinel — on a server, NetThread is the sole writer.
+
+	/// Replace the entire key state + mouse delta + mouse buttons for the current write slot.
+	void InjectState(const uint8_t* keyData, float mouseDX, float mouseDY, uint8_t mouseButtons = 0)
+	{
+		uint8_t slot = WriteSlot.load(std::memory_order_relaxed);
+		std::memcpy(KeyState[slot], keyData, 64);
+		MouseDX[slot]      = mouseDX;
+		MouseDY[slot]      = mouseDY;
+		MouseButtons[slot] = mouseButtons;
+	}
+
 	// ── Brain-side (reader) ──────────────────────────────────────────────
 
 	// Call once at the top of each logic frame.
@@ -130,8 +163,9 @@ struct InputBuffer
 		ReadSlot         = WriteSlot.load(std::memory_order_acquire);
 		uint8_t newWrite = ReadSlot ^ 1;
 
-		// Carry held-key state forward so keys stay pressed across frames
+		// Carry held state forward so keys/buttons stay pressed across frames
 		std::memcpy(KeyState[newWrite], KeyState[ReadSlot], 64);
+		MouseButtons[newWrite] = MouseButtons[ReadSlot];
 
 		// Clear the new write slot's event queue and mouse delta
 		EventCount[newWrite] = 0;
@@ -161,8 +195,18 @@ struct InputBuffer
 		return (KeyState[ReadSlot][idx >> 3] & (1u << (idx & 7))) != 0;
 	}
 
+	bool IsMouseButtonDown(uint8_t button) const
+	{
+		if (button == 0 || button > MAX_MOUSE_BUTTONS) return false;
+		return (MouseButtons[ReadSlot] & (1u << (button - 1))) != 0;
+	}
+
 	bool IsActionDown(Action action) const
 	{
+		// Mouse-bound actions
+		if (action == Action::Fire && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) return true;
+
+		// Key-bound actions
 		for (int i = 0; i < DefaultBindingCount; ++i)
 		{
 			if (DefaultBindings[i].Mapping == action && IsKeyDown(DefaultBindings[i].Key)) return true;

@@ -1,14 +1,14 @@
-# Current Status (2026-03)
+# Current Status (2026-04)
 
-> **Navigation:** [← Back to README](../README.md) | [← Configuration](CONFIGURATION.md)
+> **Navigation:** [← Back to README](../README.md) | [← Configuration](CONFIGURATION.md) | [Game Flow →](FLOW.md)
 
 ---
 
 ## Timeline Context
 
 **Project Start:** ~2026-02-01 (Week 1)
-**Current Date:** 2026-03-29
-**Phase:** Editor (Phase 1–6 of editor plan in progress)
+**Current Date:** 2026-04-03
+**Phase:** Game Flow (Foundation Stage 3 — Construct/View + Networking proven, building gameplay layer)
 
 ---
 
@@ -20,17 +20,19 @@ begins.
 
 ### Stage 1: Foundation (current)
 
-| # | Milestone               | Status      | Notes                                                                                                                   |
-|---|-------------------------|-------------|-------------------------------------------------------------------------------------------------------------------------|
-| 1 | **Editor (bare-bones)** | In progress | Scene hierarchy, entity inspection, reflected properties, save/load. ImGui docking, 6 panels. JSON serialization.       |
-| 2 | **Networking**          | Not started | GNS wrapper, client/server authority model, PIE loopback. Rollback netcode uses existing Temporal slab + Jolt snapshot. |
-| 3 | **Audio**               | Not started | SDL3 thin wrapper first (handle-based for Anti-Event compatibility). Minimal — just enough for gameplay feedback.       |
+| # | Milestone               | Status      | Notes                                                                                                                            |
+|---|-------------------------|-------------|----------------------------------------------------------------------------------------------------------------------------------|
+| 1 | **Editor (bare-bones)** | Complete    | Scene hierarchy, entity inspection, reflected properties, save/load. ImGui docking, 6 panels. JSON serialization.                |
+| 2 | **Construct/View OOP**  | Complete    | `Construct<T>`, `Owned<T>`, `ConstructView<TEntity>`, `ConstructBatch` tick dispatch. PlayerConstruct proven with JoltCharacter. |
+| 3 | **Networking**          | Functional  | GNS wrapper, PIE loopback, entity spawn replication, state corrections. Client input routing. Delta compression pending.         |
+| 4 | **Audio**               | Not started | SDL3 thin wrapper first (handle-based for Anti-Event compatibility). Minimal — just enough for gameplay feedback.                |
+| 5 | **Game Flow**           | Designed    | Session lifecycle, Soul/Body pattern, FlowManager/FlowState, network connection flow, travel. See [FLOW.md](FLOW.md).           |
 
 ### Stage 2: Hardening
 
 Once Editor + Networking + Audio are functional, the engine enters a dedicated cleanup, refactoring, and rewrite phase.
-The goal is to make the substrate as solid as possible before building the gameplay layer (Construct/View system,
-behavior trees, etc.) on top of it.
+The goal is to make the substrate as solid as possible before building behavior trees, AI directors, and higher-level
+gameplay systems on top of the proven Construct/View foundation.
 
 **Hardening targets (non-exhaustive):**
 
@@ -40,11 +42,11 @@ behavior trees, etc.) on top of it.
 - Fixed-point coordinate system (`Fixed32`, `SimFloat` alias, Jolt bridge validation)
 - Audit hot-path data structures for cache efficiency
 - Archetype field allocation and meta storage cleanup
-- Jolt push logic fixes
 - ConstraintEntity system (constraint pool, rigid attachment pass, physics root determination)
 - Static entity tier (needs asset importing)
 - Evaluate reflection system robustness (static init ordering, precompile step)
 - Registration name strings strippable via build option (`TNX_STRIP_NAMES`) for shipping builds
+- Default identity quaternion for CTransform (RotQw=1.0f) — prevent zero-quaternion rendering bugs
 
 **After hardening:** Arena shooter test level to prove the full stack — high entity counts, physics, competitive input
 latency, rollback netcode, networked multiplayer.
@@ -129,7 +131,7 @@ in the long run.
 **Jolt Physics (v5.5.0):**
 
 - JoltJobSystemAdapter bridges JPH::JobSystemWithBarrier onto Jolt job queue
-- JoltBody volatile component (TNX_VOLATILE_FIELDS, CacheTier::Volatile) — SoA in slab, slab-direct iteration
+- CJoltBody volatile component (TNX_VOLATILE_FIELDS, CacheTier::Volatile) — SoA in slab, slab-direct iteration
 - FlushPendingBodies: iterates contiguous DUAL+PHYS slab region directly via GetPhysicsRange(), no archetype/chunk
   indirection
 - PullActiveTransforms: writes pos+rot from awake bodies back into SoA WriteArrays
@@ -137,6 +139,9 @@ in the long run.
   phystick - 1) → PostPhysics
 - BodyID↔EntityCacheIndex bidirectional lookup (EntityToBody, BodyToEntity vectors)
 - GetPhysicsRange() on ComponentCacheBase: returns [DualStart, PhysEnd) in cache index units for dense physics iteration
+- JoltCharacter: CharacterVirtual wrapper for Construct-driven character controllers. Capsule shape, ExtendedUpdate
+  (grounding, stair step, slope slide). Independent of CJoltBody — Constructs own and update directly via PhysicsStep
+  tick
 
 **Input System:**
 
@@ -148,6 +153,61 @@ in the long run.
 - VecMath.h: VecLocal<N,WIDTH>, Vec2/3/4Accessor (reference-based, embedded in components)
 - QuatMath.h: QuatLocal<WIDTH>, QuatAccessor
 - FieldMath.h: Read, Clamp, Min, Max, Abs, Lerp, Step, SmoothStep
+
+**Construct/View OOP Layer (2026-03 — 2026-04):**
+
+- `Construct<T>` CRTP base — lifecycle management, auto-tick registration via C++20 concept detection
+- Tick hooks: PrePhysics, PostPhysics, PhysicsStep, ScalarUpdate (zero-cost if not implemented)
+- `ConstructBatch` — type-erased, non-virtual tick dispatch. Stable-sorted by (TickGroup, OrderWithinGroup)
+- `TickGroup` enum: PreInput → Default → PostDefault → Camera → Late (fixed engine order)
+- `Owned<T>` — value-member composition for child Constructs. Zero allocation, reverse-declaration-order cleanup
+- `ConstructView<TEntity>` — generic view template, creates a backing ECS entity of any EntityView type,
+  auto-rehydrates FieldProxy cursors on frame advance and defrag. Partition auto-derived from entity's components.
+- `ConstructRegistry` — type-erased registry of live Constructs, deferred destruction
+- `CameraConstruct` — in-world camera (LogicView, yaw/pitch/FOV state), swappable ActiveCamera on LogicThread
+- `JoltCharacter` — Jolt CharacterVirtual wrapper for Construct-driven character controllers (capsule shape,
+  grounding, stair stepping, slope sliding). Decoupled from JoltBody component — no Jolt body in the ECS.
+- `JoltLayers` — shared header for Jolt object/broadphase layer constants (extracted from JoltPhysics.cpp)
+- `JoltPhysics::GetTempAllocator()` — public accessor for passing TempAllocator to JoltCharacter::Update
+- PlayerConstruct proven: ConstructView + JoltCharacter + 2 Owned CameraConstructs + WASD/mouse look
+- Component renames: ColorData→CColor, Forces→CForces, JoltBody→CJoltBody, MeshRef→CMeshRef,
+  RigidBody→CRigidBody, Rotation→CRotation, Scale→CScale, ShapeData→CShape, TransRot→CTransform,
+  Translation→CTranslation
+- Entity types: EInstanced (full DUAL: transform+physics+mesh+color+scale),
+  EPlayer (DUAL without JoltBody: transform+mesh+color+scale), EPoint (minimal)
+- Fix: `GetOrCreateArchetype` now passes `ClassSystemID` to `BuildLayout` — entities created at runtime
+  via ConstructView get correct partition placement (was defaulting to LOGIC partition)
+
+**Game Flow (2026-04 — in progress):**
+
+- `FlowManager` — state stack manager, travel primitives, World/Level/Mode lifetime management
+- `GameState` — base class for flow states (menu, loading, gameplay, post-match). Declares requirements
+  (NeedsWorld, NeedsLevel, NeedsNetSession). FlowManager enforces requirements during transitions.
+- `GameMode` — server-authoritative rules runtime. One per World. Inheritable base (not CRTP). Users
+  opt into Construct ticks via multiple inheritance when needed.
+- Travel toolbox model — three orthogonal levers (domain lifetime, Construct lifetime, network continuity)
+  instead of a single travel policy. Games compose primitives to build their flow.
+- Persistent Constructs survive World resets via reinitialization mechanism (replaces Soul concept).
+- Bootstrap contract: engine loads a single user-specified default state by name; user code owns the
+  entire flow graph from there.
+- Vocabulary: State (drives app), Mode (drives match), Level (content chunk)
+
+**Networking (2026-03 — in progress):**
+
+- `GNSContext` — GameNetworkingSockets wrapper (header isolation, static link)
+- `NetConnectionManager` — server/client socket API, Listen/Connect, per-connection state (RTT, OwnerID, sequence
+  tracking)
+- `NetThread` — dedicated network poller at NetworkUpdateHz (default 30Hz), routes InputFrame messages to correct World
+- `ReplicationSystem` — server-side entity replication:
+    - Walks Registry each net tick, sends EntitySpawn (reliable) for new entities
+    - Sends batched StateCorrection (unreliable) with authoritative transforms
+    - `RegisterEntity()` pre-assigns EntityNetHandle with OwnerID before replication
+    - `HandleEntitySpawn()` / `HandleStateCorrections()` — client-side entity creation and correction
+- `EntityNetHandle` — packed uint32 (NetOwnerID:8 + NetIndex:24) for network identity
+- `World` abstraction — self-contained simulation (Registry + Physics + Logic + Input + SpawnSync)
+- PIE loopback: server + N client Worlds in same process, loopback GNS connections
+- Focus-based input routing: `InputTargetWorld` pointer routes PumpEvents to focused PIE viewport
+- Known gaps: no delta compression, no interest management, no entity destruction replication, no ownership camera
 
 **Architecture & Config Fixes:**
 - `MAX_FIELDS_PER_ARCHETYPE = 256` in Types.h
@@ -233,10 +293,11 @@ in the long run.
 
 ### Designed, Not Yet Implemented
 
-- [ ] **Construct/View OOP layer** — `Construct<T>` (CRTP lifecycle owner), `Owned<T>` (composition), `ConstructBatch` (
-  type-erased tick dispatch), `TickGroup` enum, View family (Instance/Phys/Render/Logic), defrag listeners, spawn
-  handshake integration for registration
-- [x] **Dirty-bit selective GPU upload** — RenderAck handshake, 5 dirty bitplanes, AVX2 scan + ctzll scatter
+- [x] **Construct/View OOP layer** — `Construct<T>`, `Owned<T>`, `ConstructView<TEntity>`, `ConstructBatch`,
+  `TickGroup`, JoltCharacter, defrag listeners, spawn handshake integration (2026-04)
+- [x] **Dirty-bit selective GPU upload** — RenderAck handshake, 5 dirty bitplanes, AVX2 scan + ctzll scatter (2026-03)
+- [ ] **Game Flow implementation** — FlowManager state transitions, World create/destroy wiring, level load/unload,
+  GameMode lifecycle, persistent Construct reinitialization
 - [ ] **Fixed-point coordinate system** — `Fixed32` value type (1 unit = 0.1mm), `FieldProxy<Fixed32, WIDTH>`, render thread conversion to camera-relative float32 at upload, Jolt bridge (int32↔float32 at cell boundary)
 - [ ] **ConstraintEntity system** — constraint entities in LOGIC partition, `ConstraintType` enum (Rigid/Hinge/BallSocket/Prismatic/Distance/Spring), render thread rigid attachment pass (2-pass depth ordering), physics root determination
 - [ ] **Space partition cell registry** — cell world origins as float64/int64, cell assignment at entity spawn, cross-cell reparenting
@@ -253,6 +314,10 @@ in the long run.
 - [x] **Render pipeline optimization** — dirty-bit selective GPU upload (2026-03-29)
 - [x] **Rollback determinism** — full slab rollback + Jolt SaveState/RestoreState, byte-perfect ECS + Jolt determinism
   verified (2026-03-29)
+- [x] **Construct/View OOP layer** — full stack proven with PlayerConstruct (2026-04)
+- [x] **Basic networking** — GNS, entity spawn replication, state corrections, PIE loopback (2026-04, in progress)
+- [ ] **Delta compression** — send only changed fields instead of full state corrections
+- [ ] **Owned entity camera** — client detects its owned entity via NetOwnerID, attaches follow camera
 - [ ] **Frustum culling** — SIMD 6-plane test, GPU-side predicate enhancement
 - [ ] **State-sorted rendering** — 64-bit sort keys, GPU radix sort after scatter
 - [ ] **Rollback netcode** — network integration using proven rollback substrate + dirty resimulation
@@ -281,5 +346,35 @@ in the long run.
 - **Dirty bit = rollback blast radius:** The same bit 30 that drives GPU upload drives selective
   resimulation during rollback. The dirty set from a correction expands naturally through update
   logic to the exact set of entities that need recomputation — no manual dependency tracking.
+
+### Replay & Recording — Architecture Wins
+
+The slab-based SoA layout means replay recording is nearly free. All deterministic simulation state already lives in
+contiguous, trivially-copyable field arrays within the slabs. Adding replay is just serialization in
+`PropagateFrame` — no new infrastructure required.
+
+**Compression:** SoA field arrays compress exceptionally well. Homogeneous float arrays (all `PosX`, all `PosY`, etc.)
+have high spatial coherence. Delta compression between frames yields mostly zeros since most entities are
+near-stationary
+per tick. Far superior to AoS replay formats where mixed types destroy compression ratios.
+
+**Free wins from existing architecture:**
+
+- **Server & client replay** — Same slab data, same serialization path, deterministic output regardless of recorder
+- **Kill cam / rewind** — Slab snapshots already in a ring buffer; rewind is just indexing backward and re-rendering
+  with a different camera target
+- **Spectator scrubbing** — Random access seek to any frame via snapshot index, resume simulation forward
+- **Anti-cheat validation** — Diff server vs client slab timelines; any divergence flags cheating
+- **Bandwidth estimation** — Compressed delta size between frames represents the theoretical minimum sync payload for
+  netcode
+
+**Sub-tick event replay:** Input events are timestamped at actual ms read time (sub-tick precision). Replay files
+preserve
+exact event timing within frames, not just frame-quantized approximations. Combined with deterministic resim, replays
+reproduce identical outcomes.
+
+**With rollback enabled:** Retroactive event insertion from replay data enables replaying remote client events at their
+original timestamps and resimming forward. Correct kill attribution across latency gaps. Frame-perfect reproduction of
+multiplayer sessions from any participant's perspective.
 
 ---

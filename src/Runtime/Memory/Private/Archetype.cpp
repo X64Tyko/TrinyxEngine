@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstring>
 #include <FieldMeta.h>
+#include "ReflectionRegistry.h"
 
 #include "Registry.h"
 
@@ -51,7 +52,7 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& c
 	constexpr size_t ReservedHeaderSpace = Chunk::HEADER_SIZE;
 
 	// Entity class declares chunk size via EntitiesPerChunk or inherits the default (256).
-	EntitiesPerChunk = MetaRegistry::Get().EntityGetters[ArchClassID].EntitiesPerChunk;
+	EntitiesPerChunk = ReflectionRegistry::Get().EntityGetters[ArchClassID].EntitiesPerChunk;
 
 	size_t currentOffset   = ReservedHeaderSpace;
 	uint8_t ArchfieldIndex = 0;
@@ -60,9 +61,9 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& c
 	{
 		ComponentTypeID typeID = comp.TypeID;
 
-		const std::vector<FieldMeta>* fields    = ComponentFieldRegistry::Get().GetFields(typeID);
-		const CacheTier temporalTier            = ComponentFieldRegistry::Get().GetTemporalTier(typeID);
-		const uint8_t cacheSlotID               = ComponentFieldRegistry::Get().GetCacheSlotIndex(typeID);
+		const std::vector<FieldMeta>* fields    = ReflectionRegistry::Get().GetFields(typeID);
+		const CacheTier temporalTier            = ReflectionRegistry::Get().GetTemporalTier(typeID);
+		const uint8_t cacheSlotID               = ReflectionRegistry::Get().GetCacheSlotIndex(typeID);
 		const ComponentCacheBase* temporalCache = reg->GetCache(temporalTier);
 
 		if (!fields || fields->empty())
@@ -87,6 +88,7 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& c
 													  typeID,
 													  temporalTier,
 													  field.ValueType,
+													  field.RefAssetType,
 													  field.Size,
 													  temporalCache ? temporalCache->GetTotalFrameCount() : 1, // 1 frame for cold — makes frame % 1 == 0, no branch needed
 													  temporalCache ? temporalCache->GetFrameStride() : 0,
@@ -200,7 +202,7 @@ void Archetype::RemoveEntity(size_t chunkIndex, uint32_t localIndex, uint32_t ar
 	{
 		Chunk* chunk                = Chunks[chunkIndex];
 		ComponentTypeID flagsTypeID = CacheSlotMeta<>::StaticTypeID();
-		FieldKey flagKey{flagsTypeID, ComponentFieldRegistry::Get().GetCacheSlotIndex(flagsTypeID), 0};
+		FieldKey flagKey{flagsTypeID, ReflectionRegistry::Get().GetCacheSlotIndex(flagsTypeID), 0};
 		auto* flagDesc = ArchetypeFieldLayout.find(flagKey);
 		assert(flagDesc && "Flags field missing from archetype layout");
 
@@ -228,7 +230,7 @@ void Archetype::RemoveEntity(size_t chunkIndex, uint32_t localIndex, uint32_t ar
 // Used by external code that needs per-field access without going through BuildFieldArrayTable.
 std::vector<void*> Archetype::GetFieldArrays(Chunk* targetChunk, ComponentTypeID typeID)
 {
-	ComponentFieldRegistry& cfr          = ComponentFieldRegistry::Get();
+	auto& cfr                            = ReflectionRegistry::Get();
 	const std::vector<FieldMeta>* fields = cfr.GetFields(typeID);
 
 	if (!fields || fields->empty())

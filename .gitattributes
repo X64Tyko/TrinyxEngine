@@ -1,0 +1,5 @@
+# Exclude all vendored/third-party libraries from GitHub language stats
+# and git diff/log stats.
+
+libs/** linguist-vendored
+libs/** -diff

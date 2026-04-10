@@ -31,4 +31,13 @@ private:
 	void RecordOverlay(VkCommandBuffer)
 	{
 	}
+
+	void UpdateViewportSlabs()
+	{
+	}
+
+	void RecordFrame(FrameSync& frame, uint32_t imageIndex)
+	{
+		RecordCommandBuffer(frame, imageIndex);
+	}
 };

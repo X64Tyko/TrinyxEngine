@@ -106,6 +106,10 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     "${CMAKE_SOURCE_DIR}/src/Runtime/Input/Public"
         "${CMAKE_SOURCE_DIR}/src/Runtime/Physics/Public"
         "${CMAKE_SOURCE_DIR}/src/Runtime/Assets/Public"
+        "${CMAKE_SOURCE_DIR}/src/Runtime/Net/Public"
+        "${CMAKE_SOURCE_DIR}/src/Runtime/Construct/Public"
+        "${CMAKE_SOURCE_DIR}/src/Runtime/Entities/Public"
+        "${CMAKE_SOURCE_DIR}/src/Runtime/Flow/Public"
         "${CMAKE_SOURCE_DIR}/src/Editor/Public"
 )
 
@@ -143,8 +147,10 @@ endif ()
 target_link_libraries(${PROJECT_NAME} PUBLIC Vulkan::Vulkan)
 
 # D. Jolt Physics
-target_link_libraries(${PROJECT_NAME} PUBLIC Jolt)
-target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC "${JOLT_PATH}")
+# Jolt::Jolt works whether Jolt was found via find_package (installed/vcpkg)
+# or built from the vendored submodule (source build creates a Jolt::Jolt alias).
+# Include dirs come from the target's interface — no manual path needed.
+target_link_libraries(${PROJECT_NAME} PUBLIC Jolt::Jolt)
 
 # F. GameNetworkingSockets (static)
 if (TARGET GameNetworkingSockets_s)
@@ -167,10 +173,68 @@ target_compile_definitions(${PROJECT_NAME} PUBLIC
 # ---------------------------------------------------------------------------
 # Slang shader compilation
 # ---------------------------------------------------------------------------
+# slangc is a pre-built binary — not built from source. The libs/slang/
+# directory holds headers + runtime libs. The compiler binary is fetched
+# from GitHub Releases on first configure if it isn't already present.
+# Version must match the runtime libs in libs/slang/lib/.
+set(_slang_version "2026.3.1")
+
 if(WIN32)
     set(SLANGC "${CMAKE_SOURCE_DIR}/libs/slang/bin/slangc.exe")
+    set(_slang_archive_name "slang-${_slang_version}-windows-x86_64.zip")
 else()
     set(SLANGC "${CMAKE_SOURCE_DIR}/libs/slang/bin/slangc")
+    set(_slang_archive_name "slang-${_slang_version}-linux-x86_64.tar.gz")
+endif()
+
+if(NOT EXISTS "${SLANGC}")
+    set(_slang_url "https://github.com/shader-slang/slang/releases/download/v${_slang_version}/${_slang_archive_name}")
+    set(_slang_archive "${CMAKE_BINARY_DIR}/${_slang_archive_name}")
+
+    message(STATUS "slangc not found — downloading Slang ${_slang_version}...")
+    file(DOWNLOAD "${_slang_url}" "${_slang_archive}"
+        SHOW_PROGRESS
+        STATUS _slang_dl_status
+        TLS_VERIFY ON
+    )
+    list(GET _slang_dl_status 0 _slang_dl_code)
+    if(NOT _slang_dl_code EQUAL 0)
+        list(GET _slang_dl_status 1 _slang_dl_error)
+        message(FATAL_ERROR "Failed to download slangc: ${_slang_dl_error}\nURL: ${_slang_url}")
+    endif()
+
+    message(STATUS "Extracting Slang ${_slang_version}...")
+    set(_slang_tmp "${CMAKE_BINARY_DIR}/_slang_extract_tmp")
+    file(MAKE_DIRECTORY "${_slang_tmp}")
+    file(ARCHIVE_EXTRACT INPUT "${_slang_archive}" DESTINATION "${_slang_tmp}")
+    file(REMOVE "${_slang_archive}")
+
+    # The archive may have a top-level subdirectory or place files at the root.
+    # GLOB_RECURSE finds slangc regardless of nesting depth.
+    file(GLOB_RECURSE _slangc_found "${_slang_tmp}/slangc*" "${_slang_tmp}/slangc.exe")
+    if(NOT _slangc_found)
+        file(REMOVE_RECURSE "${_slang_tmp}")
+        message(FATAL_ERROR "slangc not found after extraction. Check archive: ${_slang_url}")
+    endif()
+    # Determine the directory where slangc lives inside the extracted tree.
+    list(GET _slangc_found 0 _slangc_in_tmp)
+    get_filename_component(_slang_bin_in_tmp "${_slangc_in_tmp}" DIRECTORY)
+
+    # Copy all binaries from that directory into libs/slang/bin/.
+    file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/libs/slang/bin")
+    file(GLOB _slang_bin_files "${_slang_bin_in_tmp}/*")
+    foreach(_f ${_slang_bin_files})
+        file(COPY "${_f}" DESTINATION "${CMAKE_SOURCE_DIR}/libs/slang/bin")
+    endforeach()
+    file(REMOVE_RECURSE "${_slang_tmp}")
+
+    if(NOT EXISTS "${SLANGC}")
+        message(FATAL_ERROR
+            "slangc extraction failed. Please manually download Slang ${_slang_version} from:\n"
+            "  ${_slang_url}\n"
+            "and place slangc(.exe) in libs/slang/bin/")
+    endif()
+    message(STATUS "slangc ready: ${SLANGC}")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -264,11 +328,26 @@ endif ()
 add_custom_target(TrinyxShaders ALL DEPENDS ${SLANG_SPIRV_OUTPUTS})
 add_dependencies(${PROJECT_NAME} TrinyxShaders)
 
-# E. Tracy platform-specific libraries
+# E. Tracy — target-scoped includes, definitions, and platform link libraries.
+# Kept here (not in root CMakeLists) so Tracy headers/defs don't leak into
+# third-party subprojects (GNS, Jolt, etc.).
 if(ENABLE_TRACY)
+    target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC "${TRACY_PATH}/public")
+    target_compile_definitions(${PROJECT_NAME} PUBLIC
+        TRACY_ENABLE
+        TRACY_PROFILE_LEVEL=${TRACY_PROFILE_LEVEL}
+        TRACY_ON_DEMAND
+        TRACY_NO_ROCTRACER=1
+        TRACY_NO_ROCPROF=1
+    )
     if(WIN32)
         target_link_libraries(${PROJECT_NAME} PUBLIC ws2_32 dbghelp)
     elseif(UNIX)
         target_link_libraries(${PROJECT_NAME} PUBLIC pthread dl)
+        # Some toolchains / distros still put clock_gettime in librt
+        find_library(_librt rt)
+        if (_librt)
+            target_link_libraries(${PROJECT_NAME} PUBLIC rt)
+        endif ()
     endif()
 endif()

@@ -8,6 +8,7 @@
 #include "Archetype.h"
 #include "EntityRecord.h"
 #include "FlatMap.h"
+#include "ReflectionRegistry.h"
 #include "Schema.h"
 #include "Signature.h"
 #include "TemporalComponentCache.h"
@@ -79,9 +80,9 @@ public:
 
 	// --- Lifecycle dispatch (Brain thread) ---
 
-	void InvokeScalarUpdate(double dt);
-	void InvokePrePhys(double dt);
-	void InvokePostPhys(double dt);
+	void InvokeScalarUpdate(SimFloat dt);
+	void InvokePrePhys(SimFloat dt);
+	void InvokePostPhys(SimFloat dt);
 
 	// --- Slab accessors (used by LogicThread/RenderThread at init time) ---
 
@@ -101,6 +102,26 @@ public:
 	// Reverse lookup: cache slot → record (read-only copy). Returns invalid record if not found.
 	EntityRecord GetRecordByCache(EntityCacheHandle cacheHandle) const;
 
+	// Lookup: EntityHandle → record (read-only copy). Returns invalid record if not found.
+	EntityRecord GetRecord(EntityHandle handle) const;
+
+	// Bind/unbind a callback on an entity's OnCacheSlotChange (defrag listener).
+	template <typename T, void(T::*MemFn)(uint32_t, uint32_t)>
+	void BindOnCacheSlotChange(EntityHandle handle, T* obj)
+	{
+		GlobalEntityHandle gHandle = GlobalEntityRegistry.LookupGlobalHandle(handle);
+		EntityRecord* record       = GlobalEntityRegistry.Records[gHandle.GetIndex()];
+		if (record) record->OnCacheSlotChange.template Bind<T, MemFn>(obj);
+	}
+
+	template <typename T, void(T::*MemFn)(uint32_t, uint32_t)>
+	void UnbindOnCacheSlotChange(EntityHandle handle, T* obj)
+	{
+		GlobalEntityHandle gHandle = GlobalEntityRegistry.LookupGlobalHandle(handle);
+		EntityRecord* record       = GlobalEntityRegistry.Records[gHandle.GetIndex()];
+		if (record) record->OnCacheSlotChange.template Unbind<T, MemFn>(obj);
+	}
+
 	// Reverse lookup: cache slot → GHandle. Returns default GlobalEntityHandle() if not found.
 	GlobalEntityHandle FindEntityByLocation(EntityCacheHandle cacheHandle) const;
 
@@ -113,10 +134,12 @@ public:
 private:
 	friend class Archetype;
 	friend class LogicThread;
+	friend class ReplicationSystem;
 	friend struct EntityBuilder;
 	friend struct EntityRecord;
 	friend struct EntityArchive;
 	friend class TrinyxEngine;
+	friend class World;
 	friend class EditorContext;
 
 	void SetPhysics(JoltPhysics* physics) { PhysicsPtr = physics; }
@@ -259,7 +282,7 @@ bool Registry::HasComponent(EntityHandle lHandle)
 {
 	constexpr ComponentTypeID typeID = T::StaticTypeID();
 	const ClassID classType          = lHandle.GetTypeID();
-	MetaRegistry& mr                 = MetaRegistry::Get();
+	auto& mr                         = ReflectionRegistry::Get();
 	return (mr.ClassToArchetype[classType] & typeID) == typeID;
 }
 
@@ -308,7 +331,7 @@ std::vector<Archetype*> Registry::ClassQuery()
 	return Results;
 }
 
-inline void Registry::InvokeScalarUpdate(double dt)
+inline void Registry::InvokeScalarUpdate(SimFloat dt)
 {
 	TNX_ZONE_C(TNX_COLOR_LOGIC);
 
@@ -334,7 +357,7 @@ inline void Registry::InvokeScalarUpdate(double dt)
 
 	for (auto& [sig, arch] : Archetypes)
 	{
-		UpdateFunc ScalarUpdate = MetaRegistry::Get().EntityGetters[sig.ID].ScalarUpdate;
+		UpdateFunc ScalarUpdate = ReflectionRegistry::Get().EntityGetters[sig.ID].ScalarUpdate;
 		if (!ScalarUpdate) continue;
 
 		size_t size = arch->Chunks.size();
@@ -365,7 +388,7 @@ inline void Registry::InvokeScalarUpdate(double dt)
 	VolatileSlab.UnlockFrameWrite();
 }
 
-inline void Registry::InvokePrePhys(double dt)
+inline void Registry::InvokePrePhys(SimFloat dt)
 {
 	TNX_ZONE_C(TNX_COLOR_LOGIC);
 
@@ -391,7 +414,7 @@ inline void Registry::InvokePrePhys(double dt)
 
 	for (auto& [sig, arch] : Archetypes)
 	{
-		UpdateFunc prePhys = MetaRegistry::Get().EntityGetters[sig.ID].PrePhys;
+		UpdateFunc prePhys = ReflectionRegistry::Get().EntityGetters[sig.ID].PrePhys;
 		if (!prePhys) continue;
 
 		// Capture only what fits in 48 bytes: 5 pointers/values = 40 bytes
@@ -423,7 +446,7 @@ inline void Registry::InvokePrePhys(double dt)
 	VolatileSlab.UnlockFrameWrite();
 }
 
-inline void Registry::InvokePostPhys(double dt)
+inline void Registry::InvokePostPhys(SimFloat dt)
 {
 	TNX_ZONE_C(TNX_COLOR_LOGIC);
 
@@ -449,7 +472,7 @@ inline void Registry::InvokePostPhys(double dt)
 
 	for (auto& [sig, arch] : Archetypes)
 	{
-		UpdateFunc PostPhys = MetaRegistry::Get().EntityGetters[sig.ID].PostPhys;
+		UpdateFunc PostPhys = ReflectionRegistry::Get().EntityGetters[sig.ID].PostPhys;
 		if (!PostPhys) continue;
 
 		size_t size = arch->Chunks.size();

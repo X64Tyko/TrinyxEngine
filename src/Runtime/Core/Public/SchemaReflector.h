@@ -36,7 +36,7 @@ struct PrefabReflector
 		VALIDATE_ENTITY_HAS_SCHEMA(Class);
 		//VALIDATE_ENTITY_IS_STANDARD_LAYOUT(Class);
 
-		MetaRegistry::Get().RegisterPrefab<Class>();
+		ReflectionRegistry::Get().RegisterPrefab<Class>();
 
 		constexpr auto schema = Class::DefineSchema();
 
@@ -62,7 +62,7 @@ struct PrefabReflector
 			VALIDATE_COMPONENT_IS_POD(CompType);
 
 			// Register with the derived class (Class), not the base class
-			MetaRegistry::Get().RegisterPrefabComponent<Class, CompType>();
+			ReflectionRegistry::Get().RegisterPrefabComponent<Class, CompType>();
 		}
 	}
 };
@@ -88,7 +88,7 @@ static void RegisterFieldsImpl(std::index_sequence<Is...>)
 		if (Tier == CacheTier::Temporal) Tier = CacheTier::Volatile;
 #endif
 	}
-	ComponentFieldRegistry::Get().RegisterFields(typeID, Derived::ComponentTypeName, std::move(fieldMetas), Tier, Derived::StaticTemporalIndex());
+	ReflectionRegistry::Get().RegisterFields(typeID, Derived::ComponentTypeName, std::move(fieldMetas), Tier, Derived::StaticTemporalIndex());
 }
 
 // Compile-time C++ type → FieldValueType mapping.
@@ -114,13 +114,21 @@ static FieldMeta ExtractFieldMeta(FieldType<Type, WIDTH> Derived::* member)
 
 	const char* name = (Index < Derived::FieldNames.size()) ? Derived::FieldNames[Index] : "unknown";
 
+	// Read asset type annotation if the component provides FieldRefTypes
+	AssetType refType = AssetType::Invalid;
+	if constexpr (requires { Derived::FieldRefTypes; })
+	{
+		if constexpr (Index < std::tuple_size_v<std::remove_cvref_t<decltype(Derived::FieldRefTypes)>>) refType = Derived::FieldRefTypes[Index];
+	}
+
 	return FieldMeta{
 		sizeof(Type),
 		FIELD_ARRAY_ALIGNMENT, // 32 or 64 bytes depending on CMake option
 		offset,
 		0, // OffsetInChunk computed later by Archetype::BuildLayout
 		name,
-		DeduceFieldValueType<Type>()
+		DeduceFieldValueType<Type>(),
+		refType
 	};
 }
 
@@ -329,3 +337,29 @@ FORCE_INLINE void ForEachField(Func&& func)
     static inline CacheTier TemporalTier = CacheTier::Volatile; \
     static inline SystemID SystemTypeID = SystemID::SysID; \
     TNX_REGISTER_FIELDS(ComponentType, __VA_ARGS__)
+
+// ---------------------------------------------------------------------------
+// GameState / GameMode self-registration macros
+// ---------------------------------------------------------------------------
+
+#define TNX_REGISTER_STATE(StateClass) \
+    namespace { \
+        struct _##StateClass##_StateReg { \
+            _##StateClass##_StateReg() { \
+                ReflectionRegistry::Get().RegisterState(#StateClass, \
+                    []() -> std::unique_ptr<GameState> { return std::make_unique<StateClass>(); }); \
+            } \
+        }; \
+        [[maybe_unused]] TNX_USED_ATTR static _##StateClass##_StateReg _##StateClass##_state_reg; \
+    }
+
+#define TNX_REGISTER_MODE(ModeClass) \
+    namespace { \
+        struct _##ModeClass##_ModeReg { \
+            _##ModeClass##_ModeReg() { \
+                ReflectionRegistry::Get().RegisterMode(#ModeClass, \
+                    []() -> std::unique_ptr<GameMode> { return std::make_unique<ModeClass>(); }); \
+            } \
+        }; \
+        [[maybe_unused]] TNX_USED_ATTR static _##ModeClass##_ModeReg _##ModeClass##_mode_reg; \
+    }

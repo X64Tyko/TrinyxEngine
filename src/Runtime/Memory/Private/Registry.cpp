@@ -111,12 +111,12 @@ Archetype* Registry::GetOrCreateArchetype(const Signature& sig, const ClassID& i
 
 	// Build component layout from class ID
 	std::vector<ComponentMetaEx> Components;
-	MetaRegistry& MR = MetaRegistry::Get();
+	auto& MR = ReflectionRegistry::Get();
 
 	auto compListIt = MR.ClassToComponentList.find(id);
 	if (compListIt != MR.ClassToComponentList.end())
 	{
-		ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
+		auto& CFR = ReflectionRegistry::Get();
 
 		for (ComponentTypeID compTypeID : compListIt->second)
 		{
@@ -124,7 +124,11 @@ Archetype* Registry::GetOrCreateArchetype(const Signature& sig, const ClassID& i
 		}
 	}
 
-	NewArchetype->BuildLayout(this, Components);
+	SystemID sysID = SystemID::None;
+	auto sysIt     = MR.ClassSystemID.find(id);
+	if (sysIt != MR.ClassSystemID.end()) sysID = sysIt->second;
+
+	NewArchetype->BuildLayout(this, Components, sysID);
 
 	Archetypes[key] = NewArchetype;
 	return NewArchetype;
@@ -260,7 +264,7 @@ void Registry::CreateInternal(ClassID classID, std::span<GlobalEntityHandle> out
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
 	const size_t count = outHandles.size();
-	MetaRegistry& MR   = MetaRegistry::Get();
+	auto& MR           = ReflectionRegistry::Get();
 	Signature sig      = MR.ClassToArchetype[classID];
 
 #ifdef _DEBUG
@@ -380,6 +384,14 @@ EntityRecord Registry::GetRecordByCache(EntityCacheHandle cacheHandle) const
 	return record;
 }
 
+EntityRecord Registry::GetRecord(EntityHandle handle) const
+{
+	GlobalEntityHandle gHandle = GlobalEntityRegistry.LookupGlobalHandle(handle);
+	EntityRecord record        = GlobalEntityRegistry.Records[gHandle.GetIndex()];
+	if (!record.IsValid() || record.GetGeneration() != gHandle.GetGeneration()) return EntityRecord{};
+	return record;
+}
+
 GlobalEntityHandle Registry::FindEntityByLocation(EntityCacheHandle cacheHandle) const
 {
 	GlobalEntityHandle gHandle = GlobalEntityRegistry.LookupGlobalHandle(cacheHandle);
@@ -390,8 +402,7 @@ GlobalEntityHandle Registry::FindEntityByLocation(EntityCacheHandle cacheHandle)
 
 void Registry::InitializeArchetypes()
 {
-	MetaRegistry& MR            = MetaRegistry::Get();
-	ComponentFieldRegistry& CFR = ComponentFieldRegistry::Get();
+	auto& MR = ReflectionRegistry::Get();
 
 	for (auto& Arch : MR.ClassToArchetype)
 	{
@@ -403,7 +414,7 @@ void Registry::InitializeArchetypes()
 			std::vector<ComponentMetaEx> Components;
 			for (auto& CompID : MR.ClassToComponentList[Arch.first])
 			{
-				Components.push_back(CFR.GetComponentMeta(CompID));
+				Components.push_back(MR.GetComponentMeta(CompID));
 			}
 			NewArch->BuildLayout(this, Components, MR.ClassSystemID[Arch.first]);
 		}

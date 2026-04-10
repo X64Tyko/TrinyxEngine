@@ -1,8 +1,12 @@
 #include "EditorContext.h"
 #include "EditorPanel.h"
 #include "EntityBuilder.h"
+#include "FlowManager.h"
+#include "Json.h"
+#include "ReflectionRegistry.h"
 #include "JoltPhysics.h"
 #include "TrinyxEngine.h"
+#include "World.h"
 #include "EditorRenderer.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -14,11 +18,16 @@
 #include "MeshManager.h"
 #include "Registry.h"
 #include "CacheSlotMeta.h"
+#include "NetConnectionManager.h"
+#include "NetThread.h"
+#include "ReplicationSystem.h"
 #include "TemporalComponentCache.h"
 #include <cctype>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <SDL3/SDL.h>
 
 // Panel headers
@@ -28,8 +37,12 @@
 #include "Panels/LogPanel.h"
 #include "Panels/ContentBrowserPanel.h"
 
-EditorContext::EditorContext()  = default;
-EditorContext::~EditorContext() = default;
+EditorContext::EditorContext() = default;
+
+EditorContext::~EditorContext()
+{
+	if (bPIEActive) StopPIE();
+}
 
 void EditorContext::Initialize(TrinyxEngine* engine, LogicThread* logic, MeshManager* meshMgr)
 {
@@ -76,18 +89,48 @@ void EditorContext::Initialize(TrinyxEngine* engine, LogicThread* logic, MeshMan
 
 void EditorContext::LoadScene(const std::string& path, bool bReset)
 {
-	EnginePtr->Spawn([path, bReset](Registry* reg)
+	// Read file and parse JSON so we can extract metadata before spawning
+	std::ifstream file(path);
+	if (!file.is_open())
+	{
+		LOG_ERROR_F("[Editor] Failed to open scene '%s'", path.c_str());
+		return;
+	}
+	std::ostringstream ss;
+	ss << file.rdbuf();
+	JsonValue root = JsonParse(ss.str());
+	if (root.IsNull())
+	{
+		LOG_ERROR_F("[Editor] Failed to parse JSON from '%s'", path.c_str());
+		return;
+	}
+
+	// Extract scene metadata (defaultState, defaultMode)
+	auto meta = EntityBuilder::ParseSceneMeta(root);
+
+	// Spawn entities via handshake
+	EnginePtr->Spawn([&root, bReset](Registry* reg)
 	{
 		if (bReset) reg->ResetRegistry();
-		EntityBuilder::SpawnFromFile(reg, path.c_str());
+		// Detect format: prefab vs scene
+		if (root.Find("entities")) EntityBuilder::SpawnScene(reg, root);
+		else EntityBuilder::SpawnEntity(reg, root);
 	});
 
-	State.CurrentScenePath = path;
-	State.CurrentSceneName = path;
-	size_t lastSlash       = State.CurrentSceneName.find_last_of('/');
-	if (lastSlash != std::string::npos) State.CurrentSceneName = State.CurrentSceneName.substr(lastSlash + 1);
-	size_t dot = State.CurrentSceneName.find_last_of('.');
-	if (dot != std::string::npos) State.CurrentSceneName = State.CurrentSceneName.substr(0, dot);
+	State.CurrentScenePath  = path;
+	State.CurrentSceneName  = meta.Name.empty() ? path : meta.Name;
+	State.SceneDefaultState = meta.DefaultState;
+	State.SceneDefaultMode  = meta.DefaultMode;
+
+	// Fallback: derive name from filename if not in metadata
+	if (meta.Name.empty())
+	{
+		size_t lastSlash = State.CurrentSceneName.find_last_of('/');
+		if (lastSlash != std::string::npos) State.CurrentSceneName = State.CurrentSceneName.substr(lastSlash + 1);
+		size_t dot = State.CurrentSceneName.find_last_of('.');
+		if (dot != std::string::npos) State.CurrentSceneName = State.CurrentSceneName.substr(0, dot);
+	}
+
 	State.bSceneDirty = false;
 	State.ClearSelection();
 }
@@ -99,7 +142,7 @@ void EditorContext::LoadScene(const std::string& path, bool bReset)
 /// Find a float field pointer by debug name in an archetype's field array table.
 static float* FindFieldFloat(Archetype* arch, void** fieldArrayTable, const char* name, uint32_t localIndex)
 {
-	const auto& cfr = ComponentFieldRegistry::Get();
+	const auto& cfr = ReflectionRegistry::Get();
 
 	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 	{
@@ -285,7 +328,7 @@ void EditorContext::DrawGizmo()
 		State.bSceneDirty = true;
 
 		// Mark entity dirty for GPU upload via CacheSlotMeta::Flags (bit 30)
-		Archetype::FieldKey flagKey{CacheSlotMeta<>::StaticTypeID(), ComponentFieldRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID()), 0};
+		Archetype::FieldKey flagKey{CacheSlotMeta<>::StaticTypeID(), ReflectionRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID()), 0};
 		auto* flagDesc = State.SelectedArchetype->ArchetypeFieldLayout.find(flagKey);
 		if (flagDesc)
 		{
@@ -415,6 +458,18 @@ void EditorContext::BuildFrame()
 	DrawImportDialog();
 	DrawUnsavedWarning();
 
+	// PIE viewport panels
+	if (bPIEActive)
+	{
+		if (ServerViewport) DrawViewportPanel("Server", *ServerViewport);
+		for (size_t i = 0; i < PIEClients.size(); ++i)
+		{
+			char title[32];
+			snprintf(title, sizeof(title), "Client %zu", i + 1);
+			DrawViewportPanel(title, *PIEClients[i].Viewport);
+		}
+	}
+
 	// Debug windows
 	if (bShowDemoWindow) ImGui::ShowDemoWindow(&bShowDemoWindow);
 	if (bShowMetrics) ImGui::ShowMetricsWindow(&bShowMetrics);
@@ -423,8 +478,17 @@ void EditorContext::BuildFrame()
 	// Engine gets input when: right-click held in viewport, or Play is running.
 	const ImGuiIO& io         = ImGui::GetIO();
 	bool rightClickInViewport = ImGui::IsMouseDown(ImGuiMouseButton_Right) && !io.WantCaptureMouse;
-	bool playing              = LogicPtr && !LogicPtr->IsSimPaused() && bHasSnapshot;
-	EnginePtr->Render->SetEditorOwnsKeyboard(!rightClickInViewport && !playing);
+	bool playing              = (LogicPtr && !LogicPtr->IsSimPaused() && bHasSnapshot) || bPIEActive;
+	// Escape requests PIE stop — deferred to after the ImGui frame completes
+	// so we don't free GPU resources (descriptor sets, images) mid-frame.
+	if (bPIEActive && ImGui::IsKeyPressed(ImGuiKey_Escape)) bPIEStopRequested = true;
+
+	// Shift+F1 toggles mouse between engine and editor during PIE/Play.
+	// When released, editor gets mouse for panel interaction; re-press to return control.
+	if (playing && ImGui::IsKeyPressed(ImGuiKey_F1) && io.KeyShift) bMouseReleasedDuringPlay = !bMouseReleasedDuringPlay;
+	if (!playing) bMouseReleasedDuringPlay = false;
+	bool engineGetsInput = (rightClickInViewport || playing) && !bMouseReleasedDuringPlay;
+	EnginePtr->Render->SetEditorOwnsKeyboard(!engineGetsInput);
 }
 
 void EditorContext::BuildDockspace()
@@ -527,7 +591,9 @@ void EditorContext::BuildMenuBar()
 		if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, !State.CurrentScenePath.empty()))
 		{
 			EntityBuilder::SaveToFile(State.RegistryPtr, State.CurrentSceneName.c_str(),
-									  State.CurrentScenePath.c_str());
+									  State.CurrentScenePath.c_str(),
+									  State.SceneDefaultState.empty() ? nullptr : State.SceneDefaultState.c_str(),
+									  State.SceneDefaultMode.empty() ? nullptr : State.SceneDefaultMode.c_str());
 			State.bSceneDirty = false;
 		}
 		if (ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S"))
@@ -586,23 +652,113 @@ void EditorContext::BuildMenuBar()
 	{
 		bool simPaused = !LogicPtr || LogicPtr->IsSimPaused();
 
-		if (ImGui::MenuItem("Play", nullptr, false, simPaused))
+		if (ImGui::MenuItem("Play (Local)", nullptr, false, simPaused && !bPIEActive))
 		{
 			if (LogicPtr)
 			{
 				if (!bHasSnapshot) SnapshotScene();
 				LogicPtr->SetSimPaused(false);
+
+				// Route input to editor world and let game spawn a player
+				EnginePtr->InputTargetWorld = EnginePtr->GetDefaultWorld();
+				if (EnginePtr->OnPlayStarted.IsBound())
+				{
+					EnginePtr->OnPlayStarted(EnginePtr->GetDefaultWorld());
+				}
 			}
 		}
-		if (ImGui::MenuItem("Pause", nullptr, false, !simPaused))
+		if (ImGui::MenuItem("Pause", nullptr, false, !simPaused && !bPIEActive))
 		{
 			if (LogicPtr) LogicPtr->SetSimPaused(true);
 		}
-		if (ImGui::MenuItem("Stop", nullptr, false, bHasSnapshot))
+		if (ImGui::MenuItem("Stop (Local)", nullptr, false, bHasSnapshot && !bPIEActive))
 		{
+			// Let game destroy its constructs before restoring snapshot
+			if (EnginePtr->OnPlayStopped.IsBound())
+			{
+				EnginePtr->OnPlayStopped();
+			}
+			EnginePtr->InputTargetWorld = nullptr;
+
 			if (LogicPtr) LogicPtr->SetSimPaused(true);
 			RestoreSnapshot();
 		}
+
+		ImGui::Separator();
+
+		ImGui::SetNextItemWidth(80);
+		ImGui::InputInt("Clients", &PIEClientCount, 1, 1);
+		if (PIEClientCount < 1) PIEClientCount = 1;
+		if (PIEClientCount > 4) PIEClientCount = 4;
+
+		// Default State/Mode dropdowns (populated from ReflectionRegistry)
+		{
+			auto& rr = ReflectionRegistry::Get();
+
+			// GameState combo
+			ImGui::SetNextItemWidth(160);
+			const char* statePreview = State.SceneDefaultState.empty() ? "(none)" : State.SceneDefaultState.c_str();
+			if (ImGui::BeginCombo("Default State", statePreview))
+			{
+				if (ImGui::Selectable("(none)", State.SceneDefaultState.empty()))
+				{
+					State.SceneDefaultState.clear();
+					State.bSceneDirty = true;
+				}
+				for (const auto& entry : rr.RegisteredStates)
+				{
+					bool selected = (State.SceneDefaultState == entry.Name);
+					if (ImGui::Selectable(entry.Name, selected))
+					{
+						State.SceneDefaultState = entry.Name;
+						State.bSceneDirty       = true;
+					}
+					if (selected) ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+
+			// GameMode combo
+			ImGui::SetNextItemWidth(160);
+			const char* modePreview = State.SceneDefaultMode.empty() ? "(none)" : State.SceneDefaultMode.c_str();
+			if (ImGui::BeginCombo("Default Mode", modePreview))
+			{
+				if (ImGui::Selectable("(none)", State.SceneDefaultMode.empty()))
+				{
+					State.SceneDefaultMode.clear();
+					State.bSceneDirty = true;
+				}
+				for (const auto& entry : rr.RegisteredModes)
+				{
+					bool selected = (State.SceneDefaultMode == entry.Name);
+					if (ImGui::Selectable(entry.Name, selected))
+					{
+						State.SceneDefaultMode = entry.Name;
+						State.bSceneDirty      = true;
+					}
+					if (selected) ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+		}
+
+		ImGui::Separator();
+
+		if (ImGui::MenuItem("Play (Server + Client)", nullptr, false, !bPIEActive))
+		{
+			bServerVisible = true;
+			StartPIE();
+		}
+		if (ImGui::MenuItem("Play (Headless Server + Client)", nullptr, false, !bPIEActive))
+		{
+			bServerVisible = false;
+			StartPIE();
+		}
+		if (ImGui::MenuItem("Stop PIE", nullptr, false, bPIEActive))
+		{
+			StopPIE();
+		}
+
 		ImGui::EndMenu();
 	}
 
@@ -663,7 +819,9 @@ void EditorContext::DrawFileDialog()
 				size_t dot = name.find_last_of('.');
 				if (dot != std::string::npos) name = name.substr(0, dot);
 
-				EntityBuilder::SaveToFile(State.RegistryPtr, name.c_str(), FileDialogPath.c_str());
+				EntityBuilder::SaveToFile(State.RegistryPtr, name.c_str(), FileDialogPath.c_str(),
+										  State.SceneDefaultState.empty() ? nullptr : State.SceneDefaultState.c_str(),
+										  State.SceneDefaultMode.empty() ? nullptr : State.SceneDefaultMode.c_str());
 				State.CurrentScenePath = FileDialogPath;
 				State.CurrentSceneName = name;
 				State.bSceneDirty      = false;
@@ -762,11 +920,15 @@ uint32_t EditorContext::ImportMeshAsset(const std::string& gltfPath)
 		return UINT32_MAX;
 	}
 
-	uint32_t slot = MeshMgr->RegisterMesh(asset, stem);
+	// Look up UUID from AssetDatabase after reconcile
+	std::string relPath = stem + ".tnxmesh";
+	const auto* dbEntry = AssetDB.FindByPath(relPath);
+	int64_t uuid        = dbEntry ? dbEntry->UUID : 0;
+
+	uint32_t slot = MeshMgr->RegisterMesh(asset, stem, uuid);
 	if (slot != UINT32_MAX)
-		LOG_INFO_F("[Editor] Registered mesh '%s' at slot %u (%u verts, %u indices)",
-			   stem.c_str(), slot, static_cast<uint32_t>(asset.Vertices.size()),
-			   static_cast<uint32_t>(asset.Indices.size()));
+		LOG_INFO_F("[Editor] Registered mesh '%s' at slot %u (UUID: %lld)",
+			   stem.c_str(), slot, static_cast<long long>(uuid >> 8));
 
 	return slot;
 }
@@ -793,9 +955,7 @@ void EditorContext::LoadAllMeshAssets()
 			continue;
 		}
 
-		// Derive name from filename stem (e.g. "helmet.tnxmesh" → "helmet")
-		std::string meshName = std::filesystem::path(entry.Path).stem().string();
-		uint32_t slot        = MeshMgr->RegisterMesh(asset, meshName);
+		uint32_t slot = MeshMgr->RegisterMesh(asset, entry.Name, entry.UUID);
 		if (slot != UINT32_MAX)
 			LOG_INFO_F("[Editor] Loaded mesh '%s' → slot %u", entry.Path.c_str(), slot);
 	}
@@ -832,9 +992,14 @@ void EditorContext::HandleDroppedFile(const std::string& path)
 			MeshAsset asset;
 			if (LoadMeshAsset(asset, destPath))
 			{
-				uint32_t slot = MeshMgr->RegisterMesh(asset);
+				std::string relDropPath = p.filename().string();
+				const auto* dropEntry   = AssetDB.FindByPath(relDropPath);
+				int64_t dropUUID        = dropEntry ? dropEntry->UUID : 0;
+				std::string dropName    = dropEntry ? dropEntry->Name : p.stem().string();
+
+				uint32_t slot = MeshMgr->RegisterMesh(asset, dropName, dropUUID);
 				if (slot != UINT32_MAX)
-					LOG_INFO_F("[Editor] Loaded dropped mesh → slot %u", slot);
+					LOG_INFO_F("[Editor] Loaded dropped mesh '%s' → slot %u", dropName.c_str(), slot);
 			}
 		}
 	}
@@ -959,7 +1124,7 @@ void EditorContext::RestoreSnapshot()
 
 		// Reset all Jolt bodies — Play may have created bodies that don't exist in the snapshot.
 		// FlushPendingBodies will recreate them from the restored field data on the next physics tick.
-		if (EnginePtr->Physics) EnginePtr->Physics->ResetAllBodies();
+		if (EnginePtr->GetDefaultWorld() && EnginePtr->GetDefaultWorld()->GetPhysics()) EnginePtr->GetDefaultWorld()->GetPhysics()->ResetAllBodies();
 
 		uint32_t temporalFrame = reg->GetTemporalCache()->GetActiveWriteFrame();
 		uint32_t volatileFrame = reg->GetVolatileCache()->GetActiveWriteFrame();
@@ -1011,7 +1176,7 @@ void EditorContext::RestoreSnapshot()
 						   extraCount, archSnap.ArchClassID);
 
 				// Look up the Flags field descriptor once
-				Archetype::FieldKey flagKey{CacheSlotMeta<>::StaticTypeID(), ComponentFieldRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID()), 0};
+				Archetype::FieldKey flagKey{CacheSlotMeta<>::StaticTypeID(), ReflectionRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID()), 0};
 				auto* flagDesc = ownerArch->ArchetypeFieldLayout.find(flagKey);
 
 				uint32_t entityIdx = archSnap.TotalEntityCount;
@@ -1054,6 +1219,392 @@ void EditorContext::RestoreSnapshot()
 	LOG_INFO("[Editor] Scene restored from snapshot");
 }
 
+// -----------------------------------------------------------------------
+// PIE — networked multi-world Play-In-Editor
+// -----------------------------------------------------------------------
+
+void EditorContext::StartPIE()
+{
+	if (bPIEActive) return;
+
+	Registry* editorReg = EnginePtr->GetRegistry();
+
+	// Serialize editor scene to JSON
+	JsonValue sceneJson = EntityBuilder::SerializeScene(editorReg, "PIE");
+
+	// Build server and client configs from the game config (no editor overrides)
+	ServerConfig      = *EnginePtr->GetGameConfig();
+	ServerConfig.Mode = bServerVisible ? EngineMode::ListenServer : EngineMode::Server;
+
+	// Create server flow (owns server world + constructs)
+	ServerFlow = std::make_unique<FlowManager>();
+	ServerFlow->Initialize(EnginePtr, &ServerConfig, 960, 540);
+	if (!ServerFlow->CreateWorld())
+	{
+		LOG_ERROR("[PIE] Failed to initialize server world");
+		ServerFlow.reset();
+		return;
+	}
+	World* ServerWorld = ServerFlow->GetWorld();
+
+	// Load scene into server world via spawn handshake
+	ServerWorld->SetJobsInitialized(true);
+	ServerWorld->Spawn([&sceneJson](Registry* reg)
+	{
+		EntityBuilder::SpawnScene(reg, sceneJson);
+	});
+
+	// Allocate server viewport (if visible)
+	EditorRenderer* renderer = EnginePtr->GetRenderer();
+	if (bServerVisible)
+	{
+		ServerViewport              = std::make_unique<WorldViewport>();
+		ServerViewport->TargetWorld = ServerWorld;
+		renderer->AllocateViewportResources(ServerViewport.get(), 960, 540);
+		renderer->AddViewport(ServerViewport.get());
+	}
+
+	// Create client worlds (each with its own FlowManager)
+	for (int ci = 0; ci < PIEClientCount; ++ci)
+	{
+		PIEClient client;
+		client.Config      = *EnginePtr->GetGameConfig();
+		client.Config.Mode = EngineMode::Client;
+		client.Flow        = std::make_unique<FlowManager>();
+		client.Flow->Initialize(EnginePtr, &client.Config, 960, 540);
+		if (!client.Flow->CreateWorld())
+		{
+			LOG_ERROR_F("[PIE] Failed to initialize client world %d", ci);
+			// Clean up server + already-created clients
+			for (auto& c : PIEClients)
+			{
+				renderer->RemoveViewport(c.Viewport.get());
+				renderer->FreeViewportResources(c.Viewport.get());
+			}
+			if (ServerViewport)
+			{
+				renderer->RemoveViewport(ServerViewport.get());
+				renderer->FreeViewportResources(ServerViewport.get());
+				ServerViewport.reset();
+			}
+			PIEClients.clear();
+			ServerFlow.reset();
+			return;
+		}
+		World* clientWorld = client.Flow->GetWorld();
+		clientWorld->SetJobsInitialized(true);
+
+		// Spawn the level, static data won't be replicated in the future
+		clientWorld->Spawn([&sceneJson](Registry* reg)
+		{
+			EntityBuilder::SpawnScene(reg, sceneJson);
+		});
+
+		client.Viewport              = std::make_unique<WorldViewport>();
+		client.Viewport->TargetWorld = clientWorld;
+		renderer->AllocateViewportResources(client.Viewport.get(), 960, 540);
+		renderer->AddViewport(client.Viewport.get());
+
+		PIEClients.push_back(std::move(client));
+	}
+
+	// Set up loopback networking (server + client in same process)
+	static constexpr uint16_t PIEPort = 27015;
+
+	if (!EnginePtr->EnsureNetworking())
+	{
+		LOG_ERROR("[PIE] Failed to initialize networking — aborting");
+		// Clean up viewports
+		for (auto& c : PIEClients)
+		{
+			renderer->RemoveViewport(c.Viewport.get());
+			renderer->FreeViewportResources(c.Viewport.get());
+		}
+		if (ServerViewport)
+		{
+			renderer->RemoveViewport(ServerViewport.get());
+			renderer->FreeViewportResources(ServerViewport.get());
+		}
+		PIEClients.clear();
+		ServerViewport.reset();
+		ServerFlow.reset();
+		return;
+	}
+
+	NetThread* net                = EnginePtr->GetNetThread();
+	NetConnectionManager* connMgr = net->GetConnectionManager();
+
+	// Server: listen on PIE loopback port
+	if (!connMgr->Listen(PIEPort))
+	{
+		LOG_ERROR("[PIE] Failed to listen — aborting");
+		for (auto& c : PIEClients)
+		{
+			renderer->RemoveViewport(c.Viewport.get());
+			renderer->FreeViewportResources(c.Viewport.get());
+		}
+		if (ServerViewport)
+		{
+			renderer->RemoveViewport(ServerViewport.get());
+			renderer->FreeViewportResources(ServerViewport.get());
+		}
+		PIEClients.clear();
+		ServerViewport.reset();
+		ServerFlow.reset();
+		return;
+	}
+
+	// Connect each client via loopback and discover server-side handles
+	std::vector<uint32_t> knownHandles;
+	for (const auto& ci : connMgr->GetConnections()) knownHandles.push_back(ci.Handle);
+
+	for (size_t i = 0; i < PIEClients.size(); ++i)
+	{
+		uint32_t clientHandle = connMgr->Connect("127.0.0.1", PIEPort);
+		if (clientHandle == 0)
+		{
+			LOG_ERROR_F("[PIE] Client %zu failed to connect — aborting", i);
+			connMgr->StopListening();
+			for (auto& c : PIEClients)
+			{
+				renderer->RemoveViewport(c.Viewport.get());
+				renderer->FreeViewportResources(c.Viewport.get());
+			}
+			if (ServerViewport)
+			{
+				renderer->RemoveViewport(ServerViewport.get());
+				renderer->FreeViewportResources(ServerViewport.get());
+			}
+			PIEClients.clear();
+			ServerViewport.reset();
+			ServerFlow.reset();
+			return;
+		}
+		PIEClients[i].ClientHandle = clientHandle;
+		knownHandles.push_back(clientHandle);
+
+		// Pump GNS callbacks so the server accepts the connection
+		for (int j = 0; j < 20; ++j)
+		{
+			connMgr->RunCallbacks();
+			net->Tick();
+			SDL_Delay(1);
+		}
+
+		// Find the new server-side accepted handle
+		for (const auto& ci : connMgr->GetConnections())
+		{
+			bool known = false;
+			for (uint32_t h : knownHandles)
+			{
+				if (h == ci.Handle)
+				{
+					known = true;
+					break;
+				}
+			}
+			if (!known)
+			{
+				PIEClients[i].ServerHandle = ci.Handle;
+				knownHandles.push_back(ci.Handle);
+
+				// Assign OwnerID and map to client world (for future state replication routing)
+				auto& ownerID                                = ci.OwnerID;
+				PIEClients[i].Flow->GetWorld()->LocalOwnerID = ownerID;
+				net->MapConnectionToWorld(ownerID, PIEClients[i].Flow->GetWorld());
+
+				break;
+			}
+		}
+
+		if (PIEClients[i].ServerHandle == 0)
+			LOG_WARN_F("[PIE] Could not identify server-side handle for client %zu", i);
+	}
+
+	// Map server world for OwnerID 0
+	net->MapConnectionToWorld(0, ServerFlow->GetWorld());
+
+	// Set up server-side replication system
+	Replicator = std::make_unique<ReplicationSystem>();
+	Replicator->Initialize(ServerFlow->GetWorld());
+	net->SetReplicationSystem(Replicator.get());
+
+	// Start NetThread (polls connections at NetworkUpdateHz)
+	if (!net->IsRunning()) net->Start();
+
+	// Notify game code BEFORE starting logic threads — spawns run on the
+	//    fast path (LogicId not set yet) with no thread contention.
+	if (EnginePtr->OnPIEStarted.IsBound())
+	{
+		EnginePtr->OnPIEStarted(ServerFlow->GetWorld(), connMgr);
+	}
+
+	// 8. Load scene default state/mode into flow managers
+	if (!State.SceneDefaultMode.empty())
+	{
+		ServerFlow->SetGameMode(State.SceneDefaultMode.c_str());
+	}
+	if (!State.SceneDefaultState.empty())
+	{
+		ServerFlow->LoadDefaultState(State.SceneDefaultState.c_str());
+		for (auto& c : PIEClients) c.Flow->LoadDefaultState(State.SceneDefaultState.c_str());
+	}
+
+	// 9. Start logic threads via FlowManagers
+	ServerFlow->StartWorld();
+	for (auto& c : PIEClients)
+	{
+		c.Flow->StartWorld();
+	}
+
+	// 9. Default input to first client world until a viewport panel gets focus
+	if (!PIEClients.empty())
+	{
+		EnginePtr->InputTargetWorld = PIEClients[0].Flow->GetWorld();
+	}
+
+	// 10. Pause editor world's logic thread
+	if (LogicPtr) LogicPtr->SetSimPaused(true);
+
+	bPIEActive = true;
+	State.ClearSelection();
+	LOG_INFO_F("[PIE] Started: 1 server%s + %zu client(s), port %u",
+			   bServerVisible ? " (visible)" : " (headless)",
+			   PIEClients.size(), PIEPort);
+}
+
+void EditorContext::StopPIE()
+{
+	if (!bPIEActive) return;
+
+	// Clear input routing immediately
+	EnginePtr->InputTargetWorld = nullptr;
+
+	EditorRenderer* renderer = EnginePtr->GetRenderer();
+
+	// 1. Stop and join all PIE worlds via FlowManagers
+	for (auto& client : PIEClients) client.Flow->StopWorld();
+	ServerFlow->StopWorld();
+
+	for (auto& client : PIEClients) client.Flow->JoinWorld();
+	ServerFlow->JoinWorld();
+
+	// 2. Tear down PIE networking
+	NetThread* net = EnginePtr->GetNetThread();
+	if (net)
+	{
+		// Detach replication before stopping net thread
+		net->SetReplicationSystem(nullptr);
+
+		// Stop NetThread so we can safely manipulate connections
+		if (net->IsRunning())
+		{
+			net->Stop();
+			net->Join();
+		}
+
+		NetConnectionManager* connMgr = net->GetConnectionManager();
+
+		// Notify game code to unbind connection callbacks BEFORE closing connections
+		if (EnginePtr->OnPIEStopped.IsBound())
+		{
+			EnginePtr->OnPIEStopped(connMgr);
+		}
+
+		// Close all PIE client connections (both sides)
+		for (auto& client : PIEClients)
+		{
+			if (client.ServerHandle != 0) connMgr->CloseConnection(client.ServerHandle, "PIE Stop");
+			if (client.ClientHandle != 0) connMgr->CloseConnection(client.ClientHandle, "PIE Stop");
+		}
+
+		// Flush GNS so it processes the connection closures before we re-listen
+		connMgr->RunCallbacks();
+
+		// Reset the OnClientConnected multicallback to prevent stale bindings
+		connMgr->OnClientConnected.Reset();
+
+		// Clear world mappings
+		for (size_t i = 0; i < PIEClients.size(); ++i) net->MapConnectionToWorld(static_cast<uint8_t>(i + 1), nullptr);
+		net->MapConnectionToWorld(0, nullptr);
+
+		connMgr->StopListening();
+	}
+
+	// 3. Remove viewports from renderer and free GPU resources
+	renderer->WaitForGPU(); // Ensure in-flight frames finish before destroying images/descriptors
+	for (auto& client : PIEClients)
+	{
+		renderer->RemoveViewport(client.Viewport.get());
+		renderer->FreeViewportResources(client.Viewport.get());
+	}
+	if (ServerViewport)
+	{
+		renderer->RemoveViewport(ServerViewport.get());
+		renderer->FreeViewportResources(ServerViewport.get());
+	}
+
+	// 4. Shutdown and destroy worlds (FlowManager destructors handle World shutdown)
+	PIEClients.clear();
+	Replicator.reset();
+	ServerViewport.reset();
+	ServerFlow.reset();
+
+	// 5. Resume editor world
+	if (LogicPtr) LogicPtr->SetSimPaused(false);
+
+	bPIEActive = false;
+	LOG_INFO("[PIE] Stopped");
+}
+
+void EditorContext::DrawViewportPanel(const char* title, WorldViewport& vp)
+{
+	ImGui::SetNextWindowSize(ImVec2(static_cast<float>(vp.Width), static_cast<float>(vp.Height)), ImGuiCond_Appearing);
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+	if (ImGui::Begin(title))
+	{
+		// Route input to whichever viewport panel is focused
+		if (ImGui::IsWindowFocused() && vp.TargetWorld)
+		{
+			EnginePtr->InputTargetWorld = vp.TargetWorld;
+		}
+
+		ImVec2 panelSize = ImGui::GetContentRegionAvail();
+
+		if (vp.ImGuiTexture != VK_NULL_HANDLE && panelSize.x > 0 && panelSize.y > 0
+			&& vp.Width > 0 && vp.Height > 0)
+		{
+			// Fit the render target into the panel preserving aspect ratio
+			float rtAspect    = static_cast<float>(vp.Width) / static_cast<float>(vp.Height);
+			float panelAspect = panelSize.x / panelSize.y;
+
+			ImVec2 imageSize;
+			if (panelAspect > rtAspect)
+			{
+				// Panel is wider than RT — fit to height, center horizontally
+				imageSize.y = panelSize.y;
+				imageSize.x = panelSize.y * rtAspect;
+			}
+			else
+			{
+				// Panel is taller than RT — fit to width, center vertically
+				imageSize.x = panelSize.x;
+				imageSize.y = panelSize.x / rtAspect;
+			}
+
+			// Center the image within the panel
+			ImVec2 cursor = ImGui::GetCursorPos();
+			float offsetX = (panelSize.x - imageSize.x) * 0.5f;
+			float offsetY = (panelSize.y - imageSize.y) * 0.5f;
+			ImGui::SetCursorPos(ImVec2(cursor.x + offsetX, cursor.y + offsetY));
+
+			ImGui::Image(vp.ImGuiTexture, imageSize);
+		}
+	}
+	ImGui::End();
+	ImGui::PopStyleVar();
+}
+
 void EditorContext::DrawUnsavedWarning()
 {
 	if (!bShowUnsavedWarning) return;
@@ -1074,7 +1625,9 @@ void EditorContext::DrawUnsavedWarning()
 			if (!State.CurrentScenePath.empty())
 			{
 				EntityBuilder::SaveToFile(State.RegistryPtr, State.CurrentSceneName.c_str(),
-										  State.CurrentScenePath.c_str());
+										  State.CurrentScenePath.c_str(),
+										  State.SceneDefaultState.empty() ? nullptr : State.SceneDefaultState.c_str(),
+										  State.SceneDefaultMode.empty() ? nullptr : State.SceneDefaultMode.c_str());
 				State.bSceneDirty = false;
 			}
 

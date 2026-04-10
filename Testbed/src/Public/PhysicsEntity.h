@@ -1,9 +1,9 @@
 #pragma once
 
-#include "TransRot.h"
-#include "ColorData.h"
-#include "RigidBody.h"
-#include "Forces.h"
+#include "CTransform.h"
+#include "CColor.h"
+#include "CRigidBody.h"
+#include "CForces.h"
 #include "EntityView.h"
 #include "SchemaReflector.h"
 
@@ -18,25 +18,23 @@ class PhysicsEntity : public EntityView<PhysicsEntity, WIDTH>
 	TNX_REGISTER_SCHEMA(PhysicsEntity, EntityView, transform, body, forces, color)
 
 public:
-	TransRot<WIDTH> transform;
-	RigidBody<WIDTH> body;
-	Forces<WIDTH> forces;
-	ColorData<WIDTH> color;
+	CTransform<WIDTH> transform;
+	CRigidBody<WIDTH> body;
+	CForces<WIDTH> forces;
+	CColor<WIDTH> color;
 
 	static constexpr float Gravity = -9.81f;
 
-	FORCE_INLINE void PrePhysics(double dt)
+	FORCE_INLINE void PrePhysics(SimFloat dt)
 	{
-		const float fdt = static_cast<float>(dt);
-
 		// Accumulate gravity
 		forces.ForceY += body.VelY * 0.0f; // placeholder — Jolt will own this path
-		body.VelY     += Gravity * fdt;
+		body.VelY     += Gravity * dt;
 
 		// Integrate velocity into position
-		transform.PosX += body.VelX * fdt;
-		transform.PosY += body.VelY * fdt;
-		transform.PosZ += body.VelZ * fdt;
+		transform.PosX += body.VelX * dt;
+		transform.PosY += body.VelY * dt;
+		transform.PosZ += body.VelZ * dt;
 
 		// Simple floor bounce at Y = -50
 		body.VelY      = (transform.PosY < -50.0f).Choose(-body.VelY * 0.7f, body.VelY);
@@ -48,7 +46,7 @@ public:
 		color.G           = 1.0f - color.R;
 	}
 
-	FORCE_INLINE void PostPhysics([[maybe_unused]] double dt)
+	FORCE_INLINE void PostPhysics([[maybe_unused]] SimFloat dt)
 	{
 		forces.ForceX  = 0.0f;
 		forces.ForceY  = 0.0f;

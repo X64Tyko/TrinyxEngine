@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.30)
+cmake_minimum_required(VERSION 3.20)
 
 # Force dynamic runtime library for all targets (including Jolt)
 # MUST be set before project() call
@@ -16,6 +16,10 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Required for third-party static libs when linked into shared libs (Linux).
+# Harmless on Windows/MSVC; prevents relocation errors on ELF targets.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # -----------------------------------------------------------------------------
 # 2. BUILD OPTIONS
@@ -84,41 +88,60 @@ set(GNS_PATH "${CMAKE_SOURCE_DIR}/libs/gns")
 # do: target_link_libraries(MyTarget PRIVATE Slang::Compiler)
 add_library(Slang::Compiler SHARED IMPORTED GLOBAL
         src/Runtime/Core/Public/TrinyxJobs.h
-        src/Runtime/Core/Private/ThreadPinning.h
+        src/Runtime/Core/Public/ThreadPinning.h
         src/Runtime/Core/Public/TrinyxRingBuffer.h
         src/Runtime/Core/Public/RegistryTypes.h
-        src/Runtime/Core/Public/Events.h)
+        src/Runtime/Core/Public/Events.h
+        src/Runtime/Entities/Public/EInstanced.h
+        src/Runtime/Entities/Public/EPoint.h
+        src/Runtime/Physics/Public/JoltCharacter.h
+        src/Runtime/Physics/Public/JoltLayers.h
+        src/Runtime/Physics/Private/JoltCharacter.cpp
+        src/Runtime/Entities/Public/EPlayer.h
+        src/Runtime/Flow/Public/GameState.h)
 set_target_properties(Slang::Compiler PROPERTIES
         IMPORTED_LOCATION             "${SLANG_PATH}/lib/libslang-compiler.so"
         INTERFACE_INCLUDE_DIRECTORIES "${SLANG_PATH}/include"
 )
 
 # -----------------------------------------------------------------------------
-# 4. GLOBAL TRACY CONFIGURATION
+# 3.5 SUBMODULE AUTO-INITIALIZATION
 # -----------------------------------------------------------------------------
+# Populate Jolt and Tracy if someone did a plain `git clone` without --recurse.
+find_package(Git QUIET)
+if (GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+    set(_missing_submodules "")
+    if (NOT EXISTS "${CMAKE_SOURCE_DIR}/libs/tracy/public/TracyClient.cpp")
+        list(APPEND _missing_submodules "libs/tracy")
+    endif ()
+    if (NOT EXISTS "${CMAKE_SOURCE_DIR}/libs/jolt/Build/CMakeLists.txt")
+        list(APPEND _missing_submodules "libs/jolt")
+    endif ()
+    if (_missing_submodules)
+        message(STATUS "Initializing submodules: ${_missing_submodules}")
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} submodule update --init ${_missing_submodules}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            RESULT_VARIABLE _submodule_result
+        )
+        if (NOT _submodule_result EQUAL 0)
+            message(FATAL_ERROR
+                "Failed to initialize submodules: ${_missing_submodules}\n"
+                "Run manually: git submodule update --init")
+        endif ()
+    endif ()
+endif ()
+
+# -----------------------------------------------------------------------------
+# 4. TRACY CONFIGURATION
+# -----------------------------------------------------------------------------
+# Tracy is compiled as a single .cpp TU into the Trinyx library target.
+# Includes and compile definitions are applied target-scoped in Trinyx/CMakeLists.txt
+# so they don't bleed into third-party subprojects.
 if(ENABLE_TRACY)
-    # Tracy profiling level
-    # 1 = Coarse (frame/system level, ~1-2% overhead)
-    # 2 = Medium (includes per-chunk/subsystem zones, ~5-10% overhead)
-    # 3 = Fine (includes per-entity zones, ~50%+ overhead)
     set(TRACY_PROFILE_LEVEL "3" CACHE STRING "Tracy profiling detail level (1=Coarse, 2=Medium, 3=Fine)")
     set_property(CACHE TRACY_PROFILE_LEVEL PROPERTY STRINGS "1" "2" "3")
-
-    # Tracy requires these source files
-    set(TRACY_SOURCES
-            "${TRACY_PATH}/public/TracyClient.cpp"
-    )
-
-    # Add Tracy include directory globally as SYSTEM (silences warnings)
-    include_directories(SYSTEM "${TRACY_PATH}/public")
-
-    # Enable Tracy profiling and disable ROCm support
-    add_compile_definitions(TRACY_ENABLE)
-    add_compile_definitions(TRACY_PROFILE_LEVEL=${TRACY_PROFILE_LEVEL})
-    add_compile_definitions(TRACY_ON_DEMAND)
-    add_compile_definitions(TRACY_NO_ROCTRACER=1)
-    add_compile_definitions(TRACY_NO_ROCPROF=1)
-
+    set(TRACY_SOURCES "${TRACY_PATH}/public/TracyClient.cpp")
     message(STATUS "Tracy profiler enabled (Level ${TRACY_PROFILE_LEVEL})")
 else()
     set(TRACY_SOURCES "")
@@ -188,63 +211,152 @@ else()
 endif()
 
 # -----------------------------------------------------------------------------
-# 6. JOLT PHYSICS (vendored, built from source)
+# 6. JOLT PHYSICS
 # -----------------------------------------------------------------------------
-# Configure Jolt before add_subdirectory so options take effect.
-# Disable flags that conflict with our own compiler settings.
-set(OVERRIDE_CXX_FLAGS OFF CACHE BOOL "" FORCE)
-set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
-set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
-set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
-set(CPP_RTTI_ENABLED ON CACHE BOOL "" FORCE)
-set(CPP_EXCEPTIONS_ENABLED OFF CACHE BOOL "" FORCE)
-set(ENABLE_OBJECT_STREAM OFF CACHE BOOL "" FORCE)
-set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
-set(PROFILER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+# Prefer an already-installed Jolt (vcpkg or system) to avoid duplicate-target
+# conflicts. Fall back to the vendored submodule only when nothing is found.
+find_package(Jolt QUIET)
 
-# When rollback is enabled, turn on Jolt's cross-platform deterministic mode.
-# This disables FMA and sets /fp:precise (MSVC) or -ffp-contract=off (Clang)
-# so that Jolt produces identical results across rebuild-from-slab resimulations.
-if (TNX_ENABLE_ROLLBACK)
-    set(CROSS_PLATFORM_DETERMINISTIC ON CACHE BOOL "" FORCE)
+if (Jolt_FOUND)
+    message(STATUS "Jolt Physics: using installed package")
+else ()
+    message(STATUS "Jolt Physics: building from source (libs/jolt)")
+
+    # Configure before add_subdirectory so options take effect.
+    set(OVERRIDE_CXX_FLAGS          OFF CACHE BOOL "" FORCE)
+    set(ENABLE_ALL_WARNINGS         OFF CACHE BOOL "" FORCE)
+    set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+    set(ENABLE_INSTALL              OFF CACHE BOOL "" FORCE)
+    set(CPP_RTTI_ENABLED            ON  CACHE BOOL "" FORCE)
+    set(CPP_EXCEPTIONS_ENABLED      OFF CACHE BOOL "" FORCE)
+    set(ENABLE_OBJECT_STREAM        OFF CACHE BOOL "" FORCE)
+    set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+    set(PROFILER_IN_DEBUG_AND_RELEASE       OFF CACHE BOOL "" FORCE)
+
+    # Rollback requires cross-platform determinism (disables FMA, sets fp:precise).
+    if (TNX_ENABLE_ROLLBACK)
+        set(CROSS_PLATFORM_DETERMINISTIC ON CACHE BOOL "" FORCE)
+    endif ()
+
+    add_subdirectory("${JOLT_PATH}/Build" jolt-build)
+
+    set_property(TARGET Jolt PROPERTY CXX_STANDARD 20)
+    set_property(TARGET Jolt PROPERTY CXX_STANDARD_REQUIRED ON)
+
+    if (MSVC)
+        set_property(TARGET Jolt PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+        target_compile_options(Jolt PRIVATE /w)
+    else ()
+        target_compile_options(Jolt PRIVATE -w)
+    endif ()
 endif ()
 
-add_subdirectory("${JOLT_PATH}/Build" jolt-build)
+# -----------------------------------------------------------------------------
+# 7. PROTOBUF (vendored submodule — required by GameNetworkingSockets)
+# -----------------------------------------------------------------------------
+set(ABSL_PROPAGATE_CXX_STD         ON  CACHE BOOL "" FORCE)
+set(protobuf_BUILD_TESTS           OFF CACHE BOOL "" FORCE)
+set(protobuf_BUILD_CONFORMANCE     OFF CACHE BOOL "" FORCE)
+set(protobuf_BUILD_EXAMPLES        OFF CACHE BOOL "" FORCE)
+# NOTE: protobuf_INSTALL must remain ON (the default). The install.cmake it
+# guards contains the configure_file() calls that generate protobuf-config.cmake
+# into the build tree. Without that file, find_package(Protobuf CONFIG) finds
+# nothing and falls back to the system FindProtobuf.cmake, which fails.
+set(protobuf_WITH_ZLIB             OFF CACHE BOOL "" FORCE)
+set(protobuf_MSVC_STATIC_RUNTIME   OFF CACHE BOOL "" FORCE)
+set(protobuf_BUILD_SHARED_LIBS     OFF CACHE BOOL "" FORCE)
+set(protobuf_BUILD_PROTOC_BINARIES ON  CACHE BOOL "" FORCE)
+set(protobuf_BUILD_LIBUPB          OFF CACHE BOOL "" FORCE)
+# GNS uses protobuf_generate_cpp(), which is defined in protobuf-module.cmake.
+# That file is only included in protobuf-config.cmake when MODULE_COMPATIBLE=ON.
+set(protobuf_MODULE_COMPATIBLE     ON  CACHE BOOL "" FORCE)
 
-# Force Jolt to use the same runtime library as the rest of the project
-if(MSVC)
-    set_property(TARGET Jolt PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
-endif()
+add_subdirectory("${CMAKE_SOURCE_DIR}/libs/protobuf" protobuf-build)
 
-# Suppress all warnings on Jolt (third-party code, same treatment as Tracy).
-if (NOT MSVC)
-    target_compile_options(Jolt PRIVATE -w)
+# Match the DLL runtime for all protobuf targets.
+if (MSVC)
+    foreach(_pb_tgt libprotobuf libprotobuf-lite libprotoc protoc)
+        if (TARGET ${_pb_tgt})
+            set_property(TARGET ${_pb_tgt} PROPERTY
+                MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+            target_compile_options(${_pb_tgt} PRIVATE /w)
+        endif ()
+    endforeach()
 endif ()
 
+# protobuf-config.cmake unconditionally includes protobuf-targets.cmake, which
+# is normally produced only by cmake --install (install(EXPORT protobuf-targets
+# ...)). For build-tree usage we write a stub — all protobuf::* targets are
+# already defined as ALIAS targets by add_subdirectory above, so no IMPORTED
+# target definitions are needed.
+set(_pb_cmake_dir "${CMAKE_BINARY_DIR}/protobuf-build/cmake/protobuf")
+file(WRITE "${_pb_cmake_dir}/protobuf-targets.cmake"
+    "# Stub: all protobuf::* targets were defined as ALIAS targets by\n"
+    "# add_subdirectory(libs/protobuf). No IMPORTED targets needed.\n"
+)
+
+# Point find_package(Protobuf) to our build-tree config file.
+# protobuf_CMAKE_SUBDIR = "cmake/protobuf", so the config lives at
+# <binary_dir>/cmake/protobuf/protobuf-config.cmake.
+set(Protobuf_DIR "${_pb_cmake_dir}" CACHE PATH "" FORCE)
+
+# By default find_package tries Module mode (FindProtobuf.cmake) first. That
+# module raises FATAL_ERROR before Config mode gets a chance — even with
+# Protobuf_DIR set. PREFER_CONFIG reverses the order so our Config file runs
+# first, before the system FindProtobuf.cmake can abort configure.
+set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ON)
+
+# protobuf-module.cmake (the FindProtobuf compat layer, included when
+# protobuf_MODULE_COMPATIBLE=ON) tries to populate Protobuf_LIBRARIES and
+# Protobuf_PROTOC_EXECUTABLE by reading LOCATION_* properties from targets.
+# Reading LOCATION from non-IMPORTED (build) targets is forbidden in modern
+# CMake (CMP0026). Pre-setting these variables triggers the early-exit guard
+# in _protobuf_find_libraries() and skips all LOCATION reads.
+# Note: protobuf_generate() uses protobuf::protoc directly — it does NOT
+# read Protobuf_PROTOC_EXECUTABLE at build time — so any non-empty value works.
+set(Protobuf_LIBRARIES        "protobuf::libprotobuf"      CACHE STRING   "" FORCE)
+set(Protobuf_LITE_LIBRARIES   "protobuf::libprotobuf-lite" CACHE STRING   "" FORCE)
+set(Protobuf_PROTOC_LIBRARIES "protobuf::libprotoc"        CACHE STRING   "" FORCE)
+set(Protobuf_PROTOC_EXECUTABLE "$<TARGET_FILE:protoc>"     CACHE FILEPATH "" FORCE)
+
 # -----------------------------------------------------------------------------
-# 7. GAMENETWORKINGSOCKETS (vendored, built from source)
+# 8. GAMENETWORKINGSOCKETS (vendored, built from source)
 # -----------------------------------------------------------------------------
+# On Windows use BCrypt (built-in Windows API) — eliminates the OpenSSL
+# install requirement entirely. Linux/macOS keep the default (OpenSSL via
+# system package manager or vcpkg).
+if (WIN32)
+    set(USE_CRYPTO "BCrypt" CACHE STRING "GNS crypto backend" FORCE)
+endif ()
+
 # Static lib only — we link it into Trinyx, don't ship a shared lib.
-set(BUILD_STATIC_LIB ON CACHE BOOL "" FORCE)
-set(BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
-set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(BUILD_TOOLS OFF CACHE BOOL "" FORCE)
-set(ENABLE_ICE OFF CACHE BOOL "" FORCE)
-set(USE_STEAMWEBRTC OFF CACHE BOOL "" FORCE)
-set(Protobuf_USE_STATIC_LIBS OFF CACHE BOOL "" FORCE)
-set(LTO OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC_LIB        ON  CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIB        OFF CACHE BOOL "" FORCE)
+set(BUILD_EXAMPLES          OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTS             OFF CACHE BOOL "" FORCE)
+set(BUILD_TOOLS             OFF CACHE BOOL "" FORCE)
+set(ENABLE_ICE              OFF CACHE BOOL "" FORCE)
+set(USE_STEAMWEBRTC         OFF CACHE BOOL "" FORCE)
+set(LTO                     OFF CACHE BOOL "" FORCE)
+# protobuf is built as a static lib. Tell GNS so it doesn't add PROTOBUF_USE_DLLS,
+# which would decorate all symbol references with __declspec(dllimport) and cause
+# LNK4286 / LNK1120 unresolved externals when linking against libprotobuf.lib.
+set(Protobuf_USE_STATIC_LIBS ON  CACHE BOOL "" FORCE)
 
 add_subdirectory("${GNS_PATH}" gns-build)
 
 # Suppress all warnings on GNS (third-party code).
-if (TARGET GameNetworkingSockets_s AND NOT MSVC)
-    target_compile_options(GameNetworkingSockets_s PRIVATE -w)
+if (TARGET GameNetworkingSockets_s)
+    if (MSVC)
+        target_compile_options(GameNetworkingSockets_s PRIVATE /w)
+    else ()
+        target_compile_options(GameNetworkingSockets_s PRIVATE -w)
+    endif ()
 endif ()
 
 # -----------------------------------------------------------------------------
-# 8. SUBDIRECTORIES (Projects in Solution)
+# 9. SUBDIRECTORIES (Projects in Solution)
 # -----------------------------------------------------------------------------
 add_subdirectory(Trinyx)
 add_subdirectory(Testbed)
-add_subdirectory(Game)
+add_subdirectory(Playground)

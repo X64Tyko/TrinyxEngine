@@ -128,6 +128,7 @@ public:
 		ComponentTypeID componentID;    // Component type this field belongs to
 		CacheTier tier;                 // Which cache tier (Temporal, Volatile, None)
 		FieldValueType valueType = FieldValueType::Unknown;
+		AssetType refAssetType   = AssetType::Invalid; // Non-Invalid = asset reference field
 		size_t fieldSize;        // Size of one element (e.g. 4 for float)
 		size_t fieldFrameCount;  // Frame count in cache ring (1 for cold)
 		size_t fieldFrameStride; // Bytes between frame N and frame N+1 (0 for cold)
@@ -144,7 +145,7 @@ public:
 	// Get base pointer to a field array within a chunk (frame 0 for temporal/volatile fields).
 	void* GetFieldArray(Chunk* chunk, ComponentTypeID typeID, uint32_t fieldIndex)
 	{
-		FieldKey key{typeID, ComponentFieldRegistry::Get().GetCacheSlotIndex(typeID), fieldIndex};
+		FieldKey key{typeID, ReflectionRegistry::Get().GetCacheSlotIndex(typeID), fieldIndex};
 		auto* desc = ArchetypeFieldLayout.find(key);
 		return desc ? chunk->GetFieldPtr(desc->fieldSlotIndex) : nullptr;
 	}

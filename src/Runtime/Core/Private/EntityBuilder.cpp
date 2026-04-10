@@ -61,7 +61,6 @@ static void WriteFieldValue(void* dst, size_t fieldSize, FieldValueType valueTyp
 				break;
 			}
 		default:
-			// Fallback: dispatch on size (legacy behavior for Unknown types)
 			switch (fieldSize)
 			{
 				case 4:
@@ -107,7 +106,7 @@ struct FieldLookup
 static std::vector<std::pair<const char*, FieldLookup>> BuildFieldMap(const Archetype* arch)
 {
 	std::vector<std::pair<const char*, FieldLookup>> map;
-	const auto& cfr = ComponentFieldRegistry::Get();
+	const auto& cfr = ReflectionRegistry::Get();
 
 	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 	{
@@ -152,7 +151,7 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 	const std::string& typeName = typeVal->AsString();
 
 	// Resolve type name → ClassID
-	auto& MR        = MetaRegistry::Get();
+	auto& MR        = ReflectionRegistry::Get();
 	ClassID classID = MR.GetEntityByName(typeName);
 	if (classID == 0)
 	{
@@ -394,7 +393,7 @@ JsonValue EntityBuilder::SerializeEntity(Registry* reg, Archetype* arch, size_t 
 	JsonValue entity = JsonValue::Object();
 
 	// Entity type name
-	const auto& MR       = MetaRegistry::Get();
+	const auto& MR       = ReflectionRegistry::Get();
 	const char* typeName = MR.EntityGetters[arch->ArchClassID].Name;
 	entity["type"]       = JsonValue::String(typeName ? typeName : "unknown");
 
@@ -406,7 +405,7 @@ JsonValue EntityBuilder::SerializeEntity(Registry* reg, Archetype* arch, size_t 
 							   reg->GetVolatileCache()->GetActiveWriteFrame());
 
 	// Group fields by component
-	const auto& CFR      = ComponentFieldRegistry::Get();
+	const auto& CFR      = ReflectionRegistry::Get();
 	JsonValue components = JsonValue::Object();
 
 	// Track which component we're building — fields are contiguous per component
@@ -455,10 +454,22 @@ JsonValue EntityBuilder::SerializeEntity(Registry* reg, Archetype* arch, size_t 
 	return entity;
 }
 
-JsonValue EntityBuilder::SerializeScene(Registry* reg, const char* sceneName)
+EntityBuilder::SceneMeta EntityBuilder::ParseSceneMeta(const JsonValue& sceneJson)
+{
+	SceneMeta meta;
+	if (const auto* v = sceneJson.Find("name"); v && v->IsString()) meta.Name = v->AsString();
+	if (const auto* v = sceneJson.Find("defaultState"); v && v->IsString()) meta.DefaultState = v->AsString();
+	if (const auto* v = sceneJson.Find("defaultMode"); v && v->IsString()) meta.DefaultMode = v->AsString();
+	return meta;
+}
+
+JsonValue EntityBuilder::SerializeScene(Registry* reg, const char* sceneName,
+										const char* defaultState, const char* defaultMode)
 {
 	JsonValue scene = JsonValue::Object();
 	scene["name"]   = JsonValue::String(sceneName);
+	if (defaultState && defaultState[0]) scene["defaultState"] = JsonValue::String(defaultState);
+	if (defaultMode && defaultMode[0]) scene["defaultMode"] = JsonValue::String(defaultMode);
 
 	JsonValue entities = JsonValue::Array();
 
@@ -499,9 +510,10 @@ JsonValue EntityBuilder::SerializeScene(Registry* reg, const char* sceneName)
 	return scene;
 }
 
-bool EntityBuilder::SaveToFile(Registry* reg, const char* sceneName, const char* filePath)
+bool EntityBuilder::SaveToFile(Registry* reg, const char* sceneName, const char* filePath,
+							   const char* defaultState, const char* defaultMode)
 {
-	JsonValue scene  = SerializeScene(reg, sceneName);
+	JsonValue scene  = SerializeScene(reg, sceneName, defaultState, defaultMode);
 	std::string json = JsonWrite(scene, true);
 
 	std::ofstream file(filePath);

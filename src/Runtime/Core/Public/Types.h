@@ -62,6 +62,25 @@ enum class CacheTier : uint8_t
 	MAX
 };
 
+// Identifies the lifetime tier of a Construct — determines what survives
+// level transitions, World resets, and session teardown.
+// FlowManager uses this to enforce destruction/survival on transitions.
+enum class ConstructLifetime : uint8_t
+{
+	Level,      // Destroyed when the Level unloads
+	World,      // Destroyed when the World resets
+	Session,    // Survives World reset. Destroyed when the session ends.
+	Persistent, // Survives everything. Destroyed only explicitly.
+};
+
+// Simulation scalar type — float by default, swappable to Fixed32 for
+// bit-identical determinism via TNX_DETERMINISTIC build flag.
+#if TNX_DETERMINISTIC
+using SimFloat = Fixed32;
+#else
+using SimFloat = float;
+#endif
+
 template <template <FieldWidth> class Derived, FieldWidth WIDTH = FieldWidth::Scalar>
 using MaskTemplate = Derived<WIDTH>;
 
@@ -152,52 +171,6 @@ namespace Internal
 
 	extern std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> g_TemporalComponentCounter;
 }
-
-// GlobalEntityRecord = std::vector<EntityRecord>(MAX_CACHED_ENTITIES); // we can have more than max cached entities total, so we allow this to grow, but it is our global entity lookup, all entities exist here.
-
-/* Old Entity ID
-// EntityID - 64-bit smart handle with embedded metadata
-// Swappable design: Implement GetIndex(), IsValid(), operator== for custom implementations
-union EntityID
-{
-	uint64_t Value;
-
-	// Bitfield layout
-	struct
-	{
-		uint64_t Index      : 20; // 1 Million entities (array slot)
-		uint64_t Generation : 16; // 65k recycles (server-grade stability)
-		uint64_t TypeID     : 12; // 4k class types (function dispatch)
-		uint64_t OwnerID    : 8;  // 256 owners (network routing)
-		uint64_t IsStatic   : 1;  // Static Entity Flag
-		uint64_t MetaFlags  : 7;  // Reserved for future use
-	};
-
-	// Required interface (for swappability)
-	uint32_t GetIndex() const { return static_cast<uint32_t>(Index); }
-	uint16_t GetGeneration() const { return static_cast<uint16_t>(Generation); }
-	uint16_t GetTypeID() const { return static_cast<uint16_t>(TypeID); }
-	uint8_t GetOwnerID() const { return static_cast<uint8_t>(OwnerID); }
-	bool GetIsStatic() const { return IsStatic; }
-
-	bool IsValid() const { return Value != 0; }
-
-	static EntityID Invalid()
-	{
-		EntityID Id;
-		Id.Value = 0;
-		return Id;
-	}
-
-	// Comparison operators
-	bool operator==(const EntityID& Other) const { return Value == Other.Value; }
-	bool operator!=(const EntityID& Other) const { return Value != Other.Value; }
-
-	// Network/ownership helpers
-	bool IsServer() const { return OwnerID == 0; }
-	bool IsLocal(uint8_t LocalClientID) const { return OwnerID == LocalClientID; }
-};
-*/
 
 #ifdef _MSC_VER
 #pragma warning(pop)
