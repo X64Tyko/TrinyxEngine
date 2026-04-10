@@ -143,7 +143,8 @@ private:
 	std::unique_ptr<ReplicationSystem> Replicator;
 	EngineConfig ServerConfig; // Server-mode config (game config + Mode=Server/ListenServer)
 	std::vector<PIEClient> PIEClients;
-	bool bPIEActive     = false;
+	bool bPIEActive          = false;
+	bool bPrePIESimWasPaused = true; // Editor sim paused state before PIE — restored on StopPIE
 	bool bServerVisible = true; // false = headless server (no viewport)
 	int PIEClientCount  = 1;    // Number of client worlds to spawn in PIE
 

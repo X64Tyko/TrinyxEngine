@@ -1463,7 +1463,8 @@ void EditorContext::StartPIE()
 		EnginePtr->InputTargetWorld = PIEClients[0].Flow->GetWorld();
 	}
 
-	// 10. Pause editor world's logic thread
+	// 10. Pause editor world's logic thread (save state so StopPIE restores correctly)
+	bPrePIESimWasPaused = !LogicPtr || LogicPtr->IsSimPaused();
 	if (LogicPtr) LogicPtr->SetSimPaused(true);
 
 	bPIEActive = true;
@@ -1550,8 +1551,8 @@ void EditorContext::StopPIE()
 	ServerViewport.reset();
 	ServerFlow.reset();
 
-	// 5. Resume editor world
-	if (LogicPtr) LogicPtr->SetSimPaused(false);
+	// 5. Restore editor world to its pre-PIE sim state
+	if (LogicPtr) LogicPtr->SetSimPaused(bPrePIESimWasPaused);
 
 	bPIEActive = false;
 	LOG_INFO("[PIE] Stopped");
