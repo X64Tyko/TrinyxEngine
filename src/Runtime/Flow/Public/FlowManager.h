@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -133,6 +134,11 @@ public:
 
 	GameMode* GetGameMode() const { return ActiveMode.get(); }
 
+	/// Called from any thread (e.g., NetThread) when a net flow event arrives.
+	/// The active GameState's OnNetEvent hook is dispatched on the next Tick.
+	/// eventID is a FlowEventID enum value cast to uint8_t.
+	void PostNetEvent(uint8_t eventID);
+
 	// ----- Tick (called by Sentinel each frame) -----
 
 	void Tick(float dt);
@@ -187,6 +193,10 @@ private:
 	const EngineConfig* Config = nullptr;
 	int WindowWidth            = 1920;
 	int WindowHeight           = 1080;
+
+	// Lock-free net event queue — NetThread ORs bits in, Sentinel swaps to zero in Tick.
+	// Bit N = FlowEventID N is pending. Supports up to 32 distinct FlowEventIDs.
+	std::atomic<uint32_t> PendingNetEvents{0};
 
 	// Internal helpers
 	StateFactory FindStateFactory(const char* name) const;

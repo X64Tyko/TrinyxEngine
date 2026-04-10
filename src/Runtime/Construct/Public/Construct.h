@@ -92,6 +92,13 @@ public:
 		}
 
 		bInitialized = true;
+
+		// Called once after views are hydrated and ticks are registered.
+		// Implement void OnSpawned() in a derived class to run post-init logic.
+		if constexpr (requires { static_cast<Derived*>(this)->OnSpawned(); })
+		{
+			static_cast<Derived*>(this)->OnSpawned();
+		}
 	}
 
 	void Shutdown()

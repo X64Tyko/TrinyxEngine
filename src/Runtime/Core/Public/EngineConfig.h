@@ -47,6 +47,11 @@ struct EngineConfig
 	// This is your "Tick Rate". Lower = Less Bandwidth, Higher = More Precision.
 	int NetworkUpdateHz = Unset;
 
+	// Number of RTT probe pings sent during the Synchronizing phase before
+	// computing InputLead. Higher = more accurate estimate; lower = faster load.
+	// Default: 8. Range: 1-255.
+	int ClockSyncProbes = Unset;
+
 	// Input (and window management)
 	// This controls how fast your main thread goes, higher = better input latency
 	int InputPollHz = Unset;

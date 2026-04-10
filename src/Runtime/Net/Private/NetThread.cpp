@@ -1,4 +1,5 @@
 #include "NetThread.h"
+#include "FlowManager.h"
 #include "GNSContext.h"
 #include "NetConnectionManager.h"
 #include "ReplicationSystem.h"
@@ -115,32 +116,99 @@ void NetThread::Tick()
 		Replicator->Tick(ConnectionMgr.get());
 	}
 
-	// Client-side input: snapshot NetInput and send InputFrame to the server.
-	// NetInput accumulates the full delta since the last net tick — independent
-	// of SimInput which is swapped at 512Hz by LogicThread.
-	if (ClientWorld)
+	// Clock sync probes and heartbeat.
+	// Runs for all bClientInitiated connections — these are legs we opened via Connect().
+	// In GNS loopback (same-process PIE), bServerSide is unreliable because both ends
+	// of a loopback pair may have m_hListenSocket==0. bClientInitiated is set explicitly
+	// in Connect() and is always correct.
 	{
-		InputBuffer* netInput = ClientWorld->GetNetInput();
-		netInput->Swap(); // consume everything since the last net tick
-		const uint32_t frame = ClientWorld->GetLogicThread()
-								   ? ClientWorld->GetLogicThread()->GetLastCompletedFrame()
-								   : 0;
+		const double nowSec = static_cast<double>(SDL_GetPerformanceCounter())
+			/ static_cast<double>(SDL_GetPerformanceFrequency());
+		const uint8_t probeTarget = static_cast<uint8_t>(
+			(Config->ClockSyncProbes == EngineConfig::Unset) ? 8 : Config->ClockSyncProbes);
 
-		// Find our outgoing server connection (not bServerSide, connected, ownerID assigned)
-		HSteamNetConnection serverConn = 0;
-		uint8_t ownerID                = 0;
-		for (const auto& ci : ConnectionMgr->GetConnections())
+		// Snapshot handles to avoid iterator invalidation while mutating ConnectionInfo.
+		std::vector<HSteamNetConnection> handles;
+		for (const auto& ci : ConnectionMgr->GetConnections()) if (ci.bConnected && ci.bClientInitiated) handles.push_back(ci.Handle);
+
+
+		for (HSteamNetConnection handle : handles)
 		{
-			if (!ci.bServerSide && ci.bConnected && ci.OwnerID != 0)
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(handle);
+			if (!ci) continue;
+
+			// During Synchronizing: send probes to build RTT, then ClockSyncRequest.
+			if (ci->RepState == ClientRepState::Synchronizing)
 			{
-				serverConn = ci.Handle;
-				ownerID    = ci.OwnerID;
-				break;
+				if (ci->ClockSyncProbesSent < probeTarget)
+				{
+					PacketHeader ping{};
+					ping.Type        = static_cast<uint8_t>(NetMessageType::Ping);
+					ping.Flags       = PacketFlag::DefaultFlags;
+					ping.SequenceNum = ci->NextSeqOut++;
+					ping.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
+					ConnectionMgr->Send(handle, ping, nullptr, false);
+					ci->ClockSyncProbesSent++;
+					ci->LastHeartbeatTime = nowSec;
+				}
+				else if (ci->ClockSyncProbesSent < 255 && ci->ClockSyncProbesRecvd >= probeTarget)
+				{
+					// RTT estimate is stable — send ClockSyncRequest.
+					ClockSyncPayload csReq{};
+					csReq.ClientTimestamp = SDL_GetPerformanceCounter();
+					csReq.ServerFrame     = 0;
+
+					PacketHeader header{};
+					header.Type        = static_cast<uint8_t>(NetMessageType::ClockSync);
+					header.Flags       = PacketFlag::DefaultFlags;
+					header.SequenceNum = ci->NextSeqOut++;
+					header.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
+					header.PayloadSize = sizeof(ClockSyncPayload);
+					ConnectionMgr->Send(handle, header,
+										reinterpret_cast<const uint8_t*>(&csReq), false);
+					ci->ClockSyncProbesSent = 255; // sentinel: past probe phase
+					ci->LastHeartbeatTime   = nowSec;
+				}
+			}
+
+			// Periodic heartbeat Ping (1/sec) past the probe phase.
+			if (ci->RepState >= ClientRepState::Synchronizing
+				&& ci->ClockSyncProbesSent >= probeTarget
+				&& (nowSec - ci->LastHeartbeatTime) >= 1.0)
+			{
+				PacketHeader ping{};
+				ping.Type        = static_cast<uint8_t>(NetMessageType::Ping);
+				ping.Flags       = PacketFlag::DefaultFlags;
+				ping.SequenceNum = ci->NextSeqOut++;
+				ping.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
+				ConnectionMgr->Send(handle, ping, nullptr, false);
+				ci->LastHeartbeatTime = nowSec;
 			}
 		}
+	}
 
-		if (serverConn != 0)
+	// Client-side input: for each outbound connection, snapshot its mapped world's
+	// NetInput and send an InputFrame to the server. Runs once per net tick per
+	// client leg — scales to multi-client PIE without any dedicated ClientWorld pointer.
+	{
+		std::vector<HSteamNetConnection> clientHandles;
+		for (const auto& ci : ConnectionMgr->GetConnections()) if (ci.bClientInitiated && ci.bConnected && ci.OwnerID != 0) clientHandles.push_back(ci.Handle);
+
+		for (HSteamNetConnection handle : clientHandles)
 		{
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(handle);
+			if (!ci) continue;
+
+			World* world = WorldMap[ci->OwnerID];
+			if (!world) continue;
+
+			InputBuffer* netInput = world->GetNetInput();
+			netInput->Swap(); // consume everything since the last net tick
+
+			const uint32_t frame = world->GetLogicThread()
+									   ? world->GetLogicThread()->GetLastCompletedFrame()
+									   : 0;
+
 			InputFramePayload payload{};
 			netInput->SnapshotKeyState(payload.KeyState, sizeof(payload.KeyState));
 			payload.MouseDX      = netInput->GetMouseDX();
@@ -152,8 +220,8 @@ void NetThread::Tick()
 			header.Flags       = PacketFlag::DefaultFlags;
 			header.PayloadSize = sizeof(InputFramePayload);
 			header.FrameNumber = frame;
-			header.SenderID    = ownerID;
-			ConnectionMgr->Send(serverConn, header,
+			header.SenderID    = ci->OwnerID;
+			ConnectionMgr->Send(handle, header,
 								reinterpret_cast<const uint8_t*>(&payload), false);
 		}
 	}
@@ -238,11 +306,17 @@ void NetThread::RouteMessage(const ReceivedMessage& msg)
 				{
 					uint16_t now  = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
 					uint16_t sent = msg.Header.Timestamp;
-					// Wrapping 16-bit subtraction handles rollover correctly
-					float rtt = static_cast<float>(static_cast<uint16_t>(now - sent));
-					// Exponential moving average (alpha=0.125, same as TCP)
+					float rtt     = static_cast<float>(static_cast<uint16_t>(now - sent));
 					if (ci->RTT_ms <= 0.0f) ci->RTT_ms = rtt;
 					else ci->RTT_ms                    = ci->RTT_ms * 0.875f + rtt * 0.125f;
+
+					// Count probes received during the Synchronizing clock-sync phase.
+					if (ci->bClientInitiated
+						&& ci->RepState == ClientRepState::Synchronizing
+						&& ci->ClockSyncProbesRecvd < 8)
+					{
+						ci->ClockSyncProbesRecvd++;
+					}
 				}
 				break;
 			}
@@ -313,42 +387,150 @@ void NetThread::RouteMessage(const ReceivedMessage& msg)
 				auto* ci        = ConnectionMgr->FindConnection(connection);
 				if (!ci)
 				{
-					LOG_WARN_F("[NetThread] ConnectionHandshake from unknown connection %ui",
-							   connection);
+					LOG_WARN_F("[NetThread] ConnectionHandshake from unknown connection %u", connection);
 					break;
 				}
 
 				if (ci->bServerSide)
 				{
+					// Server accepts client join: assign OwnerID, stamp server frame, send HandshakePayload.
 					if (msg.Header.SenderID != 0)
 					{
-						LOG_WARN_F("[NetThread] ConnectionHandshake from client with existing ownerID %ui", msg.Header.SenderID);
+						LOG_WARN_F("[NetThread] ConnectionHandshake from client with existing ownerID %u", msg.Header.SenderID);
 						break;
 					}
 
 					ConnectionMgr->GenerateNetID(connection);
+
+					// Stamp server frame for clock sync anchor
+					const uint32_t serverFrame = (WorldMap[0] && WorldMap[0]->GetLogicThread())
+													 ? WorldMap[0]->GetLogicThread()->GetLastCompletedFrame()
+													 : 0;
+					ci->ServerFrameAtHandshake = serverFrame;
+					ci->RepState               = ClientRepState::Synchronizing;
+
+					HandshakePayload hsPay{};
+					hsPay.TickRate = static_cast<uint32_t>(
+						Config->FixedUpdateHz == EngineConfig::Unset ? 128 : Config->FixedUpdateHz);
+					hsPay.ServerFrame = serverFrame;
+
 					PacketHeader handshakeHeader{};
 					handshakeHeader.Type        = static_cast<uint8_t>(NetMessageType::ConnectionHandshake);
-					handshakeHeader.Flags       = PacketFlag::HasAck;
+					handshakeHeader.Flags       = PacketFlag::DefaultFlags;
 					handshakeHeader.SequenceNum = 2;
-					handshakeHeader.FrameNumber = 0;
+					handshakeHeader.FrameNumber = serverFrame;
 					handshakeHeader.SenderID    = ci->OwnerID;
 					handshakeHeader.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
-					handshakeHeader.PayloadSize = 0;
-					ConnectionMgr->Send(connection, handshakeHeader, nullptr, true);
+					handshakeHeader.PayloadSize = sizeof(HandshakePayload);
+					ConnectionMgr->Send(connection, handshakeHeader,
+										reinterpret_cast<const uint8_t*>(&hsPay), true);
+
+					LOG_INFO_F("[NetThread] HandshakeAccept → OwnerID=%u frame=%u tickRate=%u",
+							   ci->OwnerID, serverFrame, hsPay.TickRate);
 				}
 				else
 				{
+					// Client receives server accept: store bootstrap data, advance RepState.
 					if (msg.Header.SenderID == 0)
 					{
-						LOG_WARN_F("[NetThread] Invalid connection handshake from server with existing ownerID %ui", msg.Header.SenderID);
+						LOG_WARN("[NetThread] Invalid HandshakeAccept — SenderID is 0");
 						break;
 					}
+
 					ConnectionMgr->AssignOwnerID(connection, msg.Header.SenderID);
-					LOG_INFO_F("[NetThread] Assigned OwnerID %u to connection %u", msg.Header.SenderID, connection);
+
+					if (msg.Payload.size() >= sizeof(HandshakePayload))
+					{
+						const auto* hsPay          = reinterpret_cast<const HandshakePayload*>(msg.Payload.data());
+						ci->ServerFrameAtHandshake = hsPay->ServerFrame;
+					}
+					ci->RepState = ClientRepState::Synchronizing;
+
+					LOG_INFO_F("[NetThread] HandshakeAccept received — OwnerID=%u serverFrame=%u",
+							   msg.Header.SenderID, ci->ServerFrameAtHandshake);
 				}
 				break;
 			}
+		case NetMessageType::ClockSync:
+			{
+				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+				if (!ci) break;
+
+				if (msg.Payload.size() < sizeof(ClockSyncPayload))
+				{
+					LOG_WARN_F("[NetThread] ClockSync payload too small (%zu)", msg.Payload.size());
+					break;
+				}
+
+				const auto* req = reinterpret_cast<const ClockSyncPayload*>(msg.Payload.data());
+
+				if (ci->bServerSide)
+				{
+					// Server responds: echo ClientTimestamp, fill ServerFrame.
+					const uint32_t serverFrame = (WorldMap[0] && WorldMap[0]->GetLogicThread())
+													 ? WorldMap[0]->GetLogicThread()->GetLastCompletedFrame()
+													 : 0;
+					ClockSyncPayload resp{};
+					resp.ClientTimestamp = req->ClientTimestamp;
+					resp.ServerFrame     = serverFrame;
+
+					PacketHeader header{};
+					header.Type        = static_cast<uint8_t>(NetMessageType::ClockSync);
+					header.Flags       = PacketFlag::DefaultFlags;
+					header.SequenceNum = ci->NextSeqOut++;
+					header.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
+					header.SenderID    = 0;
+					header.PayloadSize = sizeof(ClockSyncPayload);
+					ConnectionMgr->Send(msg.Connection, header,
+										reinterpret_cast<const uint8_t*>(&resp), false);
+
+					ci->RepState = ClientRepState::Loading;
+					LOG_INFO_F("[NetThread] ClockSyncResponse sent → client Loading (frame=%u)", serverFrame);
+				}
+				else
+				{
+					// Client: compute InputLead from RTT and advance to Loading.
+					const uint32_t tickRate = (Config->FixedUpdateHz == EngineConfig::Unset)
+												  ? 128u
+												  : static_cast<uint32_t>(Config->FixedUpdateHz);
+					const float stepMs = 1000.0f / static_cast<float>(tickRate);
+					// InputLead = ceil(RTT/2 / stepMs) + 2 frames of safety
+					const uint32_t lead = static_cast<uint32_t>(ci->RTT_ms * 0.5f / stepMs) + 2u;
+					ci->InputLead       = lead;
+					ci->RepState        = ClientRepState::Loading;
+					LOG_INFO_F("[NetThread] ClockSync complete — InputLead=%u RTT=%.1fms → Loading",
+							   lead, ci->RTT_ms);
+				}
+				break;
+			}
+
+		case NetMessageType::FlowEvent:
+			{
+				if (msg.Payload.size() < sizeof(FlowEventPayload))
+				{
+					LOG_WARN_F("[NetThread] FlowEvent payload too small (%zu)", msg.Payload.size());
+					break;
+				}
+
+				const auto* ev = reinterpret_cast<const FlowEventPayload*>(msg.Payload.data());
+
+				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+				if (ci && !ci->bServerSide)
+				{
+					// Advance RepState: Loading → Loaded on ServerReady.
+					if (ci->RepState == ClientRepState::Loading
+						&& ev->EventID == static_cast<uint8_t>(FlowEventID::ServerReady))
+					{
+						ci->RepState = ClientRepState::Loaded;
+						LOG_INFO("[NetThread] FlowEvent::ServerReady — client Loaded, awaiting SpawnConfirm");
+					}
+				}
+
+				// Post to FlowManager so Sentinel dispatches OnNetEvent to the active GameState.
+				if (FlowMgr) FlowMgr->PostNetEvent(ev->EventID);
+				break;
+			}
+
 		case NetMessageType::EntityDestroy:
 			{
 				// TODO: Not yet implemented

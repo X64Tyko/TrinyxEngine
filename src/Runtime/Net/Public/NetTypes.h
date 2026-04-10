@@ -158,6 +158,21 @@ struct StateCorrectionEntry
 static_assert(sizeof(StateCorrectionEntry) == 32, "StateCorrectionEntry must be 32 bytes");
 
 // ---------------------------------------------------------------------------
+// HandshakePayload — server accept response carries session bootstrap data.
+//
+// Sent reliable with NetMessageType::ConnectionHandshake when the server
+// accepts a client join. OwnerID is carried in the header SenderID field;
+// this payload adds the context the client needs to start clock sync.
+// ---------------------------------------------------------------------------
+struct HandshakePayload
+{
+	uint32_t TickRate;    // Server's FixedUpdateHz (e.g., 512)
+	uint32_t ServerFrame; // Server's FrameNumber at accept time — clock sync anchor
+};
+
+static_assert(sizeof(HandshakePayload) == 8, "HandshakePayload must be 8 bytes");
+
+// ---------------------------------------------------------------------------
 // ClientRepState — per-connection session state machine (server-side).
 //
 // Transitions:

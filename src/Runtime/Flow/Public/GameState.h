@@ -65,6 +65,10 @@ public:
 	/// Called each Sentinel frame while this state is the top of the stack.
 	virtual void Tick(float dt) { (void)dt; }
 
+	/// Called on the Sentinel thread when a net flow event arrives from the NetThread.
+	/// eventID is a FlowEventID enum value cast to uint8_t.
+	virtual void OnNetEvent(uint8_t eventID) { (void)eventID; }
+
 	/// Declare what this state needs from the engine.
 	virtual StateRequirements GetRequirements() const { return {}; }
 

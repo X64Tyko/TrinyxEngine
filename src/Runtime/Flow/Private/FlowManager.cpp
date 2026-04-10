@@ -311,8 +311,30 @@ void FlowManager::SetGameMode(const char* modeName)
 // Tick
 // ---------------------------------------------------------------------------
 
+void FlowManager::PostNetEvent(uint8_t eventID)
+{
+	PendingNetEvents.fetch_or(1u << eventID, std::memory_order_release);
+}
+
 void FlowManager::Tick(float dt)
 {
+	// Drain net events posted by NetThread — dispatch to active state on Sentinel.
+	const uint32_t events = PendingNetEvents.exchange(0, std::memory_order_acquire);
+	if (events)
+	{
+		if (GameState* active = GetActiveState())
+		{
+			uint32_t bits = events;
+			while (bits)
+			{
+				const uint32_t bit = bits & (~bits + 1); // isolate lowest set bit
+				const uint8_t id   = static_cast<uint8_t>(__builtin_ctz(bit));
+				active->OnNetEvent(id);
+				bits &= bits - 1;
+			}
+		}
+	}
+
 	// Tick the active (top) state
 	if (GameState* active = GetActiveState())
 	{

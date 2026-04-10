@@ -152,6 +152,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 		{
 			Net = std::make_unique<NetThread>();
 			Net->Initialize(&GNS, &Config);
+			Net->SetFlowManager(Flow.get());
 		}
 	}
 #endif
@@ -215,6 +216,7 @@ bool TrinyxEngine::EnsureNetworking()
 
 	Net = std::make_unique<NetThread>();
 	Net->Initialize(&GNS, &Config);
+	Net->SetFlowManager(Flow.get());
 	return true;
 }
 #endif
