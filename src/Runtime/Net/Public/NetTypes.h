@@ -5,17 +5,6 @@
 #include "RegistryTypes.h" // NetOwnerID_Bits
 
 // ---------------------------------------------------------------------------
-// Engine mode — determines what subsystems are initialized.
-// ---------------------------------------------------------------------------
-enum class EngineMode : uint8_t
-{
-	Standalone,   // No networking — current default behavior
-	Client,       // Connects to remote server, renders locally
-	Server,       // Headless — no window/Vulkan/renderer
-	ListenServer, // Server + local client in one process (editor PIE default)
-};
-
-// ---------------------------------------------------------------------------
 // NetMessageType — discriminator for network messages.
 // ---------------------------------------------------------------------------
 enum class NetMessageType : uint8_t

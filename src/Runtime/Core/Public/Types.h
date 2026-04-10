@@ -62,6 +62,16 @@ enum class CacheTier : uint8_t
 	MAX
 };
 
+// Engine mode — determines what subsystems are initialized.
+// Defined here (not in NetTypes.h) so it is available regardless of TNX_ENABLE_NETWORK.
+enum class EngineMode : uint8_t
+{
+	Standalone,   // No networking — default for singleplayer / editor
+	Client,       // Connects to remote server, renders locally
+	Server,       // Headless — no window/Vulkan/renderer
+	ListenServer, // Server + local client in one process (PIE default)
+};
+
 // Identifies the lifetime tier of a Construct — determines what survives
 // level transitions, World resets, and session teardown.
 // FlowManager uses this to enforce destruction/survival on transitions.

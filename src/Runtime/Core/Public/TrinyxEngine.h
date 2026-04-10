@@ -6,8 +6,10 @@
 #include "EngineConfig.h"
 #include "Events.h"
 #include "FlowManager.h"
+#ifdef TNX_ENABLE_NETWORK
 #include "GNSContext.h"
 #include "NetThread.h"
+#endif
 #include "VulkanContext.h"
 #include "VulkanMemory.h"
 #include "../../Rendering/Private/FramePacer.h"
@@ -17,9 +19,11 @@ class RenderThread;
 class Registry;
 class LogicThread;
 class JoltPhysics;
+class World;
+#ifdef TNX_ENABLE_NETWORK
 class NetConnectionManager;
 class ReplicationSystem;
-class World;
+#endif
 
 // Compile-time renderer selection: EditorRenderer (ImGui overlay) or GameplayRenderer (no-op overlay).
 #if TNX_ENABLE_EDITOR
@@ -93,6 +97,7 @@ public:
 	RendererType* GetRenderer() const { return Render.get(); }
 	SDL_Window* GetWindow() const { return EngineWindow; }
 
+#ifdef TNX_ENABLE_NETWORK
 	// Networking
 	GNSContext* GetGNSContext() const { return const_cast<GNSContext*>(&GNS); }
 	NetThread* GetNetThread() const { return Net.get(); }
@@ -105,6 +110,8 @@ public:
 	// EditorContext fires them during StartPIE/StopPIE and Play/Stop.
 	Callback<void, World*, NetConnectionManager*> OnPIEStarted;
 	Callback<void, NetConnectionManager*> OnPIEStopped;
+#endif
+
 	Callback<void, World*> OnPlayStarted; // Fired when Play (Local) is clicked
 	Callback<void> OnPlayStopped;         // Fired when Stop (Local) is clicked
 
@@ -131,9 +138,11 @@ private:
 	SDL_GPUDevice* GpuDevice;
 	FramePacer Pacer;
 
+#ifdef TNX_ENABLE_NETWORK
 	// --- Networking ---
 	GNSContext GNS;
 	std::unique_ptr<NetThread> Net;
+#endif
 
 	// --- Vulkan (owned here, shared across worlds) ---
 	VulkanContext VkCtx;

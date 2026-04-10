@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include <algorithm>
 
-#include "NetTypes.h" // EngineMode
+#include "Types.h" // EngineMode, SimFloat
 
 struct EngineConfig
 {
