@@ -27,6 +27,7 @@ begins.
 | 3 | **Networking**          | Functional  | GNS wrapper, PIE loopback, entity spawn replication, state corrections. Client input routing. Delta compression pending.         |
 | 4 | **Audio**               | Not started | SDL3 thin wrapper first (handle-based for Anti-Event compatibility). Minimal — just enough for gameplay feedback.                |
 | 5 | **Game Flow**           | Designed    | Session lifecycle, Soul/Body pattern, FlowManager/FlowState, network connection flow, travel. See [FLOW.md](FLOW.md).           |
+| 6 | **Runtime HUD**         | Designed    | `HudContext` interface wired into `GameplayRenderer::OnPreRecord`. ImGui-backed during R&D; swappable per [UI.md](UI.md).       |
 
 ### Stage 2: Hardening
 

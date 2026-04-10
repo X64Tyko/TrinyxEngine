@@ -1,21 +1,43 @@
 #pragma once
+#include <memory>
+#include "HudContext.h"
 #include "RendererCore.h"
 
 // -----------------------------------------------------------------------
-// GameplayRenderer — RendererCore with no editor overlay.
-// All hooks are no-ops; compiled out entirely by the optimizer.
+// GameplayRenderer — RendererCore with an optional runtime HUD overlay.
+//
+// The HUD layer defaults to NullHudContext (zero overhead).  Game code
+// replaces it at startup:
+//
+//   renderer.SetHudContext(std::make_unique<ArenaHud>(&world));
+//
+// See docs/UI.md for the full HudContext design rationale.
 // -----------------------------------------------------------------------
 
 class GameplayRenderer : public RendererCore<GameplayRenderer>
 {
 public:
-	GameplayRenderer()  = default;
+	GameplayRenderer()
+		: HudLayer(std::make_unique<NullHudContext>())
+	{
+	}
+
 	~GameplayRenderer() = default;
+
+	/// Replace the active HUD implementation.  Called before the first frame.
+	void SetHudContext(std::unique_ptr<HudContext> hud)
+	{
+		HudLayer = std::move(hud);
+	}
+
+	HudContext* GetHudContext() const { return HudLayer.get(); }
 
 private:
 	friend class RendererCore<GameplayRenderer>;
 
-	// CRTP hooks — all empty
+	std::unique_ptr<HudContext> HudLayer;
+
+	// CRTP hooks
 	void OnPostStart()
 	{
 	}
@@ -26,6 +48,7 @@ private:
 
 	void OnPreRecord()
 	{
+		HudLayer->BuildFrame();
 	}
 
 	void RecordOverlay(VkCommandBuffer)

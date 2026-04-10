@@ -537,6 +537,7 @@ constraint system, static entity tier, reflection robustness, `TNX_STRIP_NAMES` 
   interaction transparently.
 - **Jolt is a temporary physics backend.** The constraint system is designed to be solver-agnostic. Don't suggest architectural changes that couple more tightly to Jolt.
 - **The editor scope is intentionally limited.** Scene hierarchy + entity placement + reflected property inspection + save/load. Do not suggest expanding it.
+- **UI framework is Dear ImGui — do not suggest replacing it.** ImGui is used for the editor (always) and for the runtime HUD during R&D (via `HudContext`). The `HudContext` interface in `GameplayRenderer` is the swap point if the HUD outgrows ImGui. Do not suggest rolling a custom editor UI. See `docs/UI.md`.
 - **Serialization:** JSON for all builds during R&D. Binary format will be introduced when it makes sense, not before.
   The engine includes a minimal hand-rolled JSON parser (`Json.h`) — intentionally not a vendored library. Swap-ready
   API if needs outgrow it.

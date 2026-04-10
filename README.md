@@ -312,6 +312,7 @@ ratios.
   contract
 - **[Schema Error Examples](docs/SCHEMA_ERROR_EXAMPLES.md)** — Reflection system mistakes and fixes
 - **[GPU-Driven Rendering Design](docs/GPU_Driven_Rendering_Design.md)** — GPU pipeline design doc
+- **[UI Framework](docs/UI.md)** — Editor UI (Dear ImGui) and runtime HUD (HudContext) architecture and rationale
 
 ---
 
