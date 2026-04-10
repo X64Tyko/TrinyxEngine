@@ -839,7 +839,10 @@ bool NodeScriptPanel::ExportToFile()
 	}
 	catch (const std::exception& ex)
 	{
+		snprintf(StatusMsg, sizeof(StatusMsg), "Failed to create output directory: %s", ex.what());
+		bStatusError = true;
 		LOG_ERROR_F("[NodeScript] Failed to create output directory: %s", ex.what());
+		return false;
 	}
 
 	std::ofstream file(OutputPath);

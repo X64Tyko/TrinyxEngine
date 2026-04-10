@@ -129,7 +129,10 @@ bool ComponentGeneratorPanel::ExportToFile()
 	}
 	catch (const std::exception& ex)
 	{
+		snprintf(StatusMessage, sizeof(StatusMessage), "Failed to create output directory: %s", ex.what());
+		bStatusError = true;
 		LOG_ERROR_F("[ComponentGenerator] Failed to create output directory: %s", ex.what());
+		return false;
 	}
 
 	std::ofstream file(OutputPath);
