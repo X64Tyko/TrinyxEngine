@@ -36,6 +36,8 @@
 #include "Panels/EngineStatsPanel.h"
 #include "Panels/LogPanel.h"
 #include "Panels/ContentBrowserPanel.h"
+#include "Panels/NodeScriptPanel.h"
+#include "Panels/ComponentGeneratorPanel.h"
 
 EditorContext::EditorContext() = default;
 
@@ -83,6 +85,8 @@ void EditorContext::Initialize(TrinyxEngine* engine, LogicThread* logic, MeshMan
 	AddPanel<EngineStatsPanel>();
 	AddPanel<LogPanel>();
 	AddPanel<ContentBrowserPanel>();
+	AddPanel<NodeScriptPanel>();
+	AddPanel<ComponentGeneratorPanel>();
 
 	LOG_INFO_F("[Editor] Initialized with %zu panels", Panels.size());
 }
@@ -553,10 +557,12 @@ void EditorContext::ApplyDefaultLayout(unsigned int dockspaceID)
 	ImGui::DockBuilderDockWindow("World Outliner", left);
 	ImGui::DockBuilderDockWindow("Details", right);
 
-	// Bottom: tabbed — Content Browser, Log, Engine Stats
+	// Bottom: tabbed — Content Browser, Log, Engine Stats, Node Script, Component Generator
 	ImGui::DockBuilderDockWindow("Content Browser", bottom);
 	ImGui::DockBuilderDockWindow("Log", bottom);
 	ImGui::DockBuilderDockWindow("Engine Stats", bottom);
+	ImGui::DockBuilderDockWindow("Node Script", bottom);
+	ImGui::DockBuilderDockWindow("Component Generator", bottom);
 
 	// Mark center node as the viewport (passthru so the 3D scene shows through)
 	ImGuiDockNode* centerNode = ImGui::DockBuilderGetNode(center);
