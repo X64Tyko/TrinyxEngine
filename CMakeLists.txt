@@ -271,7 +271,15 @@ set(protobuf_BUILD_LIBUPB          OFF CACHE BOOL "" FORCE)
 # That file is only included in protobuf-config.cmake when MODULE_COMPATIBLE=ON.
 set(protobuf_MODULE_COMPATIBLE     ON  CACHE BOOL "" FORCE)
 
+# Save current compile options, then strip project-level warnings so they don't
+# leak into protobuf/abseil (abseil uses __int128 which trips -Wpedantic).
+get_directory_property(_saved_compile_opts COMPILE_OPTIONS)
+set_directory_properties(PROPERTIES COMPILE_OPTIONS "")
+
 add_subdirectory("${CMAKE_SOURCE_DIR}/libs/protobuf" protobuf-build)
+
+# Restore project-level compile options.
+set_directory_properties(PROPERTIES COMPILE_OPTIONS "${_saved_compile_opts}")
 
 # Match the DLL runtime for all protobuf targets.
 if (MSVC)
