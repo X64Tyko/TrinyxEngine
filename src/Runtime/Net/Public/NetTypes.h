@@ -9,13 +9,18 @@
 // ---------------------------------------------------------------------------
 enum class NetMessageType : uint8_t
 {
-	ConnectionHandshake = 0, // Client<->Server: join request / accept+reject + assigned PlayerID
-	InputFrame          = 1, // Client->Server: input state for frame N
-	StateCorrection     = 2, // Server->Client: authoritative state snapshot for frame N
-	EntitySpawn         = 3, // Server->Client: new entity creation command
-	EntityDestroy       = 4, // Server->Client: entity destruction command
-	Ping                = 5, // Bidirectional: RTT measurement
-	Pong                = 6,
+	ConnectionHandshake = 0,  // Client<->Server: join request / accept+reject + assigned PlayerID
+	InputFrame          = 1,  // Client->Server: input state for frame N
+	StateCorrection     = 2,  // Server->Client: authoritative state snapshot for frame N
+	EntitySpawn         = 3,  // Server->Client: new entity creation command
+	EntityDestroy       = 4,  // Server->Client: entity destruction command
+	Ping                = 5,  // Bidirectional: RTT measurement
+	Pong                = 6,  // Bidirectional: RTT measurement response
+	FlowEvent           = 7,  // Server->Client: session flow signal (ServerReady, etc.)
+	SpawnRequest        = 8,  // Client->Server: request to spawn a player body
+	SpawnConfirm        = 9,  // Server->Client: authoritative spawn confirmation
+	SpawnReject         = 10, // Server->Client: spawn request denied
+	ClockSync           = 11, // Bidirectional: frame clock synchronisation
 	Count
 };
 
@@ -151,3 +156,100 @@ struct StateCorrectionEntry
 };
 
 static_assert(sizeof(StateCorrectionEntry) == 32, "StateCorrectionEntry must be 32 bytes");
+
+// ---------------------------------------------------------------------------
+// ClientRepState — per-connection session state machine (server-side).
+//
+// Transitions:
+//   PendingHandshake → Synchronizing  (HandshakeAccept sent)
+//   Synchronizing    → Loading        (ClockSync complete, InputLead known)
+//   Loading          → Loaded         (initial EntitySpawn batch complete)
+//   Loaded           → Playing        (SpawnConfirm sent)
+// ---------------------------------------------------------------------------
+enum class ClientRepState : uint8_t
+{
+	PendingHandshake = 0, // TCP-like: waiting for HandshakeRequest
+	Synchronizing    = 1, // Clock sync probes in flight
+	Loading          = 2, // Waiting for initial entity spawn batch to flush
+	Loaded           = 3, // Batch done; server will send ServerReady FlowEvent
+	Playing          = 4, // SpawnConfirm sent; full simulation sync active
+};
+
+// ---------------------------------------------------------------------------
+// FlowEvent identifiers — carried in FlowEventPayload.EventID.
+// ---------------------------------------------------------------------------
+enum class FlowEventID : uint8_t
+{
+	ServerReady = 0, // Server has flushed initial entity batch; client may send SpawnRequest
+};
+
+// ---------------------------------------------------------------------------
+// FlowEventPayload — server signals a session flow event to the client.
+// Sent reliable (NetMessageType::FlowEvent).
+// ---------------------------------------------------------------------------
+struct FlowEventPayload
+{
+	uint8_t EventID; // FlowEventID
+	uint8_t _Pad[3];
+};
+
+static_assert(sizeof(FlowEventPayload) == 4, "FlowEventPayload must be 4 bytes");
+
+// ---------------------------------------------------------------------------
+// SpawnRequestPayload — client requests a player body spawn.
+// Sent reliable (NetMessageType::SpawnRequest).
+// ---------------------------------------------------------------------------
+struct SpawnRequestPayload
+{
+	uint32_t ClassID;       // Requested entity class / prefab
+	uint32_t PredictionID;  // Client-local prediction token; echoed in Confirm/Reject
+	float PosX, PosY, PosZ; // Desired spawn position hint (server may override)
+	float _Pad;
+};
+
+static_assert(sizeof(SpawnRequestPayload) == 24, "SpawnRequestPayload must be 24 bytes");
+
+// ---------------------------------------------------------------------------
+// SpawnConfirmPayload — server confirms an authoritative spawn.
+// Sent reliable (NetMessageType::SpawnConfirm).
+// ---------------------------------------------------------------------------
+struct SpawnConfirmPayload
+{
+	uint32_t NetHandle;     // Authoritative EntityNetHandle.Value for the spawned body
+	uint32_t PredictionID;  // Echoed from SpawnRequestPayload
+	float PosX, PosY, PosZ; // Authoritative spawn position
+	float _Pad;
+};
+
+static_assert(sizeof(SpawnConfirmPayload) == 24, "SpawnConfirmPayload must be 24 bytes");
+
+// ---------------------------------------------------------------------------
+// SpawnRejectPayload — server rejects a spawn request.
+// Sent reliable (NetMessageType::SpawnReject).
+// ---------------------------------------------------------------------------
+struct SpawnRejectPayload
+{
+	uint32_t PredictionID; // Echoed from SpawnRequestPayload
+	uint8_t Reason;        // Implementation-defined reject code
+	uint8_t _Pad[3];
+};
+
+static_assert(sizeof(SpawnRejectPayload) == 8, "SpawnRejectPayload must be 8 bytes");
+
+// ---------------------------------------------------------------------------
+// ClockSyncPayload — bidirectional clock synchronisation probe.
+//
+// Client → Server (request):  ClientTimestamp set, ServerFrame = 0.
+// Server → Client (response): ServerFrame set to current FrameNumber,
+//                              ClientTimestamp echoed for RTT calculation.
+// Sent unreliable (NetMessageType::ClockSync).
+// ---------------------------------------------------------------------------
+struct ClockSyncPayload
+{
+	uint64_t ClientTimestamp; // SDL_GetPerformanceCounter() at send time
+	uint32_t ServerFrame;     // Server current FrameNumber (0 in request, filled in response)
+	uint32_t _Pad;
+};
+
+static_assert(sizeof(ClockSyncPayload) == 16, "ClockSyncPayload must be 16 bytes");
+
