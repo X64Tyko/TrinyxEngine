@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <functional>
+#include <span>
 
 #include "EngineConfig.h"
 #include "Input.h"
@@ -66,6 +67,10 @@ public:
 	LogicThread* GetLogicThread() const { return Logic.get(); }
 	InputBuffer* GetSimInput() { return &SimInput; }
 	InputBuffer* GetVizInput() { return &VizInput; }
+	InputBuffer* GetNetInput() { return &NetInput; }
+
+	/// All buffers Sentinel should fan input into. Iterate instead of adding push sites.
+	std::span<InputBuffer* const> GetInputTargets() const { return InputTargets; }
 	const EngineConfig& GetConfig() const { return Config; }
 	EngineConfig& GetConfigMut() { return Config; }
 	ConstructRegistry* GetConstructRegistry() { return Constructs; }
@@ -90,6 +95,8 @@ private:
 
 	InputBuffer SimInput;
 	InputBuffer VizInput;
+	InputBuffer NetInput;
+	InputBuffer* InputTargets[3] = {&SimInput, &VizInput, &NetInput};
 	SpawnSync Spawner;
 
 	ConstructRegistry* Constructs = nullptr; // Non-owning — FlowManager owns the registry

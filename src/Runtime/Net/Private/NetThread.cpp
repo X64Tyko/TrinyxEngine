@@ -5,6 +5,7 @@
 #include "EngineConfig.h"
 #include "Input.h"
 #include "Logger.h"
+#include "LogicThread.h"
 #include "Profiler.h"
 #include "ThreadPinning.h"
 #include "World.h"
@@ -107,11 +108,54 @@ void NetThread::Tick()
 		RouteMessage(msg);
 	}
 
-	// Server-side replication: send entity state to connected clients
+	// Server-side replication: send entity state to connected clients.
+	// Frame number comes from the server's LogicThread — not a local counter.
 	if (Replicator)
 	{
-		static uint32_t replicationFrame = 0;
-		Replicator->Tick(ConnectionMgr.get(), replicationFrame++);
+		Replicator->Tick(ConnectionMgr.get());
+	}
+
+	// Client-side input: snapshot NetInput and send InputFrame to the server.
+	// NetInput accumulates the full delta since the last net tick — independent
+	// of SimInput which is swapped at 512Hz by LogicThread.
+	if (ClientWorld)
+	{
+		InputBuffer* netInput = ClientWorld->GetNetInput();
+		netInput->Swap(); // consume everything since the last net tick
+		const uint32_t frame = ClientWorld->GetLogicThread()
+								   ? ClientWorld->GetLogicThread()->GetLastCompletedFrame()
+								   : 0;
+
+		// Find our outgoing server connection (not bServerSide, connected, ownerID assigned)
+		HSteamNetConnection serverConn = 0;
+		uint8_t ownerID                = 0;
+		for (const auto& ci : ConnectionMgr->GetConnections())
+		{
+			if (!ci.bServerSide && ci.bConnected && ci.OwnerID != 0)
+			{
+				serverConn = ci.Handle;
+				ownerID    = ci.OwnerID;
+				break;
+			}
+		}
+
+		if (serverConn != 0)
+		{
+			InputFramePayload payload{};
+			netInput->SnapshotKeyState(payload.KeyState, sizeof(payload.KeyState));
+			payload.MouseDX      = netInput->GetMouseDX();
+			payload.MouseDY      = netInput->GetMouseDY();
+			payload.MouseButtons = netInput->GetMouseButtonMask();
+
+			PacketHeader header{};
+			header.Type        = static_cast<uint8_t>(NetMessageType::InputFrame);
+			header.Flags       = PacketFlag::DefaultFlags;
+			header.PayloadSize = sizeof(InputFramePayload);
+			header.FrameNumber = frame;
+			header.SenderID    = ownerID;
+			ConnectionMgr->Send(serverConn, header,
+								reinterpret_cast<const uint8_t*>(&payload), false);
+		}
 	}
 
 	// FPS tracking

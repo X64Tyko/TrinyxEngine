@@ -79,6 +79,14 @@ public:
 	/// NetThread does NOT own this pointer — caller manages lifetime.
 	void SetReplicationSystem(ReplicationSystem* repl) { Replicator = repl; }
 
+	/// Set the client's local World — used to snapshot NetInput and send
+	/// InputFrame packets to the server each tick. Must be called after
+	/// the client connects and before gameplay begins.
+	/// Do NOT set on a ListenServer: the host's input enters the server World
+	/// directly via Sentinel. Setting this on a ListenServer would double-inject
+	/// host input and add network-loopback latency to it.
+	void SetClientWorld(World* world) { ClientWorld = world; }
+
 	// FPS tracking
 	float GetNetFPS() const { return NetFPS.load(std::memory_order_relaxed); }
 	float GetNetFrameMs() const { return NetFrameMs.load(std::memory_order_relaxed); }
@@ -90,6 +98,7 @@ private:
 	GNSContext* GNS               = nullptr;
 	const EngineConfig* Config    = nullptr;
 	ReplicationSystem* Replicator = nullptr;
+	World* ClientWorld            = nullptr; // Non-null on pure client only — see SetClientWorld
 
 	std::unique_ptr<NetConnectionManager> ConnectionMgr;
 

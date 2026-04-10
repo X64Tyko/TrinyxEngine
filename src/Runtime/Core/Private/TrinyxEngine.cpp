@@ -340,9 +340,8 @@ void TrinyxEngine::PumpEvents()
 {
 	TNX_ZONE_N("Input_Poll");
 
-	World* targetWorld    = InputTargetWorld ? InputTargetWorld : DefaultWorld;
-	InputBuffer* SimInput = targetWorld->GetSimInput();
-	InputBuffer* VizInput = targetWorld->GetVizInput();
+	World* targetWorld = InputTargetWorld ? InputTargetWorld : DefaultWorld;
+	auto inputTargets  = targetWorld->GetInputTargets();
 #ifdef TNX_ENABLE_ROLLBACK
 	LogicThread* Logic = targetWorld->GetLogicThread();
 #endif
@@ -389,8 +388,7 @@ void TrinyxEngine::PumpEvents()
 #endif
 				if (!e.key.repeat)
 				{
-					SimInput->PushKey(e.key.scancode, true);
-					VizInput->PushKey(e.key.scancode, true);
+					for (auto* buf : inputTargets) buf->PushKey(e.key.scancode, true);
 				}
 				break;
 
@@ -398,16 +396,14 @@ void TrinyxEngine::PumpEvents()
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				SimInput->PushKey(e.key.scancode, false);
-				VizInput->PushKey(e.key.scancode, false);
+				for (auto* buf : inputTargets) buf->PushKey(e.key.scancode, false);
 				break;
 
 			case SDL_EVENT_MOUSE_MOTION:
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				SimInput->AddMouseDelta(e.motion.xrel, e.motion.yrel);
-				VizInput->AddMouseDelta(e.motion.xrel, e.motion.yrel);
+				for (auto* buf : inputTargets) buf->AddMouseDelta(e.motion.xrel, e.motion.yrel);
 				break;
 
 			case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -416,16 +412,14 @@ void TrinyxEngine::PumpEvents()
 #else
 				if (!engineOwnsInput) break;
 #endif
-				SimInput->PushMouseButton(e.button.button, true);
-				VizInput->PushMouseButton(e.button.button, true);
+				for (auto* buf : inputTargets) buf->PushMouseButton(e.button.button, true);
 				break;
 
 			case SDL_EVENT_MOUSE_BUTTON_UP:
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				SimInput->PushMouseButton(e.button.button, false);
-				VizInput->PushMouseButton(e.button.button, false);
+				for (auto* buf : inputTargets) buf->PushMouseButton(e.button.button, false);
 				break;
 
 			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:

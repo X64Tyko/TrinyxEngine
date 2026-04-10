@@ -31,8 +31,8 @@ public:
 	void Initialize(World* serverWorld);
 
 	/// Run one replication tick. Call from NetThread at NetworkUpdateHz.
-	/// Sends EntitySpawn + StateCorrection to all connected clients.
-	void Tick(NetConnectionManager* connMgr, uint32_t frameNumber);
+	/// Reads the authoritative frame number from the server's LogicThread.
+	void Tick(NetConnectionManager* connMgr);
 
 	/// Pre-register a server entity with a specific OwnerID. Allocates a NetIndex,
 	/// wires NetToRecord, and sets the record's NetworkID. SendSpawns will use the

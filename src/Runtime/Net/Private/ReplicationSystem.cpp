@@ -4,6 +4,7 @@
 #include "CacheSlotMeta.h"
 #include "CColor.h"
 #include "Logger.h"
+#include "LogicThread.h"
 #include "CMeshRef.h"
 #include "NetConnectionManager.h"
 #include "NetTypes.h"
@@ -26,10 +27,16 @@ void ReplicationSystem::Initialize(World* serverWorld)
 // Tick — called from NetThread at NetworkUpdateHz
 // ---------------------------------------------------------------------------
 
-void ReplicationSystem::Tick(NetConnectionManager* connMgr, uint32_t frameNumber)
+void ReplicationSystem::Tick(NetConnectionManager* connMgr)
 {
 	if (!ServerWorld || !connMgr) return;
 	if (connMgr->GetConnectionCount() == 0) return;
+
+	// Frame number comes from the server's LogicThread — the last fully committed
+	// simulation frame. This is what clients use to detect stale corrections.
+	const uint32_t frameNumber = ServerWorld->GetLogicThread()
+									 ? ServerWorld->GetLogicThread()->GetLastCompletedFrame()
+									 : 0;
 
 	SendSpawns(connMgr, frameNumber);
 	SendStateCorrections(connMgr, frameNumber);
