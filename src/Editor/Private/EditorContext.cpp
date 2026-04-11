@@ -1249,10 +1249,6 @@ void EditorContext::StartPIE()
 
 	// Load scene into server world via spawn handshake
 	ServerWorld->SetJobsInitialized(true);
-	ServerWorld->Spawn([&sceneJson](Registry* reg)
-	{
-		EntityBuilder::SpawnScene(reg, sceneJson);
-	});
 
 	// Allocate server viewport (if visible)
 	EditorRenderer* renderer = EnginePtr->GetRenderer();
@@ -1293,12 +1289,6 @@ void EditorContext::StartPIE()
 		}
 		World* clientWorld = client.Flow->GetWorld();
 		clientWorld->SetJobsInitialized(true);
-
-		// Spawn the level, static data won't be replicated in the future
-		clientWorld->Spawn([&sceneJson](Registry* reg)
-		{
-			EntityBuilder::SpawnScene(reg, sceneJson);
-		});
 
 		client.Viewport              = std::make_unique<WorldViewport>();
 		client.Viewport->TargetWorld = clientWorld;
@@ -1412,6 +1402,7 @@ void EditorContext::StartPIE()
 				auto& ownerID                                = ci.OwnerID;
 				PIEClients[i].Flow->GetWorld()->LocalOwnerID = ownerID;
 				net->MapConnectionToWorld(ownerID, PIEClients[i].Flow->GetWorld());
+				net->MapConnectionToFlow(ownerID, PIEClients[i].Flow.get());
 
 				break;
 			}
@@ -1525,9 +1516,14 @@ void EditorContext::StopPIE()
 		// Reset the OnClientConnected multicallback to prevent stale bindings
 		connMgr->OnClientConnected.Reset();
 
-		// Clear world mappings
-		for (size_t i = 0; i < PIEClients.size(); ++i) net->MapConnectionToWorld(static_cast<uint8_t>(i + 1), nullptr);
+		// Clear world and flow mappings
+		for (size_t i = 0; i < PIEClients.size(); ++i)
+		{
+			net->MapConnectionToWorld(static_cast<uint8_t>(i + 1), nullptr);
+			net->MapConnectionToFlow(static_cast<uint8_t>(i + 1), nullptr);
+		}
 		net->MapConnectionToWorld(0, nullptr);
+		net->MapConnectionToFlow(0, nullptr);
 
 		connMgr->StopListening();
 	}

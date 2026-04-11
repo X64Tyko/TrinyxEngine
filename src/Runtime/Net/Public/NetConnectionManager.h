@@ -36,6 +36,7 @@ struct ConnectionInfo
 	bool bConnected                 = false;
 	bool bServerSide                = false; // True for server-accepted handles, false for client-initiated
 	bool bClientInitiated           = false; // True only for connections we opened via Connect() — reliable even in GNS loopback
+	bool bInitialSpawnFlushed       = false; // Server-side: true after first full entity batch sent to this client
 };
 
 // ---------------------------------------------------------------------------
@@ -114,6 +115,7 @@ public:
 
 	/// Get all active connections.
 	const std::vector<ConnectionInfo>& GetConnections() const { return Connections; }
+	std::vector<ConnectionInfo>& GetConnections() { return Connections; }
 
 	/// Number of active connections.
 	int GetConnectionCount() const { return static_cast<int>(Connections.size()); }

@@ -73,6 +73,11 @@ public:
 	/// to this World's SimInput buffer.
 	void MapConnectionToWorld(uint8_t ownerID, World* world);
 
+	/// Register a FlowManager for a specific OwnerID.
+	/// OwnerID 0 = server FlowManager (used for server-side level path queries).
+	/// OwnerID 1-255 = per-client FlowManagers (receive TravelNotify and FlowEvents).
+	void MapConnectionToFlow(uint8_t ownerID, FlowManager* flow);
+
 	/// Set the FlowManager so the NetThread can post flow events to Sentinel.
 	/// Must be set before Start(). Not required for dedicated server mode.
 	void SetFlowManager(FlowManager* flow) { FlowMgr = flow; }
@@ -102,6 +107,11 @@ private:
 	// Connection → World routing table.
 	// Index = OwnerID (0-255), value = World* (nullptr if unmapped).
 	World* WorldMap[256]{};
+
+	// Connection → FlowManager routing table.
+	// Index = OwnerID (0-255), value = FlowManager* (nullptr if unmapped).
+	// OwnerID 0 = server; 1-255 = per-client flows for TravelNotify / FlowEvent dispatch.
+	FlowManager* FlowMap[256]{};
 
 	std::thread Thread;
 	std::atomic<bool> bIsRunning{false};

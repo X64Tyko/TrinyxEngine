@@ -185,7 +185,7 @@ void Archetype::PushEntities(std::span<EntitySlot> outSlots)
 	}
 }
 
-// Tombstones an entity by clearing its Active flag and setting Dirty in the Flags field,
+// Tombstones an entity by clearing its Active and Alive flags and setting Dirty in the Flags field,
 // then moves the slot from ActiveEntitySlots to InactiveEntitySlots for future reuse.
 // The Dirty flag propagates through the GPU pipeline: the predicate shader reads it and
 // excludes the entity from draw commands. Memory is not freed here — the slot stays

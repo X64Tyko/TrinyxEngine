@@ -4,6 +4,7 @@
 #include "GameMode.h"
 #include "GameState.h"
 #include "Logger.h"
+#include "NetTypes.h"
 #include "ReflectionRegistry.h"
 #include "World.h"
 
@@ -16,7 +17,7 @@ FlowManager::~FlowManager()
 	// Exit and destroy all states top-down
 	for (int32_t i = static_cast<int32_t>(StateStackCount) - 1; i >= 0; --i)
 	{
-		if (StateStack[i]) StateStack[i]->OnExit(*this);
+		if (StateStack[i]) StateStack[i]->OnExit();
 		StateStack[i].reset();
 	}
 	StateStackCount = 0;
@@ -117,7 +118,7 @@ void FlowManager::TransitionTo(const char* stateName)
 	// Exit all states top-down
 	for (int32_t i = static_cast<int32_t>(StateStackCount) - 1; i >= 0; --i)
 	{
-		if (StateStack[i]) StateStack[i]->OnExit(*this);
+		if (StateStack[i]) StateStack[i]->OnExit();
 		StateStack[i].reset();
 	}
 	StateStackCount = 0;
@@ -169,7 +170,7 @@ void FlowManager::PopState()
 	}
 
 	auto& top = StateStack[StateStackCount - 1];
-	if (top) top->OnExit(*this);
+	if (top) top->OnExit();
 	top.reset();
 	StateStackCount--;
 
@@ -237,7 +238,7 @@ void FlowManager::JoinWorld()
 	if (ActiveWorld) ActiveWorld->Join();
 }
 
-void FlowManager::LoadLevel(const char* levelPath)
+void FlowManager::LoadLevel(const char* levelPath, bool bBackground)
 {
 	if (!ActiveWorld)
 	{
@@ -254,11 +255,14 @@ void FlowManager::LoadLevel(const char* levelPath)
 	ActiveLevelPath = levelPath;
 
 	// Spawn entities from the scene file via the World's SpawnSync handshake.
+	// bBackground: entities are Alive-only — data valid, not ticking/rendering.
+	// The Alive→Active sweep fires later (e.g. on ServerReady for clients).
 	std::string path = ActiveLevelPath;
-	ActiveWorld->Spawn([path](Registry* reg)
+	ActiveWorld->Spawn([path, bBackground](Registry* reg)
 	{
-		size_t count = EntityBuilder::SpawnFromFile(reg, path.c_str());
-		LOG_INFO_F("[FlowManager] LoadLevel: spawned %zu entities from %s", count, path.c_str());
+		size_t count = EntityBuilder::SpawnFromFile(reg, path.c_str(), bBackground);
+		LOG_INFO_F("[FlowManager] LoadLevel: spawned %zu entities from %s%s",
+				   count, path.c_str(), bBackground ? " (Alive-only)" : "");
 	});
 
 	LOG_INFO_F("[FlowManager] Level loaded: %s", levelPath);
@@ -314,6 +318,27 @@ void FlowManager::SetGameMode(const char* modeName)
 void FlowManager::PostNetEvent(uint8_t eventID)
 {
 	PendingNetEvents.fetch_or(1u << eventID, std::memory_order_release);
+}
+
+std::string FlowManager::GetActiveLevelLocalPath() const
+{
+	if (ActiveLevelPath.empty()) return {};
+	if (Config && Config->ProjectDir[0] != '\0')
+	{
+		std::string prefix = std::string(Config->ProjectDir) + "/content/";
+		if (ActiveLevelPath.rfind(prefix, 0) == 0) return ActiveLevelPath.substr(prefix.size());
+	}
+	return ActiveLevelPath; // Fallback: return as-is (non-standard path)
+}
+
+void FlowManager::PostTravelNotify(const char* levelPath)
+{
+	// Store the path (written from NetThread, read from Sentinel in OnNetEvent).
+	// This is a benign data race under the sequenced-happens-before guarantee:
+	// PostNetEvent's release fence ensures the path write is visible before the
+	// event bit, and Sentinel reads after the acquire in Tick().
+	PendingTravelPath = levelPath ? levelPath : "";
+	PostNetEvent(static_cast<uint8_t>(FlowEventID::TravelNotify));
 }
 
 void FlowManager::Tick(float dt)

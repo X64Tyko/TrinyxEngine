@@ -138,7 +138,7 @@ static const FieldLookup* FindField(
 // EntityBuilder
 // ---------------------------------------------------------------------------
 
-EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJson)
+EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJson, bool bBackground)
 {
 	// Read entity type name
 	const JsonValue* typeVal = entityJson.Find("type");
@@ -149,6 +149,11 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 	}
 
 	const std::string& typeName = typeVal->AsString();
+
+	// Compute spawn flags once. bBackground = Alive-only (won't tick/render until
+	// an explicit Alive→Active sweep). Active bit is masked in only when not background.
+	const uint32_t activeMask = bBackground ? 0u : static_cast<uint32_t>(TemporalFlagBits::Active);
+	const int32_t spawnFlags  = static_cast<int32_t>(activeMask | static_cast<uint32_t>(TemporalFlagBits::Alive));
 
 	// Resolve type name → ClassID
 	auto& MR        = ReflectionRegistry::Get();
@@ -163,28 +168,19 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 	EntityHandle id = reg->CreateByClassID(classID);
 	if (!id.IsValid()) return EntityHandle{};
 
-	// Find the archetype for this entity type
-	const auto& archetypes = reg->GetArchetypes();
-	Archetype* arch        = nullptr;
-	for (const auto& [key, a] : archetypes)
-	{
-		if (key.ID == classID)
-		{
-			arch = a;
-			break;
-		}
-	}
+	// Look up the actual slot from the record — don't guess. PushEntities may have
+	// reused a tombstoned slot from an earlier chunk, so "last chunk, tail" is wrong.
+	EntityRecord record = reg->GetRecord(id);
+	if (!record.IsValid()) return id;
 
-	if (!arch || arch->Chunks.empty()) return id;
+	Archetype* arch     = record.Arch;
+	Chunk* chunk        = record.TargetChunk;
+	uint32_t localIndex = record.LocalIndex;
+
+	if (!arch || !chunk) return id;
 
 	// Build field name → array index map for this archetype
 	auto fieldMap = BuildFieldMap(arch);
-
-	// Find which chunk this entity landed in (last chunk, since we just pushed)
-	size_t chunkIdx           = arch->Chunks.size() - 1;
-	Chunk* chunk              = arch->Chunks[chunkIdx];
-	uint32_t chunkEntityCount = arch->GetAllocatedChunkCount(chunkIdx);
-	uint32_t localIndex       = chunkEntityCount - 1; // Just-pushed entity is at the tail
 
 	// Build field array table for the write frame
 	void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
@@ -228,14 +224,13 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 			}
 		}
 
-		// Set the Active flag AFTER JSON fields — existing scenes stored Flags
-		// as float (-0.0 = 0x80000000) which breaks under type-aware deserialization.
-		// A spawned entity is always active; the flag is authoritative here.
+		// Set flags AFTER JSON fields — existing scenes stored Flags as float
+		// (-0.0 = 0x80000000) which breaks under type-aware deserialization.
 		const FieldLookup* flagsField = FindField(fieldMap, "Flags");
 		if (flagsField)
 		{
 			auto* flagsArr       = static_cast<int32_t*>(fieldArrayTable[flagsField->ArrayIndex]);
-			flagsArr[localIndex] = static_cast<int32_t>(TemporalFlagBits::Active);
+			flagsArr[localIndex] = spawnFlags;
 		}
 	};
 
@@ -248,7 +243,7 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 	return id;
 }
 
-size_t EntityBuilder::SpawnScene(Registry* reg, const JsonValue& sceneJson)
+size_t EntityBuilder::SpawnScene(Registry* reg, const JsonValue& sceneJson, bool bBackground)
 {
 	const JsonValue* entities = sceneJson.Find("entities");
 	if (!entities || !entities->IsArray())
@@ -260,7 +255,7 @@ size_t EntityBuilder::SpawnScene(Registry* reg, const JsonValue& sceneJson)
 	size_t count = 0;
 	for (const auto& entityJson : entities->AsArray())
 	{
-		EntityHandle id = SpawnEntity(reg, entityJson);
+		EntityHandle id = SpawnEntity(reg, entityJson, bBackground);
 		if (id.IsValid()) ++count;
 	}
 
@@ -271,7 +266,7 @@ size_t EntityBuilder::SpawnScene(Registry* reg, const JsonValue& sceneJson)
 	return count;
 }
 
-size_t EntityBuilder::SpawnFromFile(Registry* reg, const char* filePath)
+size_t EntityBuilder::SpawnFromFile(Registry* reg, const char* filePath, bool bBackground)
 {
 	std::ifstream file(filePath);
 	if (!file.is_open())
@@ -294,11 +289,11 @@ size_t EntityBuilder::SpawnFromFile(Registry* reg, const char* filePath)
 	// Detect format: prefab (has "type" at root) vs scene (has "entities" array)
 	if (root.Find("entities"))
 	{
-		return SpawnScene(reg, root);
+		return SpawnScene(reg, root, bBackground);
 	}
 	else if (root.Find("type"))
 	{
-		EntityHandle id = SpawnEntity(reg, root);
+		EntityHandle id = SpawnEntity(reg, root, bBackground);
 		return id.IsValid() ? 1 : 0;
 	}
 

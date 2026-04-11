@@ -28,18 +28,23 @@ struct EntityBuilder
 	// Spawn a single entity from a JSON object.
 	// Expected format:
 	//   { "type": "CubeEntity", "components": { "TransRot": { "PosX": 1.0, ... }, ... } }
+	// bBackground: entity is Alive but not Active — won't tick or render until an
+	// explicit Alive→Active sweep (used for background/client level loads).
 	// Returns the created EntityID, or an invalid ID on failure.
-	static EntityHandle SpawnEntity(Registry* reg, const JsonValue& entityJson);
+	static EntityHandle SpawnEntity(Registry* reg, const JsonValue& entityJson, bool bBackground = false);
 
 	// Spawn all entities described in a scene JSON.
 	// Expected format:
 	//   { "name": "SceneName", "entities": [ { "type": "...", "components": { ... } }, ... ] }
+	// bBackground: see SpawnEntity.
 	// Returns the number of entities successfully spawned.
-	static size_t SpawnScene(Registry* reg, const JsonValue& sceneJson);
+	static size_t SpawnScene(Registry* reg, const JsonValue& sceneJson, bool bBackground = false);
 
 	// Load a .prefab or .tnxscene file from disk and spawn its contents.
 	// Returns the number of entities spawned (1 for prefab, N for scene).
-	static size_t SpawnFromFile(Registry* reg, const char* filePath);
+	// bBackground: see SpawnEntity. File I/O and JSON parse are synchronous on the
+	// calling thread — true async parsing is a future improvement.
+	static size_t SpawnFromFile(Registry* reg, const char* filePath, bool bBackground = false);
 
 	// --- Scene metadata ---
 

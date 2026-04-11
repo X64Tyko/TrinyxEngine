@@ -11,9 +11,11 @@
 #include "ThreadPinning.h"
 #include "World.h"
 
+#include "CacheSlotMeta.h"
 #include "Registry.h"
 
 #include <SDL3/SDL_timer.h>
+#include <cstring>
 
 NetThread::NetThread()  = default;
 NetThread::~NetThread() = default;
@@ -254,6 +256,12 @@ void NetThread::MapConnectionToWorld(uint8_t ownerID, World* world)
 	LOG_INFO_F("[NetThread] Mapped OwnerID %u to World %p", ownerID, static_cast<void*>(world));
 }
 
+void NetThread::MapConnectionToFlow(uint8_t ownerID, FlowManager* flow)
+{
+	FlowMap[ownerID] = flow;
+	LOG_INFO_F("[NetThread] Mapped OwnerID %u to FlowManager %p", ownerID, static_cast<void*>(flow));
+}
+
 void NetThread::RouteMessage(const ReceivedMessage& msg)
 {
 	auto type = static_cast<NetMessageType>(msg.Header.Type);
@@ -484,8 +492,39 @@ void NetThread::RouteMessage(const ReceivedMessage& msg)
 					ConnectionMgr->Send(msg.Connection, header,
 										reinterpret_cast<const uint8_t*>(&resp), false);
 
-					ci->RepState = ClientRepState::Loading;
-					LOG_INFO_F("[NetThread] ClockSyncResponse sent → client Loading (frame=%u)", serverFrame);
+					// Immediately send TravelNotify — level is loaded on the server before
+					// clients connect in PIE. Future: gate on server level-ready state.
+					const std::string localPath = FlowMgr ? FlowMgr->GetActiveLevelLocalPath() : std::string{};
+					if (!localPath.empty())
+					{
+						TravelPayload travelMsg{};
+						travelMsg.PathLength = static_cast<uint8_t>(
+							std::min(localPath.size(), size_t(254)));
+						if (localPath.size() > 254)
+							LOG_WARN_F("[NetThread] Level path truncated to 254 chars: %s", localPath.c_str());
+						std::memcpy(travelMsg.LevelPath, localPath.c_str(), travelMsg.PathLength);
+						travelMsg.LevelPath[travelMsg.PathLength] = '\0';
+
+						PacketHeader travelHeader{};
+						travelHeader.Type        = static_cast<uint8_t>(NetMessageType::TravelNotify);
+						travelHeader.Flags       = PacketFlag::DefaultFlags;
+						travelHeader.SequenceNum = ci->NextSeqOut++;
+						travelHeader.SenderID    = 0;
+						travelHeader.FrameNumber = serverFrame;
+						travelHeader.PayloadSize = sizeof(TravelPayload);
+						ConnectionMgr->Send(msg.Connection, travelHeader,
+											reinterpret_cast<const uint8_t*>(&travelMsg), true);
+
+						ci->RepState = ClientRepState::LevelLoading;
+						LOG_INFO_F("[NetThread] ClockSyncResponse + TravelNotify → client LevelLoading (frame=%u, level=%s)",
+								   serverFrame, travelMsg.LevelPath);
+					}
+					else
+					{
+						ci->RepState = ClientRepState::Loading;
+						LOG_INFO_F("[NetThread] ClockSyncResponse sent → client Loading (frame=%u) [no level loaded]",
+								   serverFrame);
+					}
 				}
 				else
 				{
@@ -504,6 +543,59 @@ void NetThread::RouteMessage(const ReceivedMessage& msg)
 				break;
 			}
 
+		case NetMessageType::TravelNotify:
+			{
+				// Client receives: server is telling us to load a level.
+				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+				if (!ci || ci->bServerSide) break; // Only clients handle this
+
+				if (msg.Payload.size() < sizeof(TravelPayload))
+				{
+					LOG_WARN_F("[NetThread] TravelNotify payload too small (%zu)", msg.Payload.size());
+					break;
+				}
+
+				const auto* travelMsg = reinterpret_cast<const TravelPayload*>(msg.Payload.data());
+				ci->RepState          = ClientRepState::LevelLoading;
+
+				LOG_INFO_F("[NetThread] TravelNotify received — loading level '%s'",
+						   travelMsg->LevelPath);
+
+				// Post to the client's FlowManager so its GameState can load the level.
+				// FlowMap[OwnerID] routes to the correct per-client flow in PIE.
+				FlowManager* clientFlow = FlowMap[ci->OwnerID];
+				if (clientFlow) clientFlow->PostTravelNotify(travelMsg->LevelPath);
+
+				// Auto-acknowledge: level loading is synchronous in PIE.
+				// Future: remove auto-ack and let GameState call AcknowledgeLevelReady()
+				// after async load completes.
+				PacketHeader ackHeader{};
+				ackHeader.Type        = static_cast<uint8_t>(NetMessageType::LevelReady);
+				ackHeader.Flags       = PacketFlag::DefaultFlags;
+				ackHeader.SequenceNum = ci->NextSeqOut++;
+				ackHeader.SenderID    = ci->OwnerID;
+				ackHeader.PayloadSize = 0;
+				ConnectionMgr->Send(msg.Connection, ackHeader, nullptr, true);
+
+				ci->RepState = ClientRepState::LevelLoaded;
+				LOG_INFO("[NetThread] LevelReady sent → client LevelLoaded");
+				break;
+			}
+
+		case NetMessageType::LevelReady:
+			{
+				// Server receives: client finished loading the level.
+				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+				if (!ci || !ci->bServerSide) break; // Only server handles this
+
+				if (ci->RepState == ClientRepState::LevelLoading)
+				{
+					ci->RepState = ClientRepState::LevelLoaded;
+					LOG_INFO_F("[NetThread] LevelReady received — client LevelLoaded (ownerID=%u)", ci->OwnerID);
+				}
+				break;
+			}
+
 		case NetMessageType::FlowEvent:
 			{
 				if (msg.Payload.size() < sizeof(FlowEventPayload))
@@ -517,17 +609,53 @@ void NetThread::RouteMessage(const ReceivedMessage& msg)
 				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
 				if (ci && !ci->bServerSide)
 				{
-					// Advance RepState: Loading → Loaded on ServerReady.
-					if (ci->RepState == ClientRepState::Loading
+					// Advance RepState: LevelLoaded → Loaded on ServerReady.
+					if (ci->RepState == ClientRepState::LevelLoaded
 						&& ev->EventID == static_cast<uint8_t>(FlowEventID::ServerReady))
 					{
 						ci->RepState = ClientRepState::Loaded;
-						LOG_INFO("[NetThread] FlowEvent::ServerReady — client Loaded, awaiting SpawnConfirm");
+
+						// Post Alive→Active sweep to the client world's Logic thread via Spawn().
+						// Entities accumulated as Alive-only during level load go visible atomically.
+						uint8_t ownerID    = ci->OwnerID;
+						World* clientWorld = WorldMap[ownerID];
+						if (clientWorld)
+						{
+							clientWorld->Spawn([](Registry* reg)
+							{
+								ComponentCacheBase* cache  = reg->GetTemporalCache();
+								const uint32_t frame       = cache->GetActiveWriteFrame();
+								TemporalFrameHeader* hdr   = cache->GetFrameHeader(frame);
+								const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
+								auto* flags                = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
+								if (!flags) return;
+
+								const uint32_t max         = cache->GetMaxCachedEntityCount();
+								const uint32_t aliveBit    = static_cast<uint32_t>(TemporalFlagBits::Alive);
+								const uint32_t activeBit   = static_cast<uint32_t>(TemporalFlagBits::Active);
+								const uint32_t aliveShift  = TNX_CTZ32(aliveBit);
+								const uint32_t activeShift = TNX_CTZ32(activeBit);
+								int sweepCount             = 0;
+								for (uint32_t i = 0; i < max; ++i)
+								{
+									const uint32_t f    = static_cast<uint32_t>(flags[i]);
+									const uint32_t mask = -((f & aliveBit) >> aliveShift);                           // alive? 0xFFFFFFFF : 0
+									sweepCount          += static_cast<int>((activeBit & mask & ~f) >> activeShift); // 1 only if newly activated
+									flags[i]            = static_cast<int32_t>(f | (activeBit & mask));
+								}
+								LOG_INFO_F("[Replication] ServerReady: swept %d Alive→Active", sweepCount);
+							});
+						}
+						LOG_INFO("[NetThread] FlowEvent::ServerReady → Loaded, Alive→Active sweep enqueued");
 					}
 				}
 
-				// Post to FlowManager so Sentinel dispatches OnNetEvent to the active GameState.
-				if (FlowMgr) FlowMgr->PostNetEvent(ev->EventID);
+				// Post to the client's FlowManager so Sentinel dispatches OnNetEvent.
+				if (ci && !ci->bServerSide)
+				{
+					FlowManager* clientFlow = FlowMap[ci->OwnerID];
+					if (clientFlow) clientFlow->PostNetEvent(ev->EventID);
+				}
 				break;
 			}
 

@@ -21,6 +21,8 @@ enum class NetMessageType : uint8_t
 	SpawnConfirm        = 9,  // Server->Client: authoritative spawn confirmation
 	SpawnReject         = 10, // Server->Client: spawn request denied
 	ClockSync           = 11, // Bidirectional: frame clock synchronisation
+	TravelNotify        = 12, // Server->Client: load this level (path + server frame)
+	LevelReady          = 13, // Client->Server: level load complete, ready for entity flush
 	Count
 };
 
@@ -114,6 +116,9 @@ static_assert(sizeof(PacketHeader) == 24, "PacketHeader must be 24 bytes");
 // Sent reliable with NetMessageType::EntitySpawn. One entity per message.
 // Client uses Manifest.ClassType to call CreateByClassID, then writes fields.
 // TODO: Replace ClassType-based spawning with PrefabID once the asset system supports it.
+// TODO: Batch spawns — one message per entity is significant overhead for initial world flush.
+//       Replace with a variable-length batch message (count + entity array) once the
+//       reliable send path can handle variable-size payloads efficiently.
 // ---------------------------------------------------------------------------
 struct EntitySpawnPayload
 {
@@ -134,7 +139,10 @@ struct EntitySpawnPayload
 	// Mesh (Volatile)
 	uint32_t MeshID;
 
-	uint32_t _Pad0; // Align to 72 bytes
+	// Flags to write into the entity's CacheSlotMeta on spawn.
+	// Server controls whether the client spawns Active|Alive (normal) or Alive-only
+	// (background load — client will sweep Alive→Active on ServerReady).
+	int32_t SpawnFlags;
 };
 
 static_assert(sizeof(EntitySpawnPayload) == 72, "EntitySpawnPayload must be 72 bytes");
@@ -178,16 +186,20 @@ static_assert(sizeof(HandshakePayload) == 8, "HandshakePayload must be 8 bytes")
 // Transitions:
 //   PendingHandshake → Synchronizing  (HandshakeAccept sent)
 //   Synchronizing    → Loading        (ClockSync complete, InputLead known)
-//   Loading          → Loaded         (initial EntitySpawn batch complete)
+//   Loading          → LevelLoading   (TravelNotify sent to client)
+//   LevelLoading     → LevelLoaded    (LevelReady received from client)
+//   LevelLoaded      → Loaded         (initial EntitySpawn batch flushed, ServerReady sent)
 //   Loaded           → Playing        (SpawnConfirm sent)
 // ---------------------------------------------------------------------------
 enum class ClientRepState : uint8_t
 {
-	PendingHandshake = 0, // TCP-like: waiting for HandshakeRequest
+	PendingHandshake = 0, // Waiting for HandshakeRequest
 	Synchronizing    = 1, // Clock sync probes in flight
-	Loading          = 2, // Waiting for initial entity spawn batch to flush
-	Loaded           = 3, // Batch done; server will send ServerReady FlowEvent
-	Playing          = 4, // SpawnConfirm sent; full simulation sync active
+	Loading          = 2, // Clock sync done; waiting to send TravelNotify
+	LevelLoading     = 3, // TravelNotify sent; client loading level
+	LevelLoaded      = 4, // LevelReady received; flushing initial entity batch
+	Loaded           = 5, // Batch flushed, ServerReady sent; client sweeping Alive→Active
+	Playing          = 6, // SpawnConfirm sent; full simulation sync active
 };
 
 // ---------------------------------------------------------------------------
@@ -195,7 +207,8 @@ enum class ClientRepState : uint8_t
 // ---------------------------------------------------------------------------
 enum class FlowEventID : uint8_t
 {
-	ServerReady = 0, // Server has flushed initial entity batch; client may send SpawnRequest
+	ServerReady  = 0, // Server has flushed initial entity batch; client sweeps Alive→Active then sends SpawnRequest
+	TravelNotify = 1, // Server tells client to load a level (payload: TravelPayload)
 };
 
 // ---------------------------------------------------------------------------
@@ -267,4 +280,25 @@ struct ClockSyncPayload
 };
 
 static_assert(sizeof(ClockSyncPayload) == 16, "ClockSyncPayload must be 16 bytes");
+
+// ---------------------------------------------------------------------------
+// TravelPayload — server tells client to load a level.
+//
+// Sent reliable (NetMessageType::TravelNotify) after the server finishes loading
+// the level. Client loads the level, sends LevelReady when done.
+// LevelPath is a null-terminated UTF-8 string (max 255 chars + null).
+//
+// IMPORTANT: LevelPath must be the content-relative path (e.g. "Arena.tnxscene"),
+// NOT the server's absolute path. Absolute paths silently corrupt on any client
+// whose ProjectDir differs from the server's — the path would be truncated by
+// PathLength or accepted verbatim but fail to open. The sender is responsible for
+// stripping the ProjectDir+"/content/" prefix before filling this field.
+// ---------------------------------------------------------------------------
+struct TravelPayload
+{
+	uint8_t PathLength;  // Length of LevelPath (excluding null terminator)
+	char LevelPath[255]; // Content-relative path to .tnxscene (null-terminated)
+};
+
+static_assert(sizeof(TravelPayload) == 256, "TravelPayload must be 256 bytes");
 

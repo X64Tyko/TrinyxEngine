@@ -120,68 +120,113 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 	if (!flags || !posX) return; // No entities allocated
 
 	const uint32_t maxEntities = temporalCache->GetMaxCachedEntityCount();
-
-	// Grow replicated tracker if needed
 	if (Replicated.size() < maxEntities) Replicated.resize(maxEntities, false);
 
-	int spawnCount = 0;
-
-	for (uint32_t i = 0; i < maxEntities; ++i)
+	// Helper: build and send one EntitySpawn for entity at index i.
+	auto SendOneSpawn = [&](uint32_t i, HSteamNetConnection handle, bool bAliveOnly)
 	{
-		// Skip inactive or already-replicated entities
-		if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Active)) || !(flags[i] & static_cast<int32_t>(TemporalFlagBits::Replicated))) continue;
-		if (Replicated[i]) continue;
-
-		// Look up the GlobalEntityHandle for this cache index
 		GlobalEntityHandle gHandle = reg->GlobalEntityRegistry.LookupGlobalHandle(static_cast<EntityCacheHandle>(i));
 		EntityRecord* record       = reg->GlobalEntityRegistry.Records[gHandle.GetIndex()];
-		if (!record || !record->IsValid()) continue;
+		if (!record || !record->IsValid()) return;
 
-		// Use pre-assigned NetHandle (from RegisterEntity) or assign a new server-owned one
 		EntityNetHandle netHandle = record->NetworkID;
 		if (netHandle.NetIndex == 0) netHandle = AssignNetHandle(reg, gHandle);
 
-		// Build spawn payload
-		EntitySpawnPayload payload{};
-		payload.NetHandle = netHandle.Value;
+		EntitySpawnPayload spawnMsg{};
+		spawnMsg.NetHandle = netHandle.Value;
+
 		EntityNetManifest manifest{};
 		manifest.ClassType = record->Arch ? record->Arch->ArchClassID : 0;
-		payload.Manifest   = manifest.Value;
+		spawnMsg.Manifest  = manifest.Value;
 
-		payload.PosX  = posX ? posX[i] : 0.0f;
-		payload.PosY  = posY ? posY[i] : 0.0f;
-		payload.PosZ  = posZ ? posZ[i] : 0.0f;
-		payload.RotQx = rotQx ? rotQx[i] : 0.0f;
-		payload.RotQy = rotQy ? rotQy[i] : 0.0f;
-		payload.RotQz = rotQz ? rotQz[i] : 0.0f;
-		payload.RotQw = rotQw ? rotQw[i] : 1.0f;
+		// Server explicitly tells the client what flags to write.
+		// Alive-only = entity loads in background (not ticking/rendering until ServerReady sweep).
+		spawnMsg.SpawnFlags = bAliveOnly
+								  ? static_cast<int32_t>(TemporalFlagBits::Alive)
+								  : static_cast<int32_t>(TemporalFlagBits::Active | TemporalFlagBits::Alive);
 
-		payload.ScaleX = scX ? scX[i] : 1.0f;
-		payload.ScaleY = scY ? scY[i] : 1.0f;
-		payload.ScaleZ = scZ ? scZ[i] : 1.0f;
+		spawnMsg.PosX  = posX ? posX[i] : 0.0f;
+		spawnMsg.PosY  = posY ? posY[i] : 0.0f;
+		spawnMsg.PosZ  = posZ ? posZ[i] : 0.0f;
+		spawnMsg.RotQx = rotQx ? rotQx[i] : 0.0f;
+		spawnMsg.RotQy = rotQy ? rotQy[i] : 0.0f;
+		spawnMsg.RotQz = rotQz ? rotQz[i] : 0.0f;
+		spawnMsg.RotQw = rotQw ? rotQw[i] : 1.0f;
 
-		payload.ColorR = colR ? colR[i] : 1.0f;
-		payload.ColorG = colG ? colG[i] : 1.0f;
-		payload.ColorB = colB ? colB[i] : 1.0f;
-		payload.ColorA = colA ? colA[i] : 1.0f;
+		spawnMsg.ScaleX = scX ? scX[i] : 1.0f;
+		spawnMsg.ScaleY = scY ? scY[i] : 1.0f;
+		spawnMsg.ScaleZ = scZ ? scZ[i] : 1.0f;
 
-		payload.MeshID = meshID ? meshID[i] : 0;
+		spawnMsg.ColorR = colR ? colR[i] : 1.0f;
+		spawnMsg.ColorG = colG ? colG[i] : 1.0f;
+		spawnMsg.ColorB = colB ? colB[i] : 1.0f;
+		spawnMsg.ColorA = colA ? colA[i] : 1.0f;
 
-		// Send reliable to all connected clients
-		PacketHeader header{};
-		header.Type        = static_cast<uint8_t>(NetMessageType::EntitySpawn);
-		header.Flags       = PacketFlag::DefaultFlags;
-		header.PayloadSize = sizeof(EntitySpawnPayload);
-		header.FrameNumber = frameNumber;
-		header.SenderID    = 0; // Server
+		spawnMsg.MeshID = meshID ? meshID[i] : 0;
 
-		for (const auto& ci : connMgr->GetConnections())
+		PacketHeader spawnHeader{};
+		spawnHeader.Type        = static_cast<uint8_t>(NetMessageType::EntitySpawn);
+		spawnHeader.Flags       = PacketFlag::DefaultFlags;
+		spawnHeader.PayloadSize = sizeof(EntitySpawnPayload);
+		spawnHeader.FrameNumber = frameNumber;
+		spawnHeader.SenderID    = 0;
+		connMgr->Send(handle, spawnHeader, reinterpret_cast<const uint8_t*>(&spawnMsg), true);
+	};
+
+	// --- Pass 1: Initial flush for newly LevelLoaded connections ---
+	// Send all active+replicated entities with Alive-only flag.
+	// After flushing, send ServerReady and advance RepState → Loaded.
+	auto& connections = connMgr->GetConnections();
+	for (auto& ci : connections)
+	{
+		if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
+		if (ci.RepState != ClientRepState::LevelLoaded || ci.bInitialSpawnFlushed) continue;
+
+		int flushCount = 0;
+		for (uint32_t i = 0; i < maxEntities; ++i)
 		{
-			if (ci.bConnected && ci.OwnerID > 0 && ci.bServerSide) // Only send on server-accepted handles
-			{
-				connMgr->Send(ci.Handle, header,
-							  reinterpret_cast<const uint8_t*>(&payload), true);
-			}
+			if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Alive))) continue;
+			if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Replicated))) continue;
+			SendOneSpawn(i, ci.Handle, /*bAliveOnly=*/true);
+			flushCount++;
+		}
+
+		ci.bInitialSpawnFlushed = true;
+
+		// Send ServerReady — client will sweep Alive→Active then send SpawnRequest.
+		FlowEventPayload serverReadyMsg{};
+		serverReadyMsg.EventID = static_cast<uint8_t>(FlowEventID::ServerReady);
+
+		PacketHeader serverReadyHeader{};
+		serverReadyHeader.Type        = static_cast<uint8_t>(NetMessageType::FlowEvent);
+		serverReadyHeader.Flags       = PacketFlag::DefaultFlags;
+		serverReadyHeader.SequenceNum = ci.NextSeqOut++;
+		serverReadyHeader.SenderID    = 0;
+		serverReadyHeader.FrameNumber = frameNumber;
+		serverReadyHeader.PayloadSize = sizeof(FlowEventPayload);
+		connMgr->Send(ci.Handle, serverReadyHeader, reinterpret_cast<const uint8_t*>(&serverReadyMsg), true);
+
+		ci.RepState = ClientRepState::Loaded;
+		LOG_INFO_F("[Replication] Initial flush: %d entities → ownerID=%u, ServerReady sent → Loaded",
+				   flushCount, ci.OwnerID);
+	}
+
+	// --- Pass 2: Incremental spawns for fully loaded connections ---
+	// Send entities not yet in the global Replicated set to all Loaded+ connections.
+	int spawnCount = 0;
+	for (uint32_t i = 0; i < maxEntities; ++i)
+	{
+		if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Alive))) continue;
+		if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Replicated))) continue;
+		if (Replicated[i]) continue;
+
+		for (const auto& ci : connections)
+		{
+			if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
+			if (ci.RepState < ClientRepState::Loaded) continue; // Not ready yet
+			if (!ci.bInitialSpawnFlushed) continue;
+
+			SendOneSpawn(i, ci.Handle, /*bAliveOnly=*/false);
 		}
 
 		Replicated[i] = true;
@@ -189,7 +234,7 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 	}
 
 	if (spawnCount > 0)
-		LOG_DEBUG_F("[Replication] Sent %d EntitySpawn messages", spawnCount);
+	LOG_DEBUG_F("[Replication] Sent %d incremental EntitySpawn(s)", spawnCount);
 }
 
 // ---------------------------------------------------------------------------
@@ -326,7 +371,8 @@ void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayloa
 
 		if (compID == CacheSlotMeta<>::StaticTypeID())
 		{
-			if (fdesc.componentSlotIndex == 0) intArr[localIdx] = static_cast<int32_t>(TemporalFlagBits::Active);
+			// Write the flags exactly as the server sent them — server controls Active vs Alive-only.
+			if (fdesc.componentSlotIndex == 0) intArr[localIdx] = payload.SpawnFlags;
 		}
 		else if (compID == CTransform<>::StaticTypeID())
 		{
