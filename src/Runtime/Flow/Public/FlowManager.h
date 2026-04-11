@@ -160,6 +160,9 @@ public:
 	World* GetWorld() const;
 	bool HasWorld() const;
 	const EngineConfig* GetConfig() const { return Config; }
+	/// Update the stored config pointer after the owning struct has been relocated
+	/// (e.g. after move into a vector). PIE only — do not call in other contexts.
+	void RewireConfig(const EngineConfig* newConfig) { Config = newConfig; }
 	ConstructRegistry* GetConstructRegistry() { return &ConstructReg; }
 	const std::string& GetActiveLevelPath() const { return ActiveLevelPath; }
 

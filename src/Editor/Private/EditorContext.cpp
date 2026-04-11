@@ -1261,6 +1261,7 @@ void EditorContext::StartPIE()
 	}
 
 	// Create client worlds (each with its own FlowManager)
+	PIEClients.reserve(PIEClientCount);
 	for (int ci = 0; ci < PIEClientCount; ++ci)
 	{
 		PIEClient client;
@@ -1296,6 +1297,8 @@ void EditorContext::StartPIE()
 		renderer->AddViewport(client.Viewport.get());
 
 		PIEClients.push_back(std::move(client));
+		// Re-point FlowManager at the stable Config now that the struct is in the vector.
+		PIEClients.back().Flow->RewireConfig(&PIEClients.back().Config);
 	}
 
 	// Set up loopback networking (server + client in same process)
