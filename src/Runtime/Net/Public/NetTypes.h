@@ -119,6 +119,14 @@ static_assert(sizeof(PacketHeader) == 24, "PacketHeader must be 24 bytes");
 // TODO: Batch spawns — one message per entity is significant overhead for initial world flush.
 //       Replace with a variable-length batch message (count + entity array) once the
 //       reliable send path can handle variable-size payloads efficiently.
+//
+// SpawnFlags layout (Generation_Bits = 16, so both halves are 16 bits):
+//
+//   bits [31 : 32-Generation_Bits]  =  entity generation  (Generation_Bits wide)
+//   bits [Generation_Bits-1 : 0]   =  spawn flags        (32-Generation_Bits wide)
+//
+// Use Pack / GetFlags / GetGeneration — do not read SpawnFlags raw. If
+// Generation_Bits changes, static_assert on EntityRef catches mismatches.
 // ---------------------------------------------------------------------------
 struct EntitySpawnPayload
 {
@@ -139,10 +147,31 @@ struct EntitySpawnPayload
 	// Mesh (Volatile)
 	uint32_t MeshID;
 
-	// Flags to write into the entity's CacheSlotMeta on spawn.
-	// Server controls whether the client spawns Active|Alive (normal) or Alive-only
-	// (background load — client will sweep Alive→Active on ServerReady).
+	// SpawnFlags — generation packed in high Generation_Bits bits,
+	// spawn flags in the remaining low bits. Use helpers below.
 	int32_t SpawnFlags;
+
+	// --- Spawn flag constants (fit in lower 16 bits when Generation_Bits == 16) ---
+	static constexpr uint32_t SpawnFlag_Background = 1u << 0; // Alive-only; client sweeps Active on ServerReady
+
+	// --- SpawnFlags helpers ---
+	static constexpr uint32_t FlagsMask = (1u << (32u - Generation_Bits)) - 1u;
+
+	static int32_t Pack(uint32_t flagBits, uint32_t generation)
+	{
+		return static_cast<int32_t>(
+			(generation << (32u - Generation_Bits)) | (flagBits & FlagsMask));
+	}
+
+	static uint32_t GetFlags(int32_t spawnFlags)
+	{
+		return static_cast<uint32_t>(spawnFlags) & FlagsMask;
+	}
+
+	static uint16_t GetGeneration(int32_t spawnFlags)
+	{
+		return static_cast<uint16_t>(static_cast<uint32_t>(spawnFlags) >> (32u - Generation_Bits));
+	}
 };
 
 static_assert(sizeof(EntitySpawnPayload) == 72, "EntitySpawnPayload must be 72 bytes");
@@ -229,13 +258,14 @@ static_assert(sizeof(FlowEventPayload) == 4, "FlowEventPayload must be 4 bytes")
 // ---------------------------------------------------------------------------
 struct SpawnRequestPayload
 {
-	uint32_t ClassID;       // Requested entity class / prefab
-	uint32_t PredictionID;  // Client-local prediction token; echoed in Confirm/Reject
+	int64_t PrefabID;      // AssetID raw value of the requested Construct prefab
+	uint32_t PredictionID; // Client-local prediction token; echoed in Confirm/Reject
+	uint32_t _Pad;
 	float PosX, PosY, PosZ; // Desired spawn position hint (server may override)
-	float _Pad;
+	float _Pad2;
 };
 
-static_assert(sizeof(SpawnRequestPayload) == 24, "SpawnRequestPayload must be 24 bytes");
+static_assert(sizeof(SpawnRequestPayload) == 32, "SpawnRequestPayload must be 32 bytes");
 
 // ---------------------------------------------------------------------------
 // SpawnConfirmPayload — server confirms an authoritative spawn.
@@ -246,7 +276,8 @@ struct SpawnConfirmPayload
 	uint32_t NetHandle;     // Authoritative EntityNetHandle.Value for the spawned body
 	uint32_t PredictionID;  // Echoed from SpawnRequestPayload
 	float PosX, PosY, PosZ; // Authoritative spawn position
-	float _Pad;
+	uint16_t Generation;    // Entity generation — client uses this to form a valid EntityRef
+	uint16_t _Pad;
 };
 
 static_assert(sizeof(SpawnConfirmPayload) == 24, "SpawnConfirmPayload must be 24 bytes");

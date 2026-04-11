@@ -139,11 +139,12 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 		manifest.ClassType = record->Arch ? record->Arch->ArchClassID : 0;
 		spawnMsg.Manifest  = manifest.Value;
 
-		// Server explicitly tells the client what flags to write.
-		// Alive-only = entity loads in background (not ticking/rendering until ServerReady sweep).
-		spawnMsg.SpawnFlags = bAliveOnly
-								  ? static_cast<int32_t>(TemporalFlagBits::Alive)
-								  : static_cast<int32_t>(TemporalFlagBits::Active | TemporalFlagBits::Alive);
+		// SpawnFlags: pack generation in high EntityGeneration_Bits bits, flags in low bits.
+		// Receiver uses GetGeneration() to form an EntityRef, GetFlags() to write CacheSlotMeta.
+		const uint32_t flagBits = bAliveOnly
+									  ? static_cast<uint32_t>(TemporalFlagBits::Alive)
+									  : static_cast<uint32_t>(TemporalFlagBits::Active | TemporalFlagBits::Alive);
+		spawnMsg.SpawnFlags = EntitySpawnPayload::Pack(flagBits, record->GetGeneration());
 
 		spawnMsg.PosX  = posX ? posX[i] : 0.0f;
 		spawnMsg.PosY  = posY ? posY[i] : 0.0f;
@@ -371,8 +372,9 @@ void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayloa
 
 		if (compID == CacheSlotMeta<>::StaticTypeID())
 		{
-			// Write the flags exactly as the server sent them — server controls Active vs Alive-only.
-			if (fdesc.componentSlotIndex == 0) intArr[localIdx] = payload.SpawnFlags;
+			// Extract only the spawn flags from SpawnFlags — generation lives in the high bits
+			// and must not be written into the entity's flag field.
+			if (fdesc.componentSlotIndex == 0) intArr[localIdx] = static_cast<int32_t>(EntitySpawnPayload::GetFlags(payload.SpawnFlags));
 		}
 		else if (compID == CTransform<>::StaticTypeID())
 		{

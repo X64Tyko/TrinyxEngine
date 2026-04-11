@@ -926,15 +926,15 @@ uint32_t EditorContext::ImportMeshAsset(const std::string& gltfPath)
 		return UINT32_MAX;
 	}
 
-	// Look up UUID from AssetDatabase after reconcile
+	// Look up AssetID from AssetDatabase after reconcile
 	std::string relPath = stem + ".tnxmesh";
 	const auto* dbEntry = AssetDB.FindByPath(relPath);
-	int64_t uuid        = dbEntry ? dbEntry->UUID : 0;
+	AssetID meshID      = dbEntry ? dbEntry->ID : AssetID{};
 
-	uint32_t slot = MeshMgr->RegisterMesh(asset, stem, uuid);
+	uint32_t slot = MeshMgr->RegisterMesh(asset, stem, meshID);
 	if (slot != UINT32_MAX)
-		LOG_INFO_F("[Editor] Registered mesh '%s' at slot %u (UUID: %lld)",
-			   stem.c_str(), slot, static_cast<long long>(uuid >> 8));
+		LOG_INFO_F("[Editor] Registered mesh '%s' at slot %u (AssetID: %lld)",
+				   stem.c_str(), slot, static_cast<long long>(meshID.GetUUID() >> 8));
 
 	return slot;
 }
@@ -961,7 +961,7 @@ void EditorContext::LoadAllMeshAssets()
 			continue;
 		}
 
-		uint32_t slot = MeshMgr->RegisterMesh(asset, entry.Name, entry.UUID);
+		uint32_t slot = MeshMgr->RegisterMesh(asset, entry.Name, entry.ID);
 		if (slot != UINT32_MAX)
 			LOG_INFO_F("[Editor] Loaded mesh '%s' → slot %u", entry.Path.c_str(), slot);
 	}
@@ -1000,10 +1000,10 @@ void EditorContext::HandleDroppedFile(const std::string& path)
 			{
 				std::string relDropPath = p.filename().string();
 				const auto* dropEntry   = AssetDB.FindByPath(relDropPath);
-				int64_t dropUUID        = dropEntry ? dropEntry->UUID : 0;
+				AssetID dropID          = dropEntry ? dropEntry->ID : AssetID{};
 				std::string dropName    = dropEntry ? dropEntry->Name : p.stem().string();
 
-				uint32_t slot = MeshMgr->RegisterMesh(asset, dropName, dropUUID);
+				uint32_t slot = MeshMgr->RegisterMesh(asset, dropName, dropID);
 				if (slot != UINT32_MAX)
 					LOG_INFO_F("[Editor] Loaded dropped mesh '%s' → slot %u", dropName.c_str(), slot);
 			}

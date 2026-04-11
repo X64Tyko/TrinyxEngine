@@ -11,9 +11,10 @@
 #endif
 
 
-static constexpr size_t NetOwnerID_Bits  = 8;
-static constexpr size_t MaxOwnerIDs      = 1u << NetOwnerID_Bits; // 256 possible owner IDs (0=server, 1-255=clients)
-static constexpr size_t Generation_Bits  = 16;
+static constexpr size_t NetOwnerID_Bits = 8;
+static constexpr size_t MaxOwnerIDs     = 1u << NetOwnerID_Bits; // 256 possible owner IDs (0=server, 1-255=clients)
+static constexpr size_t Generation_Bits = 16;
+// EntityRef and SpawnFlags helpers will catch mismatches.
 static constexpr size_t TypeKey_Bits     = 16;
 static constexpr size_t UniqueIndex_Bits = 24;
 
@@ -86,14 +87,80 @@ union EntityNetManifest
 		uint32_t NetFlags  : 8;            // Various flags for net manifest
 		uint32_t reserved  : 8;            // reserved for later
 	};
-	
-	// Signifies that this manifest is for a predicted entity creation
+
 	bool IsPredictedCreation() const { return NetFlags & 0x1; }
 	// Signifies that following this uint32 is an EntityNetHandle this manifest is intended to modify
 	bool HasEntityHandle() const { return NetFlags & 0x2; }
-	bool PredictionResult() const { return NetFlags & 0x12; }
+	bool PredictionResult() const { return NetFlags & 0x4; } // confirmed=1, rejected=0
 };
 
 static_assert(sizeof(EntityNetHandle) == 4, "NetID must be 4 bytes");
+
+// ConstructNetHandle — 32-bit wire handle for Constructs. Mirrors EntityNetHandle.
+// Internal engine code uses this exclusively. Gameplay holds ConstructRef (below).
+union ConstructNetHandle
+{
+	uint32_t Value;
+
+	struct
+	{
+		uint32_t NetOwnerID : NetOwnerID_Bits;
+		uint32_t NetIndex   : UniqueIndex_Bits;
+	};
+
+	uint32_t GetOwnerID() const { return NetOwnerID; }
+	uint32_t GetHandleIndex() const { return NetIndex; }
+	bool IsServer() const { return NetOwnerID == 0; }
+	bool IsLocal(uint8_t localClientID) const { return NetOwnerID == localClientID; }
+	bool IsValid() const { return NetIndex != 0; }
+};
+
+static_assert(sizeof(ConstructNetHandle) == 4, "ConstructNetHandle must be 4 bytes");
+
+// ---------------------------------------------------------------------------
+// Two-tier handle design:
+//
+//   Internal (32-bit): EntityNetHandle / ConstructNetHandle
+//     Used exclusively inside engine systems (ReplicationSystem, NetThread,
+//     Registry internals). No generation — fast, compact, wire-safe for bulk
+//     paths like StateCorrection where the server is the authority.
+//
+//   External (64-bit): EntityRef / ConstructRef
+//     Used in gameplay code, RPCs, and client→server messages. Embeds
+//     generation for ABA protection — stale handles are detected on the
+//     server before any state mutation. The server validates:
+//       NetToRecord[handle.NetIndex].Generation == ref.Generation
+//
+//   StateCorrectionEntry stays 32-bit (EntityNetHandle only). Server is the
+//   authority on bulk corrections — no client-side stale-handle risk.
+// ---------------------------------------------------------------------------
+struct EntityRef
+{
+	EntityNetHandle Handle;
+	uint16_t Generation; // matches GlobalEntityHandle::Generation at creation time
+	uint16_t Flags;      // IsPredicted:1, IsOwned:1, reserved:14
+
+	bool IsValid() const { return Handle.NetIndex != 0; }
+	bool IsServer() const { return Handle.IsServer(); }
+	bool IsLocal(uint8_t localID) const { return Handle.IsLocal(localID); }
+	uint16_t GetGeneration() const { return Generation; }
+};
+
+static_assert(sizeof(EntityRef) == 8, "EntityRef must be 8 bytes");
+static_assert(Generation_Bits <= 16, "EntityRef::Generation is uint16_t — increase it if Generation_Bits > 16");
+
+struct ConstructRef
+{
+	ConstructNetHandle Handle;
+	uint16_t Generation; // matches GlobalConstructHandle::Generation at creation time
+	uint16_t Flags;      // IsPredicted:1, IsOwned:1, reserved:14
+
+	bool IsValid() const { return Handle.NetIndex != 0; }
+	bool IsServer() const { return Handle.IsServer(); }
+	bool IsLocal(uint8_t localID) const { return Handle.IsLocal(localID); }
+	uint16_t GetGeneration() const { return Generation; }
+};
+
+static_assert(sizeof(ConstructRef) == 8, "ConstructRef must be 8 bytes");
 
 using EntityCacheHandle = uint32_t;

@@ -4,15 +4,22 @@
 #include <memory>
 #include <cstdint>
 #include "Types.h"
+#include "ConstructRecord.h"
+#include "PagedMap.h"
 
 class World;
+class ReplicationSystem;
 
 // ---------------------------------------------------------------------------
-// ConstructRegistry — Lifetime-bucketed registry of all live Constructs.
+// ConstructRegistry — Lifetime-bucketed registry of all live Constructs,
+// and the authoritative store for networked Construct lookup.
 //
 // Constructs are stored in per-ConstructLifetime buckets so that tier-based
 // destruction (e.g., destroy all Level + World Constructs on World reset) is
 // a direct bucket clear with no per-entry lifetime checks.
+//
+// Net lookup (Records + NetToRecord) mirrors EntityArchive. ConstructArchive
+// has been folded in here — there is no separate archive type.
 //
 // FlowManager owns the ConstructRegistry so that Session-lifetime Constructs
 // survive World destruction. World holds a non-owning pointer passed at init.
@@ -160,7 +167,50 @@ public:
 		for (auto& bucket : Buckets) for (auto& entry : bucket) fn(entry.Ptr, entry.ID);
 	}
 
+	// --- Net lookup (public read-only) ---
+
+	ConstructRecord GetRecord(ConstructNetHandle handle) const
+	{
+		const GlobalConstructHandle& gHandle = LookupGlobalHandle(handle);
+		return Records.get(gHandle.GetIndex());
+	}
+
+	bool IsHandleValid(ConstructNetHandle handle) const
+	{
+		const GlobalConstructHandle gHandle = LookupGlobalHandle(handle);
+		const ConstructRecord* rec          = Records.try_get_ptr(gHandle.GetIndex());
+		return rec && gHandle.GetGeneration() == rec->Generation;
+	}
+
+	// ConstructRef validation — uses the generation embedded in the ref directly.
+	// One fewer map lookup vs IsHandleValid(ConstructNetHandle).
+	// Use this for all client→server RPC and net-boundary handle checks.
+	bool IsHandleValid(const ConstructRef& ref) const
+	{
+		const ConstructRecord* rec = Records.try_get_ptr(
+			LookupGlobalHandle(ref.Handle).GetIndex());
+		return rec && ref.Generation == rec->Generation;
+	}
+
 private:
+	// --- Net lookup (private mutable) ---
+	friend class ReplicationSystem;
+
+	GlobalConstructHandle LookupGlobalHandle(ConstructNetHandle handle) const
+	{
+		return NetToRecord.get(handle.GetHandleIndex());
+	}
+
+	ConstructRecord* GetRecordPtr(ConstructNetHandle handle)
+	{
+		if (!IsHandleValid(handle)) return nullptr;
+		const GlobalConstructHandle gHandle = LookupGlobalHandle(handle);
+		return Records[gHandle.GetIndex()];
+	}
+
+	PagedMap<1 << UniqueIndex_Bits, ConstructRecord> Records{};
+	PagedMap<1 << UniqueIndex_Bits, GlobalConstructHandle> NetToRecord{};
+
 	struct StorageBase
 	{
 		virtual ~StorageBase() = default;

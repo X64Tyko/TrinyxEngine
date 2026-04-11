@@ -1,6 +1,7 @@
 # TrinyxEngine Architecture
 
-> **Navigation:** [← Back to README](../README.md) | [Performance Targets →](PERFORMANCE_TARGETS.md) | [Game Flow →](FLOW.md)
+> **Navigation:
+** [← Back to README](../README.md) | [Performance Targets →](PERFORMANCE_TARGETS.md) | [Game Flow →](FLOW.md) | [Networking →](NETWORKING.md)
 
 ---
 
@@ -1136,76 +1137,36 @@ dstAccess = SHADER_READ | INDIRECT_COMMAND_READ
 
 # Networking Architecture
 
-## Overview
+Server-authoritative model over GameNetworkingSockets (GNS). PIE loopback is the primary development
+target; dedicated server follows from the same code paths.
 
-Server-authoritative model with GameNetworkingSockets (GNS) transport. Designed for PIE loopback first,
-dedicated server later.
+**Full design:** [docs/NETWORKING.md](NETWORKING.md)
 
-## Components
+## Summary
 
-**GNSContext** — Thin wrapper around GNS library initialization and teardown. Isolates GNS headers from
-the rest of the engine. Statically linked.
-
-**NetConnectionManager** — Server/client socket API. `Listen(port)` / `Connect(address, port)`,
-`PollIncoming()` / `Send()`. Per-connection state: `ConnectionInfo` tracks GNS handle, OwnerID,
-sequence numbers, RTT, ack bitfield. `OnClientConnected` callback fires when GNS handshake completes.
-Max simultaneous connections derived from `NetOwnerID_Bits` (currently 8 → 256 connections).
-
-**NetThread** — Dedicated network poller running at `NetworkUpdateHz` (default 30Hz, configurable via INI).
-Routes messages by type:
-
-- `InputFrame` → World::GetSimInput() buffer (via OwnerID → World mapping)
-- `EntitySpawn` → ReplicationSystem::HandleEntitySpawn() on client world
-- `StateCorrection` → ReplicationSystem::HandleStateCorrections() on client world
-- `Ping/Pong` → RTT estimation (EWMA, 0.875/0.125 weights)
-
-**ReplicationSystem** — Server-side entity replication. Walks Registry each net tick:
-
-1. `SendSpawns()` — reliable EntitySpawn for entities not yet replicated (ClassID, transform, scale, color, mesh)
-2. `SendStateCorrections()` — unreliable batched transforms for all live entities
-3. `RegisterEntity()` — pre-assign EntityNetHandle with OwnerID before replication picks it up
+- **GNSContext** — GNS init/teardown, isolates GNS headers
+- **NetConnectionManager** — per-connection `ConnectionInfo` (GNS handle, OwnerID, RTT, `ClientRepState`)
+- **NetThread** — 30Hz poller (configurable), routes `NetMessageType` dispatch
+- **ReplicationSystem** — server-side entity flush (EntitySpawn + StateCorrection), fires `ServerReady`
+- **NetChannel** *(planned)* — typed per-connection send API; home for delta state, coalescing, RPC dispatch
+- **Soul** *(planned)* — one per OwnerID (even splitscreen), owns the `NetChannel`, drives spawn flow
+- **ConstructHandle** *(planned)* — 32-bit handle (`OwnerID:8 | LocalIndex:16 | Generation:8`), modeled
+  on `EntityRecord`/`PagedMap`; addresses Constructs on the wire independent of entity handles
 
 ## Network Identity
 
-**EntityNetHandle** — packed uint32: `NetOwnerID:8 | NetIndex:24`. OwnerID 0 = server/unassigned,
-1-255 = client connections. NetIndex is allocated per entity on the server, wired into `NetToRecord`
-mapping for bidirectional lookup.
+**EntityNetHandle** — `NetOwnerID:8 | NetIndex:24`. OwnerID 0 = server, 1-255 = clients.
 
-**Three handle spaces in Registry:**
+**Three handle spaces in Registry:** GlobalEntityHandle (internal) / EntityHandle (local OOP) / EntityNetHandle (
+network)
 
-- GlobalEntityHandle (internal) — generation + index into Records array
-- EntityHandle (local) — LocalToRecord mapping, for local OOP code
-- EntityNetHandle (network) — NetToRecord mapping, for replication
+**ConstructHandle** *(planned)* — owner-local index + generation; resolves via ConstructRegistry PagedMap per peer.
+Pure-logic Constructs (Soul, GameMode) have no EntityNetHandle — ConstructHandle is the only wire address.
 
 ## PIE Loopback
 
-Editor creates server + N client Worlds in the same process with loopback GNS connections.
-Each client World gets its own OwnerID, viewport, field slab, and InputBuffer. The server World
-runs headless (no renderer). Input routes to the focused viewport's World via `InputTargetWorld`.
-
-## Replay & Recording (Architectural Win)
-
-The slab-based SoA layout makes replay recording nearly free. All deterministic simulation state lives in
-contiguous, trivially-copyable field arrays. Replay = serialization in `PropagateFrame`.
-
-**Compression:** Homogeneous float arrays (all PosX, all PosY) have high spatial coherence. Delta
-compression yields mostly zeros per tick. Far superior to AoS where mixed types destroy ratios.
-
-**Free wins:**
-
-- Kill cam / rewind — slab snapshots in ring buffer, rewind = index backward + re-render
-- Spectator scrubbing — random access seek via snapshot index
-- Anti-cheat — diff server vs client slab timelines
-- Bandwidth estimation — compressed delta = theoretical minimum sync payload
-- Sub-tick precision — input events timestamped at actual ms, not frame-quantized
-- With rollback — retroactive event insertion enables frame-perfect multiplayer reproduction
-
-## Known Gaps
-
-- No delta compression (full state every tick)
-- No interest management / relevancy culling
-- No entity destruction replication
-- No client-side owned entity detection + follow camera (in progress)
+Server + N client Worlds in same process. Each client: own OwnerID, viewport, slab, InputBuffer.
+`WorldMap[ownerID]` routes messages. Both NetThread halves run in-process.
 
 ---
 
@@ -1253,6 +1214,11 @@ compression yields mostly zeros per tick. Far superior to AoS where mixed types 
 - [x] **Networking (basic)** — GNS wrapper, NetThread, ReplicationSystem (EntitySpawn + StateCorrection), PIE loopback,
   focus-based input routing, EntityNetHandle ownership model (2026-04, in progress)
 - [x] **Cumulative dirty bit array wired to GPU upload** (2026-03-29)
+- [ ] **NetChannel** — typed per-connection send API; replaces inline PacketHeader construction; home for
+  delta state, message coalescing, RPC dispatch table. See [NETWORKING.md](NETWORKING.md).
+- [ ] **Soul + ConstructHandle** — Soul owns NetChannel and OwnerID identity (one per OwnerID, even splitscreen).
+  ConstructHandle: 32-bit `OwnerID:8|LocalIndex:16|Generation:8`, PagedMap-backed ConstructRegistry, owner-local
+  indices. See [NETWORKING.md](NETWORKING.md).
 - [ ] `GetTemporalFieldWritePtr` migrated from Archetype to TemporalComponentCache
 - [ ] `TemporalFrameStride` removed from Archetype (duplicated state — call cache->GetFrameStride())
 - [ ] `GetLiveChunkCount` needs per-chunk live counters or Active flag scanning (currently approximation from global

@@ -51,7 +51,11 @@ EntityHandle Registry::MakeEntityHandle(GlobalEntityHandle gHandle, ClassID clas
 	GlobalEntityRegistry.LocalToRecord.set(lHandle.GetHandleIndex(), gHandle);
 
 	EntityRecord* record = GlobalEntityRegistry.Records[gHandle.GetIndex()];
-	if (record) record->LHandle = lHandle;
+	if (record)
+	{
+		lHandle.Generation = record->GetGeneration();
+		record->LHandle    = lHandle;
+	}
 
 	return lHandle;
 }
