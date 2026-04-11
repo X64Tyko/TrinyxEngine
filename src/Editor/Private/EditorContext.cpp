@@ -701,7 +701,7 @@ void EditorContext::BuildMenuBar()
 		{
 			auto& rr = ReflectionRegistry::Get();
 
-			// GameState combo
+			// FlowState combo
 			ImGui::SetNextItemWidth(160);
 			const char* statePreview = State.SceneDefaultState.empty() ? "(none)" : State.SceneDefaultState.c_str();
 			if (ImGui::BeginCombo("Default State", statePreview))

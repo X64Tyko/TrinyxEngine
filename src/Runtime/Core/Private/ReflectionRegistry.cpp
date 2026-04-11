@@ -88,7 +88,7 @@ void ReflectionRegistry::SetCacheSlotIndex(ComponentTypeID typeID, uint8_t slot)
 }
 
 // ---------------------------------------------------------------------------
-// GameState / GameMode registration
+// FlowState / GameMode registration
 // ---------------------------------------------------------------------------
 
 void ReflectionRegistry::RegisterState(const char* name, StateFactory factory)
@@ -159,8 +159,8 @@ void ReflectionRegistry::PublishToAssetRegistry() const
 
 	for (const auto& entry : RegisteredStates)
 	{
-		AssetID id = AssetID::Create(entry.UUID, AssetType::GameState);
-		registry.Register(id, entry.Name, "", AssetType::GameState);
+		AssetID id = AssetID::Create(entry.UUID, AssetType::FlowState);
+		registry.Register(id, entry.Name, "", AssetType::FlowState);
 	}
 
 	for (const auto& entry : RegisteredModes)

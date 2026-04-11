@@ -285,7 +285,7 @@ void TrinyxEngine::RunMainLoop()
 		PumpEvents();
 #endif
 
-		// Tick the flow state machine — drives GameState::Tick() on the active state
+		// Tick the flow state machine — drives FlowState::Tick() on the active state
 		Flow->Tick(dt);
 
 		if (DefaultWorld->GetLogicThread() && !DefaultWorld->GetLogicThread()->IsRunning())

@@ -60,7 +60,7 @@ struct EntityBuilder
 	struct SceneMeta
 	{
 		std::string Name;
-		std::string DefaultState; // GameState to load (empty = none)
+		std::string DefaultState; // FlowState to load (empty = none)
 		std::string DefaultMode;  // GameMode to activate (empty = none)
 	};
 

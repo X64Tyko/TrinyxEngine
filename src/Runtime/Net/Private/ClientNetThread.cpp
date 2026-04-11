@@ -118,7 +118,7 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 			if (FlowMgr) FlowMgr->PostTravelNotify(travelMsg->LevelPath);
 
 			// Auto-acknowledge (synchronous load in PIE).
-			// Future: remove and let GameState call AcknowledgeLevelReady() after async load.
+			// Future: remove and let FlowState call AcknowledgeLevelReady() after async load.
 			NetChannel(ci, ConnectionMgr).SendHeaderOnly(NetMessageType::LevelReady, /*reliable=*/true);
 
 			ci->RepState = ClientRepState::LevelLoaded;

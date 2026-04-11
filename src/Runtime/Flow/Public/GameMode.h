@@ -10,7 +10,7 @@ class Soul;
 // scoring, round transitions, player slot management. It exists only
 // while a World is active and is destroyed with it.
 //
-// One GameMode per World. The active GameState decides which GameMode
+// One GameMode per World. The active FlowState decides which GameMode
 // to create (or none — a menu state has no GameMode).
 //
 // GameMode is intentionally NOT a Construct itself. User subclasses that

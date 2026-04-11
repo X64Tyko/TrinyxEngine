@@ -561,13 +561,13 @@ void NetThread::RouteMessage(const ReceivedMessage& msg)
 				LOG_INFO_F("[NetThread] TravelNotify received — loading level '%s'",
 						   travelMsg->LevelPath);
 
-				// Post to the client's FlowManager so its GameState can load the level.
+				// Post to the client's FlowManager so its FlowState can load the level.
 				// FlowMap[OwnerID] routes to the correct per-client flow in PIE.
 				FlowManager* clientFlow = FlowMap[ci->OwnerID];
 				if (clientFlow) clientFlow->PostTravelNotify(travelMsg->LevelPath);
 
 				// Auto-acknowledge: level loading is synchronous in PIE.
-				// Future: remove auto-ack and let GameState call AcknowledgeLevelReady()
+				// Future: remove auto-ack and let FlowState call AcknowledgeLevelReady()
 				// after async load completes.
 				PacketHeader ackHeader{};
 				ackHeader.Type        = static_cast<uint8_t>(NetMessageType::LevelReady);

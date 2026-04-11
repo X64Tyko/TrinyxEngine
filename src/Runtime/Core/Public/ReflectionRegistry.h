@@ -13,7 +13,7 @@
 #include "Signature.h"
 #include "Types.h"
 
-class GameState;
+class FlowState;
 class GameMode;
 
 // ---------------------------------------------------------------------------
@@ -23,7 +23,7 @@ class GameMode;
 // function pointers) and ComponentFieldRegistry (field decomposition,
 // component metadata, tier/slot queries) into one singleton.
 //
-// Also holds GameState/GameMode factory registrations so FlowManager
+// Also holds FlowState/GameMode factory registrations so FlowManager
 // and the editor can discover them without manual registration calls.
 //
 // Populated at static init time by registration macros (TNX_REGISTER_ENTITY,
@@ -62,9 +62,9 @@ public:
 	std::unordered_map<std::string, ClassID>         NameToClassID;
 	std::unordered_map<std::string, ComponentTypeID> NameToComponentID;
 
-	// ===== GameState / GameMode factories =====
+	// ===== FlowState / GameMode factories =====
 
-	using StateFactory = std::function<std::unique_ptr<GameState>()>;
+	using StateFactory = std::function<std::unique_ptr<FlowState>()>;
 	using ModeFactory  = std::function<std::unique_ptr<GameMode>()>;
 
 	struct StateEntry
@@ -157,7 +157,7 @@ public:
 
 	void SetCacheSlotIndex(ComponentTypeID typeID, uint8_t slot);
 
-	// ===== GameState / GameMode registration =====
+	// ===== FlowState / GameMode registration =====
 
 	void RegisterState(const char* name, StateFactory factory);
 	void RegisterMode(const char* name, ModeFactory factory);

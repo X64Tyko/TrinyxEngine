@@ -8,7 +8,7 @@ class FlowManager;
 // ---------------------------------------------------------------------------
 // StateRequirements — Declares what engine subsystems a state needs.
 //
-// Each GameState subclass overrides GetRequirements() to declare its needs.
+// Each FlowState subclass overrides GetRequirements() to declare its needs.
 // FlowManager uses these during transitions to create/destroy/preserve
 // subsystems. If a transition moves from a state that requires a World to
 // one that doesn't, the World is destroyed (and all World-scoped Constructs
@@ -23,9 +23,9 @@ struct StateRequirements
 };
 
 // ---------------------------------------------------------------------------
-// GameState — Base class for flow states.
+// FlowState — Base class for structural application states.
 //
-// States drive the application. A State is the top-level context that
+// States drive the application. A FlowState is the top-level context that
 // determines what the engine is doing right now: main menu, loading screen,
 // in-game, post-match summary, etc.
 //
@@ -44,12 +44,12 @@ struct StateRequirements
 // they need via GetRequirements(), and FlowManager manages lifetimes.
 // This prevents dangling references and enforces clean transitions.
 //
-// Thread safety: all GameState methods run on the Sentinel (main) thread.
+// Thread safety: all FlowState methods run on the Sentinel (main) thread.
 // ---------------------------------------------------------------------------
-class GameState
+class FlowState
 {
 public:
-	virtual ~GameState() = default;
+	virtual ~FlowState() = default;
 
 	/// Called when this state becomes active (pushed or transitioned to).
 	/// world may be nullptr if GetRequirements().NeedsWorld is false.
@@ -75,9 +75,9 @@ public:
 	virtual StateRequirements GetRequirements() const { return {}; }
 
 	/// Display name for debugging/logging.
-	virtual const char* GetName() const { return "GameState"; }
+	virtual const char* GetName() const { return "FlowState"; }
 
 protected:
-	GameState() = default;
-	FlowManager* Flow = nullptr; // Set on OnEnter — always the owning world's FlowManager.
+	FlowState() = default;
+	FlowManager* Flow = nullptr; // Set on OnEnter — always the owning FlowManager.
 };

@@ -339,7 +339,7 @@ FORCE_INLINE void ForEachField(Func&& func)
     TNX_REGISTER_FIELDS(ComponentType, __VA_ARGS__)
 
 // ---------------------------------------------------------------------------
-// GameState / GameMode self-registration macros
+// FlowState / GameMode self-registration macros
 // ---------------------------------------------------------------------------
 
 #define TNX_REGISTER_STATE(StateClass) \
@@ -347,7 +347,7 @@ FORCE_INLINE void ForEachField(Func&& func)
         struct _##StateClass##_StateReg { \
             _##StateClass##_StateReg() { \
                 ReflectionRegistry::Get().RegisterState(#StateClass, \
-                    []() -> std::unique_ptr<GameState> { return std::make_unique<StateClass>(); }); \
+                    []() -> std::unique_ptr<FlowState> { return std::make_unique<StateClass>(); }); \
             } \
         }; \
         [[maybe_unused]] TNX_USED_ATTR static _##StateClass##_StateReg _##StateClass##_state_reg; \

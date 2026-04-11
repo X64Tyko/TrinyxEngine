@@ -35,7 +35,7 @@ enum class AssetType : uint8_t
 	// 0x0A-0xEF reserved for file-based asset types
 
 	// Code-registered types (not file assets — registered via macros)
-	GameState  = 0xF0,
+	FlowState  = 0xF0,
 	GameMode   = 0xF1,
 	EntityType = 0xF2,
 };
@@ -215,7 +215,7 @@ inline const char* AssetTypeName(AssetType type)
 		case AssetType::Animation: return "Animation";
 		case AssetType::Level: return "Level";
 		case AssetType::Prefab: return "Prefab";
-		case AssetType::GameState: return "Game State";
+		case AssetType::FlowState: return "Game State";
 		case AssetType::GameMode: return "Game Mode";
 		case AssetType::EntityType: return "Entity Type";
 		default: return "Unknown";

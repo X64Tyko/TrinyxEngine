@@ -2,7 +2,7 @@
 
 #include "EntityBuilder.h"
 #include "GameMode.h"
-#include "GameState.h"
+#include "FlowState.h"
 #include "Logger.h"
 #include "NetTypes.h"
 #include "ReflectionRegistry.h"
@@ -113,7 +113,7 @@ void FlowManager::TransitionTo(const char* stateName)
 	auto newState = factory();
 
 	// Get current top state for requirement comparison
-	GameState* currentState = GetActiveState();
+	FlowState* currentState = GetActiveState();
 
 	// Exit all states top-down
 	for (int32_t i = static_cast<int32_t>(StateStackCount) - 1; i >= 0; --i)
@@ -374,7 +374,7 @@ void FlowManager::Tick(float dt)
 	const uint32_t events = PendingNetEvents.exchange(0, std::memory_order_acquire);
 	if (events)
 	{
-		if (GameState* active = GetActiveState())
+		if (FlowState* active = GetActiveState())
 		{
 			uint32_t bits = events;
 			while (bits)
@@ -388,7 +388,7 @@ void FlowManager::Tick(float dt)
 	}
 
 	// Tick the active (top) state
-	if (GameState* active = GetActiveState())
+	if (FlowState* active = GetActiveState())
 	{
 		active->Tick(dt);
 	}
@@ -398,7 +398,7 @@ void FlowManager::Tick(float dt)
 // Accessors
 // ---------------------------------------------------------------------------
 
-GameState* FlowManager::GetActiveState() const
+FlowState* FlowManager::GetActiveState() const
 {
 	if (StateStackCount == 0) return nullptr;
 	return StateStack[StateStackCount - 1].get();
@@ -442,7 +442,7 @@ FlowManager::ModeFactory FlowManager::FindModeFactory(const char* name) const
 	return ReflectionRegistry::Get().FindModeFactory(name);
 }
 
-void FlowManager::EnforceRequirements(GameState* currentState, GameState* nextState)
+void FlowManager::EnforceRequirements(FlowState* currentState, FlowState* nextState)
 {
 	const StateRequirements current = currentState ? currentState->GetRequirements() : StateRequirements{};
 	const StateRequirements next    = nextState ? nextState->GetRequirements() : StateRequirements{};

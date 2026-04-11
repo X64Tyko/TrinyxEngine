@@ -1,6 +1,6 @@
 #pragma once
 
-#include "GameState.h"
+#include "FlowState.h"
 #include "FlowManager.h"
 #include "EngineConfig.h"
 #include "Logger.h"
@@ -21,12 +21,12 @@ class PlayerConstruct;
 // Clients wait for TravelNotify from the server, then load the level via
 // OnNetEvent so the path is always the authoritative server path.
 // ---------------------------------------------------------------------------
-class GameplayState : public GameState
+class GameplayState : public FlowState
 {
 public:
 	void OnEnter(FlowManager& flow, World* world) override
 	{
-		GameState::OnEnter(flow, world); // caches Flow
+		FlowState::OnEnter(flow, world); // caches Flow
 
 		const EngineConfig* cfg = Flow->GetConfig();
 		if (cfg->DefaultScene[0] == '\0' || cfg->ProjectDir[0] == '\0')

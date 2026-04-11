@@ -12,7 +12,7 @@
 #include "Soul.h"
 #include "Types.h"
 
-class GameState;
+class FlowState;
 class GameMode;
 class World;
 class TrinyxEngine;
@@ -23,7 +23,7 @@ struct EngineConfig;
 //
 // The FlowManager is owned by TrinyxEngine and drives the application-level
 // state machine. It manages:
-//   - A stack of GameStates (menu, loading, in-game, pause overlay, etc.)
+//   - A stack of FlowStates (menu, loading, in-game, pause overlay, etc.)
 //   - World lifetime (create/destroy based on state requirements)
 //   - GameMode lifetime (one per World, set by the active state)
 //   - ConstructRegistry (lives here so Session-lifetime Constructs survive)
@@ -75,7 +75,7 @@ public:
 
 	// ----- State registration (code-driven, call in PostInitialize) -----
 
-	using StateFactory = std::function<std::unique_ptr<GameState>()>;
+	using StateFactory = std::function<std::unique_ptr<FlowState>()>;
 	using ModeFactory  = std::function<std::unique_ptr<GameMode>()>;
 
 	/// Register a named state factory. Name is used by LoadState/TransitionTo.
@@ -162,15 +162,15 @@ public:
 	GameMode* GetGameMode() const { return ActiveMode.get(); }
 
 	/// Called from any thread (e.g., NetThread) when a net flow event arrives.
-	/// The active GameState's OnNetEvent hook is dispatched on the next Tick.
+	/// The active FlowState's OnNetEvent hook is dispatched on the next Tick.
 	/// eventID is a FlowEventID enum value cast to uint8_t.
 	void PostNetEvent(uint8_t eventID);
 
 	/// Called from NetThread when a TravelNotify arrives. Caches the level path
-	/// (readable by GameState via GetPendingTravelPath) then posts the FlowEvent.
+	/// (readable by FlowState via GetPendingTravelPath) then posts the FlowEvent.
 	void PostTravelNotify(const char* levelPath);
 
-	/// Path sent in the last TravelNotify. GameState reads this in OnNetEvent
+	/// Path sent in the last TravelNotify. FlowState reads this in OnNetEvent
 	/// to know which level to load. Empty if no TravelNotify has arrived yet.
 	const std::string& GetPendingTravelPath() const { return PendingTravelPath; }
 
@@ -180,7 +180,7 @@ public:
 
 	// ----- Accessors -----
 
-	GameState* GetActiveState() const;
+	FlowState* GetActiveState() const;
 	World* GetWorld() const;
 	bool HasWorld() const;
 	const EngineConfig* GetConfig() const { return Config; }
@@ -201,7 +201,7 @@ private:
 	static constexpr uint32_t MaxRegisteredModes  = 16;
 
 	// State stack (index 0 = bottom, StateStackCount-1 = top/active)
-	std::unique_ptr<GameState> StateStack[MaxStateStack];
+	std::unique_ptr<FlowState> StateStack[MaxStateStack];
 	uint32_t StateStackCount = 0;
 
 	// Registered factories
@@ -233,7 +233,7 @@ private:
 	std::unique_ptr<World> ActiveWorld;
 	std::unique_ptr<GameMode> ActiveMode;
 	std::string ActiveLevelPath;   // Path of currently loaded level (empty = none)
-	std::string PendingTravelPath; // Level path from last TravelNotify (read by GameState in OnNetEvent)
+	std::string PendingTravelPath; // Level path from last TravelNotify (read by FlowState in OnNetEvent)
 
 	// Engine back-pointer (for World creation parameters)
 	TrinyxEngine* Engine       = nullptr;
@@ -251,5 +251,5 @@ private:
 
 	/// Compare current vs next state requirements and create/destroy
 	/// World and NetSession as needed.
-	void EnforceRequirements(GameState* currentState, GameState* nextState);
+	void EnforceRequirements(FlowState* currentState, FlowState* nextState);
 };
