@@ -57,8 +57,8 @@ public:
 
 	void Tick();
 
-	NetConnectionManager* GetConnectionManager() { return ConnectionMgr.get(); }
-	const NetConnectionManager* GetConnectionManager() const { return ConnectionMgr.get(); }
+	NetConnectionManager* GetConnectionManager() { return ConnectionMgr; }
+	const NetConnectionManager* GetConnectionManager() const { return ConnectionMgr; }
 
 	float GetNetFPS() const { return NetFPS.load(std::memory_order_relaxed); }
 	float GetNetFrameMs() const { return NetFrameMs.load(std::memory_order_relaxed); }
@@ -79,7 +79,7 @@ protected:
 	NetConnectionManager* ConnectionMgr = nullptr;
 
 	// OwnerID → World for the input-send path (client legs only)
-	World* WorldMap[256]{};
+	World* WorldMap[MaxOwnerIDs]{};
 
 private:
 	void ThreadMain();

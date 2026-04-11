@@ -12,6 +12,7 @@
 
 
 static constexpr size_t NetOwnerID_Bits  = 8;
+static constexpr size_t MaxOwnerIDs      = 1u << NetOwnerID_Bits; // 256 possible owner IDs (0=server, 1-255=clients)
 static constexpr size_t Generation_Bits  = 16;
 static constexpr size_t TypeKey_Bits     = 16;
 static constexpr size_t UniqueIndex_Bits = 24;
@@ -24,7 +25,7 @@ union EntitySlotMeta
 	struct
 	{
 		uint32_t Generation : Generation_Bits; // generation still lives with the entity, usable by logic and renderer
-		uint32_t NetOwnerID : NetOwnerID_Bits; // still 256 possible owner IDs held per entity for comparison
+		uint32_t NetOwnerID : NetOwnerID_Bits; // MaxOwnerIDs possible owner IDs held per entity for comparison
 		uint32_t reserved   : 7;               // genuinely not sure what else they'd need yet
 		uint32_t ValidBit   : 1;               // If the entity is actually alive (bit 31 matches the existing precedent with Flags)
 	};
