@@ -72,5 +72,6 @@ private:
 
 	FlowManager* ServerFlow       = nullptr; // non-owning
 	uint64_t     LastFlowTickTime = 0;       // SDL perf counter at last flow tick
+};
 
 #endif // TNX_ENABLE_EDITOR

@@ -1,6 +1,7 @@
 #ifdef TNX_ENABLE_EDITOR
 #include "PIENetThread.h"
 
+#include "FlowManager.h"
 #include "NetConnectionManager.h"
 #include "Logger.h"
 #include <SDL3/SDL_timer.h>
