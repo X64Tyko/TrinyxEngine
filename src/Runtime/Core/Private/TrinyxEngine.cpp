@@ -150,9 +150,14 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 		}
 		else
 		{
-			Net = std::make_unique<NetThread>();
+			Net = std::make_unique<NetThreadType>();
 			Net->Initialize(&GNS, &Config);
+#if defined(TNX_NET_MODEL_PIE)
+			Net->InitChildren();
+			Net->SetServerFlow(Flow.get());
+#elif defined(TNX_NET_MODEL_SERVER)
 			Net->SetFlowManager(Flow.get());
+#endif
 		}
 	}
 #endif
@@ -214,9 +219,14 @@ bool TrinyxEngine::EnsureNetworking()
 		}
 	}
 
-	Net = std::make_unique<NetThread>();
+	Net = std::make_unique<NetThreadType>();
 	Net->Initialize(&GNS, &Config);
+#if defined(TNX_NET_MODEL_PIE)
+	Net->InitChildren();
+	Net->SetServerFlow(Flow.get());
+#elif defined(TNX_NET_MODEL_SERVER)
 	Net->SetFlowManager(Flow.get());
+#endif
 	return true;
 }
 #endif
@@ -231,13 +241,14 @@ void TrinyxEngine::StartThreadsAndJobs()
 		// Spin while we wait so that we don't initialize workers before our Primary threads
 	}
 
-	// Start NetThread in threaded mode for Client/ListenServer.
-	// Server mode uses inline Tick() from the main loop — no extra thread.
+	// Server model uses inline Tick() from the main loop — no extra thread.
+	// Client and PIE models spin a dedicated net thread.
 #ifdef TNX_ENABLE_NETWORK
-	if (Net && Config.Mode != EngineMode::Server)
-	{
-		Net->Start();
-	}
+#if defined(TNX_NET_MODEL_SERVER)
+	// Inline — no Start(); main loop calls Net->Tick()
+#else
+	if (Net) Net->Start();
+#endif
 #endif
 
 	bool JobsInitialized = TrinyxJobs::Initialize(&Config);
@@ -262,15 +273,10 @@ void TrinyxEngine::RunMainLoop()
 		const float dt            = static_cast<float>(static_cast<double>(frameStart - LastFrameCounter) / static_cast<double>(perfFrequency));
 		LastFrameCounter          = frameStart;
 
-#if defined(TNX_DEDICATED_SERVER) && defined(TNX_ENABLE_NETWORK)
+#if defined(TNX_NET_MODEL_SERVER) && defined(TNX_ENABLE_NETWORK)
 		// Dedicated server: main thread is the network poller — no SDL events.
 		if (Net) Net->Tick();
-#elif TNX_ENABLE_EDITOR && defined(TNX_ENABLE_NETWORK)
-		// Editor PIE server runs inline on the main thread; clients pump SDL.
-		if (Config.Mode == EngineMode::Server && Net) Net->Tick();
-		else PumpEvents();
 #else
-		// Shipping client / standalone / editor without networking: pump SDL events.
 		PumpEvents();
 #endif
 

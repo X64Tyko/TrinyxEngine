@@ -11,8 +11,7 @@ void PIENetThread::InitChildren()
 
 void PIENetThread::SetServerWorld(World* world)
 {
-	MapConnectionToWorld(0, world);
-	Server.MapConnectionToWorld(0, world);
+	Server.SetServerWorld(world);
 }
 void PIENetThread::SetServerFlow(FlowManager* flow)
 {
@@ -24,14 +23,32 @@ void PIENetThread::SetReplicationSystem(ReplicationSystem* repl)
 	Server.SetReplicationSystem(repl);
 }
 
-void PIENetThread::AddClient(uint8_t ownerID, World* world, FlowManager* flow)
+void PIENetThread::AddClient(HSteamNetConnection clientHandle, World* world, FlowManager* flow)
 {
 	ClientEntry& entry = Clients.emplace_back();
-	entry.OwnerID      = ownerID;
-	entry.Handler.InitAsHandler(GNS, Config, ConnectionMgr);
-	entry.Handler.SetFlowManager(flow);
-	entry.Handler.SetClientWorld(ownerID, world);
-	MapConnectionToWorld(ownerID, world);
+	entry.Handle       = clientHandle;
+	entry.OwnerID      = 0; // promoted to real OwnerID in UpdateClientOwnerID after handshake
+	entry.Handler      = std::make_unique<ClientNetThread>();
+	entry.Handler->InitAsHandler(GNS, Config, ConnectionMgr);
+	entry.Handler->SetFlowManager(flow);
+	// World and OwnerID wired in UpdateClientOwnerID once server assigns the ID
+	(void)world;
+}
+
+void PIENetThread::UpdateClientOwnerID(HSteamNetConnection clientHandle, uint8_t ownerID, World* world)
+{
+	for (auto& entry : Clients)
+	{
+		if (entry.Handle == clientHandle)
+		{
+			entry.OwnerID = ownerID;
+			entry.Handler->SetClientWorld(ownerID, world);
+			MapConnectionToWorld(ownerID, world);
+			LOG_INFO_F("[PIENet] Client handle %u promoted to OwnerID=%u", clientHandle, ownerID);
+			return;
+		}
+	}
+	LOG_WARN_F("[PIENet] UpdateClientOwnerID: no entry for handle %u", clientHandle);
 }
 
 void PIENetThread::RemoveClient(uint8_t ownerID)
@@ -71,18 +88,19 @@ void PIENetThread::HandleMessage(const ReceivedMessage& msg)
 	{
 		for (auto& entry : Clients)
 		{
-			ConnectionInfo* cci = ConnectionMgr->FindConnection(msg.Connection);
-			if (cci && cci->OwnerID == entry.OwnerID)
+			// Pre-handshake: OwnerID not yet assigned — route by connection handle.
+			// Post-handshake: route by OwnerID.
+			const bool match = (entry.OwnerID != 0 && entry.OwnerID == ci->OwnerID)
+				|| (entry.OwnerID == 0 && entry.Handle == msg.Connection);
+			if (match)
 			{
-				entry.Handler.HandleMessage(msg);
+				entry.Handler->HandleMessage(msg);
 				return;
 			}
 		}
 
-		// Client connection not yet assigned an OwnerID (handshake in progress) —
-		// route to first client handler as a best-effort fallback.
-		if (!Clients.empty())
-			Clients[0].Handler.HandleMessage(msg);
+		LOG_WARN_F("[PIENet] HandleMessage: no client handler for connection %u (OwnerID=%u)",
+				   msg.Connection, ci->OwnerID);
 	}
 }
 

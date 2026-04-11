@@ -15,7 +15,7 @@
 #ifdef TNX_ENABLE_NETWORK
 #include "GNSContext.h"
 #include "NetConnectionManager.h"
-#include "NetThread.h"
+#include "ServerNetThread.h"
 #endif
 #include "World.h"
 #include "Input.h"
@@ -157,7 +157,7 @@ TEST(Net_InputFrameRouting)
 	config.NetworkUpdateHz = 30;
 	config.ApplyDefaults();
 
-	NetThread net;
+	ServerNetThread net;
 	net.Initialize(&gnsLocal, &config);
 
 	// We need a World to route input to. Use an InputBuffer directly

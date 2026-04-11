@@ -8,7 +8,16 @@
 #include "FlowManager.h"
 #ifdef TNX_ENABLE_NETWORK
 #include "GNSContext.h"
-#include "NetThread.h"
+#if defined(TNX_NET_MODEL_PIE)
+#include "PIENetThread.h"
+using NetThreadType = PIENetThread;
+#elif defined(TNX_NET_MODEL_SERVER)
+#include "ServerNetThread.h"
+using NetThreadType = ServerNetThread;
+#else
+#include "ClientNetThread.h"
+using NetThreadType = ClientNetThread;
+#endif
 #endif
 #include "VulkanContext.h"
 #include "VulkanMemory.h"
@@ -100,7 +109,7 @@ public:
 #ifdef TNX_ENABLE_NETWORK
 	// Networking
 	GNSContext* GetGNSContext() const { return const_cast<GNSContext*>(&GNS); }
-	NetThread* GetNetThread() const { return Net.get(); }
+	NetThreadType* GetNetThread() const { return Net.get(); }
 
 	/// Lazy-init GNS + NetThread if not already active.
 	/// Used by editor PIE to enable networking from Standalone mode.
@@ -141,7 +150,7 @@ private:
 #ifdef TNX_ENABLE_NETWORK
 	// --- Networking ---
 	GNSContext GNS;
-	std::unique_ptr<NetThread> Net;
+	std::unique_ptr<NetThreadType> Net;
 #endif
 
 	// --- Vulkan (owned here, shared across worlds) ---

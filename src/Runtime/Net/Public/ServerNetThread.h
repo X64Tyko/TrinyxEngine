@@ -24,17 +24,18 @@ class ServerNetThread : public NetThreadBase<ServerNetThread>
 
 public:
 	/// Non-owning. Set before Start() / first Tick().
-	void SetServerWorld(World* world) { MapConnectionToWorld(0, world); }
+	void SetServerWorld(World* world) { ServerWorld = world; }
 
 	void SetReplicationSystem(ReplicationSystem* repl) { Replicator = repl; }
 
 	/// Used only to query GetActiveLevelLocalPath() when sending TravelNotify.
 	void SetFlowManager(FlowManager* flow) { FlowMgr = flow; }
 
-private:
 	void HandleMessage(const ReceivedMessage& msg);
 	void TickReplication();
 
+private:
 	ReplicationSystem* Replicator = nullptr;
 	FlowManager* FlowMgr          = nullptr;
+	World* ServerWorld            = nullptr;
 };

@@ -28,9 +28,8 @@ public:
 
 	/// No-op: clients don't replicate.
 	void TickReplication() {}
-
-private:
 	void HandleMessage(const ReceivedMessage& msg);
 
+private:
 	FlowManager* FlowMgr = nullptr;
 };

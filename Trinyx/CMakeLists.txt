@@ -21,6 +21,10 @@ if (NOT TNX_ENABLE_NETWORK)
     list(FILTER ENGINE_HEADERS EXCLUDE REGEX ".*/Net/.*\\.h$")
 endif ()
 
+# Remove the old NetThread now that it is replaced by the role-split classes.
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/NetThread\\.cpp$")
+list(FILTER ENGINE_HEADERS EXCLUDE REGEX ".*/NetThread\\.h$")
+
 # volk: VOLK_IMPLEMENTATION is defined in VulkanContext.cpp — no standalone volk.c needed.
 set(VOLK_SOURCES "")
 

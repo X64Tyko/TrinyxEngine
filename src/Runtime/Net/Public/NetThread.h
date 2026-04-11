@@ -17,21 +17,6 @@ struct InputBuffer;
 struct EngineConfig;
 
 // ---------------------------------------------------------------------------
-// InputFramePayload — wire format for an InputFrame message payload.
-// 64 bytes of key state + 2 floats of mouse delta.
-// ---------------------------------------------------------------------------
-struct InputFramePayload
-{
-	uint8_t KeyState[64];
-	float MouseDX;
-	float MouseDY;
-	uint8_t MouseButtons;
-	uint8_t _Pad[3];
-};
-
-static_assert(sizeof(InputFramePayload) == 76, "InputFramePayload must be 76 bytes");
-
-// ---------------------------------------------------------------------------
 // NetThread — network coordinator.
 //
 // Two modes of operation:
