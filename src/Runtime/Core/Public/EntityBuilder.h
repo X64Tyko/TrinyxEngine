@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AssetRegistry.h"
 #include "Json.h"
 #include "Types.h"
 #include <string>
@@ -45,6 +46,14 @@ struct EntityBuilder
 	// bBackground: see SpawnEntity. File I/O and JSON parse are synchronous on the
 	// calling thread — true async parsing is a future improvement.
 	static size_t SpawnFromFile(Registry* reg, const char* filePath, bool bBackground = false);
+
+	// Load by AssetID — resolves path via AssetRegistry::ResolvePath.
+	static size_t SpawnFromAsset(Registry* reg, const AssetID& id, bool bBackground = false)
+	{
+		std::string path = AssetRegistry::Get().ResolvePath(id);
+		if (path.empty()) return 0;
+		return SpawnFromFile(reg, path.c_str(), bBackground);
+	}
 
 	// --- Scene metadata ---
 

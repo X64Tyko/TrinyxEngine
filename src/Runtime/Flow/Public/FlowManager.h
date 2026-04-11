@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 
+#include "AssetRegistry.h"
 #include "ConstructRegistry.h"
 #include "Types.h"
 
@@ -125,6 +126,13 @@ public:
 	/// explicit Alive→Active sweep. Used for client loads where the server drives
 	/// activation via ServerReady. File I/O is still synchronous on the Logic thread.
 	void LoadLevel(const char* levelPath, bool bBackground = false);
+
+	/// Load a level by AssetID — resolves path via AssetRegistry.
+	void LoadLevel(const AssetID& id, bool bBackground = false);
+
+	/// Load a level by display name (looks up in AssetRegistry, then loads).
+	/// The name is the stem of the scene file, e.g. "Arena" for Arena.tnxscene.
+	void LoadLevelByName(const char* name, bool bBackground = false);
 
 	/// Unload the current level (despawn all level-scoped entities).
 	void UnloadLevel();

@@ -114,6 +114,9 @@ void AssetDatabase::Initialize(const char* contentRoot)
 		LOG_INFO_F("[AssetDB] Created content directory: %s", ContentRoot.c_str());
 	}
 
+	// Set content root on the runtime registry so paths resolve to absolute paths.
+	AssetRegistry::Get().SetContentRoot(ContentRoot);
+
 	// Try to load existing database
 	Load();
 

@@ -268,6 +268,33 @@ void FlowManager::LoadLevel(const char* levelPath, bool bBackground)
 	LOG_INFO_F("[FlowManager] Level loaded: %s", levelPath);
 }
 
+void FlowManager::LoadLevel(const AssetID& id, bool bBackground)
+{
+	std::string path = AssetRegistry::Get().ResolvePath(id);
+	if (path.empty())
+	{
+		LOG_ERROR("[FlowManager] LoadLevel(AssetID): asset not found or no content root set");
+		return;
+	}
+	LoadLevel(path.c_str(), bBackground);
+}
+
+void FlowManager::LoadLevelByName(const char* name, bool bBackground)
+{
+	if (!name || name[0] == '\0')
+	{
+		LOG_ERROR("[FlowManager] LoadLevelByName: empty name");
+		return;
+	}
+	std::string path = AssetRegistry::Get().ResolvePathByName(name);
+	if (path.empty())
+	{
+		LOG_ERROR_F("[FlowManager] LoadLevelByName: '%s' not found in AssetRegistry", name);
+		return;
+	}
+	LoadLevel(path.c_str(), bBackground);
+}
+
 void FlowManager::UnloadLevel()
 {
 	// Destroy Level-lifetime Constructs

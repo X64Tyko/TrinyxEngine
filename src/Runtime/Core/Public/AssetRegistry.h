@@ -42,6 +42,34 @@ public:
 	// --- Startup ---
 	// void IngestManifest(const AssetManifest& manifest);  // TODO: cooked manifest
 
+	// Content root — absolute path to the content directory.
+	// Must be set before any ResolvePath call. Called by AssetDatabase::Initialize()
+	// (editor) and by TrinyxEngine startup (runtime, from EngineConfig::ProjectDir).
+	void SetContentRoot(const std::string& root) { ContentRoot = root; }
+	const std::string& GetContentRoot() const { return ContentRoot; }
+
+	// Resolve an entry's relative path to an absolute filesystem path.
+	// Returns an empty string if the entry has no path or ContentRoot is unset.
+	std::string ResolvePath(const AssetEntry& entry) const
+	{
+		if (entry.Path.empty() || ContentRoot.empty()) return {};
+		return ContentRoot + "/" + entry.Path;
+	}
+
+	// Convenience: resolve by AssetID.
+	std::string ResolvePath(const AssetID& id) const
+	{
+		const AssetEntry* e = Find(id);
+		return e ? ResolvePath(*e) : std::string{};
+	}
+
+	// Convenience: resolve by display name.
+	std::string ResolvePathByName(const std::string& name) const
+	{
+		const AssetEntry* e = FindByName(name);
+		return e ? ResolvePath(*e) : std::string{};
+	}
+
 	// --- Registration (editor/import pipeline) ---
 	void Register(const AssetID& id, const std::string& name, const std::string& path,
 				  AssetType type, uint32_t schemaVersion = 0, AssetFlags flags = AssetFlags::None)
@@ -181,6 +209,7 @@ private:
 		return (static_cast<uint8_t>(state) & static_cast<uint8_t>(flag)) != 0;
 	}
 
+	std::string ContentRoot;
 	std::unordered_map<int64_t, int64_t> AliasTable;
 	std::unordered_map<int64_t, AssetEntry> Entries;
 	std::unordered_map<std::string, int64_t> NameIndex; // display name → UUID

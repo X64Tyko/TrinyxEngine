@@ -854,9 +854,13 @@ bool NodeScriptPanel::ExportToFile()
 	}
 
 	file << GeneratedCode;
-	snprintf(StatusMsg, sizeof(StatusMsg), "Exported: %s", OutputPath);
+	{
+		const std::string s = std::string("Exported: ") + OutputPath;
+		strncpy(StatusMsg, s.c_str(), sizeof(StatusMsg) - 1);
+		StatusMsg[sizeof(StatusMsg) - 1] = '\0';
+		LOG_INFO(s.c_str());
+	}
 	bStatusError = false;
-	LOG_INFO_F("[NodeScript] Exported script -> %s", OutputPath);
 	return true;
 }
 
@@ -871,9 +875,9 @@ void NodeScriptPanel::Draw(EditorState& state)
 	// Auto-suggest output path from the project directory on the first frame it becomes available.
 	if (OutputPath[0] == '\0' && state.ConfigPtr && state.ConfigPtr->ProjectDir[0] != '\0')
 	{
-		snprintf(OutputPath, sizeof(OutputPath),
-				 "%s/src/Scripted/%sScript.h",
-				 state.ConfigPtr->ProjectDir, TargetEntityName);
+		std::string suggested = std::string(state.ConfigPtr->ProjectDir)
+			+ "/src/Scripted/" + TargetEntityName + "Script.h";
+		snprintf(OutputPath, sizeof(OutputPath), "%s", suggested.c_str());
 	}
 
 	// -----------------------------------------------------------------------
@@ -885,9 +889,9 @@ void NodeScriptPanel::Draw(EditorState& state)
 		// Refresh the suggested output path when the entity name changes.
 		if (state.ConfigPtr && state.ConfigPtr->ProjectDir[0] != '\0')
 		{
-			snprintf(OutputPath, sizeof(OutputPath),
-					 "%s/src/Scripted/%sScript.h",
-					 state.ConfigPtr->ProjectDir, TargetEntityName);
+			std::string suggested = std::string(state.ConfigPtr->ProjectDir)
+				+ "/src/Scripted/" + TargetEntityName + "Script.h";
+			snprintf(OutputPath, sizeof(OutputPath), "%s", suggested.c_str());
 		}
 	}
 	ImGui::SameLine();

@@ -5,6 +5,7 @@
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL_vulkan.h>
 
+#include "AssetRegistry.h"
 #include "EngineConfig.h"
 #include "FlowManager.h"
 #include "ReflectionRegistry.h"
@@ -135,6 +136,10 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	// Publish all static-init registered types (states, modes, entity types)
 	// to the AssetRegistry so they're resolvable by name at runtime.
 	ReflectionRegistry::Get().PublishToAssetRegistry();
+
+	// Set the content root so all AssetRegistry paths resolve to absolute paths.
+	if (Config.ProjectDir[0] != '\0')
+		AssetRegistry::Get().SetContentRoot(std::string(Config.ProjectDir) + "/content");
 
 	Flow = std::make_unique<FlowManager>();
 	Flow->Initialize(this, &Config, width, height);

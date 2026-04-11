@@ -42,8 +42,10 @@ public:
 			return;
 		}
 
-		std::string scenePath = std::string(cfg->ProjectDir) + "/content/" + cfg->DefaultScene;
-		Flow->LoadLevel(scenePath.c_str());
+		std::string sceneName = cfg->DefaultScene;
+		auto dot = sceneName.rfind('.');
+		if (dot != std::string::npos) sceneName = sceneName.substr(0, dot);
+		Flow->LoadLevelByName(sceneName.c_str());
 
 		if (cfg->Mode == EngineMode::Standalone)
 		{
@@ -63,15 +65,16 @@ public:
 	{
 		if (eventID == static_cast<uint8_t>(FlowEventID::TravelNotify))
 		{
-			// PendingTravelPath is content-relative (e.g. "Arena.tnxscene").
-			// Reconstruct full path using our own ProjectDir — safe across machines.
-			const std::string& localPath = Flow->GetPendingTravelPath();
-			if (!localPath.empty())
+			// PendingTravelPath is the scene name (e.g. "Arena.tnxscene").
+			// Resolve via AssetRegistry — no raw path building needed.
+			const std::string& levelName = Flow->GetPendingTravelPath();
+			if (!levelName.empty())
 			{
-				const EngineConfig* cfg = Flow->GetConfig();
-				std::string fullPath    = std::string(cfg->ProjectDir) + "/content/" + localPath;
-				LOG_INFO_F("[GameplayState] TravelNotify — loading level '%s' (background)", fullPath.c_str());
-				Flow->LoadLevel(fullPath.c_str(), /*bBackground=*/true);
+				std::string name = levelName;
+				auto dot = name.rfind('.');
+				if (dot != std::string::npos) name = name.substr(0, dot);
+				LOG_INFO_F("[GameplayState] TravelNotify — loading level '%s' (background)", levelName.c_str());
+				Flow->LoadLevelByName(name.c_str(), /*bBackground=*/true);
 			}
 		}
 	}

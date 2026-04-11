@@ -34,8 +34,8 @@ private:
 	std::vector<FieldDef> Fields;
 
 	std::string GeneratedCode;
-	char OutputPath[512]   = {};
-	char StatusMessage[256] = {};
+	char OutputPath[512]    = {};
+	char StatusMessage[1024] = {};
 	bool bStatusError      = false;
 
 	/// Rebuild GeneratedCode from current form state.

@@ -12,6 +12,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <string>
 
 // ---------------------------------------------------------------------------
 // Static lookup tables
@@ -144,9 +145,14 @@ bool ComponentGeneratorPanel::ExportToFile()
 	}
 
 	file << GeneratedCode;
-	snprintf(StatusMessage, sizeof(StatusMessage), "Exported: %s", OutputPath);
+	{
+		const std::string s = std::string("Exported: ") + OutputPath;
+		strncpy(StatusMessage, s.c_str(), sizeof(StatusMessage) - 1);
+		StatusMessage[sizeof(StatusMessage) - 1] = '\0';
+		LOG_INFO(s.c_str());
+	}
 	bStatusError = false;
-	LOG_INFO_F("[ComponentGenerator] Exported '%s' -> %s", CompName, OutputPath);
+	LOG_INFO_F("[ComponentGenerator] Exported '%s'", CompName);
 	return true;
 }
 
@@ -170,9 +176,9 @@ void ComponentGeneratorPanel::Draw(EditorState& state)
 		// Auto-suggest output path when a project directory is configured.
 		if (state.ConfigPtr && state.ConfigPtr->ProjectDir[0] != '\0' && OutputPath[0] == '\0')
 		{
-			snprintf(OutputPath, sizeof(OutputPath),
-					 "%s/src/Runtime/Components/Public/%s.h",
-					 state.ConfigPtr->ProjectDir, CompName);
+			std::string suggested = std::string(state.ConfigPtr->ProjectDir)
+				+ "/src/Runtime/Components/Public/" + CompName + ".h";
+			snprintf(OutputPath, sizeof(OutputPath), "%s", suggested.c_str());
 		}
 	}
 

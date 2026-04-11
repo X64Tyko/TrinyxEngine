@@ -1,6 +1,7 @@
 #include "EntityBuilder.h"
 
 #include "Archetype.h"
+#include "AssetRegistry.h"
 #include "FieldMeta.h"
 #include "Logger.h"
 #include "Registry.h"
@@ -10,6 +11,7 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <unordered_set>
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -243,21 +245,147 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 	return id;
 }
 
-size_t EntityBuilder::SpawnScene(Registry* reg, const JsonValue& sceneJson, bool bBackground)
+// ---------------------------------------------------------------------------
+// Prefab loading helpers
+// ---------------------------------------------------------------------------
+
+// Thread-local cycle guard — stores absolute paths of prefabs currently being loaded.
+static thread_local std::unordered_set<std::string> ActivePrefabLoads;
+
+// Load and parse an asset JSON file from an absolute path.
+static JsonValue LoadAssetJSON(const std::string& path)
+{
+	std::ifstream file(path);
+	if (!file.is_open())
+	{
+		LOG_ERROR_F("[EntityBuilder] Failed to open asset '%s'", path.c_str());
+		return JsonValue{};
+	}
+	std::ostringstream ss;
+	ss << file.rdbuf();
+	return JsonParse(ss.str());
+}
+
+// Deep-merge override component fields on top of an entity JSON in place.
+// overrides is a "components" object: { "CTransform": { "PosX": 5.0 }, ... }
+static void MergeComponentOverrides(JsonValue& entityJson, const JsonValue* overrides)
+{
+	if (!overrides || !overrides->IsObject()) return;
+	JsonValue* baseComponents = entityJson.Find("components");
+	if (!baseComponents || !baseComponents->IsObject()) return;
+
+	for (const auto& [compName, compOverride] : overrides->AsObject())
+	{
+		if (!compOverride.IsObject()) continue;
+
+		JsonValue* baseComp = baseComponents->Find(compName);
+		if (!baseComp)
+		{
+			(*baseComponents)[compName] = JsonValue::Object();
+			baseComp                    = baseComponents->Find(compName);
+		}
+
+		for (const auto& [fieldName, fieldVal] : compOverride.AsObject())
+			(*baseComp)[fieldName] = fieldVal;
+	}
+}
+
+// Resolve an AssetID stored as a JSON number to an absolute path via the AssetRegistry.
+static std::string ResolveAssetIDFromJSON(const JsonValue& val)
+{
+	if (!val.IsNumber()) return {};
+	AssetID id;
+	id.Raw = static_cast<int64_t>(val.AsNumber());
+	return AssetRegistry::Get().ResolvePath(id);
+}
+
+// Forward declaration for mutual recursion.
+static size_t SpawnSceneInternal(Registry* reg, const JsonValue& sceneJson, bool bBackground);
+
+// Spawn all entities from a prefab or scene JSON with full recursive prefab support.
+// Returns number of entities spawned. Construct prefabs are skipped (count = 0).
+static size_t SpawnFromAssetJSON(Registry* reg, const std::string& path,
+								 const JsonValue* componentOverrides, bool bBackground)
+{
+	if (ActivePrefabLoads.count(path))
+	{
+		LOG_ERROR_F("[EntityBuilder] Prefab cycle detected at '%s'", path.c_str());
+		return 0;
+	}
+
+	ActivePrefabLoads.insert(path);
+
+	JsonValue assetJson = LoadAssetJSON(path);
+	size_t count        = 0;
+
+	if (!assetJson.IsNull())
+	{
+		// Skip construct prefabs — they are spawned by the construct factory, not EntityBuilder.
+		const JsonValue* prefabType = assetJson.Find("prefabType");
+		if (prefabType && prefabType->IsString() && prefabType->AsString() == "Construct")
+		{
+			// no-op
+		}
+		else if (assetJson.Find("entities"))
+		{
+			// Scene / entity-group prefab — recurse.
+			count = SpawnSceneInternal(reg, assetJson, bBackground);
+		}
+		else if (assetJson.Find("type"))
+		{
+			// Single entity prefab — apply overrides then spawn.
+			MergeComponentOverrides(assetJson, componentOverrides);
+			EntityHandle id = EntityBuilder::SpawnEntity(reg, assetJson, bBackground);
+			if (id.IsValid()) ++count;
+		}
+		else
+		{
+			LOG_WARN_F("[EntityBuilder] Unrecognized asset format: '%s'", path.c_str());
+		}
+	}
+
+	ActivePrefabLoads.erase(path);
+	return count;
+}
+
+static size_t SpawnSceneInternal(Registry* reg, const JsonValue& sceneJson, bool bBackground)
 {
 	const JsonValue* entities = sceneJson.Find("entities");
 	if (!entities || !entities->IsArray())
 	{
-		LOG_ERROR("[EntityBuilder] Scene missing 'entities' array");
+		LOG_ERROR("[EntityBuilder] Scene/group missing 'entities' array");
 		return 0;
 	}
 
 	size_t count = 0;
-	for (const auto& entityJson : entities->AsArray())
+	for (const auto& entry : entities->AsArray())
 	{
-		EntityHandle id = SpawnEntity(reg, entityJson, bBackground);
-		if (id.IsValid()) ++count;
+		// Prefab reference: { "prefab": <assetID>, "overrides": { "CTransform": { ... } } }
+		const JsonValue* prefabRef = entry.Find("prefab");
+		if (prefabRef && prefabRef->IsNumber())
+		{
+			std::string path = ResolveAssetIDFromJSON(*prefabRef);
+			if (path.empty())
+			{
+				LOG_WARN_F("[EntityBuilder] Prefab AssetID %lld not found in registry",
+						   static_cast<long long>(static_cast<int64_t>(prefabRef->AsNumber())));
+				continue;
+			}
+			count += SpawnFromAssetJSON(reg, path, entry.Find("overrides"), bBackground);
+		}
+		else
+		{
+			// Inline entity definition.
+			EntityHandle id = EntityBuilder::SpawnEntity(reg, entry, bBackground);
+			if (id.IsValid()) ++count;
+		}
 	}
+	return count;
+}
+
+size_t EntityBuilder::SpawnScene(Registry* reg, const JsonValue& sceneJson, bool bBackground)
+{
+	size_t count = SpawnSceneInternal(reg, sceneJson, bBackground);
 
 	const JsonValue* nameVal = sceneJson.Find("name");
 	const char* sceneName    = (nameVal && nameVal->IsString()) ? nameVal->AsString().c_str() : "unnamed";
@@ -268,37 +396,8 @@ size_t EntityBuilder::SpawnScene(Registry* reg, const JsonValue& sceneJson, bool
 
 size_t EntityBuilder::SpawnFromFile(Registry* reg, const char* filePath, bool bBackground)
 {
-	std::ifstream file(filePath);
-	if (!file.is_open())
-	{
-		LOG_ERROR_F("[EntityBuilder] Failed to open file '%s'", filePath);
-		return 0;
-	}
-
-	std::ostringstream ss;
-	ss << file.rdbuf();
-	std::string content = ss.str();
-
-	JsonValue root = JsonParse(content);
-	if (root.IsNull())
-	{
-		LOG_ERROR_F("[EntityBuilder] Failed to parse JSON from '%s'", filePath);
-		return 0;
-	}
-
-	// Detect format: prefab (has "type" at root) vs scene (has "entities" array)
-	if (root.Find("entities"))
-	{
-		return SpawnScene(reg, root, bBackground);
-	}
-	else if (root.Find("type"))
-	{
-		EntityHandle id = SpawnEntity(reg, root, bBackground);
-		return id.IsValid() ? 1 : 0;
-	}
-
-	LOG_ERROR_F("[EntityBuilder] Unrecognized JSON format in '%s'", filePath);
-	return 0;
+	// Use the full recursive path so top-level loads also participate in cycle detection.
+	return SpawnFromAssetJSON(reg, filePath, nullptr, bBackground);
 }
 
 // ---------------------------------------------------------------------------

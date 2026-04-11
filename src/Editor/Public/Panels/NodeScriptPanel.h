@@ -36,9 +36,8 @@ public:
 
 	void Draw(EditorState& state) override;
 
-private:
 	// -------------------------------------------------------------------------
-	// Data model
+	// Data model — public so file-scope palette tables in the .cpp can use them.
 	// -------------------------------------------------------------------------
 
 	enum class PinType : uint8_t { Exec, Float, Int, Bool, Vec3 };
@@ -125,6 +124,7 @@ private:
 	// Graph state
 	// -------------------------------------------------------------------------
 
+private:
 	std::vector<ScriptNode> Nodes;
 	std::vector<NodeLink>   Links;
 	int NextID = 1;
@@ -164,7 +164,7 @@ private:
 	char OutputPath[512]      = {};
 	std::string GeneratedCode;
 	bool bShowCodePreview     = false;
-	char StatusMsg[256]       = {};
+	char StatusMsg[1024]      = {};
 	bool bStatusError         = false;
 
 	// -------------------------------------------------------------------------
