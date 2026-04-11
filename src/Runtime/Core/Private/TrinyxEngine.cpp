@@ -280,12 +280,8 @@ void TrinyxEngine::RunMainLoop()
 		PumpEvents();
 #endif
 
-		// Tick the flow state machine — drives GameState::Tick() on the active state.
-		// In PIE mode, PIENetThread::TickReplication ticks all flows (server + clients)
-		// after message dispatch. Skip here to avoid a double-tick of the server flow.
-#if !defined(TNX_NET_MODEL_PIE)
+		// Tick the flow state machine — drives GameState::Tick() on the active state
 		Flow->Tick(dt);
-#endif
 
 		if (DefaultWorld->GetLogicThread() && !DefaultWorld->GetLogicThread()->IsRunning())
 		{

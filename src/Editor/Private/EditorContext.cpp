@@ -1418,6 +1418,7 @@ void EditorContext::StartPIE()
 
 	// Wire server world and replication
 	net->SetServerWorld(ServerFlow->GetWorld());
+	net->SetServerFlow(ServerFlow.get());
 
 	Replicator = std::make_unique<ReplicationSystem>();
 	Replicator->Initialize(ServerFlow->GetWorld());
@@ -1522,6 +1523,7 @@ void EditorContext::StopPIE()
 		// Clear all client handler registrations
 		net->ClearClients();
 		net->SetServerWorld(nullptr);
+		net->SetServerFlow(nullptr);
 
 		connMgr->StopListening();
 	}
