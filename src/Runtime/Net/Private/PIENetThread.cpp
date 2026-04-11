@@ -3,6 +3,7 @@
 
 #include "NetConnectionManager.h"
 #include "Logger.h"
+#include <SDL3/SDL_timer.h>
 
 void PIENetThread::InitChildren()
 {
@@ -16,6 +17,7 @@ void PIENetThread::SetServerWorld(World* world)
 void PIENetThread::SetServerFlow(FlowManager* flow)
 {
 	Server.SetFlowManager(flow);
+	ServerFlow = flow;
 }
 
 void PIENetThread::SetReplicationSystem(ReplicationSystem* repl)
@@ -28,6 +30,7 @@ void PIENetThread::AddClient(HSteamNetConnection clientHandle, World* world, Flo
 	ClientEntry& entry = Clients.emplace_back();
 	entry.Handle       = clientHandle;
 	entry.OwnerID      = 0; // promoted to real OwnerID in UpdateClientOwnerID after handshake
+	entry.Flow         = flow;
 	entry.Handler      = std::make_unique<ClientNetThread>();
 	entry.Handler->InitAsHandler(GNS, Config, ConnectionMgr);
 	entry.Handler->SetFlowManager(flow);
@@ -68,6 +71,18 @@ void PIENetThread::ClearClients()
 void PIENetThread::TickReplication()
 {
 	Server.TickReplication();
+
+	// Compute dt from SDL perf counter — same source as TrinyxEngine's Sentinel loop.
+	const uint64_t now  = SDL_GetPerformanceCounter();
+	const float dt      = LastFlowTickTime
+		? static_cast<float>(static_cast<double>(now - LastFlowTickTime)
+			/ static_cast<double>(SDL_GetPerformanceFrequency()))
+		: 0.0f;
+	LastFlowTickTime = now;
+
+	if (ServerFlow) ServerFlow->Tick(dt);
+	for (auto& entry : Clients)
+		if (entry.Flow) entry.Flow->Tick(dt);
 }
 
 void PIENetThread::HandleMessage(const ReceivedMessage& msg)

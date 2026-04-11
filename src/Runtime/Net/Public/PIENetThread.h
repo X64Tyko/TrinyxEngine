@@ -57,7 +57,7 @@ public:
 
 private:
 	void HandleMessage(const ReceivedMessage& msg);
-	void TickReplication();
+	void TickReplication(); // also ticks all owned FlowManagers
 
 	ServerNetThread Server;
 
@@ -66,8 +66,11 @@ private:
 		HSteamNetConnection Handle = 0; // client-side GNS handle — used for routing before OwnerID is assigned
 		uint8_t OwnerID            = 0; // 0 = unassigned (handshake not yet complete)
 		std::unique_ptr<ClientNetThread> Handler;
+		FlowManager* Flow = nullptr;   // non-owning — EditorContext owns the FlowManager
 	};
 	std::vector<ClientEntry> Clients;
-};
+
+	FlowManager* ServerFlow       = nullptr; // non-owning
+	uint64_t     LastFlowTickTime = 0;       // SDL perf counter at last flow tick
 
 #endif // TNX_ENABLE_EDITOR
