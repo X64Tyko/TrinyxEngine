@@ -5,28 +5,24 @@
 #include "RegistryTypes.h" // NetOwnerID_Bits
 
 // ---------------------------------------------------------------------------
-// Engine mode — determines what subsystems are initialized.
-// ---------------------------------------------------------------------------
-enum class EngineMode : uint8_t
-{
-	Standalone,   // No networking — current default behavior
-	Client,       // Connects to remote server, renders locally
-	Server,       // Headless — no window/Vulkan/renderer
-	ListenServer, // Server + local client in one process (editor PIE default)
-};
-
-// ---------------------------------------------------------------------------
 // NetMessageType — discriminator for network messages.
 // ---------------------------------------------------------------------------
 enum class NetMessageType : uint8_t
 {
-	ConnectionHandshake = 0, // Client<->Server: join request / accept+reject + assigned PlayerID
-	InputFrame          = 1, // Client->Server: input state for frame N
-	StateCorrection     = 2, // Server->Client: authoritative state snapshot for frame N
-	EntitySpawn         = 3, // Server->Client: new entity creation command
-	EntityDestroy       = 4, // Server->Client: entity destruction command
-	Ping                = 5, // Bidirectional: RTT measurement
-	Pong                = 6,
+	ConnectionHandshake = 0,  // Client<->Server: join request / accept+reject + assigned PlayerID
+	InputFrame          = 1,  // Client->Server: input state for frame N
+	StateCorrection     = 2,  // Server->Client: authoritative state snapshot for frame N
+	EntitySpawn         = 3,  // Server->Client: new entity creation command
+	EntityDestroy       = 4,  // Server->Client: entity destruction command
+	Ping                = 5,  // Bidirectional: RTT measurement
+	Pong                = 6,  // Bidirectional: RTT measurement response
+	FlowEvent           = 7,  // Server->Client: session flow signal (ServerReady, etc.)
+	SpawnRequest        = 8,  // Client->Server: request to spawn a player body
+	SpawnConfirm        = 9,  // Server->Client: authoritative spawn confirmation
+	SpawnReject         = 10, // Server->Client: spawn request denied
+	ClockSync           = 11, // Bidirectional: frame clock synchronisation
+	TravelNotify        = 12, // Server->Client: load this level (path + server frame)
+	LevelReady          = 13, // Client->Server: level load complete, ready for entity flush
 	Count
 };
 
@@ -120,6 +116,9 @@ static_assert(sizeof(PacketHeader) == 24, "PacketHeader must be 24 bytes");
 // Sent reliable with NetMessageType::EntitySpawn. One entity per message.
 // Client uses Manifest.ClassType to call CreateByClassID, then writes fields.
 // TODO: Replace ClassType-based spawning with PrefabID once the asset system supports it.
+// TODO: Batch spawns — one message per entity is significant overhead for initial world flush.
+//       Replace with a variable-length batch message (count + entity array) once the
+//       reliable send path can handle variable-size payloads efficiently.
 // ---------------------------------------------------------------------------
 struct EntitySpawnPayload
 {
@@ -140,7 +139,10 @@ struct EntitySpawnPayload
 	// Mesh (Volatile)
 	uint32_t MeshID;
 
-	uint32_t _Pad0; // Align to 72 bytes
+	// Flags to write into the entity's CacheSlotMeta on spawn.
+	// Server controls whether the client spawns Active|Alive (normal) or Alive-only
+	// (background load — client will sweep Alive→Active on ServerReady).
+	int32_t SpawnFlags;
 };
 
 static_assert(sizeof(EntitySpawnPayload) == 72, "EntitySpawnPayload must be 72 bytes");
@@ -162,3 +164,156 @@ struct StateCorrectionEntry
 };
 
 static_assert(sizeof(StateCorrectionEntry) == 32, "StateCorrectionEntry must be 32 bytes");
+
+// ---------------------------------------------------------------------------
+// HandshakePayload — server accept response carries session bootstrap data.
+//
+// Sent reliable with NetMessageType::ConnectionHandshake when the server
+// accepts a client join. OwnerID is carried in the header SenderID field;
+// this payload adds the context the client needs to start clock sync.
+// ---------------------------------------------------------------------------
+struct HandshakePayload
+{
+	uint32_t TickRate;    // Server's FixedUpdateHz (e.g., 512)
+	uint32_t ServerFrame; // Server's FrameNumber at accept time — clock sync anchor
+};
+
+static_assert(sizeof(HandshakePayload) == 8, "HandshakePayload must be 8 bytes");
+
+// ---------------------------------------------------------------------------
+// ClientRepState — per-connection session state machine (server-side).
+//
+// Transitions:
+//   PendingHandshake → Synchronizing  (HandshakeAccept sent)
+//   Synchronizing    → Loading        (ClockSync complete, InputLead known)
+//   Loading          → LevelLoading   (TravelNotify sent to client)
+//   LevelLoading     → LevelLoaded    (LevelReady received from client)
+//   LevelLoaded      → Loaded         (initial EntitySpawn batch flushed, ServerReady sent)
+//   Loaded           → Playing        (SpawnConfirm sent)
+// ---------------------------------------------------------------------------
+enum class ClientRepState : uint8_t
+{
+	PendingHandshake = 0, // Waiting for HandshakeRequest
+	Synchronizing    = 1, // Clock sync probes in flight
+	Loading          = 2, // Clock sync done; waiting to send TravelNotify
+	LevelLoading     = 3, // TravelNotify sent; client loading level
+	LevelLoaded      = 4, // LevelReady received; flushing initial entity batch
+	Loaded           = 5, // Batch flushed, ServerReady sent; client sweeping Alive→Active
+	Playing          = 6, // SpawnConfirm sent; full simulation sync active
+};
+
+// ---------------------------------------------------------------------------
+// FlowEvent identifiers — carried in FlowEventPayload.EventID.
+// ---------------------------------------------------------------------------
+enum class FlowEventID : uint8_t
+{
+	ServerReady  = 0, // Server has flushed initial entity batch; client sweeps Alive→Active then sends SpawnRequest
+	TravelNotify = 1, // Server tells client to load a level (payload: TravelPayload)
+};
+
+// ---------------------------------------------------------------------------
+// FlowEventPayload — server signals a session flow event to the client.
+// Sent reliable (NetMessageType::FlowEvent).
+// ---------------------------------------------------------------------------
+struct FlowEventPayload
+{
+	uint8_t EventID; // FlowEventID
+	uint8_t _Pad[3];
+};
+
+static_assert(sizeof(FlowEventPayload) == 4, "FlowEventPayload must be 4 bytes");
+
+// ---------------------------------------------------------------------------
+// SpawnRequestPayload — client requests a player body spawn.
+// Sent reliable (NetMessageType::SpawnRequest).
+// ---------------------------------------------------------------------------
+struct SpawnRequestPayload
+{
+	uint32_t ClassID;       // Requested entity class / prefab
+	uint32_t PredictionID;  // Client-local prediction token; echoed in Confirm/Reject
+	float PosX, PosY, PosZ; // Desired spawn position hint (server may override)
+	float _Pad;
+};
+
+static_assert(sizeof(SpawnRequestPayload) == 24, "SpawnRequestPayload must be 24 bytes");
+
+// ---------------------------------------------------------------------------
+// SpawnConfirmPayload — server confirms an authoritative spawn.
+// Sent reliable (NetMessageType::SpawnConfirm).
+// ---------------------------------------------------------------------------
+struct SpawnConfirmPayload
+{
+	uint32_t NetHandle;     // Authoritative EntityNetHandle.Value for the spawned body
+	uint32_t PredictionID;  // Echoed from SpawnRequestPayload
+	float PosX, PosY, PosZ; // Authoritative spawn position
+	float _Pad;
+};
+
+static_assert(sizeof(SpawnConfirmPayload) == 24, "SpawnConfirmPayload must be 24 bytes");
+
+// ---------------------------------------------------------------------------
+// SpawnRejectPayload — server rejects a spawn request.
+// Sent reliable (NetMessageType::SpawnReject).
+// ---------------------------------------------------------------------------
+struct SpawnRejectPayload
+{
+	uint32_t PredictionID; // Echoed from SpawnRequestPayload
+	uint8_t Reason;        // Implementation-defined reject code
+	uint8_t _Pad[3];
+};
+
+static_assert(sizeof(SpawnRejectPayload) == 8, "SpawnRejectPayload must be 8 bytes");
+
+// ---------------------------------------------------------------------------
+// ClockSyncPayload — bidirectional clock synchronisation probe.
+//
+// Client → Server (request):  ClientTimestamp set, ServerFrame = 0.
+// Server → Client (response): ServerFrame set to current FrameNumber,
+//                              ClientTimestamp echoed for RTT calculation.
+// Sent unreliable (NetMessageType::ClockSync).
+// ---------------------------------------------------------------------------
+struct ClockSyncPayload
+{
+	uint64_t ClientTimestamp; // SDL_GetPerformanceCounter() at send time
+	uint32_t ServerFrame;     // Server current FrameNumber (0 in request, filled in response)
+	uint32_t _Pad;
+};
+
+static_assert(sizeof(ClockSyncPayload) == 16, "ClockSyncPayload must be 16 bytes");
+
+// ---------------------------------------------------------------------------
+// TravelPayload — server tells client to load a level.
+//
+// Sent reliable (NetMessageType::TravelNotify) after the server finishes loading
+// the level. Client loads the level, sends LevelReady when done.
+// LevelPath is a null-terminated UTF-8 string (max 255 chars + null).
+//
+// IMPORTANT: LevelPath must be the content-relative path (e.g. "Arena.tnxscene"),
+// NOT the server's absolute path. Absolute paths silently corrupt on any client
+// whose ProjectDir differs from the server's — the path would be truncated by
+// PathLength or accepted verbatim but fail to open. The sender is responsible for
+// stripping the ProjectDir+"/content/" prefix before filling this field.
+// ---------------------------------------------------------------------------
+struct TravelPayload
+{
+	uint8_t PathLength;  // Length of LevelPath (excluding null terminator)
+	char LevelPath[255]; // Content-relative path to .tnxscene (null-terminated)
+};
+
+static_assert(sizeof(TravelPayload) == 256, "TravelPayload must be 256 bytes");
+
+// ---------------------------------------------------------------------------
+// InputFramePayload — wire format for an InputFrame message payload.
+// 64 bytes of key state + 2 floats of mouse delta.
+// ---------------------------------------------------------------------------
+struct InputFramePayload
+{
+	uint8_t KeyState[64];
+	float MouseDX;
+	float MouseDY;
+	uint8_t MouseButtons;
+	uint8_t _Pad[3];
+};
+
+static_assert(sizeof(InputFramePayload) == 76, "InputFramePayload must be 76 bytes");
+

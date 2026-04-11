@@ -4,10 +4,11 @@
 
 enum class TemporalFlagBits : int32_t
 {
-	Active       = static_cast<int32_t>(1u << 31), ///< Entity is alive — GPU predicate reads this
+	Active       = static_cast<int32_t>(1u << 31), ///< Entity ticks and renders — GPU predicate reads this
 	Dirty        = static_cast<int32_t>(1u << 30), ///< Entity data changed — accumulates until render clears
 	DirtiedFrame = static_cast<int32_t>(1u << 29), ///< Entity dirtied THIS frame — cleared at frame start, used for per-frame logic reset
 	Replicated   = static_cast<int32_t>(1u << 28), ///< This entity replicates
+	Alive        = static_cast<int32_t>(1u << 27), ///< Entity exists in the world — data is valid, StateCorrections apply. Set on spawn, cleared on destroy. Active implies Alive.
 
 	depthMask = 0xF << 24, ///< 4 bits for attachment depth
 

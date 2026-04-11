@@ -216,6 +216,16 @@ struct InputBuffer
 
 	float GetMouseDX() const { return MouseDX[ReadSlot]; }
 	float GetMouseDY() const { return MouseDY[ReadSlot]; }
+
+	// Network-side snapshot — copy the ReadSlot key state and mouse button mask
+	// for sending in an InputFrame. Call NetInput->Swap() before this to ensure
+	// ReadSlot contains the full delta since the last net tick.
+	void SnapshotKeyState(uint8_t* dst, size_t size) const
+	{
+		std::memcpy(dst, KeyState[ReadSlot], size < 64 ? size : 64);
+	}
+
+	uint8_t GetMouseButtonMask() const { return MouseButtons[ReadSlot]; }
 #if TNX_DEV_METRICS
 	uint64_t GetSwapPerfCount() const { return LastSwapPerfCount; }
 	uint64_t GetCurrentSwapTime() const { return CurrentSwapTime; }

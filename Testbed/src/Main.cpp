@@ -12,15 +12,18 @@
 #include "Archetype.h"
 #include "Logger.h"
 #include "TestFramework.h"
+#ifdef TNX_ENABLE_NETWORK
 #include "GNSContext.h"
 #include "NetConnectionManager.h"
-#include "NetThread.h"
+#include "ServerNetThread.h"
+#endif
 #include "World.h"
 #include "Input.h"
 #include "Public/PlayerConstruct.h"
 
 using namespace tnx::Testing;
 
+#ifdef TNX_ENABLE_NETWORK
 // ---------------------------------------------------------------------------
 // Networking: GNS loopback ping/pong test
 // Validates: GNS static linking, loopback connectivity, PacketHeader framing
@@ -154,7 +157,7 @@ TEST(Net_InputFrameRouting)
 	config.NetworkUpdateHz = 30;
 	config.ApplyDefaults();
 
-	NetThread net;
+	ServerNetThread net;
 	net.Initialize(&gnsLocal, &config);
 
 	// We need a World to route input to. Use an InputBuffer directly
@@ -244,6 +247,7 @@ TEST(Net_InputFrameRouting)
 	// gnsLocal and net destroyed in correct order by stack unwinding
 	// (net first, then gnsLocal — so NetConnectionManager shuts down before GNS)
 }
+#endif // TNX_ENABLE_NETWORK
 
 TEST(Registry_CreateEntities)
 {

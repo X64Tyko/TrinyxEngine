@@ -15,6 +15,16 @@ find_package(Vulkan REQUIRED)
 file(GLOB_RECURSE ENGINE_SOURCES "${CMAKE_SOURCE_DIR}/src/Runtime/*.cpp")
 file(GLOB_RECURSE ENGINE_HEADERS "${CMAKE_SOURCE_DIR}/src/Runtime/*.h")
 
+# Exclude Net sources when networking is disabled.
+if (NOT TNX_ENABLE_NETWORK)
+    list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/Net/.*\\.cpp$")
+    list(FILTER ENGINE_HEADERS EXCLUDE REGEX ".*/Net/.*\\.h$")
+endif ()
+
+# Remove the old NetThread now that it is replaced by the role-split classes.
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/NetThread\\.cpp$")
+list(FILTER ENGINE_HEADERS EXCLUDE REGEX ".*/NetThread\\.h$")
+
 # volk: VOLK_IMPLEMENTATION is defined in VulkanContext.cpp — no standalone volk.c needed.
 set(VOLK_SOURCES "")
 
@@ -153,7 +163,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC Vulkan::Vulkan)
 target_link_libraries(${PROJECT_NAME} PUBLIC Jolt::Jolt)
 
 # F. GameNetworkingSockets (static)
-if (TARGET GameNetworkingSockets_s)
+if (TNX_ENABLE_NETWORK AND TARGET GameNetworkingSockets_s)
     target_link_libraries(${PROJECT_NAME} PUBLIC GameNetworkingSockets_s)
     target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC "${GNS_PATH}/include")
 endif()

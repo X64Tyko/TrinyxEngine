@@ -175,6 +175,7 @@ HSteamNetConnection NetConnectionManager::Connect(const char* address, uint16_t 
 	}
 
 	AddConnection(conn);
+	if (ConnectionInfo* ci = FindConnection(conn)) ci->bClientInitiated = true;
 	LOG_INFO_F("[NetConnectionManager] Connecting to %s:%u (handle %u)", address, port, conn);
 	return conn;
 }

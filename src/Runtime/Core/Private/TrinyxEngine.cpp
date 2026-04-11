@@ -42,6 +42,7 @@ void TrinyxEngine::ParseCommandLine(int argc, char* argv[])
 {
 	for (int i = 1; i < argc; ++i)
 	{
+#ifdef TNX_ENABLE_NETWORK
 		if (strcmp(argv[i], "--server") == 0)
 		{
 			Config.Mode = EngineMode::Server;
@@ -60,6 +61,9 @@ void TrinyxEngine::ParseCommandLine(int argc, char* argv[])
 		{
 			Config.NetPort = static_cast<uint16_t>(atoi(argv[++i]));
 		}
+#else
+		(void)argv[i]; // suppress unused warning when networking is disabled
+#endif
 	}
 }
 
@@ -136,6 +140,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	Flow->Initialize(this, &Config, width, height);
 
 	// ---- GNS + NetThread -------------------------------------------------
+#ifdef TNX_ENABLE_NETWORK
 	if (Config.Mode != EngineMode::Standalone)
 	{
 		if (!GNS.Initialize())
@@ -145,10 +150,17 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 		}
 		else
 		{
-			Net = std::make_unique<NetThread>();
+			Net = std::make_unique<NetThreadType>();
 			Net->Initialize(&GNS, &Config);
+#if defined(TNX_NET_MODEL_PIE)
+			Net->InitChildren();
+			Net->SetServerFlow(Flow.get());
+#elif defined(TNX_NET_MODEL_SERVER)
+			Net->SetFlowManager(Flow.get());
+#endif
 		}
 	}
+#endif
 
 	// ---- World (owned by FlowManager) ------------------------------------
 	if (!Flow->CreateWorld())
@@ -193,9 +205,10 @@ void TrinyxEngine::Spawn(std::function<void(Registry*)> action)
 	if (DefaultWorld) DefaultWorld->Spawn(std::move(action));
 }
 
+#ifdef TNX_ENABLE_NETWORK
 bool TrinyxEngine::EnsureNetworking()
 {
-	if (Net) return true; // Already initialized
+	if (Net) return true;
 
 	if (!GNS.IsInitialized())
 	{
@@ -206,10 +219,17 @@ bool TrinyxEngine::EnsureNetworking()
 		}
 	}
 
-	Net = std::make_unique<NetThread>();
+	Net = std::make_unique<NetThreadType>();
 	Net->Initialize(&GNS, &Config);
+#if defined(TNX_NET_MODEL_PIE)
+	Net->InitChildren();
+	Net->SetServerFlow(Flow.get());
+#elif defined(TNX_NET_MODEL_SERVER)
+	Net->SetFlowManager(Flow.get());
+#endif
 	return true;
 }
+#endif
 
 void TrinyxEngine::StartThreadsAndJobs()
 {
@@ -221,12 +241,15 @@ void TrinyxEngine::StartThreadsAndJobs()
 		// Spin while we wait so that we don't initialize workers before our Primary threads
 	}
 
-	// Start NetThread in threaded mode for Client/ListenServer.
-	// Server mode uses inline Tick() from the main loop — no extra thread.
-	if (Net && Config.Mode != EngineMode::Server)
-	{
-		Net->Start();
-	}
+	// Server model uses inline Tick() from the main loop — no extra thread.
+	// Client and PIE models spin a dedicated net thread.
+#ifdef TNX_ENABLE_NETWORK
+#if defined(TNX_NET_MODEL_SERVER)
+	// Inline — no Start(); main loop calls Net->Tick()
+#else
+	if (Net) Net->Start();
+#endif
+#endif
 
 	bool JobsInitialized = TrinyxJobs::Initialize(&Config);
 	bJobsInitialized.store(JobsInitialized, std::memory_order_release);
@@ -250,16 +273,10 @@ void TrinyxEngine::RunMainLoop()
 		const float dt            = static_cast<float>(static_cast<double>(frameStart - LastFrameCounter) / static_cast<double>(perfFrequency));
 		LastFrameCounter          = frameStart;
 
-#if defined(TNX_DEDICATED_SERVER)
-		// Dedicated server: main thread is the network poller.
-		// No window, no SDL events, no renderer.
+#if defined(TNX_NET_MODEL_SERVER) && defined(TNX_ENABLE_NETWORK)
+		// Dedicated server: main thread is the network poller — no SDL events.
 		if (Net) Net->Tick();
-#elif TNX_ENABLE_EDITOR
-		// Editor: runtime mode for PIE (server + N clients in one process).
-		if (Config.Mode == EngineMode::Server && Net) Net->Tick();
-		else PumpEvents();
 #else
-		// Shipping client/standalone: always pump SDL events.
 		PumpEvents();
 #endif
 
@@ -291,10 +308,16 @@ void TrinyxEngine::Shutdown()
 	// Stop threads — FlowManager owns World lifecycle
 	Flow->StopWorld();
 	if (Render) Render->Stop();
+#ifdef TNX_ENABLE_NETWORK
 	if (Net) Net->Stop();
+#endif
 	Flow->JoinWorld();
 	if (Render) Render->Join();
+#ifdef TNX_ENABLE_NETWORK
 	if (Net) Net->Join();
+	Net.reset();
+	GNS.Shutdown();
+#endif
 
 	// Shut down the job system after coordinator threads have exited
 	TrinyxJobs::Shutdown();
@@ -306,10 +329,6 @@ void TrinyxEngine::Shutdown()
 	// FlowManager owns the World — destroy it (and all Constructs) here.
 	DefaultWorld = nullptr;
 	Flow.reset();
-
-	// Tear down networking
-	Net.reset();
-	GNS.Shutdown();
 
 	// Tear down Vulkan
 	VkMem.Shutdown();
@@ -329,9 +348,8 @@ void TrinyxEngine::PumpEvents()
 {
 	TNX_ZONE_N("Input_Poll");
 
-	World* targetWorld    = InputTargetWorld ? InputTargetWorld : DefaultWorld;
-	InputBuffer* SimInput = targetWorld->GetSimInput();
-	InputBuffer* VizInput = targetWorld->GetVizInput();
+	World* targetWorld = InputTargetWorld ? InputTargetWorld : DefaultWorld;
+	auto inputTargets  = targetWorld->GetInputTargets();
 #ifdef TNX_ENABLE_ROLLBACK
 	LogicThread* Logic = targetWorld->GetLogicThread();
 #endif
@@ -378,8 +396,7 @@ void TrinyxEngine::PumpEvents()
 #endif
 				if (!e.key.repeat)
 				{
-					SimInput->PushKey(e.key.scancode, true);
-					VizInput->PushKey(e.key.scancode, true);
+					for (auto* buf : inputTargets) buf->PushKey(e.key.scancode, true);
 				}
 				break;
 
@@ -387,16 +404,14 @@ void TrinyxEngine::PumpEvents()
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				SimInput->PushKey(e.key.scancode, false);
-				VizInput->PushKey(e.key.scancode, false);
+				for (auto* buf : inputTargets) buf->PushKey(e.key.scancode, false);
 				break;
 
 			case SDL_EVENT_MOUSE_MOTION:
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				SimInput->AddMouseDelta(e.motion.xrel, e.motion.yrel);
-				VizInput->AddMouseDelta(e.motion.xrel, e.motion.yrel);
+				for (auto* buf : inputTargets) buf->AddMouseDelta(e.motion.xrel, e.motion.yrel);
 				break;
 
 			case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -405,16 +420,14 @@ void TrinyxEngine::PumpEvents()
 #else
 				if (!engineOwnsInput) break;
 #endif
-				SimInput->PushMouseButton(e.button.button, true);
-				VizInput->PushMouseButton(e.button.button, true);
+				for (auto* buf : inputTargets) buf->PushMouseButton(e.button.button, true);
 				break;
 
 			case SDL_EVENT_MOUSE_BUTTON_UP:
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				SimInput->PushMouseButton(e.button.button, false);
-				VizInput->PushMouseButton(e.button.button, false);
+				for (auto* buf : inputTargets) buf->PushMouseButton(e.button.button, false);
 				break;
 
 			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:

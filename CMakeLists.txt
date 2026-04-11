@@ -33,6 +33,14 @@ option(TNX_ALIGN_64 "Use 64-byte alignment for field arrays (zero cache line spl
 option(TNX_ENABLE_ROLLBACK "Enable N-frame rollback history. Off = TNX_TEMPORAL_FIELDS components use Volatile (5-frame) storage." OFF)
 option(TNX_DETAILED_METRICS "Log per-frame latency breakdown (Buffer/Pipeline/Scanout). Noisy." OFF)
 option(TNX_ENABLE_EDITOR "Enable editor UI (ImGui integration). Adds editor panels and overlay." OFF)
+option(TNX_ENABLE_NETWORK "Enable networking (GameNetworkingSockets + Protobuf). Required for multiplayer." ON)
+# TNX_NET_MODEL selects the networking role baked into the build.
+#   PIE    — Editor in-process: one ServerNetThread + N ClientNetThread, ticked by PIENetThread.
+#            Automatically selected when TNX_ENABLE_EDITOR is ON.
+#   Server — Dedicated server: ServerNetThread only.
+#   Client — Standalone client: ClientNetThread only.
+set(TNX_NET_MODEL "Client" CACHE STRING "Networking role: PIE | Server | Client")
+set_property(CACHE TNX_NET_MODEL PROPERTY STRINGS "PIE" "Server" "Client")
 option(TNX_TESTING "Enable test harnesses (rollback determinism test, etc.). Debug/profiling tool." OFF)
 option(TNX_GPU_PICKING "Enable GPU-based entity picking (click-to-select). Requires editor." OFF)
 option(TNX_GPU_PICKING_FAST "Enable fast GPU picking mode (picks every frame at mouse cursor). Requires TNX_GPU_PICKING." OFF)
@@ -40,8 +48,26 @@ option(TNX_GPU_PICKING_FAST "Enable fast GPU picking mode (picks every frame at 
 if (TNX_ENABLE_EDITOR)
     add_compile_definitions(TNX_ENABLE_EDITOR)
     message(STATUS "Editor UI: ENABLED (ImGui)")
+    # Editor always implies PIE networking model
+    set(TNX_NET_MODEL "PIE" CACHE STRING "" FORCE)
 else ()
     message(STATUS "Editor UI: DISABLED")
+endif ()
+
+if (TNX_ENABLE_NETWORK)
+    add_compile_definitions(TNX_ENABLE_NETWORK)
+    if (TNX_NET_MODEL STREQUAL "PIE")
+        add_compile_definitions(TNX_NET_MODEL_PIE)
+        message(STATUS "Networking: ENABLED — PIE model (ServerNetThread + ClientNetThread)")
+    elseif (TNX_NET_MODEL STREQUAL "Server")
+        add_compile_definitions(TNX_NET_MODEL_SERVER)
+        message(STATUS "Networking: ENABLED — Server model (ServerNetThread)")
+    else ()
+        add_compile_definitions(TNX_NET_MODEL_CLIENT)
+        message(STATUS "Networking: ENABLED — Client model (ClientNetThread)")
+    endif ()
+else ()
+    message(STATUS "Networking: DISABLED (standalone builds only)")
 endif ()
 
 if (TNX_ENABLE_ROLLBACK)
@@ -254,6 +280,7 @@ endif ()
 # -----------------------------------------------------------------------------
 # 7. PROTOBUF (vendored submodule — required by GameNetworkingSockets)
 # -----------------------------------------------------------------------------
+if (TNX_ENABLE_NETWORK)
 set(ABSL_PROPAGATE_CXX_STD         ON  CACHE BOOL "" FORCE)
 set(protobuf_BUILD_TESTS           OFF CACHE BOOL "" FORCE)
 set(protobuf_BUILD_CONFORMANCE     OFF CACHE BOOL "" FORCE)
@@ -361,6 +388,8 @@ if (TARGET GameNetworkingSockets_s)
         target_compile_options(GameNetworkingSockets_s PRIVATE -w)
     endif ()
 endif ()
+
+endif () # TNX_ENABLE_NETWORK
 
 # -----------------------------------------------------------------------------
 # 9. SUBDIRECTORIES (Projects in Solution)

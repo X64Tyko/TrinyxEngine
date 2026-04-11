@@ -9,26 +9,12 @@
 
 // Forward declarations
 class GNSContext;
+class FlowManager;
 class NetConnectionManager;
 class ReplicationSystem;
 class World;
 struct InputBuffer;
 struct EngineConfig;
-
-// ---------------------------------------------------------------------------
-// InputFramePayload — wire format for an InputFrame message payload.
-// 64 bytes of key state + 2 floats of mouse delta.
-// ---------------------------------------------------------------------------
-struct InputFramePayload
-{
-	uint8_t KeyState[64];
-	float MouseDX;
-	float MouseDY;
-	uint8_t MouseButtons;
-	uint8_t _Pad[3];
-};
-
-static_assert(sizeof(InputFramePayload) == 76, "InputFramePayload must be 76 bytes");
 
 // ---------------------------------------------------------------------------
 // NetThread — network coordinator.
@@ -72,6 +58,15 @@ public:
 	/// to this World's SimInput buffer.
 	void MapConnectionToWorld(uint8_t ownerID, World* world);
 
+	/// Register a FlowManager for a specific OwnerID.
+	/// OwnerID 0 = server FlowManager (used for server-side level path queries).
+	/// OwnerID 1-255 = per-client FlowManagers (receive TravelNotify and FlowEvents).
+	void MapConnectionToFlow(uint8_t ownerID, FlowManager* flow);
+
+	/// Set the FlowManager so the NetThread can post flow events to Sentinel.
+	/// Must be set before Start(). Not required for dedicated server mode.
+	void SetFlowManager(FlowManager* flow) { FlowMgr = flow; }
+
 	/// Access the connection manager (for server Listen / client Connect).
 	NetConnectionManager* GetConnectionManager() { return ConnectionMgr.get(); }
 
@@ -90,12 +85,18 @@ private:
 	GNSContext* GNS               = nullptr;
 	const EngineConfig* Config    = nullptr;
 	ReplicationSystem* Replicator = nullptr;
+	FlowManager* FlowMgr          = nullptr; // Non-owning; set by engine before Start()
 
 	std::unique_ptr<NetConnectionManager> ConnectionMgr;
 
 	// Connection → World routing table.
 	// Index = OwnerID (0-255), value = World* (nullptr if unmapped).
 	World* WorldMap[256]{};
+
+	// Connection → FlowManager routing table.
+	// Index = OwnerID (0-255), value = FlowManager* (nullptr if unmapped).
+	// OwnerID 0 = server; 1-255 = per-client flows for TravelNotify / FlowEvent dispatch.
+	FlowManager* FlowMap[256]{};
 
 	std::thread Thread;
 	std::atomic<bool> bIsRunning{false};

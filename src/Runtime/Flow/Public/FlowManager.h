@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -120,7 +121,10 @@ public:
 	void JoinWorld();
 
 	/// Load a level (.tnxscene) into the current World.
-	void LoadLevel(const char* levelName);
+	/// bBackground: entities spawn as Alive-only (not ticking/rendering) until an
+	/// explicit Alive→Active sweep. Used for client loads where the server drives
+	/// activation via ServerReady. File I/O is still synchronous on the Logic thread.
+	void LoadLevel(const char* levelPath, bool bBackground = false);
 
 	/// Unload the current level (despawn all level-scoped entities).
 	void UnloadLevel();
@@ -133,6 +137,19 @@ public:
 
 	GameMode* GetGameMode() const { return ActiveMode.get(); }
 
+	/// Called from any thread (e.g., NetThread) when a net flow event arrives.
+	/// The active GameState's OnNetEvent hook is dispatched on the next Tick.
+	/// eventID is a FlowEventID enum value cast to uint8_t.
+	void PostNetEvent(uint8_t eventID);
+
+	/// Called from NetThread when a TravelNotify arrives. Caches the level path
+	/// (readable by GameState via GetPendingTravelPath) then posts the FlowEvent.
+	void PostTravelNotify(const char* levelPath);
+
+	/// Path sent in the last TravelNotify. GameState reads this in OnNetEvent
+	/// to know which level to load. Empty if no TravelNotify has arrived yet.
+	const std::string& GetPendingTravelPath() const { return PendingTravelPath; }
+
 	// ----- Tick (called by Sentinel each frame) -----
 
 	void Tick(float dt);
@@ -143,8 +160,16 @@ public:
 	World* GetWorld() const;
 	bool HasWorld() const;
 	const EngineConfig* GetConfig() const { return Config; }
+	/// Update the stored config pointer after the owning struct has been relocated
+	/// (e.g. after move into a vector). PIE only — do not call in other contexts.
+	void RewireConfig(const EngineConfig* newConfig) { Config = newConfig; }
 	ConstructRegistry* GetConstructRegistry() { return &ConstructReg; }
 	const std::string& GetActiveLevelPath() const { return ActiveLevelPath; }
+
+	/// Returns the content-relative level path (e.g. "Arena.tnxscene") — safe to send over the
+	/// network. Strips the ProjectDir+"/content/" prefix from ActiveLevelPath. Falls back to
+	/// the full path if the prefix doesn't match (e.g. path was set manually).
+	std::string GetActiveLevelLocalPath() const;
 
 private:
 	static constexpr uint32_t MaxStateStack       = 8;
@@ -180,13 +205,18 @@ private:
 	// Active subsystems
 	std::unique_ptr<World> ActiveWorld;
 	std::unique_ptr<GameMode> ActiveMode;
-	std::string ActiveLevelPath; // Path of currently loaded level (empty = none)
+	std::string ActiveLevelPath;   // Path of currently loaded level (empty = none)
+	std::string PendingTravelPath; // Level path from last TravelNotify (read by GameState in OnNetEvent)
 
 	// Engine back-pointer (for World creation parameters)
 	TrinyxEngine* Engine       = nullptr;
 	const EngineConfig* Config = nullptr;
 	int WindowWidth            = 1920;
 	int WindowHeight           = 1080;
+
+	// Lock-free net event queue — NetThread ORs bits in, Sentinel swaps to zero in Tick.
+	// Bit N = FlowEventID N is pending. Supports up to 32 distinct FlowEventIDs.
+	std::atomic<uint32_t> PendingNetEvents{0};
 
 	// Internal helpers
 	StateFactory FindStateFactory(const char* name) const;

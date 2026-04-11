@@ -1,6 +1,8 @@
 #pragma once
 #include <memory>
 #include <functional>
+#include <span>
+#include <vector>
 
 #include "EngineConfig.h"
 #include "Input.h"
@@ -66,6 +68,44 @@ public:
 	LogicThread* GetLogicThread() const { return Logic.get(); }
 	InputBuffer* GetSimInput() { return &SimInput; }
 	InputBuffer* GetVizInput() { return &VizInput; }
+	InputBuffer* GetNetInput() { return &NetInput; }
+
+	/// Returns the sim input for a specific player on the server, or the local
+	/// SimInput when ownerID == 0 (client world or standalone). This is the
+	/// single call site for player-driven input regardless of network role.
+	InputBuffer* GetInputForPlayer(uint8_t ownerID)
+	{
+		if (ownerID == 0) return &SimInput;
+		InputBuffer* buf = GetPlayerSimInput(ownerID);
+		return buf ? buf : &SimInput;
+	}
+	InputBuffer* GetVizInputForPlayer(uint8_t ownerID)
+	{
+		if (ownerID == 0) return &VizInput;
+		InputBuffer* buf = GetPlayerVizInput(ownerID);
+		return buf ? buf : &VizInput;
+	}
+	/// Returns nullptr if ownerID is 0 or beyond the currently connected player
+	/// count. Use EnsurePlayerInputSlot() before the first inject to allocate.
+	InputBuffer* GetPlayerSimInput(uint8_t ownerID)
+	{
+		if (ownerID == 0 || ownerID > PlayerSimInputs.size()) return nullptr;
+		return PlayerSimInputs[ownerID - 1].get();
+	}
+	InputBuffer* GetPlayerVizInput(uint8_t ownerID)
+	{
+		if (ownerID == 0 || ownerID > PlayerVizInputs.size()) return nullptr;
+		return PlayerVizInputs[ownerID - 1].get();
+	}
+	void EnsurePlayerInputSlot(uint8_t ownerID)
+	{
+		if (ownerID == 0) return;
+		while (PlayerSimInputs.size() < ownerID) PlayerSimInputs.push_back(std::make_unique<InputBuffer>());
+		while (PlayerVizInputs.size() < ownerID) PlayerVizInputs.push_back(std::make_unique<InputBuffer>());
+	}
+
+	/// All buffers Sentinel should fan input into. Iterate instead of adding push sites.
+	std::span<InputBuffer* const> GetInputTargets() const { return InputTargets; }
 	const EngineConfig& GetConfig() const { return Config; }
 	EngineConfig& GetConfigMut() { return Config; }
 	ConstructRegistry* GetConstructRegistry() { return Constructs; }
@@ -90,6 +130,10 @@ private:
 
 	InputBuffer SimInput;
 	InputBuffer VizInput;
+	InputBuffer NetInput;
+	std::vector<std::unique_ptr<InputBuffer>> PlayerSimInputs; // per-player sim input, grown on EnsurePlayerInputSlot
+	std::vector<std::unique_ptr<InputBuffer>> PlayerVizInputs; // per-player viz input, grown on EnsurePlayerInputSlot
+	InputBuffer* InputTargets[3] = {&SimInput, &VizInput, &NetInput};
 	SpawnSync Spawner;
 
 	ConstructRegistry* Constructs = nullptr; // Non-owning — FlowManager owns the registry

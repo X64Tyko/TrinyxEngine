@@ -21,14 +21,22 @@ static constexpr size_t MaxNetConnections = 1 << NetOwnerID_Bits;
 // ---------------------------------------------------------------------------
 struct ConnectionInfo
 {
-	HSteamNetConnection Handle = 0; // GNS connection handle
-	uint8_t OwnerID            = 0; // Assigned NetOwnerID (0 = server/unassigned)
-	uint32_t NextSeqOut        = 0; // Next outgoing sequence number
-	uint32_t LastSeqIn         = 0; // Latest received sequence number (for ack piggybacking)
-	uint32_t AckBitfield       = 0; // Received-packet bitfield (for ack piggybacking)
-	float RTT_ms               = 0.0f; // Smoothed round-trip time in milliseconds
-	bool bConnected            = false;
-	bool bServerSide           = false; // True for server-accepted handles, false for client-initiated
+	HSteamNetConnection Handle      = 0;    // GNS connection handle
+	uint8_t OwnerID                 = 0;    // Assigned NetOwnerID (0 = server/unassigned)
+	uint32_t NextSeqOut             = 0;    // Next outgoing sequence number
+	uint32_t LastSeqIn              = 0;    // Latest received sequence number (for ack piggybacking)
+	uint32_t AckBitfield            = 0;    // Received-packet bitfield (for ack piggybacking)
+	float RTT_ms                    = 0.0f; // Smoothed round-trip time in milliseconds
+	uint32_t ServerFrameAtHandshake = 0;    // Server FrameNumber when HandshakeAccept was sent
+	uint32_t InputLead              = 0;    // Frames to lead the server — set after ClockSync
+	uint8_t ClockSyncProbesSent     = 0;    // Ping probes sent during Synchronizing phase
+	uint8_t ClockSyncProbesRecvd    = 0;    // Pong responses received during Synchronizing phase
+	double LastHeartbeatTime        = 0.0;  // SDL_GetPerformanceCounter() / freq at last Ping send
+	ClientRepState RepState         = ClientRepState::PendingHandshake;
+	bool bConnected                 = false;
+	bool bServerSide                = false; // True for server-accepted handles, false for client-initiated
+	bool bClientInitiated           = false; // True only for connections we opened via Connect() — reliable even in GNS loopback
+	bool bInitialSpawnFlushed       = false; // Server-side: true after first full entity batch sent to this client
 };
 
 // ---------------------------------------------------------------------------
@@ -107,6 +115,7 @@ public:
 
 	/// Get all active connections.
 	const std::vector<ConnectionInfo>& GetConnections() const { return Connections; }
+	std::vector<ConnectionInfo>& GetConnections() { return Connections; }
 
 	/// Number of active connections.
 	int GetConnectionCount() const { return static_cast<int>(Connections.size()); }

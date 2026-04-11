@@ -19,7 +19,7 @@
 #include "Registry.h"
 #include "CacheSlotMeta.h"
 #include "NetConnectionManager.h"
-#include "NetThread.h"
+#include "PIENetThread.h"
 #include "ReplicationSystem.h"
 #include "TemporalComponentCache.h"
 #include <cctype>
@@ -1255,10 +1255,6 @@ void EditorContext::StartPIE()
 
 	// Load scene into server world via spawn handshake
 	ServerWorld->SetJobsInitialized(true);
-	ServerWorld->Spawn([&sceneJson](Registry* reg)
-	{
-		EntityBuilder::SpawnScene(reg, sceneJson);
-	});
 
 	// Allocate server viewport (if visible)
 	EditorRenderer* renderer = EnginePtr->GetRenderer();
@@ -1271,6 +1267,7 @@ void EditorContext::StartPIE()
 	}
 
 	// Create client worlds (each with its own FlowManager)
+	PIEClients.reserve(PIEClientCount);
 	for (int ci = 0; ci < PIEClientCount; ++ci)
 	{
 		PIEClient client;
@@ -1300,18 +1297,14 @@ void EditorContext::StartPIE()
 		World* clientWorld = client.Flow->GetWorld();
 		clientWorld->SetJobsInitialized(true);
 
-		// Spawn the level, static data won't be replicated in the future
-		clientWorld->Spawn([&sceneJson](Registry* reg)
-		{
-			EntityBuilder::SpawnScene(reg, sceneJson);
-		});
-
 		client.Viewport              = std::make_unique<WorldViewport>();
 		client.Viewport->TargetWorld = clientWorld;
 		renderer->AllocateViewportResources(client.Viewport.get(), 960, 540);
 		renderer->AddViewport(client.Viewport.get());
 
 		PIEClients.push_back(std::move(client));
+		// Re-point FlowManager at the stable Config now that the struct is in the vector.
+		PIEClients.back().Flow->RewireConfig(&PIEClients.back().Config);
 	}
 
 	// Set up loopback networking (server + client in same process)
@@ -1337,7 +1330,7 @@ void EditorContext::StartPIE()
 		return;
 	}
 
-	NetThread* net                = EnginePtr->GetNetThread();
+	PIENetThread* net             = EnginePtr->GetNetThread();
 	NetConnectionManager* connMgr = net->GetConnectionManager();
 
 	// Server: listen on PIE loopback port
@@ -1389,6 +1382,11 @@ void EditorContext::StartPIE()
 		PIEClients[i].ClientHandle = clientHandle;
 		knownHandles.push_back(clientHandle);
 
+		// Register the client handler immediately — before the pump — so it
+		// can receive the handshake reply and subsequent ClockSync/TravelNotify.
+		// OwnerID is 0 at this point; PIENetThread routes by handle until promoted.
+		net->AddClient(clientHandle, PIEClients[i].Flow->GetWorld(), PIEClients[i].Flow.get());
+
 		// Pump GNS callbacks so the server accepts the connection
 		for (int j = 0; j < 20; ++j)
 		{
@@ -1397,7 +1395,7 @@ void EditorContext::StartPIE()
 			SDL_Delay(1);
 		}
 
-		// Find the new server-side accepted handle
+		// Find the new server-side accepted handle and promote the client entry
 		for (const auto& ci : connMgr->GetConnections())
 		{
 			bool known = false;
@@ -1414,10 +1412,10 @@ void EditorContext::StartPIE()
 				PIEClients[i].ServerHandle = ci.Handle;
 				knownHandles.push_back(ci.Handle);
 
-				// Assign OwnerID and map to client world (for future state replication routing)
-				auto& ownerID                                = ci.OwnerID;
+				// Promote client entry from handle-based to OwnerID-based routing
+				const uint8_t ownerID                        = ci.OwnerID;
 				PIEClients[i].Flow->GetWorld()->LocalOwnerID = ownerID;
-				net->MapConnectionToWorld(ownerID, PIEClients[i].Flow->GetWorld());
+				net->UpdateClientOwnerID(clientHandle, ownerID, PIEClients[i].Flow->GetWorld());
 
 				break;
 			}
@@ -1427,15 +1425,15 @@ void EditorContext::StartPIE()
 			LOG_WARN_F("[PIE] Could not identify server-side handle for client %zu", i);
 	}
 
-	// Map server world for OwnerID 0
-	net->MapConnectionToWorld(0, ServerFlow->GetWorld());
+	// Wire server world and replication
+	net->SetServerWorld(ServerFlow->GetWorld());
+	net->SetServerFlow(ServerFlow.get());
 
-	// Set up server-side replication system
 	Replicator = std::make_unique<ReplicationSystem>();
 	Replicator->Initialize(ServerFlow->GetWorld());
 	net->SetReplicationSystem(Replicator.get());
 
-	// Start NetThread (polls connections at NetworkUpdateHz)
+	// Start the shared net thread (polls connections at NetworkUpdateHz)
 	if (!net->IsRunning()) net->Start();
 
 	// Notify game code BEFORE starting logic threads — spawns run on the
@@ -1469,7 +1467,8 @@ void EditorContext::StartPIE()
 		EnginePtr->InputTargetWorld = PIEClients[0].Flow->GetWorld();
 	}
 
-	// 10. Pause editor world's logic thread
+	// 10. Pause editor world's logic thread (save state so StopPIE restores correctly)
+	bPrePIESimWasPaused = !LogicPtr || LogicPtr->IsSimPaused();
 	if (LogicPtr) LogicPtr->SetSimPaused(true);
 
 	bPIEActive = true;
@@ -1496,13 +1495,13 @@ void EditorContext::StopPIE()
 	ServerFlow->JoinWorld();
 
 	// 2. Tear down PIE networking
-	NetThread* net = EnginePtr->GetNetThread();
+	PIENetThread* net = EnginePtr->GetNetThread();
 	if (net)
 	{
 		// Detach replication before stopping net thread
 		net->SetReplicationSystem(nullptr);
 
-		// Stop NetThread so we can safely manipulate connections
+		// Stop net thread so we can safely manipulate connections
 		if (net->IsRunning())
 		{
 			net->Stop();
@@ -1530,9 +1529,10 @@ void EditorContext::StopPIE()
 		// Reset the OnClientConnected multicallback to prevent stale bindings
 		connMgr->OnClientConnected.Reset();
 
-		// Clear world mappings
-		for (size_t i = 0; i < PIEClients.size(); ++i) net->MapConnectionToWorld(static_cast<uint8_t>(i + 1), nullptr);
-		net->MapConnectionToWorld(0, nullptr);
+		// Clear all client handler registrations
+		net->ClearClients();
+		net->SetServerWorld(nullptr);
+		net->SetServerFlow(nullptr);
 
 		connMgr->StopListening();
 	}
@@ -1556,8 +1556,8 @@ void EditorContext::StopPIE()
 	ServerViewport.reset();
 	ServerFlow.reset();
 
-	// 5. Resume editor world
-	if (LogicPtr) LogicPtr->SetSimPaused(false);
+	// 5. Restore editor world to its pre-PIE sim state
+	if (LogicPtr) LogicPtr->SetSimPaused(bPrePIESimWasPaused);
 
 	bPIEActive = false;
 	LOG_INFO("[PIE] Stopped");

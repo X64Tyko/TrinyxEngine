@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include <algorithm>
 
-#include "NetTypes.h" // EngineMode
+#include "Types.h" // EngineMode, SimFloat
 
 struct EngineConfig
 {
@@ -46,6 +46,11 @@ struct EngineConfig
 	// Networking (Fixed Low/Med) - e.g., 20Hz or 30Hz
 	// This is your "Tick Rate". Lower = Less Bandwidth, Higher = More Precision.
 	int NetworkUpdateHz = Unset;
+
+	// Number of RTT probe pings sent during the Synchronizing phase before
+	// computing InputLead. Higher = more accurate estimate; lower = faster load.
+	// Default: 8. Range: 1-255.
+	int ClockSyncProbes = Unset;
 
 	// Input (and window management)
 	// This controls how fast your main thread goes, higher = better input latency

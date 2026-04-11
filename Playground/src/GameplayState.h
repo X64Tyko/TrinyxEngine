@@ -4,6 +4,7 @@
 #include "FlowManager.h"
 #include "EngineConfig.h"
 #include "Logger.h"
+#include "NetTypes.h"
 #include "SchemaReflector.h"
 #include "PlayerConstruct.h"
 
@@ -16,46 +17,66 @@ class PlayerConstruct;
 // GameplayState — The default in-game state for Playground.
 //
 // Requires a World (NeedsWorld = true). On entry, loads the scene specified
-// by EngineConfig::DefaultScene and optionally activates a GameMode.
+// by EngineConfig::DefaultScene — but only if this is the server or standalone.
+// Clients wait for TravelNotify from the server, then load the level via
+// OnNetEvent so the path is always the authoritative server path.
 // ---------------------------------------------------------------------------
 class GameplayState : public GameState
 {
 public:
 	void OnEnter(FlowManager& flow, World* world) override
 	{
-		(void)world;
+		GameState::OnEnter(flow, world); // caches Flow
 
-		// Load the default scene if configured
-		const EngineConfig* cfg = flow.GetConfig();
-		if (cfg->DefaultScene[0] != '\0' && cfg->ProjectDir[0] != '\0')
-		{
-			std::string scenePath = std::string(cfg->ProjectDir) + "/content/" + cfg->DefaultScene;
-			flow.LoadLevel(scenePath.c_str());
-
-			// In standalone we can just spawn our character.
-			if (cfg->Mode == EngineMode::Standalone)
-			{
-				world->Spawn([world](Registry*)
-				{
-					world->GetConstructRegistry()->Create<PlayerConstruct>(world);
-				});
-			}
-		}
-		else
+		const EngineConfig* cfg = Flow->GetConfig();
+		if (cfg->DefaultScene[0] == '\0' || cfg->ProjectDir[0] == '\0')
 		{
 			LOG_INFO("[GameplayState] No DefaultScene configured — entering empty world");
+			return;
+		}
+
+		// Clients wait for TravelNotify; server/standalone load immediately.
+		if (cfg->Mode == EngineMode::Client)
+		{
+			LOG_INFO("[GameplayState] Client — deferring level load until TravelNotify");
+			return;
+		}
+
+		std::string scenePath = std::string(cfg->ProjectDir) + "/content/" + cfg->DefaultScene;
+		Flow->LoadLevel(scenePath.c_str());
+
+		if (cfg->Mode == EngineMode::Standalone)
+		{
+			world->Spawn([world](Registry*)
+			{
+				world->GetConstructRegistry()->Create<PlayerConstruct>(world);
+			});
 		}
 	}
 
-	void OnExit(FlowManager& flow) override
+	void OnExit() override
 	{
-		flow.UnloadLevel();
+		Flow->UnloadLevel();
 	}
 
-	void Tick(float dt) override
+	void OnNetEvent(uint8_t eventID) override
 	{
-		(void)dt;
+		if (eventID == static_cast<uint8_t>(FlowEventID::TravelNotify))
+		{
+			// PendingTravelPath is content-relative (e.g. "Arena.tnxscene").
+			// Reconstruct full path using our own ProjectDir — safe across machines.
+			const std::string& localPath = Flow->GetPendingTravelPath();
+			if (!localPath.empty())
+			{
+				const EngineConfig* cfg = Flow->GetConfig();
+				std::string fullPath    = std::string(cfg->ProjectDir) + "/content/" + localPath;
+				LOG_INFO_F("[GameplayState] TravelNotify — loading level '%s' (background)", fullPath.c_str());
+				Flow->LoadLevel(fullPath.c_str(), /*bBackground=*/true);
+			}
+		}
 	}
+
+	void Tick(float dt) override { (void)dt; }
 
 	StateRequirements GetRequirements() const override
 	{
@@ -66,3 +87,4 @@ public:
 };
 
 TNX_REGISTER_STATE(GameplayState)
+
