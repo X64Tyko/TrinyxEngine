@@ -28,13 +28,20 @@ public:
 
 	void SetReplicationSystem(ReplicationSystem* repl) { Replicator = repl; }
 
-	/// Used only to query GetActiveLevelLocalPath() when sending TravelNotify.
-	void SetFlowManager(FlowManager* flow) { FlowMgr = flow; }
+	/// Used only to query GetActiveLevelLocalPath() when sending TravelNotify,
+	/// and to call OnClientLoaded/OnClientDisconnected for Soul lifecycle.
+	void SetFlowManager(FlowManager* flow);
+
+	/// Called after ConnectionMgr is valid (post Initialize/InitAsHandler).
+	/// Registers Soul lifecycle callbacks on the connection manager.
+	void BindSoulCallbacks();
 
 	void HandleMessage(const ReceivedMessage& msg);
 	void TickReplication();
 
 private:
+	void OnClientDisconnectedCB(uint8_t ownerID);
+
 	ReplicationSystem* Replicator = nullptr;
 	FlowManager* FlowMgr          = nullptr;
 	World* ServerWorld            = nullptr;

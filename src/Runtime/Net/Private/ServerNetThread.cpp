@@ -1,6 +1,7 @@
 #include "ServerNetThread.h"
 
 #include "FlowManager.h"
+#include "NetChannel.h"
 #include "NetConnectionManager.h"
 #include "NetTypes.h"
 #include "ReplicationSystem.h"
@@ -9,6 +10,27 @@
 
 #include <SDL3/SDL_timer.h>
 #include <cstring>
+
+void ServerNetThread::SetFlowManager(FlowManager* flow)
+{
+	FlowMgr = flow;
+}
+
+void ServerNetThread::BindSoulCallbacks()
+{
+	if (!ConnectionMgr || !FlowMgr) return;
+
+	ConnectionMgr->OnClientDisconnected.Bind<ServerNetThread, &ServerNetThread::OnClientDisconnectedCB>(this);
+}
+
+void ServerNetThread::OnClientDisconnectedCB(uint8_t ownerID)
+{
+	if (FlowMgr&& ownerID 
+	!=
+	0
+	)
+	FlowMgr->OnClientDisconnected(ownerID);
+}
 
 void ServerNetThread::TickReplication()
 {
@@ -51,14 +73,8 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 
 		case NetMessageType::Ping:
 		{
-			PacketHeader pong{};
-			pong.Type        = static_cast<uint8_t>(NetMessageType::Pong);
-			pong.Flags       = PacketFlag::DefaultFlags;
-			pong.SequenceNum = msg.Header.SequenceNum;
-			pong.FrameNumber = msg.Header.FrameNumber;
-			pong.SenderID    = 0;
-			pong.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
-			ConnectionMgr->Send(msg.Connection, pong, nullptr, false);
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (ci) NetChannel(ci, ConnectionMgr).SendPong(msg.Header);
 			break;
 		}
 
@@ -104,16 +120,8 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 				Config->FixedUpdateHz == EngineConfig::Unset ? 128 : Config->FixedUpdateHz);
 			hsPay.ServerFrame = serverFrame;
 
-			PacketHeader handshakeHeader{};
-			handshakeHeader.Type        = static_cast<uint8_t>(NetMessageType::ConnectionHandshake);
-			handshakeHeader.Flags       = PacketFlag::DefaultFlags;
-			handshakeHeader.SequenceNum = 2;
-			handshakeHeader.FrameNumber = serverFrame;
-			handshakeHeader.SenderID    = ci->OwnerID;
-			handshakeHeader.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
-			handshakeHeader.PayloadSize = sizeof(HandshakePayload);
-			ConnectionMgr->Send(msg.Connection, handshakeHeader,
-								reinterpret_cast<const uint8_t*>(&hsPay), true);
+			NetChannel(ci, ConnectionMgr).Send(
+				NetMessageType::ConnectionHandshake, hsPay, /*reliable=*/true, serverFrame);
 
 			LOG_INFO_F("[ServerNet] HandshakeAccept → OwnerID=%u frame=%u tickRate=%u",
 					   ci->OwnerID, serverFrame, hsPay.TickRate);
@@ -141,15 +149,8 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 			resp.ClientTimestamp = req->ClientTimestamp;
 			resp.ServerFrame     = serverFrame;
 
-			PacketHeader header{};
-			header.Type        = static_cast<uint8_t>(NetMessageType::ClockSync);
-			header.Flags       = PacketFlag::DefaultFlags;
-			header.SequenceNum = ci->NextSeqOut++;
-			header.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
-			header.SenderID    = 0;
-			header.PayloadSize = sizeof(ClockSyncPayload);
-			ConnectionMgr->Send(msg.Connection, header,
-								reinterpret_cast<const uint8_t*>(&resp), false);
+			NetChannel ch(ci, ConnectionMgr);
+			ch.Send(NetMessageType::ClockSync, resp, /*reliable=*/false, serverFrame);
 
 			const std::string localPath = FlowMgr ? FlowMgr->GetActiveLevelLocalPath() : std::string{};
 			if (!localPath.empty())
@@ -161,15 +162,7 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 				std::memcpy(travelMsg.LevelPath, localPath.c_str(), travelMsg.PathLength);
 				travelMsg.LevelPath[travelMsg.PathLength] = '\0';
 
-				PacketHeader travelHeader{};
-				travelHeader.Type        = static_cast<uint8_t>(NetMessageType::TravelNotify);
-				travelHeader.Flags       = PacketFlag::DefaultFlags;
-				travelHeader.SequenceNum = ci->NextSeqOut++;
-				travelHeader.SenderID    = 0;
-				travelHeader.FrameNumber = serverFrame;
-				travelHeader.PayloadSize = sizeof(TravelPayload);
-				ConnectionMgr->Send(msg.Connection, travelHeader,
-									reinterpret_cast<const uint8_t*>(&travelMsg), true);
+				ch.Send(NetMessageType::TravelNotify, travelMsg, /*reliable=*/true, serverFrame);
 
 				ci->RepState = ClientRepState::LevelLoading;
 				LOG_INFO_F("[ServerNet] ClockSyncResponse + TravelNotify → LevelLoading (frame=%u, level=%s)",
@@ -192,6 +185,20 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 			{
 				ci->RepState = ClientRepState::LevelLoaded;
 				LOG_INFO_F("[ServerNet] LevelReady received — client LevelLoaded (ownerID=%u)", ci->OwnerID);
+
+				// TODO: flush initial entity batch to this client (EntitySpawn with Alive flag)
+				// For now advance immediately to Loaded and send ServerReady.
+
+				ci->RepState = ClientRepState::Loaded;
+
+				FlowEventPayload ready{};
+				ready.EventID = static_cast<uint8_t>(FlowEventID::ServerReady);
+				NetChannel(ci, ConnectionMgr).Send(
+					NetMessageType::FlowEvent, ready, /*reliable=*/true, msg.Header.FrameNumber);
+
+				LOG_INFO_F("[ServerNet] ServerReady sent (ownerID=%u)", ci->OwnerID);
+
+				if (FlowMgr) FlowMgr->OnClientLoaded(ci->OwnerID);
 			}
 			break;
 		}

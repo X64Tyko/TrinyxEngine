@@ -8,6 +8,8 @@
 
 #include "AssetRegistry.h"
 #include "ConstructRegistry.h"
+#include "RegistryTypes.h"
+#include "Soul.h"
 #include "Types.h"
 
 class GameState;
@@ -137,6 +139,20 @@ public:
 	/// Unload the current level (despawn all level-scoped entities).
 	void UnloadLevel();
 
+	// ----- Soul lifecycle -----
+
+	/// Called by ServerNetThread when a client's RepState reaches Loaded.
+	/// Creates a Soul for ownerID, calls GameMode::OnPlayerJoined.
+	/// Also called on the client for its own ownerID after SpawnConfirm.
+	void OnClientLoaded(uint8_t ownerID);
+
+	/// Called by ServerNetThread when a client disconnects.
+	/// Calls GameMode::OnPlayerLeft, destroys the Soul.
+	void OnClientDisconnected(uint8_t ownerID);
+
+	/// Returns the Soul for a given ownerID, or nullptr if not present.
+	Soul* GetSoul(uint8_t ownerID) const { return Souls[ownerID].get(); }
+
 	// ----- GameMode -----
 
 	/// Set the active GameMode for the current World.
@@ -209,6 +225,9 @@ private:
 
 	// Construct Registry — lives here so Session-lifetime Constructs survive World reset
 	ConstructRegistry ConstructReg;
+
+	// Souls — one per connected OwnerID (index = OwnerID). Server-side index 0 is unused.
+	std::unique_ptr<Soul> Souls[MaxOwnerIDs];
 
 	// Active subsystems
 	std::unique_ptr<World> ActiveWorld;

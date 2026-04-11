@@ -40,7 +40,7 @@ FlowManager::~FlowManager()
 // ---------------------------------------------------------------------------
 
 void FlowManager::Initialize(TrinyxEngine* engine, const EngineConfig* config,
-							  int windowWidth, int windowHeight)
+							 int windowWidth, int windowHeight)
 {
 	Engine       = engine;
 	Config       = config;
@@ -94,7 +94,7 @@ void FlowManager::LoadDefaultState(const char* stateName)
 	auto newState = factory();
 	EnforceRequirements(nullptr, newState.get());
 
-	StateStack[0] = std::move(newState);
+	StateStack[0]   = std::move(newState);
 	StateStackCount = 1;
 	StateStack[0]->OnEnter(*this, ActiveWorld.get());
 
@@ -127,7 +127,7 @@ void FlowManager::TransitionTo(const char* stateName)
 	EnforceRequirements(currentState, newState.get());
 
 	// Push the new state as the sole entry
-	StateStack[0] = std::move(newState);
+	StateStack[0]   = std::move(newState);
 	StateStackCount = 1;
 	StateStack[0]->OnEnter(*this, ActiveWorld.get());
 
@@ -423,8 +423,7 @@ FlowManager::StateFactory FlowManager::FindStateFactory(const char* name) const
 	// Check local overrides first (manual RegisterState calls)
 	for (uint32_t i = 0; i < RegisteredStateCount; ++i)
 	{
-		if (strcmp(RegisteredStates[i].Name, name) == 0)
-			return RegisteredStates[i].Factory;
+		if (strcmp(RegisteredStates[i].Name, name) == 0) return RegisteredStates[i].Factory;
 	}
 
 	// Fall back to ReflectionRegistry (populated by TNX_REGISTER_STATE macros)
@@ -436,8 +435,7 @@ FlowManager::ModeFactory FlowManager::FindModeFactory(const char* name) const
 	// Check local overrides first (manual RegisterMode calls)
 	for (uint32_t i = 0; i < RegisteredModeCount; ++i)
 	{
-		if (strcmp(RegisteredModes[i].Name, name) == 0)
-			return RegisteredModes[i].Factory;
+		if (strcmp(RegisteredModes[i].Name, name) == 0) return RegisteredModes[i].Factory;
 	}
 
 	// Fall back to ReflectionRegistry (populated by TNX_REGISTER_MODE macros)
@@ -447,7 +445,7 @@ FlowManager::ModeFactory FlowManager::FindModeFactory(const char* name) const
 void FlowManager::EnforceRequirements(GameState* currentState, GameState* nextState)
 {
 	const StateRequirements current = currentState ? currentState->GetRequirements() : StateRequirements{};
-	const StateRequirements next    = nextState    ? nextState->GetRequirements()    : StateRequirements{};
+	const StateRequirements next    = nextState ? nextState->GetRequirements() : StateRequirements{};
 
 	// Tear down subsystems the new state doesn't need
 	if (current.NeedsWorld && !next.NeedsWorld)
@@ -464,5 +462,29 @@ void FlowManager::EnforceRequirements(GameState* currentState, GameState* nextSt
 	}
 
 	// TODO: NetSession creation when next.NeedsNetSession && !NetSession
+}
+
+// ---------------------------------------------------------------------------
+// Soul lifecycle
+// ---------------------------------------------------------------------------
+
+void FlowManager::OnClientLoaded(uint8_t ownerID)
+{
+	if (Souls[ownerID]) return; // Already present — shouldn't happen, but guard anyway
+
+	Souls[ownerID] = std::make_unique<Soul>(ownerID);
+	Souls[ownerID]->OnJoined();
+
+	if (ActiveMode) ActiveMode->OnPlayerJoined(*Souls[ownerID]);
+}
+
+void FlowManager::OnClientDisconnected(uint8_t ownerID)
+{
+	if (!Souls[ownerID]) return;
+
+	if (ActiveMode) ActiveMode->OnPlayerLeft(*Souls[ownerID]);
+
+	Souls[ownerID]->OnLeft();
+	Souls[ownerID].reset();
 }
 

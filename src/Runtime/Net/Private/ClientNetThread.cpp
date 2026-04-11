@@ -2,6 +2,7 @@
 
 #include "CacheSlotMeta.h"
 #include "FlowManager.h"
+#include "NetChannel.h"
 #include "NetConnectionManager.h"
 #include "NetTypes.h"
 #include "Registry.h"
@@ -20,14 +21,8 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 	{
 		case NetMessageType::Ping:
 		{
-			PacketHeader pong{};
-			pong.Type        = static_cast<uint8_t>(NetMessageType::Pong);
-			pong.Flags       = PacketFlag::DefaultFlags;
-			pong.SequenceNum = msg.Header.SequenceNum;
-			pong.FrameNumber = msg.Header.FrameNumber;
-			pong.SenderID    = 0;
-			pong.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
-			ConnectionMgr->Send(msg.Connection, pong, nullptr, false);
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (ci) NetChannel(ci, ConnectionMgr).SendPong(msg.Header);
 			break;
 		}
 
@@ -124,13 +119,7 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 
 			// Auto-acknowledge (synchronous load in PIE).
 			// Future: remove and let GameState call AcknowledgeLevelReady() after async load.
-			PacketHeader ackHeader{};
-			ackHeader.Type        = static_cast<uint8_t>(NetMessageType::LevelReady);
-			ackHeader.Flags       = PacketFlag::DefaultFlags;
-			ackHeader.SequenceNum = ci->NextSeqOut++;
-			ackHeader.SenderID    = ci->OwnerID;
-			ackHeader.PayloadSize = 0;
-			ConnectionMgr->Send(msg.Connection, ackHeader, nullptr, true);
+			NetChannel(ci, ConnectionMgr).SendHeaderOnly(NetMessageType::LevelReady, /*reliable=*/true);
 
 			ci->RepState = ClientRepState::LevelLoaded;
 			LOG_INFO("[ClientNet] LevelReady sent → client LevelLoaded");

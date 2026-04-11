@@ -9,6 +9,7 @@
 void PIENetThread::InitChildren()
 {
 	Server.InitAsHandler(GNS, Config, ConnectionMgr);
+	Server.BindSoulCallbacks();
 }
 
 void PIENetThread::SetServerWorld(World* world)

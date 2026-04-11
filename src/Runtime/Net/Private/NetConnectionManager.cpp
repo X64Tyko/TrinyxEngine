@@ -324,7 +324,9 @@ void NetConnectionManager::RemoveConnection(HSteamNetConnection conn)
 	{
 		if (it->Handle == conn)
 		{
+			const uint8_t ownerID = it->OwnerID;
 			Connections.erase(it);
+			OnClientDisconnected(ownerID);
 			return;
 		}
 	}

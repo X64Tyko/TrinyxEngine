@@ -50,6 +50,7 @@ struct ReceivedMessage
 };
 
 DEFINE_FIXED_MULTICALLBACK(OnClientConnectedEvent, MaxNetConnections, const ConnectionInfo&)
+DEFINE_FIXED_MULTICALLBACK(OnClientDisconnectedEvent, MaxNetConnections, uint8_t /*ownerID*/)
 
 // ---------------------------------------------------------------------------
 // NetConnectionManager
@@ -129,6 +130,10 @@ public:
 	/// Fired when a server-side connection is fully confirmed (GNS handshake complete).
 	/// Fires on the NetThread during RunCallbacks(). Safe to call World::Spawn() from here.
 	OnClientConnectedEvent OnClientConnected;
+
+	/// Fired when a server-side connection closes (ClosedByPeer or ProblemDetectedLocally).
+	/// ownerID is 0 if the client disconnected before completing the handshake.
+	OnClientDisconnectedEvent OnClientDisconnected;
 
 	/// GNS status callback — routes into this manager. Must be static for GNS.
 	static void OnConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t* info);
