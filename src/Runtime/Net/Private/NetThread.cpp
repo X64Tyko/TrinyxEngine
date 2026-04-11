@@ -1,6 +1,7 @@
 #include "NetThread.h"
 #include "FlowManager.h"
 #include "GNSContext.h"
+#include "NetChannel.h"
 #include "NetConnectionManager.h"
 #include "ReplicationSystem.h"
 #include "EngineConfig.h"
@@ -662,6 +663,25 @@ void NetThread::RouteMessage(const ReceivedMessage& msg)
 		case NetMessageType::EntityDestroy:
 			{
 				// TODO: Not yet implemented
+				break;
+			}
+
+		case NetMessageType::ClientModeManifest:
+			{
+				// Engine validates that at least the base header fields arrived.
+				// The GameMode is responsible for casting to its own concrete derived type.
+				struct BaseClientManifest : ClientModeManifestPayload<BaseClientManifest>
+				{
+				};
+				if (msg.Header.PayloadSize < sizeof(BaseClientManifest))
+				{
+					LOG_WARN_F("[NetThread] ClientModeManifest too small (got %u)", msg.Header.PayloadSize);
+					break;
+				}
+				// TODO: forward raw bytes to GameMode::OnClientModeManifest(soul, payload, size)
+				const auto* base = reinterpret_cast<const BaseClientManifest*>(msg.Payload.data());
+				LOG_INFO_F("[NetThread] ClientModeManifest from owner=%u (seq=%u) — GameMode routing not yet wired",
+						   ci->OwnerID, base->ManifestSequenceID);
 				break;
 			}
 

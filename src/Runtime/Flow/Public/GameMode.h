@@ -1,4 +1,7 @@
 #pragma once
+#include "WithLobby.h"
+#include "WithSpawnManagement.h"
+#include "WithTeamAssignment.h"
 
 class World;
 class Soul;

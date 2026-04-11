@@ -234,6 +234,25 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 			// TODO
 			break;
 
+		case NetMessageType::GameModeManifest:
+			{
+				// Engine validates that at least the base header fields arrived.
+				// The GameMode is responsible for casting to its own concrete derived type.
+				struct BaseManifest : GameModeManifestPayload<BaseManifest>
+				{
+				};
+				if (msg.Header.PayloadSize < sizeof(BaseManifest))
+				{
+					LOG_WARN_F("[ClientNet] GameModeManifest too small (got %u)", msg.Header.PayloadSize);
+					break;
+				}
+				// TODO: forward raw bytes to GameMode::OnGameModeManifest(payload, size)
+				const auto* base = reinterpret_cast<const BaseManifest*>(msg.Payload.data());
+				LOG_INFO_F("[ClientNet] GameModeManifest received (seq=%u, mode='%s') — GameMode routing not yet wired",
+						   base->SequenceID, base->ModeName);
+				break;
+			}
+
 		default:
 			LOG_WARN_F("[ClientNet] Unhandled message type %u", msg.Header.Type);
 			break;

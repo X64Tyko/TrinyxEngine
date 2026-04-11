@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 
+#include "RegistryTypes.h"
+
 // ---------------------------------------------------------------------------
 // Soul — per-player session object, one per connected OwnerID.
 //
@@ -18,8 +20,8 @@
 //
 // Thread safety: Soul is created and destroyed on the Sentinel thread.
 // Gameplay reads (GetOwnerID, GetInputLead) are safe from any thread once
-// created. Writes to mutable fields (PendingSpawnID) must happen from
-// Sentinel or under the spawn handshake contract.
+// created. Writes to mutable fields must happen from Sentinel or under the
+// spawn handshake contract.
 // ---------------------------------------------------------------------------
 class Soul
 {
@@ -30,24 +32,53 @@ public:
 	Soul(const Soul&)            = delete;
 	Soul& operator=(const Soul&) = delete;
 
-	uint8_t  GetOwnerID()    const { return OwnerID; }
-	uint32_t GetInputLead()  const { return InputLead; }
+	uint8_t GetOwnerID() const { return OwnerID; }
+	uint32_t GetInputLead() const { return InputLead; }
 
-	bool HasPendingSpawn()   const { return PendingSpawnID != 0; }
-	void SetPendingSpawn(uint32_t id) { PendingSpawnID = id; }
-	void ClearPendingSpawn()          { PendingSpawnID = 0; }
-	uint32_t GetPendingSpawnID() const { return PendingSpawnID; }
+	bool HasBody() const { return ConfirmedBodyHandle.IsValid(); }
+	ConstructRef GetBodyHandle() const { return ConfirmedBodyHandle; }
+
+	/// Called by the GameMode (via WithSpawnManagement or directly) after the
+	/// server confirms a spawn. Stores the handle and fires OnBodyConfirmed().
+	void ClaimBody(ConstructRef ref)
+	{
+		ConfirmedBodyHandle = ref;
+		OnBodyConfirmed();
+	}
 
 	/// Called by FlowManager after creation — game code can override for init.
-	virtual void OnJoined()     {}
+	virtual void OnJoined()
+	{
+	}
 
 	/// Called by FlowManager just before destruction.
-	virtual void OnLeft()       {}
+	virtual void OnLeft()
+	{
+	}
+
+	/// Called immediately after ClaimBody() — wire input routing, show HUD, etc.
+	virtual void OnBodyConfirmed()
+	{
+	}
+
+	/// Called when the Body is destroyed (death, despawn, respawn cycle start).
+	/// ConfirmedBodyHandle is cleared before this fires.
+	virtual void OnBodyLost()
+	{
+	}
+
+	/// Clears ConfirmedBodyHandle and fires OnBodyLost(). Called by GameMode
+	/// on Body destruction (e.g. death, level unload).
+	void ReleaseBody()
+	{
+		ConfirmedBodyHandle = {};
+		OnBodyLost();
+	}
 
 private:
 	friend class FlowManager;
 
-	uint8_t  OwnerID       = 0; // Assigned at connection — stable for the session
-	uint32_t InputLead     = 0; // Frames client leads the server — set after ClockSync
-	uint32_t PendingSpawnID = 0; // Non-zero while a SpawnRequest is in flight
+	uint8_t OwnerID                  = 0;  // Assigned at connection — stable for the session
+	uint32_t InputLead               = 0;  // Frames client leads the server — set after ClockSync
+	ConstructRef ConfirmedBodyHandle = {}; // Valid once ClaimBody() is called; cleared on ReleaseBody()
 };

@@ -37,6 +37,9 @@ struct ConnectionInfo
 	bool bServerSide                = false; // True for server-accepted handles, false for client-initiated
 	bool bClientInitiated           = false; // True only for connections we opened via Connect() — reliable even in GNS loopback
 	bool bInitialSpawnFlushed       = false; // Server-side: true after first full entity batch sent to this client
+
+	// Client-side only — tracks in-flight spawn predictions awaiting Confirm/Reject.
+	PredictionLedger Predictions;
 };
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <type_traits>
 
 #include "NetConnectionManager.h"
 #include "NetTypes.h"
@@ -43,6 +44,36 @@ public:
 	{
 		PacketHeader hdr = MakeHeader(type, sizeof(T), frameNumber);
 		return SendInternal(hdr, reinterpret_cast<const uint8_t*>(&payload), sizeof(T), reliable);
+	}
+
+	// Send a game-layer typed payload. MsgType is a NetMessageType NTTP — the
+	// wire message ID is resolved at compile time with zero runtime overhead.
+	// TPayload must derive from BaseNetPayload<TPayload>.
+	//
+	//   ch.Send<NetMessageType::GameModeManifest>(royaleData, /*reliable=*/true);
+	//
+	// Two GameModes can both use GameModeManifest with different payload structs —
+	// the engine routes by TypeID, the GameMode interprets the bytes.
+	template <NetMessageType MsgType, typename TPayload>
+	bool Send(const TPayload& payload, bool reliable, uint32_t frameNumber = 0)
+	{
+		static_assert(std::is_base_of_v<BaseNetPayload<TPayload>, TPayload>,
+					  "TPayload must derive from BaseNetPayload<TPayload>");
+		TPayload::ValidateTrivial();
+		constexpr uint16_t size = TPayload::PayloadSize;
+		PacketHeader hdr        = MakeHeader(MsgType, size, frameNumber);
+		return SendInternal(hdr, reinterpret_cast<const uint8_t*>(&payload), size, reliable);
+	}
+
+	// Validate an incoming payload size against a known type before handing
+	// bytes to the GameMode. Returns false if size mismatches — caller drops.
+	template <typename TPayload>
+	static bool ValidatePayload(const PacketHeader& hdr)
+	{
+		static_assert(std::is_base_of_v<BaseNetPayload<TPayload>, TPayload>,
+					  "TPayload must derive from BaseNetPayload<TPayload>");
+		TPayload::ValidateTrivial();
+		return hdr.PayloadSize == TPayload::PayloadSize;
 	}
 
 	// Send a header-only message (no payload body).

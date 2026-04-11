@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <cassert>
 #include <tuple>
 #include <type_traits>
 
@@ -362,4 +363,30 @@ FORCE_INLINE void ForEachField(Func&& func)
             } \
         }; \
         [[maybe_unused]] TNX_USED_ATTR static _##ModeClass##_ModeReg _##ModeClass##_mode_reg; \
+    }
+
+// ---------------------------------------------------------------------------
+// TNX_REGISTER_MODEMIX — registers a user-defined GameMode mixin with the
+// ReflectionRegistry. Assigns the next available ID from the user band
+// (128–255) via g_GlobalMixinCounter, following the same pattern as
+// component and entity registration.
+//
+// Usage (once per mixin type, in a .cpp file):
+//   TNX_REGISTER_MODEMIX(MyAbilityMixin)
+//
+// Engine mixins (WithSpawnManagement, etc.) have fixed compile-time IDs in
+// the engine band (0–127) and self-register by calling RegisterMixin directly.
+// ---------------------------------------------------------------------------
+
+#define TNX_REGISTER_MODEMIX(MixinClass) \
+    namespace { \
+        struct _##MixinClass##_MixinReg { \
+            _##MixinClass##_MixinReg() { \
+                uint8_t id = Internal::g_GlobalMixinCounter++; \
+                assert(id <= ReflectionRegistry::MixinUserBandEnd && \
+                    "TNX_REGISTER_MODEMIX: user mixin band exhausted (128-255)."); \
+                ReflectionRegistry::Get().RegisterMixin(#MixinClass, id, /*isUserDefined=*/true); \
+            } \
+        }; \
+        [[maybe_unused]] TNX_USED_ATTR static _##MixinClass##_MixinReg _##MixinClass##_mixin_reg; \
     }

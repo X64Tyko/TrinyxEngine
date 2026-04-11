@@ -5,6 +5,7 @@
 #include "FieldMeta.h"
 #include "Logger.h"
 
+#include <cassert>
 #include <cstring>
 
 // ---------------------------------------------------------------------------
@@ -143,6 +144,32 @@ ReflectionRegistry::ModeFactory ReflectionRegistry::FindModeByUUID(int64_t uuid)
 {
 	auto it = ModeUUIDIndex.find(uuid);
 	return it != ModeUUIDIndex.end() ? RegisteredModes[it->second].Factory : nullptr;
+}
+
+void ReflectionRegistry::RegisterMixin(const char* name, uint8_t baseTypeID, bool isUserDefined)
+{
+	// Collision check — asserts rather than silently dropping to catch misconfigured ID bands early.
+	auto it = MixinIDIndex.find(baseTypeID);
+	assert(it == MixinIDIndex.end() &&
+		"ModeMixin ID collision: two mixins claim the same BaseTypeID. "
+		"Check TNX_REGISTER_MODEMIX order or engine mixin ID bands.");
+
+	int64_t uuid = UUIDFromName(name);
+	size_t idx   = RegisteredMixins.size();
+	RegisteredMixins.push_back({name, uuid, baseTypeID, isUserDefined});
+	MixinIDIndex[baseTypeID] = idx;
+}
+
+const ReflectionRegistry::MixinEntry* ReflectionRegistry::FindMixin(const char* name) const
+{
+	for (const auto& entry : RegisteredMixins) if (strcmp(entry.Name, name) == 0) return &entry;
+	return nullptr;
+}
+
+const ReflectionRegistry::MixinEntry* ReflectionRegistry::FindMixinByID(uint8_t baseTypeID) const
+{
+	auto it = MixinIDIndex.find(baseTypeID);
+	return it != MixinIDIndex.end() ? &RegisteredMixins[it->second] : nullptr;
 }
 
 int64_t ReflectionRegistry::UUIDFromName(const char* name)

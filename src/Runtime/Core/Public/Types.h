@@ -178,6 +178,7 @@ constexpr uint32_t CHUNK_SIZE = 256 * MAX_FIELDS_PER_ARCHETYPE * 4;
 namespace Internal
 {
 	extern uint32_t g_GlobalComponentCounter;
+	extern uint8_t g_GlobalMixinCounter; // user mixin IDs, starts at 128
 
 	extern std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> g_TemporalComponentCounter;
 }

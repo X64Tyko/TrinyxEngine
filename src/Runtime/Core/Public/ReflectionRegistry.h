@@ -167,6 +167,35 @@ public:
 	[[nodiscard]] StateFactory FindStateByUUID(int64_t uuid) const;
 	[[nodiscard]] ModeFactory FindModeByUUID(int64_t uuid) const;
 
+	// ===== ModeMixin registration =====
+	//
+	// Engine-defined mixins (WithSpawnManagement, WithTeamAssignment, etc.) declare
+	// a compile-time BaseTypeID constant and self-register via RegisterMixin.
+	// User-defined mixins use TNX_REGISTER_MODEMIX which assigns the next ID from
+	// the 128–255 user band via a static counter. IDs are asserted unique at startup.
+	//
+	// BaseTypeID is the first message type ID claimed by the mixin. Each mixin
+	// claims a contiguous band of 4 IDs (BaseTypeID .. BaseTypeID+3).
+
+	static constexpr uint8_t MixinUserBandStart = 128;
+	static constexpr uint8_t MixinUserBandEnd   = 255;
+
+	struct MixinEntry
+	{
+		const char* Name;
+		int64_t UUID;
+		uint8_t BaseTypeID; // First of 4 contiguous message type IDs
+		bool IsUserDefined;
+	};
+
+	std::vector<MixinEntry> RegisteredMixins;
+	std::unordered_map<uint8_t, size_t> MixinIDIndex; // BaseTypeID → RegisteredMixins index
+
+	void RegisterMixin(const char* name, uint8_t baseTypeID, bool isUserDefined);
+
+	[[nodiscard]] const MixinEntry* FindMixin(const char* name) const;
+	[[nodiscard]] const MixinEntry* FindMixinByID(uint8_t baseTypeID) const;
+
 	/// Compute a deterministic UUID from a type + name (FNV-1a hash).
 	static int64_t UUIDFromName(const char* name);
 

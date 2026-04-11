@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 
 #include "RegistryTypes.h" // NetOwnerID_Bits
 
@@ -23,6 +24,10 @@ enum class NetMessageType : uint8_t
 	ClockSync           = 11, // Bidirectional: frame clock synchronisation
 	TravelNotify        = 12, // Server->Client: load this level (path + server frame)
 	LevelReady          = 13, // Client->Server: level load complete, ready for entity flush
+	GameModeManifest    = 14, // Server->Client: game-layer context publish (mode, level, rules, etc.)
+	ClientModeManifest  = 15, // Client->Server: optional reply to a GameModeManifest (preferences, loadout, etc.)
+	Custom              = 16, // Game-defined: first slot for user-extended message types
+	Unknown             = 17, // Sentinel: unrecognised message type — receiver must drop
 	Count
 };
 
@@ -109,6 +114,37 @@ struct PacketHeader
 static_assert(sizeof(PacketHeader) == PacketHeader_ExpectedSize,
 			  "PacketHeader size mismatch — if you changed a *_Bytes constant, update the struct layout to match");
 static_assert(sizeof(PacketHeader) == 24, "PacketHeader must be 24 bytes");
+
+// ---------------------------------------------------------------------------
+// BaseNetPayload — CRTP base for all game-layer network payloads.
+//
+// Provides a compile-time PayloadSize constant so NetChannel::Send can stamp
+// the header without any runtime computation or struct field overhead.
+// The static_assert enforces that all payloads are trivially copyable —
+// preventing silent corruption from vtables, std::string, etc. on the wire.
+//
+// Usage:
+//   struct RoyaleManifestData : BaseNetPayload<RoyaleManifestData>
+//   {
+//       uint8_t TeamCount;
+//       uint32_t RuleFlags;
+//   };
+//   ch.Send<NetMessageType::GameModeManifest>(data, /*reliable=*/true);
+//
+// Receiver validates: hdr.PayloadSize == RoyaleManifestData::PayloadSize
+// before handing bytes to the GameMode — mismatched builds drop the packet.
+// ---------------------------------------------------------------------------
+template <typename TDerived>
+struct BaseNetPayload
+{
+	static constexpr uint16_t PayloadSize = sizeof(TDerived);
+	// Trivial-copy check deferred to first use — TDerived incomplete at base instantiation time.
+	static constexpr void ValidateTrivial()
+	{
+		static_assert(std::is_trivially_copyable_v<TDerived>,
+					  "Net payloads must be trivially copyable -- no vtable, no std::string, no unique_ptr");
+	}
+};
 
 // ---------------------------------------------------------------------------
 // EntitySpawnPayload — server tells client to create an entity.
@@ -334,7 +370,108 @@ struct TravelPayload
 static_assert(sizeof(TravelPayload) == 256, "TravelPayload must be 256 bytes");
 
 // ---------------------------------------------------------------------------
-// InputFramePayload — wire format for an InputFrame message payload.
+// GameModeManifestPayload<TDerived> — CRTP base for GameMode→client context
+// publishes. Inherits BaseNetPayload<TDerived> so PayloadSize reflects the
+// full derived struct size, not just the base.
+//
+// Game-specific rules go in a derived struct:
+//   struct RoyaleManifest : GameModeManifestPayload<RoyaleManifest>
+//   {
+//       uint8_t TeamCount;
+//       uint32_t RuleFlags;
+//   };
+//   ch.Send<NetMessageType::GameModeManifest>(manifest, reliable);
+//
+// Engine validates the base size (>= sizeof GameModeManifestPayload<T>) before
+// handing bytes to the GameMode; the GameMode casts to its concrete type.
+// SequenceID is echoed in ClientModeManifestPayload to correlate replies.
+// ---------------------------------------------------------------------------
+template <typename TDerived>
+struct GameModeManifestPayload : BaseNetPayload<TDerived>
+{
+	uint8_t SequenceID;      // Monotonic per-mode counter; echoed by client reply
+	uint8_t ModeNameLength;  // Length of ModeName (excluding null terminator)
+	char ModeName[62];       // Display name of the active GameMode (null-terminated)
+	uint8_t LevelNameLength; // Length of LevelName (excluding null terminator)
+	char LevelName[62];      // Display name of the active level (null-terminated)
+	uint8_t MaxPlayers;      // Max player count for UI display
+	uint8_t _pad[1];         // alignment
+};
+
+// ---------------------------------------------------------------------------
+// ClientModeManifestPayload<TDerived> — CRTP base for client→GameMode replies.
+// Game-specific preference fields go in a derived struct:
+//   struct RoyaleClientManifest : ClientModeManifestPayload<RoyaleClientManifest>
+//   {
+//       uint8_t PreferredTeam;
+//       uint32_t CosmeticFlags;
+//   };
+//
+// ManifestSequenceID must match the GameModeManifestPayload.SequenceID being
+// replied to — the server discards stale replies.
+// ---------------------------------------------------------------------------
+template <typename TDerived>
+struct ClientModeManifestPayload : BaseNetPayload<TDerived>
+{
+	uint8_t ManifestSequenceID; // SequenceID of the GameModeManifest being acknowledged
+	uint8_t _pad[3];            // alignment
+};
+
+// ---------------------------------------------------------------------------
+// PredictionLedger — client-side record of in-flight spawn predictions.
+//
+// Lives in ConnectionInfo (transport layer). Keyed by PredictionID echoed
+// in SpawnConfirm/SpawnReject. Single-entry today; same structure scales to
+// projectile/ability prediction by expanding capacity.
+//
+// On SpawnConfirm: promote the predicted Construct to authoritative, call
+//   Soul::ClaimBody(ref), clear the ledger entry.
+// On SpawnReject: destroy the predicted Construct, clear the ledger entry.
+// ---------------------------------------------------------------------------
+struct PredictionLedger
+{
+	static constexpr uint8_t Capacity = 1; // expand when projectile prediction lands
+
+	struct Entry
+	{
+		uint32_t PredictionID = 0;  // echoed by server in Confirm/Reject
+		uint32_t RequestFrame = 0;  // local frame when SpawnRequest was sent
+		ConstructRef LocalRef = {}; // predicted Construct handle (client-side)
+		int64_t PrefabUUID    = 0;  // prefab used for prediction
+		bool Active           = false;
+	};
+
+	Entry Entries[Capacity] = {};
+
+	void Set(uint32_t predID, uint32_t frame, ConstructRef ref, int64_t uuid)
+	{
+		for (auto& e : Entries)
+		{
+			if (!e.Active)
+			{
+				e = {predID, frame, ref, uuid, true};
+				return;
+			}
+		}
+	}
+
+	Entry* Find(uint32_t predID)
+	{
+		for (auto& e : Entries) if (e.Active && e.PredictionID == predID) return &e;
+		return nullptr;
+	}
+
+	void Clear(uint32_t predID)
+	{
+		for (auto& e : Entries) if (e.PredictionID == predID)
+		{
+			e = {};
+			return;
+		}
+	}
+};
+
+
 // 64 bytes of key state + 2 floats of mouse delta.
 // ---------------------------------------------------------------------------
 struct InputFramePayload

@@ -27,6 +27,7 @@
 namespace Internal
 {
 	uint32_t g_GlobalComponentCounter(1);
+	uint8_t g_GlobalMixinCounter(128); // user mixin IDs start after engine band (0-127)
 	std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> g_TemporalComponentCounter = []()
 	{
 		std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> a;
