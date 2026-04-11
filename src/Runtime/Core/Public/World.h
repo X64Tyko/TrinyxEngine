@@ -6,7 +6,6 @@
 
 #include "EngineConfig.h"
 #include "Input.h"
-#include "RegistryTypes.h"
 #include "SpawnSync.h"
 
 class Registry;
@@ -90,17 +89,17 @@ public:
 	/// count. Use EnsurePlayerInputSlot() before the first inject to allocate.
 	InputBuffer* GetPlayerSimInput(uint8_t ownerID)
 	{
-		if (ownerID == 0 || ownerID > MaxServerPlayers || ownerID > PlayerSimInputs.size()) return nullptr;
+		if (ownerID == 0 || ownerID > PlayerSimInputs.size()) return nullptr;
 		return PlayerSimInputs[ownerID - 1].get();
 	}
 	InputBuffer* GetPlayerVizInput(uint8_t ownerID)
 	{
-		if (ownerID == 0 || ownerID > MaxServerPlayers || ownerID > PlayerVizInputs.size()) return nullptr;
+		if (ownerID == 0 || ownerID > PlayerVizInputs.size()) return nullptr;
 		return PlayerVizInputs[ownerID - 1].get();
 	}
 	void EnsurePlayerInputSlot(uint8_t ownerID)
 	{
-		if (ownerID == 0 || ownerID > MaxServerPlayers) return;
+		if (ownerID == 0) return;
 		while (PlayerSimInputs.size() < ownerID) PlayerSimInputs.push_back(std::make_unique<InputBuffer>());
 		while (PlayerVizInputs.size() < ownerID) PlayerVizInputs.push_back(std::make_unique<InputBuffer>());
 	}
