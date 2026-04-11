@@ -5,6 +5,7 @@
 
 #include "EngineConfig.h"
 #include "Input.h"
+#include "RegistryTypes.h"
 #include "SpawnSync.h"
 
 class Registry;
@@ -69,6 +70,34 @@ public:
 	InputBuffer* GetVizInput() { return &VizInput; }
 	InputBuffer* GetNetInput() { return &NetInput; }
 
+	/// Returns the sim input for a specific player on the server, or the local
+	/// SimInput when ownerID == 0 (client world or standalone). This is the
+	/// single call site for player-driven input regardless of network role.
+	InputBuffer* GetInputForPlayer(uint8_t ownerID)
+	{
+		if (ownerID == 0) return &SimInput;
+		InputBuffer* buf = GetPlayerSimInput(ownerID);
+		return buf ? buf : &SimInput;
+	}
+	InputBuffer* GetVizInputForPlayer(uint8_t ownerID)
+	{
+		if (ownerID == 0) return &VizInput;
+		InputBuffer* buf = GetPlayerVizInput(ownerID);
+		return buf ? buf : &VizInput;
+	}
+	/// Returns nullptr if ownerID is out of range. Used by server to route each
+	/// client's InputFrame to the correct player entity.
+	InputBuffer* GetPlayerSimInput(uint8_t ownerID)
+	{
+		if (ownerID == 0 || ownerID > MaxServerPlayers) return nullptr;
+		return &PlayerSimInputs[ownerID - 1];
+	}
+	InputBuffer* GetPlayerVizInput(uint8_t ownerID)
+	{
+		if (ownerID == 0 || ownerID > MaxServerPlayers) return nullptr;
+		return &PlayerVizInputs[ownerID - 1];
+	}
+
 	/// All buffers Sentinel should fan input into. Iterate instead of adding push sites.
 	std::span<InputBuffer* const> GetInputTargets() const { return InputTargets; }
 	const EngineConfig& GetConfig() const { return Config; }
@@ -96,6 +125,8 @@ private:
 	InputBuffer SimInput;
 	InputBuffer VizInput;
 	InputBuffer NetInput;
+	InputBuffer PlayerSimInputs[MaxServerPlayers]; // per-player sim input (server-side, indexed by ownerID-1)
+	InputBuffer PlayerVizInputs[MaxServerPlayers]; // per-player viz input (server-side, indexed by ownerID-1)
 	InputBuffer* InputTargets[3] = {&SimInput, &VizInput, &NetInput};
 	SpawnSync Spawner;
 

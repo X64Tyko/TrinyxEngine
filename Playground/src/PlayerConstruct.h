@@ -23,6 +23,8 @@
 class PlayerConstruct : public Construct<PlayerConstruct>
 {
 public:
+	uint8_t OwnerID = 0; // NetOwnerID of the controlling Soul (0 = local/standalone)
+
 	ConstructView<EPlayer> Body;
 	Owned<CameraConstruct> FirstPersonCam;
 	Owned<CameraConstruct> ThirdPersonCam;
@@ -97,7 +99,7 @@ public:
 	// The actual Jolt push happens in PhysicsFlush (once per physics step).
 	void PrePhysics(SimFloat dt)
 	{
-		InputBuffer* simInput = GetWorld()->GetSimInput();
+		InputBuffer* simInput = GetWorld()->GetInputForPlayer(OwnerID);
 
 		float sinYaw = std::sin(Yaw);
 		float cosYaw = std::cos(Yaw);
@@ -140,7 +142,7 @@ public:
 	// Runs after physics — body transform is up to date.
 	void ScalarUpdate(SimFloat dt)
 	{
-		InputBuffer* vizInput = GetWorld()->GetVizInput();
+		InputBuffer* vizInput = GetWorld()->GetVizInputForPlayer(OwnerID);
 
 		// ── Camera toggle (V key) — edge-detect ─────────────────────────
 		bool toggleDown = vizInput->IsActionDown(Action::ToggleCamera);
