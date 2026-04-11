@@ -36,6 +36,7 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 			const uint8_t ownerID  = msg.Header.SenderID;
 			const auto* payload    = reinterpret_cast<const InputFramePayload*>(msg.Payload.data());
 
+			ServerWorld->EnsurePlayerInputSlot(ownerID);
 			InputBuffer* simInput = ServerWorld->GetPlayerSimInput(ownerID);
 			InputBuffer* vizInput = ServerWorld->GetPlayerVizInput(ownerID);
 			if (!simInput)

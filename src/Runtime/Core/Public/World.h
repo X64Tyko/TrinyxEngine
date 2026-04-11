@@ -2,6 +2,7 @@
 #include <memory>
 #include <functional>
 #include <span>
+#include <vector>
 
 #include "EngineConfig.h"
 #include "Input.h"
@@ -85,17 +86,23 @@ public:
 		InputBuffer* buf = GetPlayerVizInput(ownerID);
 		return buf ? buf : &VizInput;
 	}
-	/// Returns nullptr if ownerID is out of range. Used by server to route each
-	/// client's InputFrame to the correct player entity.
+	/// Returns nullptr if ownerID is 0 or beyond the currently connected player
+	/// count. Use EnsurePlayerInputSlot() before the first inject to allocate.
 	InputBuffer* GetPlayerSimInput(uint8_t ownerID)
 	{
-		if (ownerID == 0 || ownerID > MaxServerPlayers) return nullptr;
-		return &PlayerSimInputs[ownerID - 1];
+		if (ownerID == 0 || ownerID > MaxServerPlayers || ownerID > PlayerSimInputs.size()) return nullptr;
+		return PlayerSimInputs[ownerID - 1].get();
 	}
 	InputBuffer* GetPlayerVizInput(uint8_t ownerID)
 	{
-		if (ownerID == 0 || ownerID > MaxServerPlayers) return nullptr;
-		return &PlayerVizInputs[ownerID - 1];
+		if (ownerID == 0 || ownerID > MaxServerPlayers || ownerID > PlayerVizInputs.size()) return nullptr;
+		return PlayerVizInputs[ownerID - 1].get();
+	}
+	void EnsurePlayerInputSlot(uint8_t ownerID)
+	{
+		if (ownerID == 0 || ownerID > MaxServerPlayers) return;
+		while (PlayerSimInputs.size() < ownerID) PlayerSimInputs.push_back(std::make_unique<InputBuffer>());
+		while (PlayerVizInputs.size() < ownerID) PlayerVizInputs.push_back(std::make_unique<InputBuffer>());
 	}
 
 	/// All buffers Sentinel should fan input into. Iterate instead of adding push sites.
@@ -125,8 +132,8 @@ private:
 	InputBuffer SimInput;
 	InputBuffer VizInput;
 	InputBuffer NetInput;
-	InputBuffer PlayerSimInputs[MaxServerPlayers]; // per-player sim input (server-side, indexed by ownerID-1)
-	InputBuffer PlayerVizInputs[MaxServerPlayers]; // per-player viz input (server-side, indexed by ownerID-1)
+	std::vector<std::unique_ptr<InputBuffer>> PlayerSimInputs; // per-player sim input, grown on EnsurePlayerInputSlot
+	std::vector<std::unique_ptr<InputBuffer>> PlayerVizInputs; // per-player viz input, grown on EnsurePlayerInputSlot
 	InputBuffer* InputTargets[3] = {&SimInput, &VizInput, &NetInput};
 	SpawnSync Spawner;
 
