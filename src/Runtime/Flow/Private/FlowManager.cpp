@@ -199,6 +199,7 @@ World* FlowManager::CreateWorld()
 		return nullptr;
 	}
 
+	ActiveWorld->SetFlowManager(this);
 	LOG_INFO("[FlowManager] World created");
 	return ActiveWorld.get();
 }
@@ -219,6 +220,7 @@ void FlowManager::DestroyWorld()
 	ConstructReg.DestroyByLifetime(ConstructLifetime::Session);
 
 	ActiveWorld->Shutdown();
+	ActiveWorld->SetFlowManager(nullptr);
 	ActiveWorld.reset();
 
 	LOG_INFO("[FlowManager] World destroyed");

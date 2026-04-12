@@ -5,7 +5,6 @@
 #include <array>
 #include <memory>
 
-class FlowManager;
 class ReplicationSystem;
 class World;
 
@@ -19,8 +18,8 @@ class World;
 // Owns the server world pointer (non-owning ref) and replication system
 // (also non-owning — caller manages lifetime).
 //
-// FlowManager is used only to query the active level path when sending
-// TravelNotify. It is the server FlowManager and never routes client events.
+// FlowManager is resolved from ServerWorld->GetFlowManager() — no separate
+// FlowMgr pointer needed.
 // ---------------------------------------------------------------------------
 class ServerNetThread : public NetThreadBase<ServerNetThread>
 {
@@ -29,12 +28,9 @@ class ServerNetThread : public NetThreadBase<ServerNetThread>
 public:
 	/// Non-owning. Set before Start() / first Tick().
 	void SetServerWorld(World* world) { ServerWorld = world; }
+	World* GetServerWorld() const { return ServerWorld; }
 
 	void SetReplicationSystem(ReplicationSystem* repl) { Replicator = repl; }
-
-	/// Used only to query GetActiveLevelLocalPath() when sending TravelNotify,
-	/// and to call OnClientLoaded/OnClientDisconnected for Soul lifecycle.
-	void SetFlowManager(FlowManager* flow);
 
 	/// Called after ConnectionMgr is valid (post Initialize/InitAsHandler).
 	/// Registers Soul lifecycle callbacks on the connection manager.
@@ -64,7 +60,6 @@ private:
 	void CreateInputLog(uint8_t ownerID);
 
 	ReplicationSystem* Replicator = nullptr;
-	FlowManager* FlowMgr          = nullptr;
 	World* ServerWorld            = nullptr;
 
 	// One log per ownerID slot — only allocated for connected players.

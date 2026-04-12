@@ -7,7 +7,6 @@
 
 #include <vector>
 
-class FlowManager;
 class ReplicationSystem;
 class World;
 
@@ -20,12 +19,14 @@ class World;
 // have their own threads and their Initialize() is not called (they share
 // this instance's ConnectionMgr).
 //
+// FlowManager is always resolved from world->GetFlowManager() — no separate
+// flow pointers needed. Each World knows its owning FlowManager.
+//
 // Usage:
 //   pie.Initialize(gns, config);
 //   pie.SetServerWorld(serverWorld);
-//   pie.SetServerFlow(serverFlow);      // for TravelNotify level-path query
 //   pie.SetReplicationSystem(repl);
-//   pie.AddClient(ownerID, clientWorld, clientFlow);
+//   pie.AddClient(ownerID, clientWorld);
 //   pie.Start();                        // spins the shared OS thread
 // ---------------------------------------------------------------------------
 class PIENetThread : public NetThreadBase<PIENetThread>
@@ -34,13 +35,12 @@ class PIENetThread : public NetThreadBase<PIENetThread>
 
 public:
 	void SetServerWorld(World* world);
-	void SetServerFlow(FlowManager* flow);
 	void SetReplicationSystem(ReplicationSystem* repl);
 
 	/// Register a client handler keyed by its GNS connection handle.
 	/// Call this immediately after Connect(), before any Tick() pumping,
 	/// so the handler is in place to receive the handshake reply.
-	void AddClient(HSteamNetConnection clientHandle, World* world, FlowManager* flow);
+	void AddClient(HSteamNetConnection clientHandle, World* world);
 
 	/// Promote an existing client entry from handle-based to OwnerID-based routing.
 	/// Call this after the pump loop once the server has assigned an OwnerID.
@@ -50,8 +50,12 @@ public:
 	void ClearClients();
 
 	/// Call after Initialize() to wire the Server child handler to the shared transport.
-	/// Must be called before SetServerWorld / SetServerFlow / AddClient.
+	/// Must be called before SetServerWorld / AddClient.
 	void InitChildren();
+
+	/// Single poll+dispatch cycle for use during synchronous pump loops (PIE startup).
+	/// Runs GNS callbacks, drains the incoming message queue, and dispatches each message.
+	void PumpMessages();
 
 	ServerNetThread& GetServer() { return Server; }
 
@@ -66,13 +70,12 @@ private:
 	{
 		HSteamNetConnection Handle = 0; // client-side GNS handle — used for routing before OwnerID is assigned
 		uint8_t OwnerID            = 0; // 0 = unassigned (handshake not yet complete)
+		World* ClientWorld         = nullptr; // non-owning — EditorContext owns the World via FlowManager
 		std::unique_ptr<ClientNetThread> Handler;
-		FlowManager* Flow = nullptr;   // non-owning — EditorContext owns the FlowManager
 	};
 	std::vector<ClientEntry> Clients;
 
-	FlowManager* ServerFlow       = nullptr; // non-owning
-	uint64_t     LastFlowTickTime = 0;       // SDL perf counter at last flow tick
+	uint64_t LastFlowTickTime = 0; // SDL perf counter at last flow tick
 };
 
 #endif // TNX_ENABLE_EDITOR

@@ -13,14 +13,9 @@
 #include <SDL3/SDL_timer.h>
 #include <cstring>
 
-void ServerNetThread::SetFlowManager(FlowManager* flow)
-{
-	FlowMgr = flow;
-}
-
 void ServerNetThread::BindSoulCallbacks()
 {
-	if (!ConnectionMgr || !FlowMgr) return;
+	if (!ConnectionMgr || !ServerWorld) return;
 
 	ConnectionMgr->OnClientDisconnected.Bind<ServerNetThread, &ServerNetThread::OnClientDisconnectedCB>(this);
 }
@@ -29,11 +24,8 @@ void ServerNetThread::OnClientDisconnectedCB(uint8_t ownerID)
 {
 	if (ownerID != 0 && ownerID < MaxOwnerIDs) InputLogs[ownerID].reset(); // free the log; slot becomes nullptr
 
-	if (FlowMgr&& ownerID 
-	!=
-	0
-	)
-	FlowMgr->OnClientDisconnected(ownerID);
+	if (FlowManager* flow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr)
+		if (ownerID != 0) flow->OnClientDisconnected(ownerID);
 }
 
 void ServerNetThread::CreateInputLog(uint8_t ownerID)
@@ -48,27 +40,42 @@ void ServerNetThread::CreateInputLog(uint8_t ownerID)
 	InputLogs[ownerID]->Initialize(temporalFrameCount);
 }
 
+
 void ServerNetThread::WirePlayerInputInjector(World* world)
 {
 	LogicThread* logic = world ? world->GetLogicThread() : nullptr;
 	if (!logic) return;
 
 	// Capture 'this' — ServerNetThread outlives the LogicThread (engine shutdown order).
-	// Iterates all ownerID slots each sim tick; non-null logs belong to connected players.
-	// On hit: inject key state + events into the player's sim InputBuffer.
-	// On miss (NotYetReceived): InputBuffer::Swap() already carried last state forward — no-op.
-	// On miss (LateOrAliased): data loss, log a warning.
-	logic->SetPlayerInputInjector([this, world](uint32_t frameNumber)
+	// Each sim tick: gate on MaxClientInputLead, consume (real or predicted), inject, check dirty.
+	logic->SetPlayerInputInjector([this, world, logic](uint32_t frameNumber)
 	{
+		const int maxLead = Config ? Config->MaxClientInputLead : 16;
+
 		for (uint32_t ownerID = 1; ownerID < MaxOwnerIDs; ++ownerID)
 		{
 			PlayerInputLog* log = InputLogs[ownerID].get();
 			if (!log) continue;
 
+			// Don't process input until Activate() has been called (PlayerBeginConfirm sent).
+			if (!log->bActive) continue;
+
+			InputBuffer* buf = world->GetPlayerSimInput(static_cast<uint8_t>(ownerID));
+
+			// Frame gate: stall if the client is too far behind.
+			// Still call Swap() so carry-forward of the last held state is visible via ReadSlot.
+			if (maxLead >= 0
+				&& frameNumber > log->LastReceivedFrame + static_cast<uint32_t>(maxLead))
+			{
+				LOG_WARN_F("[ServerNet] Stalling sim for ownerID %u: frame %u, lastReceived %u, lead %d",
+						   ownerID, frameNumber, log->LastReceivedFrame, maxLead);
+				if (buf) buf->Swap();
+				continue;
+			}
+
 			InputConsumeResult result = log->ConsumeFrame(frameNumber);
 			if (result)
 			{
-				InputBuffer* buf = world->GetPlayerSimInput(static_cast<uint8_t>(ownerID));
 				if (buf)
 				{
 					buf->InjectState(result.Entry->KeyState,
@@ -78,15 +85,28 @@ void ServerNetThread::WirePlayerInputInjector(World* world)
 					// TODO: inject discrete events into player event queue
 				}
 
-				// Echo the consumed frame back in all outbound headers so the client
-				// knows it can advance its send window past this frame.
-				if (ConnectionInfo* ci = ConnectionMgr ? ConnectionMgr->FindConnectionByOwnerID(static_cast<uint8_t>(ownerID)) : nullptr) ci->LastAckedClientFrame = log->LastConsumedFrame;
+				if (ConnectionInfo* ci = ConnectionMgr ? ConnectionMgr->FindConnectionByOwnerID(static_cast<uint8_t>(ownerID)) : nullptr)
+					ci->LastAckedClientFrame = log->LastConsumedFrame;
 			}
 			else if (result.Reason == InputMissReason::LateOrAliased)
 			{
 				LOG_WARN_F("[ServerNet] Input data loss for ownerID %u at frame %u", ownerID, frameNumber);
 			}
-			// NotYetReceived: silent — InputBuffer carries last held state forward via Swap()
+			// NotYetReceived within lead: ConsumeFrame already wrote a predicted entry and returned it.
+
+			// Expose the injected (or predicted/carried-forward) state to the sim this frame.
+			if (buf) buf->Swap();
+
+			// Trigger resim if a real packet corrected predicted frames.
+			if (log->IsDirty())
+			{
+				const uint32_t resimFrom = log->EarliestDirtyFrame;
+				log->ClearDirty();
+				LOG_INFO_F("[ServerNet] Input mismatch for ownerID %u, resim from frame %u", ownerID, resimFrom);
+#ifdef TNX_ENABLE_ROLLBACK
+				logic->RequestRollback(resimFrom);
+#endif
+			}
 		}
 	});
 }
@@ -174,16 +194,16 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 
 			ConnectionMgr->GenerateNetID(msg.Connection);
 
-			// Create the per-player input log now that we have a stable ownerID.
-			// Depth matches TemporalFrameCount so frame indexing is 1:1 with the slab.
-			CreateInputLog(ci->OwnerID);
-
 			if (ServerWorld) ServerWorld->EnsurePlayerInputSlot(ci->OwnerID);
 
 			const uint32_t serverFrame = (ServerWorld && ServerWorld->GetLogicThread())
 											 ? ServerWorld->GetLogicThread()->GetLastCompletedFrame()
 											 : 0;
 			ci->ServerFrameAtHandshake = serverFrame;
+
+			// Create the per-player input log now that we have a stable ownerID.
+			// Log is inactive until Activate() is called at PlayerBeginConfirm time.
+			CreateInputLog(ci->OwnerID);
 			ci->RepState               = ClientRepState::Synchronizing;
 
 			HandshakePayload hsPay{};
@@ -223,7 +243,8 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 			NetChannel ch(ci, ConnectionMgr);
 			ch.Send(NetMessageType::ClockSync, resp, /*reliable=*/false, serverFrame);
 
-			const std::string localPath = FlowMgr ? FlowMgr->GetActiveLevelLocalPath() : std::string{};
+			const std::string localPath = (ServerWorld && ServerWorld->GetFlowManager())
+				? ServerWorld->GetFlowManager()->GetActiveLevelLocalPath() : std::string{};
 			if (!localPath.empty())
 			{
 				TravelPayload travelMsg{};
@@ -259,7 +280,8 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 
 				// ReplicationSystem::SendSpawns Pass 1 will flush the initial entity batch,
 				// send ServerReady, and advance RepState → Loaded on the next Tick.
-				if (FlowMgr) FlowMgr->OnClientLoaded(ci->OwnerID);
+				if (FlowManager* flow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr)
+					flow->OnClientLoaded(ci->OwnerID);
 			}
 			break;
 		}
@@ -292,10 +314,12 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 				break;
 			}
 
-			if (FlowMgr)
 			{
-				RPCContext ctx{ ci, ConnectionMgr };
-				FlowMgr->DispatchServerRPC(ci->OwnerID, ctx, *rpcHdr, params);
+				if (FlowManager* flow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr)
+				{
+					RPCContext ctx{ci, ConnectionMgr};
+					flow->DispatchServerRPC(ci->OwnerID, ctx, *rpcHdr, params);
+				}
 			}
 			break;
 		}

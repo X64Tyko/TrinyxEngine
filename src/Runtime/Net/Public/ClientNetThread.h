@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <vector>
 
-class FlowManager;
 class World;
 
 // ---------------------------------------------------------------------------
@@ -14,17 +13,14 @@ class World;
 //   ClockSync (client compute InputLead)  TravelNotify  FlowEvent
 //   EntitySpawn  ConstructSpawn  StateCorrection
 //
-// Holds a non-owning FlowManager pointer for posting net events to Sentinel.
-// FlowManager lives on Sentinel — ClientNetThread never owns it.
+// FlowManager is resolved from the client World (world->GetFlowManager()) so
+// there is no separate FlowMgr pointer to keep in sync.
 // ---------------------------------------------------------------------------
 class ClientNetThread : public NetThreadBase<ClientNetThread>
 {
 	friend class NetThreadBase<ClientNetThread>;
 
 public:
-	/// Non-owning. Posts TravelNotify and FlowEvents to client's Sentinel flow.
-	void SetFlowManager(FlowManager* flow) { FlowMgr = flow; }
-
 	/// Non-owning. Required for EntitySpawn and StateCorrection routing.
 	void SetClientWorld(uint8_t ownerID, World* world) { MapConnectionToWorld(ownerID, world); }
 
@@ -46,6 +42,5 @@ private:
 	/// Attempt to spawn one deferred payload. Returns true if done (success or permanent failure).
 	bool TrySpawnDeferred(const DeferredConstructSpawn& entry);
 
-	FlowManager* FlowMgr = nullptr;
 	std::vector<DeferredConstructSpawn> DeferredConstructSpawns;
 };

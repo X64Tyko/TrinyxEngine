@@ -103,7 +103,7 @@ void ReplicationSystem::SendConstructSpawns(NetConnectionManager* connMgr, uint3
 // ---------------------------------------------------------------------------
 
 bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* entityReg,
-											 FlowManager* flow, const uint8_t* data, size_t len)
+											 World* clientWorld, const uint8_t* data, size_t len)
 {
 	if (len < sizeof(ConstructSpawnPayload))
 	{
@@ -164,8 +164,7 @@ bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* e
 	}
 
 	// Create the client-side Construct via the replication path
-	World* clientWorld = flow ? flow->GetWorld() : nullptr;
-	void* raw          = factory(reg, clientWorld, resolvedHandles, resolvedCount, ownerID);
+	void* raw = factory(reg, clientWorld, resolvedHandles, resolvedCount, ownerID);
 	if (!raw)
 	{
 		LOG_WARN("[Replication] HandleConstructSpawn: factory returned null");
@@ -182,7 +181,8 @@ bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* e
 	ConstructRef ref = reg->WireNetRef(raw, serverHandle, wireManifest, typeHash);
 
 	// Deliver to the owning Soul
-	Soul* soul = flow ? flow->GetSoul(ownerID) : nullptr;
+	FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr;
+	Soul* soul        = flow ? flow->GetSoul(ownerID) : nullptr;
 	if (soul)
 	{
 		soul->ClaimBody(ref);
@@ -459,7 +459,7 @@ void ReplicationSystem::SendStateCorrections(NetConnectionManager* connMgr, uint
 
 	for (const auto& ci : connMgr->GetConnections())
 	{
-		if (ci.bConnected && ci.OwnerID > 0)
+		if (ci.bConnected && ci.bServerSide && ci.OwnerID > 0)
 		{
 			connMgr->Send(ci.Handle, header,
 						  reinterpret_cast<const uint8_t*>(batch.data()), false);

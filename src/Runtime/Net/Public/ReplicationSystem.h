@@ -13,7 +13,6 @@
 class World;
 class Registry;
 class ConstructRegistry;
-class FlowManager;
 class NetConnectionManager;
 union EntityHandle;
 union GlobalEntityHandle;
@@ -123,7 +122,7 @@ public:
 	/// Returns false if any required entity is not yet in the client registry — caller
 	/// should defer and retry next tick.
 	static bool HandleConstructSpawn(ConstructRegistry* reg, Registry* entityReg,
-									 FlowManager* flow, const uint8_t* data, size_t len);
+									 World* clientWorld, const uint8_t* data, size_t len);
 
 private:
 	void SendSpawns(NetConnectionManager* connMgr, uint32_t frameNumber);

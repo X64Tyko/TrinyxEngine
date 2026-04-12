@@ -130,7 +130,11 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 
 				LOG_INFO_F("[ClientNet] TravelNotify received — loading level '%s'", travelMsg->LevelPath);
 
-				if (FlowMgr) FlowMgr->PostTravelNotify(travelMsg->LevelPath);
+				{
+					World* clientWorld = WorldMap[ci->OwnerID];
+					if (FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr)
+						flow->PostTravelNotify(travelMsg->LevelPath);
+				}
 
 				// Auto-acknowledge (synchronous load in PIE).
 				// Future: remove and let FlowState call AcknowledgeLevelReady() after async load.
@@ -158,43 +162,25 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 				{
 					ci->RepState = ClientRepState::Loaded;
 
-					World* clientWorld = WorldMap[ci->OwnerID];
-					if (clientWorld)
+					// SendPlayerBeginRequest just sends a packet — safe to call from NetThread.
 					{
-						clientWorld->Spawn([](Registry* reg)
-						{
-							ComponentCacheBase* cache  = reg->GetTemporalCache();
-							const uint32_t frame       = cache->GetActiveWriteFrame();
-							TemporalFrameHeader* hdr   = cache->GetFrameHeader(frame);
-							const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
-							auto* flags                = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
-							if (!flags) return;
-
-							const uint32_t max         = cache->GetMaxCachedEntityCount();
-							const uint32_t aliveBit    = static_cast<uint32_t>(TemporalFlagBits::Alive);
-							const uint32_t activeBit   = static_cast<uint32_t>(TemporalFlagBits::Active);
-							const uint32_t aliveShift  = TNX_CTZ32(aliveBit);
-							const uint32_t activeShift = TNX_CTZ32(activeBit);
-							int sweepCount             = 0;
-							for (uint32_t i = 0; i < max; ++i)
-							{
-								const uint32_t f    = static_cast<uint32_t>(flags[i]);
-								const uint32_t mask = -((f & aliveBit) >> aliveShift);
-								sweepCount          += static_cast<int>((activeBit & mask & ~f) >> activeShift);
-								flags[i]            = static_cast<int32_t>(f | (activeBit & mask));
-							}
-							LOG_INFO_F("[Replication] ServerReady: swept %d Alive→Active", sweepCount);
-						});
+						World* clientWorld = WorldMap[ci->OwnerID];
+						if (FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr)
+							flow->SendPlayerBeginRequest(NetChannel(ci, ConnectionMgr), msg.Header.FrameNumber, ci->Predictions);
 					}
 
-					// FlowManager owns all spawn request decisions (prefab, prediction ID, position hint).
-					// ClientNetThread only provides the channel and ledger.
-					if (FlowMgr) FlowMgr->SendPlayerBeginRequest(NetChannel(ci, ConnectionMgr), msg.Header.FrameNumber, ci->Predictions);
-
-					LOG_INFO("[ClientNet] FlowEvent::ServerReady → Loaded, Alive→Active sweep enqueued");
+					// The Alive→Active sweep is deferred to FlowManager's Sentinel tick so it runs
+					// AFTER the level load Spawn() (posted via TravelNotify) completes. Posting the
+					// event here (rather than calling Spawn directly) prevents a SpawnSync race where
+					// the sweep wins the mutex before level entities exist.
+					LOG_INFO("[ClientNet] FlowEvent::ServerReady → Loaded, sweep deferred to FlowManager");
 				}
 
-				if (FlowMgr) FlowMgr->PostNetEvent(ev->EventID);
+				{
+					World* clientWorld = WorldMap[ci->OwnerID];
+					if (FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr)
+						flow->PostNetEvent(ev->EventID);
+				}
 				break;
 			}
 
@@ -301,10 +287,13 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 					break;
 				}
 
-				if (FlowMgr)
 				{
-					RPCContext ctx{ci, ConnectionMgr};
-					FlowMgr->DispatchClientRPC(ci->OwnerID, ctx, *rpcHdr, params);
+					World* clientWorld = WorldMap[ci->OwnerID];
+					if (FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr)
+					{
+						RPCContext ctx{ci, ConnectionMgr};
+						flow->DispatchClientRPC(ci->OwnerID, ctx, *rpcHdr, params);
+					}
 				}
 				break;
 			}
@@ -352,14 +341,13 @@ bool ClientNetThread::TrySpawnDeferred(const DeferredConstructSpawn& entry)
 
 	ConstructRegistry* constructs = clientWorld->GetConstructRegistry();
 	Registry* entityReg           = clientWorld->GetRegistry();
-	FlowManager* flow             = FlowMgr;
 	std::vector<uint8_t> payload  = entry.Payload;
 
 	bool done = false;
-	clientWorld->Spawn([constructs, entityReg, flow, payload, &done](Registry*)
+	clientWorld->Spawn([constructs, entityReg, clientWorld, payload, &done](Registry*)
 	{
 		done = ReplicationSystem::HandleConstructSpawn(
-			constructs, entityReg, flow, payload.data(), payload.size());
+			constructs, entityReg, clientWorld, payload.data(), payload.size());
 	});
 	return done;
 }
@@ -387,6 +375,9 @@ void ClientNetThread::TickInputSend()
 	{
 		ConnectionInfo* ci = ConnectionMgr->FindConnection(handle);
 		if (!ci) continue;
+
+		// Don't send input until the server has confirmed our spawn.
+		if (ci->RepState < ClientRepState::Playing) continue;
 
 		World* world = WorldMap[ci->OwnerID];
 		if (!world) continue;

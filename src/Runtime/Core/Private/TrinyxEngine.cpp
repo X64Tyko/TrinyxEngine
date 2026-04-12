@@ -163,7 +163,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 			Net->Initialize(&GNS, &Config);
 #if defined(TNX_NET_MODEL_PIE)
 			Net->InitChildren();
-			Net->SetServerFlow(Flow.get());
+			// Server world wired below, after FlowManager::CreateWorld().
 #elif defined(TNX_NET_MODEL_SERVER)
 			Net->SetFlowManager(Flow.get());
 #endif
@@ -190,7 +190,9 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 #if defined(TNX_NET_MODEL_PIE) || defined(TNX_NET_MODEL_SERVER)
 	if (Net) Net->SetReplicationSystem(Replicator.get());
 #endif
-#if defined(TNX_NET_MODEL_SERVER)
+#if defined(TNX_NET_MODEL_PIE)
+	if (Net) Net->SetServerWorld(DefaultWorld);
+#elif defined(TNX_NET_MODEL_SERVER)
 	// Wire the per-player input injector into the server world's LogicThread.
 	// PIE wires this in EditorContext after SetServerWorld() is called per-session.
 	if (Net) Net->SetServerWorld(DefaultWorld);
@@ -253,7 +255,7 @@ bool TrinyxEngine::EnsureNetworking()
 	Net->Initialize(&GNS, &Config);
 #if defined(TNX_NET_MODEL_PIE)
 	Net->InitChildren();
-	Net->SetServerFlow(Flow.get());
+	if (DefaultWorld) Net->SetServerWorld(DefaultWorld);
 #elif defined(TNX_NET_MODEL_SERVER)
 	Net->SetFlowManager(Flow.get());
 #endif

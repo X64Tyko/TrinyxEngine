@@ -8,125 +8,132 @@
 
 void PIENetThread::InitChildren()
 {
-	Server.InitAsHandler(GNS, Config, ConnectionMgr);
-	Server.BindSoulCallbacks();
+Server.InitAsHandler(GNS, Config, ConnectionMgr);
+Server.BindSoulCallbacks();
+}
+
+void PIENetThread::PumpMessages()
+{
+ConnectionMgr->RunCallbacks();
+
+std::vector<ReceivedMessage> messages;
+ConnectionMgr->PollIncoming(messages);
+for (const auto& msg : messages) HandleMessage(msg);
 }
 
 void PIENetThread::SetServerWorld(World* world)
 {
-	Server.SetServerWorld(world);
-}
-void PIENetThread::SetServerFlow(FlowManager* flow)
-{
-	Server.SetFlowManager(flow);
-	ServerFlow = flow;
+Server.SetServerWorld(world);
 }
 
 void PIENetThread::SetReplicationSystem(ReplicationSystem* repl)
 {
-	Server.SetReplicationSystem(repl);
+Server.SetReplicationSystem(repl);
 }
 
-void PIENetThread::AddClient(HSteamNetConnection clientHandle, World* world, FlowManager* flow)
+void PIENetThread::AddClient(HSteamNetConnection clientHandle, World* world)
 {
-	ClientEntry& entry = Clients.emplace_back();
-	entry.Handle       = clientHandle;
-	entry.OwnerID      = 0; // promoted to real OwnerID in UpdateClientOwnerID after handshake
-	entry.Flow         = flow;
-	entry.Handler      = std::make_unique<ClientNetThread>();
-	entry.Handler->InitAsHandler(GNS, Config, ConnectionMgr);
-	entry.Handler->SetFlowManager(flow);
-	// World and OwnerID wired in UpdateClientOwnerID once server assigns the ID
-	(void)world;
+ClientEntry& entry   = Clients.emplace_back();
+entry.Handle         = clientHandle;
+entry.OwnerID        = 0; // promoted to real OwnerID in UpdateClientOwnerID after handshake
+entry.ClientWorld    = world;
+entry.Handler        = std::make_unique<ClientNetThread>();
+entry.Handler->InitAsHandler(GNS, Config, ConnectionMgr);
+// World and OwnerID wired in UpdateClientOwnerID once server assigns the ID
 }
 
 void PIENetThread::UpdateClientOwnerID(HSteamNetConnection clientHandle, uint8_t ownerID, World* world)
 {
-	for (auto& entry : Clients)
-	{
-		if (entry.Handle == clientHandle)
-		{
-			entry.OwnerID = ownerID;
-			entry.Handler->SetClientWorld(ownerID, world);
-			MapConnectionToWorld(ownerID, world);
-			LOG_INFO_F("[PIENet] Client handle %u promoted to OwnerID=%u", clientHandle, ownerID);
-			return;
-		}
-	}
-	LOG_WARN_F("[PIENet] UpdateClientOwnerID: no entry for handle %u", clientHandle);
+for (auto& entry : Clients)
+{
+if (entry.Handle == clientHandle)
+{
+entry.OwnerID     = ownerID;
+entry.ClientWorld = world;
+entry.Handler->SetClientWorld(ownerID, world);
+MapConnectionToWorld(ownerID, world);
+LOG_INFO_F("[PIENet] Client handle %u promoted to OwnerID=%u", clientHandle, ownerID);
+return;
+}
+}
+LOG_WARN_F("[PIENet] UpdateClientOwnerID: no entry for handle %u", clientHandle);
 }
 
 void PIENetThread::RemoveClient(uint8_t ownerID)
 {
-	auto it = std::find_if(Clients.begin(), Clients.end(),
-		[ownerID](const ClientEntry& e) { return e.OwnerID == ownerID; });
-	if (it != Clients.end())
-		Clients.erase(it);
-	MapConnectionToWorld(ownerID, nullptr);
+auto it = std::find_if(Clients.begin(), Clients.end(),
+[ownerID](const ClientEntry& e) { return e.OwnerID == ownerID; });
+if (it != Clients.end())
+Clients.erase(it);
+MapConnectionToWorld(ownerID, nullptr);
 }
 
 void PIENetThread::ClearClients()
 {
-	Clients.clear();
+Clients.clear();
 }
 
 void PIENetThread::TickReplication()
 {
-	Server.TickReplication();
+Server.TickReplication();
 
-	// Compute dt from SDL perf counter — same source as TrinyxEngine's Sentinel loop.
-	const uint64_t now  = SDL_GetPerformanceCounter();
-	const float dt      = LastFlowTickTime
-		? static_cast<float>(static_cast<double>(now - LastFlowTickTime)
-			/ static_cast<double>(SDL_GetPerformanceFrequency()))
-		: 0.0f;
-	LastFlowTickTime = now;
+// Compute dt from SDL perf counter — same source as TrinyxEngine's Sentinel loop.
+const uint64_t now  = SDL_GetPerformanceCounter();
+const float dt      = LastFlowTickTime
+? static_cast<float>(static_cast<double>(now - LastFlowTickTime)
+/ static_cast<double>(SDL_GetPerformanceFrequency()))
+: 0.0f;
+LastFlowTickTime = now;
 
-	if (ServerFlow) ServerFlow->Tick(dt);
-	for (auto& entry : Clients)
-	{
-		if (entry.Flow) entry.Flow->Tick(dt);
-		entry.Handler->TickReplication();
-	}
+// Tick the server's FlowManager.
+World* serverWorld = Server.GetServerWorld();
+if (serverWorld)
+if (FlowManager* flow = serverWorld->GetFlowManager()) flow->Tick(dt);
+
+// Tick each client's FlowManager and drain deferred replication work.
+for (auto& entry : Clients)
+{
+if (entry.ClientWorld)
+if (FlowManager* flow = entry.ClientWorld->GetFlowManager()) flow->Tick(dt);
+entry.Handler->TickReplication();
+}
 }
 
 void PIENetThread::TickInputSend()
 {
-	for (auto& entry : Clients) entry.Handler->TickInputSend();
+for (auto& entry : Clients) entry.Handler->TickInputSend();
 }
 
 void PIENetThread::HandleMessage(const ReceivedMessage& msg)
 {
-	const ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+const ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
 
-	if (!ci)
-	{
-		LOG_WARN_F("[PIENet] HandleMessage: unknown connection %u", msg.Connection);
-		return;
-	}
+if (!ci)
+{
+LOG_WARN_F("[PIENet] HandleMessage: unknown connection %u", msg.Connection);
+return;
+}
 
-	if (ci->bServerSide)
-	{
-		Server.HandleMessage(msg);
-	}
-	else
-	{
-		for (auto& entry : Clients)
-		{
-			// Pre-handshake: OwnerID not yet assigned — route by connection handle.
-			// Post-handshake: route by OwnerID.
-			const bool match = (entry.OwnerID != 0 && entry.OwnerID == ci->OwnerID)
-				|| (entry.OwnerID == 0 && entry.Handle == msg.Connection);
-			if (match)
-			{
-				entry.Handler->HandleMessage(msg);
-				return;
-			}
-		}
+if (ci->bServerSide)
+{
+Server.HandleMessage(msg);
+}
+else
+{
+for (auto& entry : Clients)
+{
+// Always match on the registered client-side handle — the client-initiated CI
+// may still have OwnerID=0 when the first post-handshake messages arrive.
+if (entry.Handle == msg.Connection)
+{
+entry.Handler->HandleMessage(msg);
+return;
+}
+}
 
-		LOG_WARN_F("[PIENet] HandleMessage: no client handler for connection %u (OwnerID=%u)",
-				   msg.Connection, ci->OwnerID);
-	}
+LOG_WARN_F("[PIENet] HandleMessage: no client handler for connection %u (OwnerID=%u)",
+   msg.Connection, ci->OwnerID);
+}
 }
 
 #endif // TNX_ENABLE_EDITOR

@@ -1358,49 +1358,58 @@ void EditorContext::StartPIE()
 		// Register the client handler immediately — before the pump — so it
 		// can receive the handshake reply and subsequent ClockSync/TravelNotify.
 		// OwnerID is 0 at this point; PIENetThread routes by handle until promoted.
-		net->AddClient(clientHandle, PIEClients[i].Flow->GetWorld(), PIEClients[i].Flow.get());
+		net->AddClient(clientHandle, PIEClients[i].Flow->GetWorld());
 
-		// Pump GNS callbacks so the server accepts the connection
-		for (int j = 0; j < 20; ++j)
+		// Pump: run callbacks + poll + dispatch until the server-side connection appears
+		// and GenerateNetID has fired (HandshakeRequest processed → OwnerID assigned).
+		const HSteamNetConnection serverHandle = [&]() -> HSteamNetConnection
 		{
-			connMgr->RunCallbacks();
-			net->Tick();
-			SDL_Delay(1);
-		}
-
-		// Find the new server-side accepted handle and promote the client entry
-		for (const auto& ci : connMgr->GetConnections())
-		{
-			bool known = false;
-			for (uint32_t h : knownHandles)
+			for (int j = 0; j < 50; ++j)
 			{
-				if (h == ci.Handle)
+				net->PumpMessages();
+				SDL_Delay(1);
+				for (const auto& ci : connMgr->GetConnections())
 				{
-					known = true;
-					break;
+					bool known = false;
+					for (uint32_t h : knownHandles) { if (h == ci.Handle) { known = true; break; } }
+					if (!known) return ci.Handle;
 				}
 			}
-			if (!known)
-			{
-				PIEClients[i].ServerHandle = ci.Handle;
-				knownHandles.push_back(ci.Handle);
+			return 0;
+		}();
 
-				// Promote client entry from handle-based to OwnerID-based routing
-				const uint8_t ownerID                        = ci.OwnerID;
-				PIEClients[i].Flow->GetWorld()->LocalOwnerID = ownerID;
-				net->UpdateClientOwnerID(clientHandle, ownerID, PIEClients[i].Flow->GetWorld());
-
-				break;
-			}
-		}
-
-		if (PIEClients[i].ServerHandle == 0)
+		if (serverHandle == 0)
+		{
 			LOG_WARN_F("[PIE] Could not identify server-side handle for client %zu", i);
+		}
+		else
+		{
+			knownHandles.push_back(serverHandle);
+			PIEClients[i].ServerHandle = serverHandle;
+
+			// Keep pumping until GenerateNetID fires and OwnerID is non-zero.
+			uint8_t ownerID = 0;
+			for (int j = 0; j < 100 && ownerID == 0; ++j)
+			{
+				net->PumpMessages();
+				SDL_Delay(1);
+				for (const auto& ci : connMgr->GetConnections())
+				{
+					if (ci.Handle == serverHandle) { ownerID = ci.OwnerID; break; }
+				}
+			}
+
+			if (ownerID == 0)
+				LOG_WARN_F("[PIE] OwnerID never assigned for client %zu server handle %u", i, serverHandle);
+
+			// Promote client entry: wire world to the now-known OwnerID.
+			PIEClients[i].Flow->GetWorld()->LocalOwnerID = ownerID;
+			net->UpdateClientOwnerID(clientHandle, ownerID, PIEClients[i].Flow->GetWorld());
+		}
 	}
 
 	// Wire server world and replication
 	net->SetServerWorld(ServerFlow->GetWorld());
-	net->SetServerFlow(ServerFlow.get());
 	net->GetServer().WirePlayerInputInjector(ServerFlow->GetWorld());
 
 	Replicator = std::make_unique<ReplicationSystem>();
@@ -1512,7 +1521,6 @@ void EditorContext::StopPIE()
 		// Clear all client handler registrations
 		net->ClearClients();
 		net->SetServerWorld(nullptr);
-		net->SetServerFlow(nullptr);
 
 		connMgr->StopListening();
 	}
