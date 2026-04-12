@@ -160,9 +160,11 @@ struct BaseNetPayload
 //
 // SpawnFlags layout (Generation_Bits = 16, so both halves are 16 bits):
 //
-//   bits [31 : 32-Generation_Bits]  =  entity generation  (Generation_Bits wide)
-//   bits [Generation_Bits-1 : 0]   =  spawn flags        (32-Generation_Bits wide)
+//   bits [31 : 16]  =  TemporalFlagBits  (all system flags live in bits 20-31, game-layer in bits 16-19)
+//   bits [15 :  0]  =  entity generation (Generation_Bits wide)
 //
+// Flags are written directly to CacheSlotMeta — no translation needed on the receiver side.
+// Bits 16-19 are available for future spawn-specific game-layer flags.
 // Use Pack / GetFlags / GetGeneration — do not read SpawnFlags raw. If
 // Generation_Bits changes, static_assert on EntityRef catches mismatches.
 // ---------------------------------------------------------------------------
@@ -185,30 +187,29 @@ struct EntitySpawnPayload
 	// Mesh (Volatile)
 	uint32_t MeshID;
 
-	// SpawnFlags — generation packed in high Generation_Bits bits,
-	// spawn flags in the remaining low bits. Use helpers below.
+	// SpawnFlags — TemporalFlagBits in high 16 bits, generation in low 16 bits.
+	// Pass TemporalFlagBits values directly; GetFlags() returns them ready for CacheSlotMeta.
 	int32_t SpawnFlags;
 
-	// --- Spawn flag constants (fit in lower 16 bits when Generation_Bits == 16) ---
-	static constexpr uint32_t SpawnFlag_Background = 1u << 0; // Alive-only; client sweeps Active on ServerReady
-
 	// --- SpawnFlags helpers ---
-	static constexpr uint32_t FlagsMask = (1u << (32u - Generation_Bits)) - 1u;
+	// Generation in low 16 bits; TemporalFlagBits in high 16 bits (bits 16-31).
+	// Bits 16-19 are available for spawn-specific game-layer flags.
+	static constexpr uint32_t FlagsMask      = ~((1u << Generation_Bits) - 1u); // 0xFFFF0000
+	static constexpr uint32_t GenerationMask = (1u << Generation_Bits) - 1u;    // 0x0000FFFF
 
 	static int32_t Pack(uint32_t flagBits, uint32_t generation)
 	{
-		return static_cast<int32_t>(
-			(generation << (32u - Generation_Bits)) | (flagBits & FlagsMask));
+		return static_cast<int32_t>((flagBits & FlagsMask) | (generation & GenerationMask));
 	}
 
-	static uint32_t GetFlags(int32_t spawnFlags)
+	static int32_t GetFlags(int32_t spawnFlags)
 	{
-		return static_cast<uint32_t>(spawnFlags) & FlagsMask;
+		return spawnFlags & static_cast<int32_t>(FlagsMask);
 	}
 
 	static uint16_t GetGeneration(int32_t spawnFlags)
 	{
-		return static_cast<uint16_t>(static_cast<uint32_t>(spawnFlags) >> (32u - Generation_Bits));
+		return static_cast<uint16_t>(static_cast<uint32_t>(spawnFlags) & GenerationMask);
 	}
 };
 

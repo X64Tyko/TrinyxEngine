@@ -292,8 +292,8 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 		manifest.ClassType = record->Arch ? record->Arch->ArchClassID : 0;
 		spawnMsg.Manifest  = manifest.Value;
 
-		// SpawnFlags: pack generation in high EntityGeneration_Bits bits, flags in low bits.
-		// Receiver uses GetGeneration() to form an EntityRef, GetFlags() to write CacheSlotMeta.
+		// SpawnFlags: TemporalFlagBits in high 16 bits, generation in low 16 bits.
+		// Receiver writes GetFlags() directly to CacheSlotMeta — no translation needed.
 		const uint32_t flagBits = bAliveOnly
 									  ? static_cast<uint32_t>(TemporalFlagBits::Alive)
 									  : static_cast<uint32_t>(TemporalFlagBits::Active | TemporalFlagBits::Alive);
@@ -525,9 +525,8 @@ void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayloa
 
 		if (compID == CacheSlotMeta<>::StaticTypeID())
 		{
-			// Extract only the spawn flags from SpawnFlags — generation lives in the high bits
-			// and must not be written into the entity's flag field.
-			if (fdesc.componentSlotIndex == 0) intArr[localIdx] = static_cast<int32_t>(EntitySpawnPayload::GetFlags(payload.SpawnFlags));
+			// GetFlags() returns the TemporalFlagBits directly — write them straight to the slab.
+			if (fdesc.componentSlotIndex == 0) intArr[localIdx] = EntitySpawnPayload::GetFlags(payload.SpawnFlags);
 		}
 		else if (compID == CTransform<>::StaticTypeID())
 		{
