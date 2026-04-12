@@ -7,6 +7,7 @@
 #include "Input.h"
 #include "JoltPhysics.h"
 #include "Owned.h"
+#include "Soul.h"
 
 #include <cmath>
 
@@ -26,7 +27,7 @@ class PlayerConstruct : public Construct<PlayerConstruct>
 public:
 	TNX_CONSTRUCT_WORLD
 
-	uint8_t OwnerID = 0; // NetOwnerID of the controlling Soul (0 = local/standalone)
+	Soul* PlayerSoul = nullptr; // Owning Soul — null in standalone (no net session)
 
 	ConstructView<EPlayer> Body;
 	Owned<CameraConstruct> FirstPersonCam;
@@ -119,7 +120,7 @@ public:
 	// The actual Jolt push happens in PhysicsFlush (once per physics step).
 	void PrePhysics(SimFloat dt)
 	{
-		InputBuffer* simInput = GetWorld()->GetInputForPlayer(OwnerID);
+		InputBuffer* simInput = GetWorld()->GetInputForPlayer(GetOwnerID());
 
 		float sinYaw = std::sin(Yaw);
 		float cosYaw = std::cos(Yaw);
@@ -162,7 +163,7 @@ public:
 	// Runs after physics — body transform is up to date.
 	void ScalarUpdate(SimFloat dt)
 	{
-		InputBuffer* vizInput = GetWorld()->GetVizInputForPlayer(OwnerID);
+		InputBuffer* vizInput = GetWorld()->GetVizInputForPlayer(GetOwnerID());
 
 		// ── Camera toggle (V key) — edge-detect ─────────────────────────
 		bool toggleDown = vizInput->IsActionDown(Action::ToggleCamera);
@@ -212,13 +213,16 @@ public:
 	float SpawnPosY = 5.0f;
 	float SpawnPosZ = 0.0f;
 
+	uint8_t GetOwnerID() const { return PlayerSoul ? PlayerSoul->GetOwnerID() : 0; }
+
 private:
 	/// Set the active camera only if this is the owning client (or standalone).
 	/// Headless server never calls SetActiveCamera; remote client Constructs skip it too.
 	void SetActiveCameraIfOwned(CameraConstruct* cam)
 	{
 		if (GetWorld()->GetConfig().Mode == EngineMode::Server) return;
-		if (OwnerID != 0 && OwnerID != GetWorld()->LocalOwnerID) return;
+		const uint8_t ownerID = GetOwnerID();
+		if (ownerID != 0 && ownerID != GetWorld()->LocalOwnerID) return;
 		GetWorld()->GetLogicThread()->SetActiveCamera(cam);
 	}
 

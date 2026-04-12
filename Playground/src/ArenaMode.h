@@ -78,9 +78,9 @@ private:
 		const int64_t prefabIDRaw = GetCharacterPrefab(soul);
 		const uint16_t typeHash   = ReflectionRegistry::ConstructTypeHashFromName("PlayerConstruct");
 
-		auto* player      = reg->Create<PlayerConstruct>(world);
-		player->OwnerID   = soul.GetOwnerID();
-		player->SpawnPosX = 0.0f;
+		auto* player         = reg->Create<PlayerConstruct>(world);
+		player->PlayerSoul   = &soul;
+		player->SpawnPosX    = 0.0f;
 		player->SpawnPosY = 5.0f;
 		player->SpawnPosZ = 0.0f;
 
