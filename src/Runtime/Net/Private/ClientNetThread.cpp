@@ -394,6 +394,21 @@ void ClientNetThread::TickInputSend()
 		payload.MouseDY      = netInput->GetMouseDY();
 		payload.MouseButtons = netInput->GetMouseButtonMask();
 
+		payload.FirstClientFrame = ci->LastSentInputFrame + 1;
+		payload.LastClientFrame  = frame;
+
+		const uint16_t eventCount = netInput->GetEventCount();
+		const uint8_t toSend      = static_cast<uint8_t>(eventCount <= 8 ? eventCount : 8);
+		if (eventCount > 8) [[unlikely]]
+			LOG_WARN_F("[ClientNet] Input event overflow: %u events in window, capping at 8", eventCount);
+
+		for (uint8_t i = 0; i < toSend; ++i)
+		{
+			InputData e       = netInput->ReadEvent();
+			payload.Events[i] = {static_cast<uint32_t>(e.Key), e.FrameUSOffset, e.Pressed, 0};
+		}
+		payload.EventCount = toSend;
+
 		PacketHeader header{};
 		header.Type        = static_cast<uint8_t>(NetMessageType::InputFrame);
 		header.Flags       = PacketFlag::DefaultFlags;
@@ -402,5 +417,7 @@ void ClientNetThread::TickInputSend()
 		header.SenderID    = ci->OwnerID;
 		ConnectionMgr->Send(handle, header,
 							reinterpret_cast<const uint8_t*>(&payload), false);
+
+		ci->LastSentInputFrame = frame;
 	}
 }

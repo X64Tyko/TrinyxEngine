@@ -38,6 +38,9 @@ struct ConnectionInfo
 	bool bClientInitiated           = false; // True only for connections we opened via Connect() — reliable even in GNS loopback
 	bool bInitialSpawnFlushed       = false; // Server-side: true after first full entity batch sent to this client
 
+	// Client-side input tracking — used to build FirstClientFrame spans in InputFramePayload.
+	uint32_t LastSentInputFrame = 0;
+
 	// Client-side only — tracks in-flight spawn predictions awaiting Confirm/Reject.
 	PredictionLedger Predictions;
 };

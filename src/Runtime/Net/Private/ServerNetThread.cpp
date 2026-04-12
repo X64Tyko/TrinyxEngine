@@ -1,5 +1,6 @@
 #include "ServerNetThread.h"
 
+#include "EngineConfig.h"
 #include "FlowManager.h"
 #include "NetChannel.h"
 #include "NetConnectionManager.h"
@@ -26,11 +27,25 @@ void ServerNetThread::BindSoulCallbacks()
 
 void ServerNetThread::OnClientDisconnectedCB(uint8_t ownerID)
 {
+	if (ownerID != 0 && ownerID < MaxOwnerIDs) InputLogs[ownerID].reset(); // free the log; slot becomes nullptr
+
 	if (FlowMgr&& ownerID 
 	!=
 	0
 	)
 	FlowMgr->OnClientDisconnected(ownerID);
+}
+
+void ServerNetThread::CreateInputLog(uint8_t ownerID)
+{
+	if (ownerID == 0 || ownerID >= MaxOwnerIDs) return;
+
+	const uint32_t temporalFrameCount = (Config && Config->TemporalFrameCount != EngineConfig::Unset)
+											? static_cast<uint32_t>(Config->TemporalFrameCount)
+											: 32u;
+
+	InputLogs[ownerID] = std::make_unique<PlayerInputLog>();
+	InputLogs[ownerID]->Initialize(temporalFrameCount);
 }
 
 void ServerNetThread::TickReplication()
@@ -56,19 +71,25 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 				LOG_WARN_F("[ServerNet] InputFrame payload too small (%zu)", msg.Payload.size());
 				break;
 			}
-			const uint8_t ownerID  = msg.Header.SenderID;
-			const auto* payload    = reinterpret_cast<const InputFramePayload*>(msg.Payload.data());
+			const uint8_t ownerID = msg.Header.SenderID;
+			const auto* payload   = reinterpret_cast<const InputFramePayload*>(msg.Payload.data());
 
-			ServerWorld->EnsurePlayerInputSlot(ownerID);
-			InputBuffer* simInput = ServerWorld->GetPlayerSimInput(ownerID);
-			InputBuffer* vizInput = ServerWorld->GetPlayerVizInput(ownerID);
-			if (!simInput)
+			PlayerInputLog* log = GetInputLog(ownerID);
+			if (!log)
 			{
-				LOG_WARN_F("[ServerNet] InputFrame from OwnerID %u out of range — dropped", ownerID);
+				LOG_WARN_F("[ServerNet] InputFrame from OwnerID %u — no log (not connected?)", ownerID);
 				break;
 			}
-			simInput->InjectState(payload->KeyState, payload->MouseDX, payload->MouseDY, payload->MouseButtons);
-			vizInput->InjectState(payload->KeyState, payload->MouseDX, payload->MouseDY, payload->MouseButtons);
+
+			// Split payload across per-sim-frame slots in the log. Each frame slot (frame % Depth)
+			// mirrors the temporal slab so LogicThread can look up input by frame index directly.
+			const uint32_t fixedHz = (Config && Config->FixedUpdateHz != EngineConfig::Unset)
+										 ? static_cast<uint32_t>(Config->FixedUpdateHz)
+										 : 512u;
+			log->Store(*payload, fixedHz);
+
+			// TODO(rollback): if payload->LastClientFrame < serverCurrentFrame (late packet),
+			// trigger ExecuteRollback(payload->FirstClientFrame) to resim with corrected input.
 			break;
 		}
 
@@ -109,6 +130,12 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 			}
 
 			ConnectionMgr->GenerateNetID(msg.Connection);
+
+			// Create the per-player input log now that we have a stable ownerID.
+			// Depth matches TemporalFrameCount so frame indexing is 1:1 with the slab.
+			CreateInputLog(ci->OwnerID);
+
+			if (ServerWorld) ServerWorld->EnsurePlayerInputSlot(ci->OwnerID);
 
 			const uint32_t serverFrame = (ServerWorld && ServerWorld->GetLogicThread())
 											 ? ServerWorld->GetLogicThread()->GetLastCompletedFrame()

@@ -1,5 +1,9 @@
 #pragma once
 #include "NetThreadBase.h"
+#include "PlayerInputLog.h"
+#include "RegistryTypes.h"
+#include <array>
+#include <memory>
 
 class FlowManager;
 class ReplicationSystem;
@@ -36,13 +40,28 @@ public:
 	/// Registers Soul lifecycle callbacks on the connection manager.
 	void BindSoulCallbacks();
 
+	/// LogicThread calls this each sim tick to resolve player input.
+	/// Returns nullptr if no log exists for this ownerID (not connected).
+	PlayerInputLog* GetInputLog(uint8_t ownerID)
+	{
+		return (ownerID < MaxOwnerIDs) ? InputLogs[ownerID].get() : nullptr;
+	}
+
 	void HandleMessage(const ReceivedMessage& msg);
 	void TickReplication();
 
 private:
 	void OnClientDisconnectedCB(uint8_t ownerID);
 
+	/// Creates a PlayerInputLog for ownerID, sized to match the temporal slab.
+	/// Called from the ConnectionHandshake handler when an ownerID is assigned.
+	void CreateInputLog(uint8_t ownerID);
+
 	ReplicationSystem* Replicator = nullptr;
 	FlowManager* FlowMgr          = nullptr;
 	World* ServerWorld            = nullptr;
+
+	// One log per ownerID slot — only allocated for connected players.
+	// Slot 0 (server) is never populated. Depth == TemporalFrameCount.
+	std::array<std::unique_ptr<PlayerInputLog>, MaxOwnerIDs> InputLogs{};
 };

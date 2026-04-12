@@ -18,9 +18,9 @@ enum class NetMessageType : uint8_t
 	Ping                = 5,  // Bidirectional: RTT measurement
 	Pong                = 6,  // Bidirectional: RTT measurement response
 	FlowEvent           = 7,  // Server->Client: session flow signal (ServerReady, etc.)
-	PlayerBeginRequest        = 8,  // Client->Server: request to spawn a player body
-	PlayerBeginConfirm        = 9,  // Server->Client: authoritative spawn confirmation
-	PlayerBeginReject         = 10, // Server->Client: spawn request denied
+	PlayerBeginRequest  = 8,  // Client->Server: request to spawn a player body
+	PlayerBeginConfirm  = 9,  // Server->Client: authoritative spawn confirmation
+	PlayerBeginReject   = 10, // Server->Client: spawn request denied
 	ClockSync           = 11, // Bidirectional: frame clock synchronisation
 	TravelNotify        = 12, // Server->Client: load this level (path + server frame)
 	LevelReady          = 13, // Client->Server: level load complete, ready for entity flush
@@ -299,10 +299,10 @@ enum class ClientRepState : uint8_t
 // ---------------------------------------------------------------------------
 enum class FlowEventID : uint8_t
 {
-	ServerReady   = 0, // Server has flushed initial entity batch; client sweeps Alive→Active then sends PlayerBeginRequest
-	TravelNotify  = 1, // Server tells client to load a level (payload: TravelPayload)
-	PlayerBeginConfirm  = 2, // Server confirmed the spawn; client reads FlowManager::PendingPlayerBeginConfirm
-	PlayerBeginReject   = 3, // Server rejected the spawn; client should destroy predicted body
+	ServerReady        = 0, // Server has flushed initial entity batch; client sweeps Alive→Active then sends PlayerBeginRequest
+	TravelNotify       = 1, // Server tells client to load a level (payload: TravelPayload)
+	PlayerBeginConfirm = 2, // Server confirmed the spawn; client reads FlowManager::PendingPlayerBeginConfirm
+	PlayerBeginReject  = 3, // Server rejected the spawn; client should destroy predicted body
 };
 
 // ---------------------------------------------------------------------------
@@ -371,6 +371,7 @@ struct RPCHeader
 	uint16_t MethodID;  // Identifies the handler — assigned by RPCMethodID<TParams>()
 	uint16_t ParamSize; // sizeof(TParams) — validated before dispatch, then dropped
 };
+
 static_assert(sizeof(RPCHeader) == 4, "RPCHeader must be 4 bytes");
 
 // ---------------------------------------------------------------------------
@@ -380,13 +381,14 @@ static_assert(sizeof(RPCHeader) == 4, "RPCHeader must be 4 bytes");
 // the SoulRPC message. NEVER serialized or transmitted over the wire.
 // The receiving side reconstructs it from the ConnectionInfo it already holds.
 // ---------------------------------------------------------------------------
-class  NetConnectionManager;
+class NetConnectionManager;
 struct ConnectionInfo;
+
 struct RPCContext
 {
-	ConnectionInfo*       CI          = nullptr; // Originating connection — valid for handler lifetime only
-	NetConnectionManager* Mgr         = nullptr;
-	uint32_t              FrameNumber = 0;
+	ConnectionInfo* CI        = nullptr; // Originating connection — valid for handler lifetime only
+	NetConnectionManager* Mgr = nullptr;
+	uint32_t FrameNumber      = 0;
 };
 
 
@@ -397,11 +399,11 @@ struct RPCContext
 // ---------------------------------------------------------------------------
 struct PlayerBeginResult
 {
-	bool        Accepted  = false;
-	float       PosX      = 0.0f;
-	float       PosY      = 5.0f; // Reasonable default so body isn't in the floor
-	float       PosZ      = 0.0f;
-	ConstructRef Body     = {};   // Handle to the created Body Construct (may be invalid until Constructs wire up)
+	bool Accepted     = false;
+	float PosX        = 0.0f;
+	float PosY        = 5.0f; // Reasonable default so body isn't in the floor
+	float PosZ        = 0.0f;
+	ConstructRef Body = {}; // Handle to the created Body Construct (may be invalid until Constructs wire up)
 };
 
 // ---------------------------------------------------------------------------
@@ -536,25 +538,43 @@ struct PredictionLedger
 
 	void Clear(uint32_t predID)
 	{
-		for (auto& e : Entries) if (e.PredictionID == predID)
-		{
-			e = {};
-			return;
-		}
+		for (auto& e : Entries)
+			if (e.PredictionID == predID)
+			{
+				e = {};
+				return;
+			}
 	}
 };
 
 
-// 64 bytes of key state + 2 floats of mouse delta.
+// Wire-safe discrete input event — used inside InputFramePayload.
+// Mirrors InputData but without alignas(16), keeping the network payload compact.
+struct NetInputEvent
+{
+	uint32_t Key;           // SDL_Scancode cast to uint32_t
+	uint16_t FrameUSOffset; // μs since last Swap — deterministic frame mapping via shared frameTimeUS
+	uint8_t Pressed;        // 1 = down, 0 = up
+	uint8_t _Pad;
+};
+
+static_assert(sizeof(NetInputEvent) == 8, "NetInputEvent must be 8 bytes");
+
+// Input snapshot sent by the client at InputNetHz (default 128Hz).
+// Covers [FirstClientFrame, LastClientFrame] — typically 4 sim frames at 512Hz/128Hz.
 // ---------------------------------------------------------------------------
 struct InputFramePayload
 {
-	uint8_t KeyState[64];
+	uint8_t KeyState[64]; // held-key bitfield (all 512 SDL scancodes)
 	float MouseDX;
 	float MouseDY;
 	uint8_t MouseButtons;
-	uint8_t _Pad[3];
+	uint8_t EventCount; // number of valid entries in Events[] (max 8)
+	uint8_t _Pad[2];
+	uint32_t FirstClientFrame; // first sim frame this payload applies to
+	uint32_t LastClientFrame;  // last sim frame (client frame at send time)
+	NetInputEvent Events[8];   // discrete events within the window
 };
 
-static_assert(sizeof(InputFramePayload) == 76, "InputFramePayload must be 76 bytes");
+static_assert(sizeof(InputFramePayload) == 148, "InputFramePayload must be 148 bytes");
 

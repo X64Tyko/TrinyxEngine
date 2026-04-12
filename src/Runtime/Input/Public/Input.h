@@ -45,8 +45,8 @@ inline constexpr uint8_t MAX_MOUSE_BUTTONS  = 5; // SDL supports 1-5
 struct InputData
 {
 	alignas(16) SDL_Scancode Key;
-	uint16_t FrameMSOffset;
-	uint8_t Pressed; // 1 = down, 0 = up
+	uint16_t FrameUSOffset; // μs since last Swap — deterministic frame mapping via shared frameTimeUS constant
+	uint8_t Pressed;        // 1 = down, 0 = up
 };
 
 // ── InputBuffer ──────────────────────────────────────────────────────────────
@@ -78,7 +78,7 @@ struct InputBuffer
 	uint8_t MouseButtons[2]{}; // bitmask per slot: bit N = button N+1
 
 	// ── Slot management ──────────────────────────────────────────────────
-	uint64_t SwapTime = 0;
+	uint64_t SwapTimeUS = 0; // SDL_GetTicksNS() / 1000 at last Swap — microsecond base for FrameUSOffset
 	std::atomic<uint8_t> WriteSlot{0};
 	uint8_t ReadSlot    = 1;
 	uint16_t ReadCursor = 0;
@@ -107,13 +107,17 @@ struct InputBuffer
 			else KeyState[slot][byteIdx]      &= static_cast<uint8_t>(~bit);
 		}
 
-		// Push event
+		// Push event. FrameUSOffset is μs since last Swap — deterministically maps to sim frame
+		// on any peer using the shared constant: simFrame = First + FrameUSOffset / frameTimeUS
+		// where frameTimeUS = 1,000,000 / FixedUpdateHz. Cap at uint16_t max (65535μs ≈ 65ms).
 		uint16_t eventIdx = EventCount[slot];
 		if (eventIdx < 1024)
 		{
+			const uint64_t deltaUS  = SDL_GetTicksNS() / 1000u - SwapTimeUS;
+			const uint16_t offsetUS = static_cast<uint16_t>(deltaUS < 65535u ? deltaUS : 65535u);
 			Events[slot][eventIdx] = {
 				key,
-				static_cast<uint16_t>(SDL_GetTicks() - SwapTime),
+				offsetUS,
 				static_cast<uint8_t>(down ? 1 : 0)
 			};
 			EventCount[slot] = eventIdx + 1;
@@ -173,7 +177,7 @@ struct InputBuffer
 		MouseDY[newWrite]    = 0.0f;
 
 		ReadCursor = 0;
-		SwapTime   = SDL_GetTicks();
+		SwapTimeUS = SDL_GetTicksNS() / 1000u;
 
 		WriteSlot.store(newWrite, std::memory_order_release);
 	}
