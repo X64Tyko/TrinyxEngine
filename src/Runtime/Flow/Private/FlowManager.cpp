@@ -500,12 +500,11 @@ void FlowManager::OnClientDisconnected(uint8_t ownerID)
 	Souls[ownerID].reset();
 }
 
-std::optional<PlayerBeginResult> FlowManager::HandlePlayerBeginRequest(uint8_t ownerID, const PlayerBeginRequestPayload& req)
+std::optional<PlayerBeginResult> FlowManager::HandlePlayerBeginRequest(Soul* soul, const PlayerBeginRequestPayload& req)
 {
-	Soul* soul = GetSoul(ownerID);
 	if (!soul)
 	{
-		LOG_WARN_F("[FlowMgr] HandlePlayerBeginRequest: no Soul for ownerID=%u", ownerID);
+		LOG_WARN("[FlowMgr] HandlePlayerBeginRequest: null Soul");
 		return std::nullopt;
 	}
 
@@ -554,28 +553,4 @@ void FlowManager::SendPlayerBeginRequest(NetChannel channel, uint32_t frameNumbe
 	// Fire the PlayerBegin SoulRPC — thunk packs RPCHeader + payload and sends
 	// as NetMessageType::SoulRPC, replacing the old direct PlayerBeginRequest send.
 	Souls[ownerID]->PlayerBegin(req);
-}
-
-void FlowManager::DispatchServerRPC(uint8_t ownerID, const RPCContext& ctx,
-                                    const RPCHeader& hdr, const uint8_t* params)
-{
-	Soul* soul = Souls[ownerID].get();
-	if (!soul)
-	{
-		LOG_WARN_F("[FlowMgr] DispatchServerRPC: no Soul for ownerID=%u (MethodID=%u)", ownerID, hdr.MethodID);
-		return;
-	}
-	soul->DispatchServerRPC(ctx, hdr, params);
-}
-
-void FlowManager::DispatchClientRPC(uint8_t ownerID, const RPCContext& ctx,
-                                    const RPCHeader& hdr, const uint8_t* params)
-{
-	Soul* soul = Souls[ownerID].get();
-	if (!soul)
-	{
-		LOG_WARN_F("[FlowMgr] DispatchClientRPC: no Soul for ownerID=%u (MethodID=%u)", ownerID, hdr.MethodID);
-		return;
-	}
-	soul->DispatchClientRPC(ctx, hdr, params);
 }

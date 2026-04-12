@@ -317,8 +317,16 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 			{
 				if (FlowManager* flow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr)
 				{
-					RPCContext ctx{ci, ConnectionMgr};
-					flow->DispatchServerRPC(ci->OwnerID, ctx, *rpcHdr, params);
+					if (Soul* soul = flow->GetSoul(ci->OwnerID))
+					{
+						RPCContext ctx{ci, ConnectionMgr};
+						soul->DispatchServerRPC(ctx, *rpcHdr, params);
+					}
+					else
+					{
+						LOG_WARN_F("[ServerNet] SoulRPC: no Soul for ownerID=%u (MethodID=%u)",
+								   ci->OwnerID, rpcHdr->MethodID);
+					}
 				}
 			}
 			break;

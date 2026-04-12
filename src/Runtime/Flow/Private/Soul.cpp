@@ -64,7 +64,7 @@ TNX_IMPL_SERVER(Soul, PlayerBegin, PlayerBeginRequestPayload)
 	}
 
 	const auto result = FlowMgr
-		? FlowMgr->HandlePlayerBeginRequest(OwnerID, params)
+		? FlowMgr->HandlePlayerBeginRequest(this, params)
 		: std::nullopt;
 
 	if (result.has_value())

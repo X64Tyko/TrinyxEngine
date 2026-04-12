@@ -168,7 +168,7 @@ public:
 	/// Delegates to GameMode::OnPlayerBeginRequest for all game decisions.
 	/// Returns the PlayerBeginResult on accept, nullopt on reject.
 	/// ServerNetThread reads the result to build PlayerBeginConfirmPayload — no Soul fields used as relay.
-	std::optional<PlayerBeginResult> HandlePlayerBeginRequest(uint8_t ownerID, const PlayerBeginRequestPayload& req);
+	std::optional<PlayerBeginResult> HandlePlayerBeginRequest(Soul* soul, const PlayerBeginRequestPayload& req);
 
 	/// Called from ClientNetThread after the Alive→Active sweep on ServerReady.
 	/// Creates the client-side Soul for ownerID (derived from channel) if absent,
@@ -177,17 +177,7 @@ public:
 	void SendPlayerBeginRequest(NetChannel channel, uint32_t frameNumber, PredictionLedger& ledger);
 
 	// ----- RPC dispatch (called from ServerNetThread / ClientNetThread) -----
-
-	/// Routes an inbound SoulRPC packet to the correct Soul on the server side.
-	/// Refreshes the Soul's channel from ctx before dispatching so reply thunks
-	/// route back to the originating client.
-	void DispatchServerRPC(uint8_t ownerID, const RPCContext& ctx,
-	                       const RPCHeader& hdr, const uint8_t* params);
-
-	/// Routes an inbound SoulRPC packet to the client-side Soul.
-	/// ownerID identifies which Soul slot to use (our own OwnerID on the client).
-	void DispatchClientRPC(uint8_t ownerID, const RPCContext& ctx,
-	                       const RPCHeader& hdr, const uint8_t* params);
+	// Note: callers look up Soul* via GetSoul(ownerID) then call soul->DispatchServerRPC/DispatchClientRPC directly.
 
 	/// Called from any thread (e.g., NetThread) when a net flow event arrives.
 	/// The active FlowState's OnNetEvent hook is dispatched on the next Tick.
