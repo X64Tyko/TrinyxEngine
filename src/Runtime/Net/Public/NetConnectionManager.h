@@ -1,9 +1,73 @@
 #pragma once
 #include <cstdint>
 #include <vector>
+#include <algorithm>
+#include <cstring>
 
 #include "Events.h"
 #include "NetTypes.h"
+
+// ---------------------------------------------------------------------------
+// ClientInputAccumulator — persistent outbound input payload for one client
+// connection. Lives in ConnectionInfo; updated each TickInputSend tick.
+//
+// Design: the payload IS the persistent object. Key state is always the most
+// recent snapshot. Events are tagged with their absolute sim frame so they can
+// be trimmed by LastServerAckedFrame and have FrameUSOffset reconstructed at
+// send time relative to the current FirstClientFrame.
+// ---------------------------------------------------------------------------
+struct PendingNetInputEvent
+{
+	uint32_t SimFrame; // absolute sim frame this event belongs to
+	uint32_t Key;      // SDL_Scancode
+	uint8_t Pressed;   // 1 = down, 0 = up
+};
+
+struct ClientInputAccumulator
+{
+	uint8_t KeyState[64] = {};
+	float MouseDX        = 0.0f;
+	float MouseDY        = 0.0f;
+	uint8_t MouseButtons = 0;
+	std::vector<PendingNetInputEvent> PendingEvents;
+
+	// Remove events that the server has already consumed.
+	void TrimAcked(uint32_t lastAckedFrame)
+	{
+		PendingEvents.erase(
+			std::remove_if(PendingEvents.begin(), PendingEvents.end(),
+						   [lastAckedFrame](const PendingNetInputEvent& e) { return e.SimFrame <= lastAckedFrame; }),
+			PendingEvents.end());
+	}
+
+	// Build wire payload. FrameUSOffset per event is reconstructed relative to firstFrame.
+	// Events are capped at 8 on the wire; oldest are sent first (lowest SimFrame).
+	InputFramePayload BuildPayload(uint32_t firstFrame, uint32_t lastFrame, uint32_t frameTimeUS) const
+	{
+		InputFramePayload p{};
+		std::memcpy(p.KeyState, KeyState, 64);
+		p.MouseDX          = MouseDX;
+		p.MouseDY          = MouseDY;
+		p.MouseButtons     = MouseButtons;
+		p.FirstClientFrame = firstFrame;
+		p.LastClientFrame  = lastFrame;
+
+		uint8_t count = 0;
+		for (const PendingNetInputEvent& pe : PendingEvents)
+		{
+			if (count >= 8) break;
+			p.Events[count].Key     = pe.Key;
+			p.Events[count].Pressed = pe.Pressed;
+			p.Events[count]._Pad    = 0;
+			// Reconstruct μs offset relative to the current send window's FirstClientFrame.
+			p.Events[count].FrameUSOffset = static_cast<uint16_t>(
+				(pe.SimFrame - firstFrame) * frameTimeUS);
+			count++;
+		}
+		p.EventCount = count;
+		return p;
+	}
+};
 
 // Forward declarations — avoid pulling GNS headers into every consumer
 class ISteamNetworkingSockets;
@@ -38,8 +102,17 @@ struct ConnectionInfo
 	bool bClientInitiated           = false; // True only for connections we opened via Connect() — reliable even in GNS loopback
 	bool bInitialSpawnFlushed       = false; // Server-side: true after first full entity batch sent to this client
 
-	// Client-side input tracking — used to build FirstClientFrame spans in InputFramePayload.
-	uint32_t LastSentInputFrame = 0;
+	// Client-side: last frame the server confirmed it consumed. Advances on inbound
+	// AckedClientFrame — never on send. Drives TrimAcked() and FirstClientFrame floor.
+	uint32_t LastServerAckedFrame = 0;
+
+	// Server-side: last client input frame consumed by the injector. Stamped into every
+	// outbound header so the client can trim its send window.
+	uint32_t LastAckedClientFrame = 0;
+
+	// Client-side: persistent outbound input payload. Key state is always current;
+	// events accumulate until acked, trimmed by LastServerAckedFrame before each send.
+	ClientInputAccumulator InputAccum;
 
 	// Client-side only — tracks in-flight spawn predictions awaiting Confirm/Reject.
 	PredictionLedger Predictions;
@@ -119,6 +192,14 @@ public:
 
 	/// Find connection info by GNS handle. Returns nullptr if not found.
 	ConnectionInfo* FindConnection(HSteamNetConnection conn);
+
+	/// Find connection info by OwnerID. Returns nullptr if not found.
+	/// O(n) over active connections — only use outside hot-path code.
+	ConnectionInfo* FindConnectionByOwnerID(uint8_t ownerID)
+	{
+		for (ConnectionInfo& ci : Connections) if (ci.OwnerID == ownerID) return &ci;
+		return nullptr;
+	}
 
 	/// Get all active connections.
 	const std::vector<ConnectionInfo>& GetConnections() const { return Connections; }

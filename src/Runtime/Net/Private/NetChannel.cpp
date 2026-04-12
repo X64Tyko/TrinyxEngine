@@ -12,8 +12,9 @@ PacketHeader NetChannel::MakeHeader(NetMessageType type, uint16_t payloadSize, u
 	hdr.SequenceNum = CI ? CI->NextSeqOut++ : 0;
 	hdr.FrameNumber = frameNumber;
 	hdr.SenderID    = CI ? CI->OwnerID : 0;
-	hdr.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
-	hdr.PayloadSize = payloadSize;
+	hdr.Timestamp        = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
+	hdr.PayloadSize      = payloadSize;
+	hdr.AckedClientFrame = CI ? CI->LastAckedClientFrame : 0;
 	return hdr;
 }
 

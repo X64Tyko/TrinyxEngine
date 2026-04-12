@@ -214,6 +214,12 @@ void LogicThread::ThreadMain()
 void LogicThread::ProcessSimInput(SimFloat dt)
 {
 	SimInput->Swap();
+
+	// Server-side: pull each connected player's input from the PlayerInputLog for this frame.
+	// On miss (NotYetReceived), the player's InputBuffer carries forward the last held state
+	// automatically via InputBuffer::Swap(). Discrete events are not extrapolated.
+	// TODO(rollback): on LateOrAliased miss after this frame is consumed, schedule resim.
+	if (PlayerInputInjector) PlayerInputInjector(FrameNumber);
 }
 
 void LogicThread::ProcessVizInput(SimFloat dt)

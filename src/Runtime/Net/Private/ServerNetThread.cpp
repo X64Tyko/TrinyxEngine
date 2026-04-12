@@ -48,6 +48,49 @@ void ServerNetThread::CreateInputLog(uint8_t ownerID)
 	InputLogs[ownerID]->Initialize(temporalFrameCount);
 }
 
+void ServerNetThread::WirePlayerInputInjector(World* world)
+{
+	LogicThread* logic = world ? world->GetLogicThread() : nullptr;
+	if (!logic) return;
+
+	// Capture 'this' — ServerNetThread outlives the LogicThread (engine shutdown order).
+	// Iterates all ownerID slots each sim tick; non-null logs belong to connected players.
+	// On hit: inject key state + events into the player's sim InputBuffer.
+	// On miss (NotYetReceived): InputBuffer::Swap() already carried last state forward — no-op.
+	// On miss (LateOrAliased): data loss, log a warning.
+	logic->SetPlayerInputInjector([this, world](uint32_t frameNumber)
+	{
+		for (uint32_t ownerID = 1; ownerID < MaxOwnerIDs; ++ownerID)
+		{
+			PlayerInputLog* log = InputLogs[ownerID].get();
+			if (!log) continue;
+
+			InputConsumeResult result = log->ConsumeFrame(frameNumber);
+			if (result)
+			{
+				InputBuffer* buf = world->GetPlayerSimInput(static_cast<uint8_t>(ownerID));
+				if (buf)
+				{
+					buf->InjectState(result.Entry->KeyState,
+									 result.Entry->MouseDX,
+									 result.Entry->MouseDY,
+									 result.Entry->MouseButtons);
+					// TODO: inject discrete events into player event queue
+				}
+
+				// Echo the consumed frame back in all outbound headers so the client
+				// knows it can advance its send window past this frame.
+				if (ConnectionInfo* ci = ConnectionMgr ? ConnectionMgr->FindConnectionByOwnerID(static_cast<uint8_t>(ownerID)) : nullptr) ci->LastAckedClientFrame = log->LastConsumedFrame;
+			}
+			else if (result.Reason == InputMissReason::LateOrAliased)
+			{
+				LOG_WARN_F("[ServerNet] Input data loss for ownerID %u at frame %u", ownerID, frameNumber);
+			}
+			// NotYetReceived: silent — InputBuffer carries last held state forward via Swap()
+		}
+	});
+}
+
 void ServerNetThread::TickReplication()
 {
 	if (Replicator) Replicator->Tick(ConnectionMgr);

@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <thread>
 #include <atomic>
+#include <functional>
 
 #include "ConstructBatch.h"
 #include "Registry.h"
@@ -38,6 +39,15 @@ public:
 
 	bool IsRunning() const { return bIsRunning.load(std::memory_order_relaxed); }
 	void SetConstructRegistry(ConstructRegistry* cr) { ConstructsPtr = cr; }
+
+	/// Server-side hook: inject per-player input from PlayerInputLog into each player's
+	/// InputBuffer before gameplay logic runs. Called each fixed tick inside ProcessSimInput.
+	/// Wire up after both LogicThread and ServerNetThread are initialized.
+	/// Signature: void(uint32_t frameNumber)
+	void SetPlayerInputInjector(std::function<void(uint32_t)> injector)
+	{
+		PlayerInputInjector = std::move(injector);
+	}
 
 	// Active camera — when set, ProcessVizInput free-fly is disabled and
 	// PublishCompletedFrame reads position/yaw/pitch from this camera.
@@ -111,6 +121,9 @@ private:
 	// Input
 	InputBuffer* SimInput = nullptr;
 	InputBuffer* VizInput = nullptr;
+
+	// Server-side: per-player input injection hook (null on clients/standalone)
+	std::function<void(uint32_t)> PlayerInputInjector;
 
 	// Camera state (FPS-style: yaw around Y, pitch around X)
 	Vector3 CamPos{0.0f, 0.0f, 0.0f};

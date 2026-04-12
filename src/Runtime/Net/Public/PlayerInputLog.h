@@ -3,6 +3,7 @@
 #include "RegistryTypes.h"
 #include <memory>
 #include <cstring>
+#include <algorithm>
 
 // ---------------------------------------------------------------------------
 // PlayerInputLog
@@ -41,6 +42,10 @@
 struct PlayerInputLogEntry
 {
 	uint32_t SimFrame       = UINT32_MAX; // UINT32_MAX = slot is empty / not yet written
+	// The LastClientFrame of the packet whose keystate is stored here.
+	// Lower = older snapshot = more accurate for this sim frame.
+	// Out-of-order arrivals only overwrite if they carry a fresher (older) snapshot.
+	uint32_t SnapshotFrame  = UINT32_MAX;
 	uint8_t KeyState[64]    = {};
 	float MouseDX           = 0.f;
 	float MouseDY           = 0.f;
@@ -72,6 +77,10 @@ struct PlayerInputLog
 	uint32_t Depth             = 0;
 	uint32_t LastConsumedFrame = 0; // highest sim frame handed to the simulation
 	uint32_t LastReceivedFrame = 0; // highest LastClientFrame stored — used to classify misses
+	// Largest FirstClientFrame seen across all received packets.
+	// Out-of-order arrivals are clamped to start here — prevents stale packets from
+	// overwriting frames that a later packet's FirstClientFrame already superseded.
+	uint32_t HighWaterFirstFrame = 0;
 
 	/// Must be called before use. Allocates Depth slots matching TemporalFrameCount.
 	void Initialize(uint32_t temporalFrameCount)
@@ -93,19 +102,36 @@ struct PlayerInputLog
 
 		const uint32_t frameTimeUS = 1'000'000u / fixedUpdateHz;
 
-		for (uint32_t frame = payload.FirstClientFrame; frame <= payload.LastClientFrame; ++frame)
+		// Advance watermark — records the furthest-forward window start we've seen.
+		// Out-of-order packets are clamped to this so they can't touch frames that a
+		// later packet has already superseded.
+		if (payload.FirstClientFrame > HighWaterFirstFrame) HighWaterFirstFrame = payload.FirstClientFrame;
+
+		const uint32_t effectiveFirst = std::max(payload.FirstClientFrame, HighWaterFirstFrame);
+
+		for (uint32_t frame = effectiveFirst; frame <= payload.LastClientFrame; ++frame)
 		{
 			if (frame <= LastConsumedFrame) continue; // skip frames already consumed within span
 
 			PlayerInputLogEntry& entry = Entries[frame % Depth];
 
+			// Prefer the packet whose snapshot is oldest (smallest LastClientFrame) —
+			// that's the one taken closest in time to this sim frame, making it the
+			// most accurate keystate for this frame. This handles out-of-order delivery:
+			// a newer packet arriving first with a stale future keystate will be
+			// overwritten when the older, more accurate packet arrives.
+			const bool slotMatchesFrame  = (entry.SimFrame == frame);
+			const bool incomingIsFresher = (payload.LastClientFrame < entry.SnapshotFrame);
+			if (slotMatchesFrame && !incomingIsFresher) continue;
+
 			// Held state applies uniformly to all frames in the span
 			std::memcpy(entry.KeyState, payload.KeyState, 64);
-			entry.MouseDX      = payload.MouseDX;
-			entry.MouseDY      = payload.MouseDY;
-			entry.MouseButtons = payload.MouseButtons;
-			entry.SimFrame     = frame;
-			entry.EventCount   = 0;
+			entry.MouseDX       = payload.MouseDX;
+			entry.MouseDY       = payload.MouseDY;
+			entry.MouseButtons  = payload.MouseButtons;
+			entry.SimFrame      = frame;
+			entry.SnapshotFrame = payload.LastClientFrame;
+			entry.EventCount    = 0;
 
 			// Distribute discrete events to the sim frame they occurred in.
 			// FrameUSOffset is μs since the input window opened (at FirstClientFrame).

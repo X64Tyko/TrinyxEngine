@@ -190,6 +190,12 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 #if defined(TNX_NET_MODEL_PIE) || defined(TNX_NET_MODEL_SERVER)
 	if (Net) Net->SetReplicationSystem(Replicator.get());
 #endif
+#if defined(TNX_NET_MODEL_SERVER)
+	// Wire the per-player input injector into the server world's LogicThread.
+	// PIE wires this in EditorContext after SetServerWorld() is called per-session.
+	if (Net) Net->SetServerWorld(DefaultWorld);
+	if (Net) Net->WirePlayerInputInjector(DefaultWorld);
+#endif
 	}
 #endif
 

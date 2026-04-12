@@ -38,21 +38,23 @@ enum class NetMessageType : uint8_t
 // Changing any value will change sizeof(PacketHeader) and break the
 // static_assert below so the impact is immediately visible.
 // ---------------------------------------------------------------------------
-static constexpr size_t PacketType_Bytes     = 1;                         // NetMessageType discriminator
-static constexpr size_t PacketFlags_Bytes    = 1;                         // bit0=HasAck, bit1=HasTimestamp
-static constexpr size_t PayloadSize_Bytes    = 2;                         // max payload: (1 << 16) - 1 = 65535
-static constexpr size_t SequenceNum_Bytes    = 4;                         // per-connection monotonic counter
-static constexpr size_t FrameNumber_Bytes    = 4;                         // simulation frame this message relates to
-static constexpr size_t SenderID_Bytes       = (NetOwnerID_Bits + 7) / 8; // derived from NetOwnerID_Bits (currently 8 → 1 byte)
-static constexpr size_t Timestamp_Bytes      = 2;                         // wrapping milliseconds for RTT estimation
-static constexpr size_t AckSequenceNum_Bytes = 4;                         // latest sequence received from remote
-static constexpr size_t AckBitfield_Bytes    = 4;                         // 32-packet sliding ack window
+static constexpr size_t PacketType_Bytes       = 1;                         // NetMessageType discriminator
+static constexpr size_t PacketFlags_Bytes      = 1;                         // bit0=HasAck, bit1=HasTimestamp
+static constexpr size_t PayloadSize_Bytes      = 2;                         // max payload: (1 << 16) - 1 = 65535
+static constexpr size_t SequenceNum_Bytes      = 4;                         // per-connection monotonic counter
+static constexpr size_t FrameNumber_Bytes      = 4;                         // simulation frame this message relates to
+static constexpr size_t SenderID_Bytes         = (NetOwnerID_Bits + 7) / 8; // derived from NetOwnerID_Bits (currently 8 → 1 byte)
+static constexpr size_t Timestamp_Bytes        = 2;                         // wrapping milliseconds for RTT estimation
+static constexpr size_t AckSequenceNum_Bytes   = 4;                         // latest sequence received from remote
+static constexpr size_t AckBitfield_Bytes      = 4;                         // 32-packet sliding ack window
+static constexpr size_t AckedClientFrame_Bytes = 4;                         // last client frame the server has consumed input for
 
 static constexpr size_t PacketHeader_ExpectedSize =
 	PacketType_Bytes + PacketFlags_Bytes + PayloadSize_Bytes +
 	SequenceNum_Bytes + FrameNumber_Bytes +
 	SenderID_Bytes + 1 /* padding */ + Timestamp_Bytes +
-	AckSequenceNum_Bytes + AckBitfield_Bytes;
+	AckSequenceNum_Bytes + AckBitfield_Bytes +
+	AckedClientFrame_Bytes;
 
 // ---------------------------------------------------------------------------
 // Packet flags
@@ -76,16 +78,18 @@ namespace PacketFlag
 // ---------------------------------------------------------------------------
 struct PacketHeader
 {
-	uint8_t Type;            // NetMessageType
-	uint8_t Flags;           // PacketFlag bitmask
-	uint16_t PayloadSize;    // Bytes following this header (max 65535)
-	uint32_t SequenceNum;    // Per-connection monotonic sequence number
-	uint32_t FrameNumber;    // Simulation frame this message relates to
-	uint8_t SenderID;        // NetOwnerID — 0 = server/global, 1-255 = connected players
-	uint8_t _Pad0;           // Alignment / future use
-	uint16_t Timestamp;      // Wrapping milliseconds for per-packet RTT estimation
-	uint32_t AckSequenceNum; // Latest SequenceNum received from remote (valid if HasAck)
-	uint32_t AckBitfield;    // Bit i = received (AckSequenceNum - 1 - i) (valid if HasAck)
+	uint8_t Type;              // NetMessageType
+	uint8_t Flags;             // PacketFlag bitmask
+	uint16_t PayloadSize;      // Bytes following this header (max 65535)
+	uint32_t SequenceNum;      // Per-connection monotonic sequence number
+	uint32_t FrameNumber;      // Simulation frame this message relates to
+	uint8_t SenderID;          // NetOwnerID — 0 = server/global, 1-255 = connected players
+	uint8_t _Pad0;             // Alignment / future use
+	uint16_t Timestamp;        // Wrapping milliseconds for per-packet RTT estimation
+	uint32_t AckSequenceNum;   // Latest SequenceNum received from remote (valid if HasAck)
+	uint32_t AckBitfield;      // Bit i = received (AckSequenceNum - 1 - i) (valid if HasAck)
+	uint32_t AckedClientFrame; // Last client input frame the server has consumed (echoed back by server).
+	// Client uses this to advance LastConsumedFrame and skip redundant resends.
 
 	// --- Helpers ---
 
@@ -115,7 +119,7 @@ struct PacketHeader
 
 static_assert(sizeof(PacketHeader) == PacketHeader_ExpectedSize,
 			  "PacketHeader size mismatch — if you changed a *_Bytes constant, update the struct layout to match");
-static_assert(sizeof(PacketHeader) == 24, "PacketHeader must be 24 bytes");
+static_assert(sizeof(PacketHeader) == 28, "PacketHeader must be 28 bytes");
 
 // ---------------------------------------------------------------------------
 // BaseNetPayload — CRTP base for all game-layer network payloads.

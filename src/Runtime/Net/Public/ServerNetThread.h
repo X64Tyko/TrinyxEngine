@@ -47,6 +47,12 @@ public:
 		return (ownerID < MaxOwnerIDs) ? InputLogs[ownerID].get() : nullptr;
 	}
 
+	/// Wire the per-player input injector into the world's LogicThread.
+	/// Call after SetServerWorld() — the injector runs each sim tick inside ProcessSimInput,
+	/// pulling ConsumeFrame() results from each connected player's log and injecting into
+	/// their InputBuffer so gameplay code reads correct per-player input.
+	void WirePlayerInputInjector(World* world);
+
 	void HandleMessage(const ReceivedMessage& msg);
 	void TickReplication();
 

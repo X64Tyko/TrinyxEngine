@@ -1401,6 +1401,7 @@ void EditorContext::StartPIE()
 	// Wire server world and replication
 	net->SetServerWorld(ServerFlow->GetWorld());
 	net->SetServerFlow(ServerFlow.get());
+	net->GetServer().WirePlayerInputInjector(ServerFlow->GetWorld());
 
 	Replicator = std::make_unique<ReplicationSystem>();
 	Replicator->Initialize(ServerFlow->GetWorld());

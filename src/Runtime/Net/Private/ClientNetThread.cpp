@@ -20,6 +20,16 @@
 
 void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 {
+	// Every server-sent header carries the last client input frame it consumed.
+	// Advance LastServerAckedFrame so TickInputSend() widens from there, not from last send.
+	if (msg.Header.AckedClientFrame > 0)
+	{
+		if (ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection))
+		{
+			if (msg.Header.AckedClientFrame > ci->LastServerAckedFrame) ci->LastServerAckedFrame = msg.Header.AckedClientFrame;
+		}
+	}
+
 	auto type = static_cast<NetMessageType>(msg.Header.Type);
 
 	switch (type)
@@ -388,26 +398,32 @@ void ClientNetThread::TickInputSend()
 								   ? world->GetLogicThread()->GetLastCompletedFrame()
 								   : 0;
 
-		InputFramePayload payload{};
-		netInput->SnapshotKeyState(payload.KeyState, sizeof(payload.KeyState));
-		payload.MouseDX      = netInput->GetMouseDX();
-		payload.MouseDY      = netInput->GetMouseDY();
-		payload.MouseButtons = netInput->GetMouseButtonMask();
+		const uint32_t fixedHz     = (Config->FixedUpdateHz == EngineConfig::Unset) ? 512 : Config->FixedUpdateHz;
+		const uint32_t frameTimeUS = 1'000'000u / fixedHz;
 
-		payload.FirstClientFrame = ci->LastSentInputFrame + 1;
-		payload.LastClientFrame  = frame;
+		// Trim events the server already consumed, then update key state + append new events.
+		ClientInputAccumulator& accum = ci->InputAccum;
+		accum.TrimAcked(ci->LastServerAckedFrame);
 
+		netInput->SnapshotKeyState(accum.KeyState, sizeof(accum.KeyState));
+		accum.MouseDX      = netInput->GetMouseDX();
+		accum.MouseDY      = netInput->GetMouseDY();
+		accum.MouseButtons = netInput->GetMouseButtonMask();
+
+		// Append new discrete events, tagging each with its absolute sim frame.
 		const uint16_t eventCount = netInput->GetEventCount();
-		const uint8_t toSend      = static_cast<uint8_t>(eventCount <= 8 ? eventCount : 8);
 		if (eventCount > 8) [[unlikely]]
-			LOG_WARN_F("[ClientNet] Input event overflow: %u events in window, capping at 8", eventCount);
-
-		for (uint8_t i = 0; i < toSend; ++i)
+			LOG_WARN_F("[ClientNet] Input event overflow: %u events in net window", eventCount);
+		for (uint16_t i = 0; i < eventCount; ++i)
 		{
 			InputData e       = netInput->ReadEvent();
-			payload.Events[i] = {static_cast<uint32_t>(e.Key), e.FrameUSOffset, e.Pressed, 0};
+			const uint32_t simFrame = frame + e.FrameUSOffset / frameTimeUS;
+			accum.PendingEvents.push_back({simFrame, static_cast<uint32_t>(e.Key), e.Pressed});
 		}
-		payload.EventCount = toSend;
+
+		// Build wire payload from the full unacked window and send.
+		const uint32_t firstFrame       = ci->LastServerAckedFrame + 1;
+		const InputFramePayload payload = accum.BuildPayload(firstFrame, frame, frameTimeUS);
 
 		PacketHeader header{};
 		header.Type        = static_cast<uint8_t>(NetMessageType::InputFrame);
@@ -417,7 +433,5 @@ void ClientNetThread::TickInputSend()
 		header.SenderID    = ci->OwnerID;
 		ConnectionMgr->Send(handle, header,
 							reinterpret_cast<const uint8_t*>(&payload), false);
-
-		ci->LastSentInputFrame = frame;
 	}
 }
