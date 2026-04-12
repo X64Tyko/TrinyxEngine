@@ -12,8 +12,10 @@ find_package(Vulkan REQUIRED)
 # SOURCE MANAGEMENT
 # -----------------------------------------------------------------------------
 # Gather engine source files (Runtime only — Editor is added conditionally below).
-file(GLOB_RECURSE ENGINE_SOURCES "${CMAKE_SOURCE_DIR}/src/Runtime/*.cpp")
-file(GLOB_RECURSE ENGINE_HEADERS "${CMAKE_SOURCE_DIR}/src/Runtime/*.h")
+# CONFIGURE_DEPENDS: CMake will re-run configure automatically when files are
+# added or removed, so build directories don't need a manual cmake -B invocation.
+file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/Runtime/*.cpp")
+file(GLOB_RECURSE ENGINE_HEADERS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/Runtime/*.h")
 
 # Exclude Net sources when networking is disabled.
 if (NOT TNX_ENABLE_NETWORK)
@@ -30,8 +32,8 @@ set(VOLK_SOURCES "")
 
 # Dear ImGui + Editor sources (editor builds only).
 if (TNX_ENABLE_EDITOR)
-    file(GLOB_RECURSE EDITOR_SOURCES "${CMAKE_SOURCE_DIR}/src/Editor/*.cpp")
-    file(GLOB_RECURSE EDITOR_HEADERS "${CMAKE_SOURCE_DIR}/src/Editor/*.h")
+    file(GLOB_RECURSE EDITOR_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/Editor/*.cpp")
+    file(GLOB_RECURSE EDITOR_HEADERS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/Editor/*.h")
     set(GUIZMO_PATH "${CMAKE_SOURCE_DIR}/libs/guizmo")
     set(IMGUI_SOURCES
             "${IMGUI_PATH}/imgui.cpp"
