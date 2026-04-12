@@ -22,10 +22,12 @@ static void WriteDefaults(const char* path)
 		<< "FixedUpdateHz=128\n"
 		<< "NetworkUpdateHz=30\n"
 		<< "InputPollHz=1000\n"
+		<< "InputNetHz=128\n"
+		<< "InputDelayFrames=0\n"
 		<< "MaxRenderableEntities=11000\n"
 		<< "MaxCachedEntities=25000\n"
 		<< "MaxJoltBodies=11000\n"
-		<< "TemporalFrameCount=8\n"
+		<< "TemporalFrameCount=32\n"
 		<< "JobCacheSize=16384\n"
 		<< "PhysicsUpdateInterval=8\n"
 		<< "DefaultScene=\n"
@@ -60,6 +62,8 @@ static void FillFromFile(const char* path, EngineConfig& cfg)
 		else if (key == "FixedUpdateHz" && cfg.FixedUpdateHz == EngineConfig::Unset) cfg.FixedUpdateHz = std::stoi(val);
 		else if (key == "NetworkUpdateHz" && cfg.NetworkUpdateHz == EngineConfig::Unset) cfg.NetworkUpdateHz = std::stoi(val);
 		else if (key == "InputPollHz" && cfg.InputPollHz == EngineConfig::Unset) cfg.InputPollHz = std::stoi(val);
+		else if (key == "InputNetHz" && cfg.InputNetHz == EngineConfig::Unset) cfg.InputNetHz = std::stoi(val);
+		else if (key == "InputDelayFrames" && cfg.InputDelayFrames == 0) cfg.InputDelayFrames = std::stoi(val);
 		else if (key == "MaxRenderableEntities" && cfg.MAX_RENDERABLE_ENTITIES == EngineConfig::Unset) cfg.MAX_RENDERABLE_ENTITIES = std::stoi(val);
 		else if (key == "MaxCachedEntities" && cfg.MAX_CACHED_ENTITIES == EngineConfig::Unset) cfg.MAX_CACHED_ENTITIES = std::stoi(val);
 		else if (key == "MaxJoltBodies" && cfg.MAX_JOLT_BODIES == EngineConfig::Unset) cfg.MAX_JOLT_BODIES = std::stoi(val);
@@ -110,10 +114,11 @@ void EngineConfig::ApplyDefaults()
 	if (PhysicsUpdateInterval == Unset) PhysicsUpdateInterval = 8;
 	if (NetworkUpdateHz == Unset) NetworkUpdateHz = 30;
 	if (InputPollHz == Unset) InputPollHz = 1000;
+	if (InputNetHz == Unset) InputNetHz = 128;
 	if (MAX_RENDERABLE_ENTITIES == Unset) MAX_RENDERABLE_ENTITIES = 11000;
 	if (MAX_CACHED_ENTITIES == Unset) MAX_CACHED_ENTITIES = 25000;
 	if (MAX_JOLT_BODIES == Unset) MAX_JOLT_BODIES = 11000;
-	if (TemporalFrameCount == Unset) TemporalFrameCount = 8;
+	if (TemporalFrameCount == Unset) TemporalFrameCount = 32;
 	if (JobCacheSize == Unset) JobCacheSize = 16 * 1024;
 }
 
@@ -124,6 +129,7 @@ void EngineConfig::FillFrom(const EngineConfig& other)
 	if (PhysicsUpdateInterval == Unset && other.PhysicsUpdateInterval != Unset) PhysicsUpdateInterval = other.PhysicsUpdateInterval;
 	if (NetworkUpdateHz == Unset && other.NetworkUpdateHz != Unset) NetworkUpdateHz = other.NetworkUpdateHz;
 	if (InputPollHz == Unset && other.InputPollHz != Unset) InputPollHz = other.InputPollHz;
+	if (InputNetHz == Unset && other.InputNetHz != Unset) InputNetHz = other.InputNetHz;
 	if (MAX_RENDERABLE_ENTITIES == Unset && other.MAX_RENDERABLE_ENTITIES != Unset) MAX_RENDERABLE_ENTITIES = other.MAX_RENDERABLE_ENTITIES;
 	if (MAX_CACHED_ENTITIES == Unset && other.MAX_CACHED_ENTITIES != Unset) MAX_CACHED_ENTITIES = other.MAX_CACHED_ENTITIES;
 	if (MAX_JOLT_BODIES == Unset && other.MAX_JOLT_BODIES != Unset) MAX_JOLT_BODIES = other.MAX_JOLT_BODIES;

@@ -28,6 +28,10 @@ public:
 	/// Non-owning. Required for EntitySpawn and StateCorrection routing.
 	void SetClientWorld(uint8_t ownerID, World* world) { MapConnectionToWorld(ownerID, world); }
 
+	/// Send one InputFrame packet to the server for each active client connection.
+	/// Called from NetThreadBase::ThreadMain at InputNetHz (fast path).
+	void TickInputSend();
+
 	/// Drain deferred ConstructSpawn payloads that were waiting for EntitySpawn to land.
 	void TickReplication();
 	void HandleMessage(const ReceivedMessage& msg);

@@ -2,7 +2,10 @@
 
 #include "CacheSlotMeta.h"
 #include "ConstructRegistry.h"
+#include "EngineConfig.h"
 #include "FlowManager.h"
+#include "Input.h"
+#include "LogicThread.h"
 #include "NetChannel.h"
 #include "NetConnectionManager.h"
 #include "NetTypes.h"
@@ -360,5 +363,44 @@ void ClientNetThread::TickReplication()
 	{
 		if (TrySpawnDeferred(*it)) it = DeferredConstructSpawns.erase(it);
 		else ++it;
+	}
+}
+
+void ClientNetThread::TickInputSend()
+{
+	std::vector<HSteamNetConnection> clientHandles;
+	for (const auto& ci : ConnectionMgr->GetConnections())
+		if (ci.bClientInitiated && ci.bConnected && ci.OwnerID != 0)
+			clientHandles.push_back(ci.Handle);
+
+	for (HSteamNetConnection handle : clientHandles)
+	{
+		ConnectionInfo* ci = ConnectionMgr->FindConnection(handle);
+		if (!ci) continue;
+
+		World* world = WorldMap[ci->OwnerID];
+		if (!world) continue;
+
+		InputBuffer* netInput = world->GetNetInput();
+		netInput->Swap();
+
+		const uint32_t frame = world->GetLogicThread()
+								   ? world->GetLogicThread()->GetLastCompletedFrame()
+								   : 0;
+
+		InputFramePayload payload{};
+		netInput->SnapshotKeyState(payload.KeyState, sizeof(payload.KeyState));
+		payload.MouseDX      = netInput->GetMouseDX();
+		payload.MouseDY      = netInput->GetMouseDY();
+		payload.MouseButtons = netInput->GetMouseButtonMask();
+
+		PacketHeader header{};
+		header.Type        = static_cast<uint8_t>(NetMessageType::InputFrame);
+		header.Flags       = PacketFlag::DefaultFlags;
+		header.PayloadSize = sizeof(InputFramePayload);
+		header.FrameNumber = frame;
+		header.SenderID    = ci->OwnerID;
+		ConnectionMgr->Send(handle, header,
+							reinterpret_cast<const uint8_t*>(&payload), false);
 	}
 }

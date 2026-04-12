@@ -90,6 +90,11 @@ void PIENetThread::TickReplication()
 	}
 }
 
+void PIENetThread::TickInputSend()
+{
+	for (auto& entry : Clients) entry.Handler->TickInputSend();
+}
+
 void PIENetThread::HandleMessage(const ReceivedMessage& msg)
 {
 	const ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);

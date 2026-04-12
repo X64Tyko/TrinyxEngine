@@ -58,6 +58,7 @@ public:
 private:
 	void HandleMessage(const ReceivedMessage& msg);
 	void TickReplication(); // also ticks all owned FlowManagers
+	void TickInputSend();   // delegates to each ClientNetThread handler
 
 	ServerNetThread Server;
 

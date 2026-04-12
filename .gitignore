@@ -44,3 +44,13 @@ Makefile
 
 # Compiled shader artifacts (source is *.slang, outputs are gitignored)
 shaders/*.spv
+shaders/**/*.spv
+*.spv
+
+# Generated shader disassembly / cross-compiled output
+*_frag.c
+*_vert.c
+
+# Runtime-generated files
+imgui.ini
+temp_*.txt

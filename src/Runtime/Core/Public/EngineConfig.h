@@ -56,6 +56,18 @@ struct EngineConfig
 	// This controls how fast your main thread goes, higher = better input latency
 	int InputPollHz = Unset;
 
+	// Rate at which the client sends InputFrame packets to the server.
+	// Decoupled from NetworkUpdateHz (state corrections) — higher = lower input latency on server.
+	// At 512Hz sim / 128Hz input = 4 sim frames per packet.
+	// TODO(lockstep): when InputDelayFrames > 0, ensure InputNetHz >= FixedUpdateHz / InputDelayFrames
+	int InputNetHz = Unset;
+
+	// Artificial input delay in sim frames for lockstep/deterministic play.
+	// 0 = disabled (default). Brain reads input for (currentFrame - InputDelayFrames).
+	// TODO(lockstep): when > 0, extend InputBuffer ring depth to InputDelayFrames + 1 slots.
+	// TODO(lockstep): gate Brain::AdvanceFrame on receipt of all peer inputs for (currentFrame - InputDelayFrames).
+	int InputDelayFrames = 0;
+
 	// Arena 1 capacity (Render + Dual partitions). Determines the slab boundary
 	// between Arena 1 and Arena 2. Must be <= MAX_CACHED_ENTITIES.
 	int MAX_RENDERABLE_ENTITIES = Unset;
@@ -113,5 +125,15 @@ struct EngineConfig
 	{
 		int hz = (NetworkUpdateHz == Unset) ? 30 : NetworkUpdateHz;
 		return (hz > 0) ? 1.0 / hz : 0.0;
+	}
+
+	int GetInputNetHz() const
+	{
+		return (InputNetHz == Unset) ? 128 : InputNetHz;
+	}
+
+	double GetInputNetStepTime() const
+	{
+		return 1.0 / GetInputNetHz();
 	}
 };

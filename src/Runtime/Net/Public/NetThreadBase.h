@@ -21,16 +21,22 @@ struct ReceivedMessage;
 // NetThreadBase<Derived>  (CRTP)
 //
 // Owns the GNS transport, OS thread lifecycle, rate-limited Tick loop, clock
-// sync probes, per-client input-frame send, and FPS tracking.
+// sync probes, and FPS tracking.
 //
-// Derived must implement two hooks:
+// Derived must implement three hooks:
 //   void HandleMessage(const ReceivedMessage& msg)   — role-specific routing
 //   void TickReplication()                            — no-op on client
+//   void TickInputSend()                              — no-op on server; client sends InputFrame
 //
 // Two operating modes (same as before):
 //   Threaded  — call Start(); used for Client and ListenServer.
 //   Inline    — call Tick() from your own loop; used for dedicated Server and
 //               PIE child instances (ticked manually by PIENetThread).
+//
+// Threading model:
+//   ThreadMain loops at InputNetHz (fast path): message poll + Self().TickInputSend().
+//   Every InputNetHz/NetworkUpdateHz iterations: full Tick() slow path
+//   (replication, clock sync, FPS tracking).
 // ---------------------------------------------------------------------------
 
 template <typename Derived>
@@ -60,8 +66,13 @@ public:
 	NetConnectionManager* GetConnectionManager() { return ConnectionMgr; }
 	const NetConnectionManager* GetConnectionManager() const { return ConnectionMgr; }
 
+	// Slow-path rate (NetworkUpdateHz) — replication, clock sync
 	float GetNetFPS() const { return NetFPS.load(std::memory_order_relaxed); }
 	float GetNetFrameMs() const { return NetFrameMs.load(std::memory_order_relaxed); }
+
+	// Fast-path rate (InputNetHz) — input send
+	float GetInputNetFPS() const { return InputNetFPS.load(std::memory_order_relaxed); }
+	float GetInputNetFrameMs() const { return InputNetFrameMs.load(std::memory_order_relaxed); }
 
 	// Per-client world routing for input-frame send path.
 	// OwnerID 0 = server world. 1-255 = client connections.
@@ -69,6 +80,11 @@ public:
 
 protected:
 	Derived& Self() { return *static_cast<Derived*>(this); }
+
+	// Default no-op — server inherits this; client and PIE override.
+	void TickInputSend()
+	{
+	}
 
 	GNSContext* GNS            = nullptr;
 	const EngineConfig* Config = nullptr;
@@ -84,17 +100,25 @@ protected:
 private:
 	void ThreadMain();
 	void TickClockSync(double nowSec);
-	void TickInputSend();
 	void TickFPS(double nowSec);
+	void TickInputFPS(double nowSec);
 
 	std::thread Thread;
 	std::atomic<bool> bIsRunning{false};
 
+	// Slow-path FPS (NetworkUpdateHz)
 	std::atomic<float> NetFPS{0.0f};
 	std::atomic<float> NetFrameMs{0.0f};
 	double FpsTimer     = 0.0;
 	double LastFPSCheck = 0.0;
 	int FpsFrameCount   = 0;
+
+	// Fast-path FPS (InputNetHz)
+	std::atomic<float> InputNetFPS{0.0f};
+	std::atomic<float> InputNetFrameMs{0.0f};
+	double InputFpsTimer     = 0.0;
+	double InputLastFPSCheck = 0.0;
+	int InputFpsFrameCount   = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -109,6 +133,7 @@ private:
 #include "Profiler.h"
 #include "ThreadPinning.h"
 #include "Logger.h"
+#include <algorithm>
 
 template <typename Derived>
 void NetThreadBase<Derived>::Initialize(GNSContext* gns, const EngineConfig* config)
@@ -153,7 +178,13 @@ template <typename Derived>
 void NetThreadBase<Derived>::ThreadMain()
 {
 	const uint64_t perfFrequency = SDL_GetPerformanceFrequency();
-	const double stepTime        = Config->GetNetworkStepTime();
+	const double inputStepTime   = Config->GetInputNetStepTime();
+	const int inputNetHz         = Config->GetInputNetHz();
+	const int networkUpdateHz    = (Config->NetworkUpdateHz == EngineConfig::Unset) ? 30 : Config->NetworkUpdateHz;
+	// How many fast (InputNetHz) ticks between each slow (NetworkUpdateHz) tick.
+	// Clamped to 1 so the slow path always runs at least as often as the fast path.
+	const int stateTickEvery = std::max(1, inputNetHz / networkUpdateHz);
+	int stateTickCounter     = 0;
 
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
@@ -161,9 +192,29 @@ void NetThreadBase<Derived>::ThreadMain()
 
 		const uint64_t frameStart = SDL_GetPerformanceCounter();
 
-		Tick();
+		// Fast path — every tick at InputNetHz: message poll + input send.
+		ConnectionMgr->RunCallbacks();
 
-		const uint64_t targetTicks = static_cast<uint64_t>(stepTime * static_cast<double>(perfFrequency));
+		std::vector<ReceivedMessage> messages;
+		ConnectionMgr->PollIncoming(messages);
+		for (const auto& msg : messages) Self().HandleMessage(msg);
+
+		Self().TickInputSend();
+
+		const double nowFast = static_cast<double>(SDL_GetPerformanceCounter())
+			/ static_cast<double>(perfFrequency);
+		TickInputFPS(nowFast);
+
+		// Slow path — every stateTickEvery iterations at NetworkUpdateHz:
+		// replication, clock sync, FPS tracking.
+		if (++stateTickCounter >= stateTickEvery)
+		{
+			stateTickCounter = 0;
+			Tick();
+		}
+
+		// Rate limit to InputNetHz
+		const uint64_t targetTicks = static_cast<uint64_t>(inputStepTime * static_cast<double>(perfFrequency));
 		const uint64_t frameEnd    = frameStart + targetTicks;
 
 		uint64_t now = SDL_GetPerformanceCounter();
@@ -186,14 +237,6 @@ template <typename Derived>
 void NetThreadBase<Derived>::Tick()
 {
 	TNX_ZONE_N("Net_Tick");
-
-	ConnectionMgr->RunCallbacks();
-
-	std::vector<ReceivedMessage> messages;
-	ConnectionMgr->PollIncoming(messages);
-
-	for (const auto& msg : messages)
-		Self().HandleMessage(msg);
 
 	Self().TickReplication();
 
@@ -269,46 +312,6 @@ void NetThreadBase<Derived>::TickClockSync(double nowSec)
 }
 
 template <typename Derived>
-void NetThreadBase<Derived>::TickInputSend()
-{
-	std::vector<HSteamNetConnection> clientHandles;
-	for (const auto& ci : ConnectionMgr->GetConnections())
-		if (ci.bClientInitiated && ci.bConnected && ci.OwnerID != 0)
-			clientHandles.push_back(ci.Handle);
-
-	for (HSteamNetConnection handle : clientHandles)
-	{
-		ConnectionInfo* ci = ConnectionMgr->FindConnection(handle);
-		if (!ci) continue;
-
-		World* world = WorldMap[ci->OwnerID];
-		if (!world) continue;
-
-		InputBuffer* netInput = world->GetNetInput();
-		netInput->Swap();
-
-		const uint32_t frame = world->GetLogicThread()
-								   ? world->GetLogicThread()->GetLastCompletedFrame()
-								   : 0;
-
-		InputFramePayload payload{};
-		netInput->SnapshotKeyState(payload.KeyState, sizeof(payload.KeyState));
-		payload.MouseDX      = netInput->GetMouseDX();
-		payload.MouseDY      = netInput->GetMouseDY();
-		payload.MouseButtons = netInput->GetMouseButtonMask();
-
-		PacketHeader header{};
-		header.Type        = static_cast<uint8_t>(NetMessageType::InputFrame);
-		header.Flags       = PacketFlag::DefaultFlags;
-		header.PayloadSize = sizeof(InputFramePayload);
-		header.FrameNumber = frame;
-		header.SenderID    = ci->OwnerID;
-		ConnectionMgr->Send(handle, header,
-							reinterpret_cast<const uint8_t*>(&payload), false);
-	}
-}
-
-template <typename Derived>
 void NetThreadBase<Derived>::TickFPS(double nowSec)
 {
 	FpsFrameCount++;
@@ -324,5 +327,24 @@ void NetThreadBase<Derived>::TickFPS(double nowSec)
 		LOG_DEBUG_F("Net FPS: %d | Frame: %.2fms", static_cast<int>(fps), static_cast<double>(ms));
 		FpsFrameCount = 0;
 		FpsTimer      = 0.0;
+	}
+}
+
+template <typename Derived>
+void NetThreadBase<Derived>::TickInputFPS(double nowSec)
+{
+	InputFpsFrameCount++;
+	InputFpsTimer    += nowSec - InputLastFPSCheck;
+	InputLastFPSCheck = nowSec;
+
+	if (InputFpsTimer >= 1.0) [[unlikely]]
+	{
+		float fps = static_cast<float>(InputFpsFrameCount / InputFpsTimer);
+		float ms  = static_cast<float>((InputFpsTimer / InputFpsFrameCount) * 1000.0);
+		InputNetFPS.store(fps, std::memory_order_relaxed);
+		InputNetFrameMs.store(ms, std::memory_order_relaxed);
+		LOG_DEBUG_F("NetInput FPS: %d | Frame: %.3fms", static_cast<int>(fps), static_cast<double>(ms));
+		InputFpsFrameCount = 0;
+		InputFpsTimer      = 0.0;
 	}
 }
