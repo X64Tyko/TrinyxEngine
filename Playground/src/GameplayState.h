@@ -9,6 +9,7 @@
 
 #include <string>
 
+#include "CacheSlotMeta.h"
 #include "World.h"
 
 // ---------------------------------------------------------------------------
@@ -74,6 +75,42 @@ public:
 				LOG_INFO_F("[GameplayState] TravelNotify — loading level '%s' (background)", levelName.c_str());
 				Flow->LoadLevelByName(name.c_str(), /*bBackground=*/true);
 			}
+		}
+
+		// ServerReady: level load (TravelNotify = 0) always precedes this (ServerReady = 1) in
+		// FlowManager::Tick(), so level entities are guaranteed Alive before we sweep them Active.
+		if (eventID == static_cast<uint8_t>(FlowEventID::ServerReady))
+		{
+			World* world = Flow->GetWorld();
+			if (!world)
+			{
+				LOG_WARN("[GameplayState] ServerReady: no world, sweep skipped");
+				return;
+			}
+			world->Spawn([](Registry* reg)
+			{
+				ComponentCacheBase* cache  = reg->GetTemporalCache();
+				const uint32_t frame       = cache->GetActiveWriteFrame();
+				TemporalFrameHeader* hdr   = cache->GetFrameHeader(frame);
+				const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
+				auto* flags                = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
+				if (!flags) return;
+
+				const uint32_t max         = cache->GetMaxCachedEntityCount();
+				const uint32_t aliveBit    = static_cast<uint32_t>(TemporalFlagBits::Alive);
+				const uint32_t activeBit   = static_cast<uint32_t>(TemporalFlagBits::Active);
+				const uint32_t aliveShift  = TNX_CTZ32(aliveBit);
+				const uint32_t activeShift = TNX_CTZ32(activeBit);
+				int sweepCount             = 0;
+				for (uint32_t i = 0; i < max; ++i)
+				{
+					const uint32_t f    = static_cast<uint32_t>(flags[i]);
+					const uint32_t mask = -((f & aliveBit) >> aliveShift);
+					sweepCount          += static_cast<int>((activeBit & mask & ~f) >> activeShift);
+					flags[i]            = static_cast<int32_t>(f | (activeBit & mask));
+				}
+				LOG_INFO_F("[Replication] ServerReady: swept %d Alive→Active", sweepCount);
+			});
 		}
 	}
 

@@ -163,8 +163,12 @@ bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* e
 		return true; // Bad type — don't retry
 	}
 
+	// Look up the owning Soul before creating — passed into the Construct base.
+	FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr;
+	Soul* soul        = flow ? flow->GetSoul(ownerID) : nullptr;
+
 	// Create the client-side Construct via the replication path
-	void* raw = factory(reg, clientWorld, resolvedHandles, resolvedCount, ownerID);
+	void* raw = factory(reg, clientWorld, resolvedHandles, resolvedCount, soul);
 	if (!raw)
 	{
 		LOG_WARN("[Replication] HandleConstructSpawn: factory returned null");
@@ -181,8 +185,6 @@ bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* e
 	ConstructRef ref = reg->WireNetRef(raw, serverHandle, wireManifest, typeHash);
 
 	// Deliver to the owning Soul
-	FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr;
-	Soul* soul        = flow ? flow->GetSoul(ownerID) : nullptr;
 	if (soul)
 	{
 		soul->ClaimBody(ref);

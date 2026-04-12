@@ -1,33 +1,34 @@
 #pragma once
 
-#include "Construct.h"
 #include "CameraConstruct.h"
-#include "EInstanced.h"
+#include "Construct.h"
+#include "ConstructView.h"
 #include "EngineConfig.h"
 #include "Input.h"
+#include "JoltCharacter.h"
 #include "JoltPhysics.h"
 #include "Owned.h"
 #include "Soul.h"
 
+#include "EPlayer.h"
+
 #include <cmath>
 
-#include "EPlayer.h"
-#include "JoltCharacter.h"
-
 // ---------------------------------------------------------------------------
-// PlayerConstruct — Playground player with physics capsule and dual cameras.
+// PlayerConstruct — Standard engine player with physics capsule and dual cameras.
 //
-// Owns a DefaultView (capsule mesh, physics body) and two CameraConstructs
-// (first-person + third-person). V key toggles the active camera.
-// WASD drives kinematic velocity (set in PrePhysics, consumed by Jolt Step).
+// Owns a ConstructView<EPlayer> (capsule mesh, physics body) and two
+// CameraConstructs (first-person + third-person). V key toggles the active
+// camera. WASD drives kinematic velocity (set in PrePhysics, consumed by Jolt).
 // Mouse look and camera positioning happen in ScalarUpdate (after physics).
+//
+// Ownership: GetOwnerSoul() returns the Soul* set during replication
+// (or null in standalone/server). GetOwnerID() delegates to that Soul.
 // ---------------------------------------------------------------------------
 class PlayerConstruct : public Construct<PlayerConstruct>
 {
 public:
 	TNX_CONSTRUCT_WORLD
-
-	Soul* PlayerSoul = nullptr; // Owning Soul — null in standalone (no net session)
 
 	ConstructView<EPlayer> Body;
 	Owned<CameraConstruct> FirstPersonCam;
@@ -97,28 +98,22 @@ public:
 
 	void PhysicsStep(SimFloat dt)
 	{
-		// Let Jolt handle collision, slopes, stairs, grounding
 		CharacterController.Update(
 			JPH::Vec3(DesiredVelX, 0, DesiredVelZ),
 			JPH::Vec3(0, -9.81f, 0),
 			static_cast<float>(dt),
 			*GetWorld()->GetPhysics()->GetTempAllocator());
 
-		// Write the resolved position back to the slab
 		JPH::RVec3 pos      = CharacterController.GetPosition();
 		Body.Transform.PosX = pos.GetX();
 		Body.Transform.PosY = pos.GetY();
 		Body.Transform.PosZ = pos.GetZ();
 
-		// reset our desired velocity so we can begin accumulating again.
 		DesiredVelX = 0.0f;
 		DesiredVelZ = 0.0f;
 	}
 
-	// ── PrePhysics: read input, accumulate desired velocity ──────────────
-	// Runs every logic frame (512Hz). Caches the latest desired velocity.
-	// The actual Jolt push happens in PhysicsFlush (once per physics step).
-	void PrePhysics(SimFloat dt)
+	void PrePhysics(SimFloat /*dt*/)
 	{
 		InputBuffer* simInput = GetWorld()->GetInputForPlayer(GetOwnerID());
 
@@ -130,26 +125,10 @@ public:
 
 		float moveX = 0.0f, moveZ = 0.0f;
 
-		if (simInput->IsActionDown(Action::MoveForward))
-		{
-			moveX += forwardX;
-			moveZ += forwardZ;
-		}
-		if (simInput->IsActionDown(Action::MoveBackward))
-		{
-			moveX -= forwardX;
-			moveZ -= forwardZ;
-		}
-		if (simInput->IsActionDown(Action::MoveRight))
-		{
-			moveX += rightX;
-			moveZ += rightZ;
-		}
-		if (simInput->IsActionDown(Action::MoveLeft))
-		{
-			moveX -= rightX;
-			moveZ -= rightZ;
-		}
+		if (simInput->IsActionDown(Action::MoveForward))  { moveX += forwardX; moveZ += forwardZ; }
+		if (simInput->IsActionDown(Action::MoveBackward)) { moveX -= forwardX; moveZ -= forwardZ; }
+		if (simInput->IsActionDown(Action::MoveRight))    { moveX += rightX;   moveZ += rightZ;   }
+		if (simInput->IsActionDown(Action::MoveLeft))     { moveX -= rightX;   moveZ -= rightZ;   }
 
 		float len = std::sqrt(moveX * moveX + moveZ * moveZ);
 		if (len > 0.001f)
@@ -159,13 +138,10 @@ public:
 		}
 	}
 
-	// ── ScalarUpdate: mouse look, camera toggle, camera positioning ──────
-	// Runs after physics — body transform is up to date.
-	void ScalarUpdate(SimFloat dt)
+	void ScalarUpdate(SimFloat /*dt*/)
 	{
 		InputBuffer* vizInput = GetWorld()->GetVizInputForPlayer(GetOwnerID());
 
-		// ── Camera toggle (V key) — edge-detect ─────────────────────────
 		bool toggleDown = vizInput->IsActionDown(Action::ToggleCamera);
 		if (toggleDown && !bToggleHeld)
 		{
@@ -176,7 +152,6 @@ public:
 		}
 		bToggleHeld = toggleDown;
 
-		// ── Mouse look ──────────────────────────────────────────────────
 		constexpr float MouseSens = 0.002f;
 		constexpr float MaxPitch  = 1.5533f; // ~89 degrees
 
@@ -185,7 +160,6 @@ public:
 		if (Pitch > MaxPitch) Pitch = MaxPitch;
 		if (Pitch < -MaxPitch) Pitch = -MaxPitch;
 
-		// ── Update camera positions from body transform ─────────────────
 		auto& tr    = Body.Transform;
 		SimFloat px = tr.PosX.Value();
 		SimFloat py = tr.PosY.Value();
@@ -194,11 +168,9 @@ public:
 		float sinYaw = std::sin(Yaw);
 		float cosYaw = std::cos(Yaw);
 
-		// First-person: at eye height
 		FirstPersonCam->SetPosition(px, py + EyeHeight, pz);
 		FirstPersonCam->SetYawPitch(Yaw, Pitch);
 
-		// Third-person: behind and above
 		float camDist  = 5.0f;
 		float cosPitch = std::cos(Pitch);
 		float tpX      = px - sinYaw * cosPitch * camDist;
@@ -208,16 +180,19 @@ public:
 		ThirdPersonCam->SetYawPitch(Yaw, Pitch);
 	}
 
-	// Spawn position — set by ArenaMode before Initialize is called.
+	// Spawn position — set by game mode before Initialize is called.
 	float SpawnPosX = 0.0f;
 	float SpawnPosY = 5.0f;
 	float SpawnPosZ = 0.0f;
 
-	uint8_t GetOwnerID() const { return PlayerSoul ? PlayerSoul->GetOwnerID() : 0; }
+	uint8_t GetOwnerID() const
+	{
+		Soul* s = GetOwnerSoul();
+		return s ? s->GetOwnerID() : 0;
+	}
 
 private:
 	/// Set the active camera only if this is the owning client (or standalone).
-	/// Headless server never calls SetActiveCamera; remote client Constructs skip it too.
 	void SetActiveCameraIfOwned(CameraConstruct* cam)
 	{
 		if (GetWorld()->GetConfig().Mode == EngineMode::Server) return;
@@ -228,7 +203,6 @@ private:
 
 	CameraConstruct* ActiveCam = nullptr;
 
-	// Replication state — set by InitializeForReplication before Initialize.
 	bool bIsClientSide = false;
 	EntityHandle ReplicationEntityHandle{};
 

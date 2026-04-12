@@ -1,11 +1,13 @@
 #include "NetConnectionManager.h"
 
 #include <SDL3/SDL_timer.h>
+#include <cassert>
 
 #include "GNSContext.h"
 
 #include <steam/isteamnetworkingsockets.h>
 #include <steam/isteamnetworkingutils.h>
+#include <steam/steamnetworkingtypes.h>
 
 #include "Logger.h"
 
@@ -249,6 +251,11 @@ int NetConnectionManager::PollIncoming(std::vector<ReceivedMessage>& outMessages
 bool NetConnectionManager::Send(HSteamNetConnection conn, const PacketHeader& header,
 								const uint8_t* payload, bool reliable)
 {
+	// Payload pointer must be present when PayloadSize > 0 — a mismatch means
+	// the caller stamped the wrong size or forgot to pass the buffer.
+	assert((header.PayloadSize == 0 || payload != nullptr) &&
+		   "Send: non-zero PayloadSize but null payload pointer");
+
 	uint8_t buf[sizeof(PacketHeader) + 65535]; // Stack buffer — PayloadSize is uint16
 	uint32_t totalSize = PacketHeader::Serialize(buf, header, payload);
 	return SendRaw(conn, buf, totalSize, reliable);
@@ -258,6 +265,10 @@ bool NetConnectionManager::SendRaw(HSteamNetConnection conn, const uint8_t* data
 								   uint32_t size, bool reliable)
 {
 	if (!Sockets) return false;
+
+	// GNS hard limit — exceeding this silently drops the message.
+	assert(size <= static_cast<uint32_t>(k_cbMaxSteamNetworkingSocketsMessageSizeSend) &&
+		   "SendRaw: message exceeds GNS maximum send size (512 KB)");
 
 	int flags = reliable ? GNS::SendReliable : GNS::SendUnreliable;
 

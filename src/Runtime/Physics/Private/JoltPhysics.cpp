@@ -620,7 +620,8 @@ const JPH::BodyInterface& JoltPhysics::GetBodyInterfaceNoLock() const
 
 void JoltPhysics::SaveSnapshot(uint32_t frameNumber)
 {
-	auto& slot       = SnapshotRing[frameNumber % SnapshotCapacity];
+	const uint32_t physStep = frameNumber / static_cast<uint32_t>(ConfigPtr->PhysicsUpdateInterval);
+	auto& slot       = SnapshotRing[physStep % SnapshotCapacity];
 	slot.FrameNumber = frameNumber;
 
 	JPH::StateRecorderImpl recorder;
@@ -630,7 +631,8 @@ void JoltPhysics::SaveSnapshot(uint32_t frameNumber)
 
 bool JoltPhysics::RestoreSnapshot(uint32_t frameNumber)
 {
-	auto& slot = SnapshotRing[frameNumber % SnapshotCapacity];
+	const uint32_t physStep = frameNumber / static_cast<uint32_t>(ConfigPtr->PhysicsUpdateInterval);
+	auto& slot = SnapshotRing[physStep % SnapshotCapacity];
 	if (slot.FrameNumber != frameNumber)
 	{
 		LOG_WARN_F("[JoltPhysics] Snapshot for frame %u not found (slot has frame %u)",

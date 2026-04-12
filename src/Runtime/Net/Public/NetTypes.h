@@ -303,8 +303,8 @@ enum class ClientRepState : uint8_t
 // ---------------------------------------------------------------------------
 enum class FlowEventID : uint8_t
 {
-	ServerReady        = 0, // Server has flushed initial entity batch; client sweeps Alive→Active then sends PlayerBeginRequest
-	TravelNotify       = 1, // Server tells client to load a level (payload: TravelPayload)
+	TravelNotify       = 0, // Server tells client to load a level (payload: TravelPayload)
+	ServerReady        = 1, // Server has flushed initial entity batch; client sweeps Alive→Active then sends PlayerBeginRequest
 	PlayerBeginConfirm = 2, // Server confirmed the spawn; client reads FlowManager::PendingPlayerBeginConfirm
 	PlayerBeginReject  = 3, // Server rejected the spawn; client should destroy predicted body
 };

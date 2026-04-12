@@ -17,6 +17,7 @@ class FlowState;
 class GameMode;
 class ConstructRegistry;
 class World;
+class Soul;
 union EntityHandle;
 
 // Forward declarations for RPC dispatch table.
@@ -245,7 +246,7 @@ public:
 	// HandleConstructSpawn calls FindConstructClientFactory(typeHash) to get the
 	// client-side factory for the type identified by ConstructNetManifest::PrefabIndex.
 
-	using ConstructClientFactory = void*(*)(ConstructRegistry*, World*, EntityHandle*, uint8_t viewCount, uint8_t ownerID);
+	using ConstructClientFactory = void*(*)(ConstructRegistry*, World*, EntityHandle*, uint8_t viewCount, Soul* ownerSoul);
 
 	struct ConstructEntry
 	{

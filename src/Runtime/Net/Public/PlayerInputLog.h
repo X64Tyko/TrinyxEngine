@@ -51,7 +51,8 @@ struct PlayerInputLogEntry
 	float MouseDY           = 0.f;
 	uint8_t MouseButtons    = 0;
 	uint8_t EventCount      = 0;
-	uint8_t _Pad[2]         = {};
+	bool bPredicted         = false; // true = extrapolated from last known state, not real input
+	uint8_t _Pad            = {};
 	NetInputEvent Events[8] = {};
 };
 
@@ -75,14 +76,22 @@ struct PlayerInputLog
 {
 	std::unique_ptr<PlayerInputLogEntry[]> Entries;
 	uint32_t Depth             = 0;
-	uint32_t LastConsumedFrame = 0; // highest sim frame handed to the simulation
-	uint32_t LastReceivedFrame = 0; // highest LastClientFrame stored — used to classify misses
-	// Largest FirstClientFrame seen across all received packets.
-	// Out-of-order arrivals are clamped to start here — prevents stale packets from
-	// overwriting frames that a later packet's FirstClientFrame already superseded.
+	uint32_t LastConsumedFrame = 0;
+	uint32_t LastReceivedFrame = 0;
 	uint32_t HighWaterFirstFrame = 0;
 
-	/// Must be called before use. Allocates Depth slots matching TemporalFrameCount.
+	// Set true when PlayerBeginConfirm is dispatched (RepState → Playing).
+	// The injector skips this log until then.
+	bool     bActive           = false;
+
+	// Dirty tracking: set when a real packet corrects a previously predicted frame.
+	bool     bDirty            = false;
+	uint32_t EarliestDirtyFrame = UINT32_MAX;
+
+	bool     IsDirty()   const { return bDirty; }
+	void     ClearDirty()      { bDirty = false; EarliestDirtyFrame = UINT32_MAX; }
+
+	/// Must be called before use. Allocates Depth slots.
 	void Initialize(uint32_t temporalFrameCount)
 	{
 		Depth   = temporalFrameCount;
@@ -90,14 +99,23 @@ struct PlayerInputLog
 	}
 
 	/// Called by NetThread when an InputFrame arrives.
-	/// Splits the payload across every sim frame in [FirstClientFrame, LastClientFrame].
-	/// Each frame's slot (frame % Depth) receives: the full held key state, mouse delta,
-	/// and the subset of discrete events whose FrameUSOffset falls within that frame's
-	/// time window (fixedUpdateHz used to determine per-frame μs duration).
-	/// Frames at or below LastConsumedFrame are skipped (already simulated).
+	/// For frames not yet consumed: store normally (first-write-wins with out-of-order correction).
+	/// For frames already consumed as predicted: compare and mark dirty if different.
 	void Store(const InputFramePayload& payload, uint32_t fixedUpdateHz)
 	{
 		if (!Entries) return;
+
+		// First packet activates the log: seed all counters so the injector's lead gate
+		// starts from this frame, not from 0.
+		if (!bActive)
+		{
+			const uint32_t seed = payload.FirstClientFrame > 0 ? payload.FirstClientFrame - 1 : 0;
+			LastReceivedFrame   = seed;
+			LastConsumedFrame   = seed;
+			HighWaterFirstFrame = seed;
+			bActive             = true;
+		}
+
 		if (payload.LastClientFrame <= LastConsumedFrame) return; // entire span already simulated
 
 		const uint32_t frameTimeUS = 1'000'000u / fixedUpdateHz;
@@ -111,57 +129,91 @@ struct PlayerInputLog
 
 		for (uint32_t frame = effectiveFirst; frame <= payload.LastClientFrame; ++frame)
 		{
-			if (frame <= LastConsumedFrame) continue; // skip frames already consumed within span
-
 			PlayerInputLogEntry& entry = Entries[frame % Depth];
 
-			// Prefer the packet whose snapshot is oldest (smallest LastClientFrame) —
-			// that's the one taken closest in time to this sim frame, making it the
-			// most accurate keystate for this frame. This handles out-of-order delivery:
-			// a newer packet arriving first with a stale future keystate will be
-			// overwritten when the older, more accurate packet arrives.
+			// Build the incoming event set for this frame so we can compare it.
+			const uint32_t windowOffsetStart = (frame - payload.FirstClientFrame) * frameTimeUS;
+			const uint32_t windowOffsetEnd   = windowOffsetStart + frameTimeUS;
+
+			if (frame <= LastConsumedFrame)
+			{
+				// Frame was already simulated. Only care if it was predicted — compare and
+				// mark dirty so the server can resim with the real input.
+				if (entry.SimFrame != frame || !entry.bPredicted) continue;
+
+				const bool keystateChanged = (std::memcmp(entry.KeyState, payload.KeyState, 64) != 0)
+										  || (entry.MouseDX != payload.MouseDX)
+										  || (entry.MouseDY != payload.MouseDY)
+										  || (entry.MouseButtons != payload.MouseButtons);
+
+				// Check if the incoming event set for this frame differs.
+				uint8_t incomingEventCount = 0;
+				NetInputEvent incomingEvents[8];
+				for (uint8_t e = 0; e < payload.EventCount && incomingEventCount < 8; ++e)
+				{
+					const uint32_t evOffset = payload.Events[e].FrameUSOffset;
+					if (evOffset >= windowOffsetStart && evOffset < windowOffsetEnd)
+						incomingEvents[incomingEventCount++] = payload.Events[e];
+				}
+
+				const bool eventsChanged = (incomingEventCount != entry.EventCount)
+					|| (incomingEventCount > 0
+						&& std::memcmp(incomingEvents, entry.Events, incomingEventCount * sizeof(NetInputEvent)) != 0);
+
+				if (keystateChanged || eventsChanged)
+				{
+					// Overwrite with real data and mark the log dirty for resim.
+					std::memcpy(entry.KeyState, payload.KeyState, 64);
+					entry.MouseDX      = payload.MouseDX;
+					entry.MouseDY      = payload.MouseDY;
+					entry.MouseButtons = payload.MouseButtons;
+					entry.bPredicted   = false;
+					entry.EventCount   = static_cast<uint8_t>(incomingEventCount);
+					std::memcpy(entry.Events, incomingEvents, incomingEventCount * sizeof(NetInputEvent));
+
+					bDirty = true;
+					if (frame < EarliestDirtyFrame) EarliestDirtyFrame = frame;
+				}
+				continue;
+			}
+
+			// Frame not yet consumed — normal store path.
+			// Prefer the packet whose snapshot is oldest (smallest LastClientFrame).
 			const bool slotMatchesFrame  = (entry.SimFrame == frame);
 			const bool incomingIsFresher = (payload.LastClientFrame < entry.SnapshotFrame);
 			if (slotMatchesFrame && !incomingIsFresher) continue;
 
-			// Held state applies uniformly to all frames in the span
 			std::memcpy(entry.KeyState, payload.KeyState, 64);
 			entry.MouseDX       = payload.MouseDX;
 			entry.MouseDY       = payload.MouseDY;
 			entry.MouseButtons  = payload.MouseButtons;
 			entry.SimFrame      = frame;
 			entry.SnapshotFrame = payload.LastClientFrame;
+			entry.bPredicted    = false;
 			entry.EventCount    = 0;
-
-			// Distribute discrete events to the sim frame they occurred in.
-			// FrameUSOffset is μs since the input window opened (at FirstClientFrame).
-			const uint32_t windowOffsetStart = (frame - payload.FirstClientFrame) * frameTimeUS;
-			const uint32_t windowOffsetEnd   = windowOffsetStart + frameTimeUS;
 
 			for (uint8_t e = 0; e < payload.EventCount && entry.EventCount < 8; ++e)
 			{
 				const uint32_t evOffset = payload.Events[e].FrameUSOffset;
-				if (evOffset >= windowOffsetStart && evOffset < windowOffsetEnd) entry.Events[entry.EventCount++] = payload.Events[e];
+				if (evOffset >= windowOffsetStart && evOffset < windowOffsetEnd)
+					entry.Events[entry.EventCount++] = payload.Events[e];
 			}
 		}
 
 		if (payload.LastClientFrame > LastReceivedFrame) LastReceivedFrame = payload.LastClientFrame;
 	}
 
-	/// Called by LogicThread each sim tick.
-	/// On hit: advances LastConsumedFrame and returns the entry with Reason::Hit.
-	/// On miss: Reason::NotYetReceived means the packet simply hasn't arrived yet —
-	/// extrapolate by repeating the last key state. Reason::LateOrAliased means the
-	/// slot was clobbered or the frame was in a received span but overwritten — log
-	/// a diagnostic or schedule a resim.
-	/// TODO(rollback): Reason::LateOrAliased with frameNumber < LastConsumedFrame means
-	/// a late packet arrived for an already-simulated frame — trigger ExecuteRollback().
+	/// Called by server LogicThread injector each sim tick.
+	/// Hit: advances LastConsumedFrame, returns the real entry.
+	/// NotYetReceived (within lead budget): writes a predicted entry from last known state
+	///   and returns it — server keeps running, entry is flagged for correction on late arrival.
+	/// NotYetReceived (beyond lead budget): caller should stall the sim.
 	InputConsumeResult ConsumeFrame(uint32_t frameNumber)
 	{
 		if (!Entries) return {nullptr, InputMissReason::LateOrAliased};
 
-		const PlayerInputLogEntry& entry = Entries[frameNumber % Depth];
-		if (entry.SimFrame == frameNumber)
+		PlayerInputLogEntry& entry = Entries[frameNumber % Depth];
+		if (entry.SimFrame == frameNumber && !entry.bPredicted)
 		{
 			if (frameNumber > LastConsumedFrame) LastConsumedFrame = frameNumber;
 			return {&entry, InputMissReason::Hit};
@@ -170,6 +222,35 @@ struct PlayerInputLog
 		const InputMissReason reason = (frameNumber > LastReceivedFrame)
 										   ? InputMissReason::NotYetReceived
 										   : InputMissReason::LateOrAliased;
-		return {nullptr, reason};
+
+		if (reason == InputMissReason::NotYetReceived)
+		{
+			// Extrapolate: copy last known state into this slot and mark predicted.
+			// Find the most recent real or predicted entry to copy from.
+			const PlayerInputLogEntry* lastKnown = nullptr;
+			for (uint32_t f = frameNumber - 1; f != UINT32_MAX && f + Depth >= frameNumber; --f)
+			{
+				const PlayerInputLogEntry& prev = Entries[f % Depth];
+				if (prev.SimFrame == f) { lastKnown = &prev; break; }
+			}
+
+			entry.SimFrame      = frameNumber;
+			entry.SnapshotFrame = UINT32_MAX;
+			entry.bPredicted    = true;
+			entry.EventCount    = 0; // discrete events are never predicted
+			if (lastKnown)
+			{
+				std::memcpy(entry.KeyState, lastKnown->KeyState, 64);
+				entry.MouseDX      = lastKnown->MouseDX;
+				entry.MouseDY      = lastKnown->MouseDY;
+				entry.MouseButtons = lastKnown->MouseButtons;
+			}
+			else std::memset(entry.KeyState, 0, 64);
+
+			if (frameNumber > LastConsumedFrame) LastConsumedFrame = frameNumber;
+			return {&entry, InputMissReason::NotYetReceived};
+		}
+
+		return {nullptr, InputMissReason::LateOrAliased};
 	}
 };

@@ -414,8 +414,8 @@ FORCE_INLINE void ForEachField(Func&& func)
                 ReflectionRegistry::Get().RegisterConstruct( \
                     #ConstructClass, \
                     ReflectionRegistry::ConstructTypeHashFromName(#ConstructClass), \
-                    [](ConstructRegistry* reg, World* w, EntityHandle* handles, uint8_t count, uint8_t ownerID) -> void* { \
-                        return reg->CreateForReplication<ConstructClass>(w, handles, count, ownerID); \
+                    [](ConstructRegistry* reg, World* w, EntityHandle* handles, uint8_t count, Soul* soul) -> void* { \
+                        return reg->CreateForReplication<ConstructClass>(w, handles, count, soul); \
                     }); \
             } \
         }; \

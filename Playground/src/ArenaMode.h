@@ -79,7 +79,7 @@ private:
 		const uint16_t typeHash   = ReflectionRegistry::ConstructTypeHashFromName("PlayerConstruct");
 
 		auto* player         = reg->Create<PlayerConstruct>(world);
-		player->PlayerSoul   = &soul;
+		player->SetOwnerSoul(&soul);
 		player->SpawnPosX    = 0.0f;
 		player->SpawnPosY = 5.0f;
 		player->SpawnPosZ = 0.0f;

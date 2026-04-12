@@ -9,6 +9,7 @@
 #include "PagedMap.h"
 
 class World;
+class Soul;
 class ReplicationSystem;
 
 // ---------------------------------------------------------------------------
@@ -140,17 +141,17 @@ public:
 
 	/// Create a Construct using the replication path (client-side).
 	/// Calls InitializeForReplication(world, handles, count) instead of Initialize(world).
-	/// ownerID is set on the Construct before InitializeForReplication so ownership
+	/// ownerSoul is set on the Construct before InitializeForReplication so ownership
 	/// checks (e.g. SetActiveCameraIfOwned) work correctly during initialization.
 	template <typename T>
-	T* CreateForReplication(World* InWorld, EntityHandle* viewHandles, uint8_t viewCount, uint8_t ownerID)
+	T* CreateForReplication(World* InWorld, EntityHandle* viewHandles, uint8_t viewCount, Soul* ownerSoul)
 	{
 		auto typed = std::make_unique<TypedStorage<T>>();
 		T* raw     = &typed->Value;
 
 		uint32_t id = NextID++;
 		raw->SetConstructID(id);
-		raw->OwnerID = ownerID;
+		raw->SetOwnerSoul(ownerSoul);
 		raw->InitializeForReplication(InWorld, viewHandles, viewCount);
 
 		Entry entry;

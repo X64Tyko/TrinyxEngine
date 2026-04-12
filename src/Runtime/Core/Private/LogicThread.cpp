@@ -189,6 +189,19 @@ void LogicThread::ThreadMain()
 					bRollbackTestRequested.store(false, std::memory_order_relaxed);
 					ExecuteRollbackTest();
 				}
+
+				if (bRollbackRequested.load(std::memory_order_acquire))
+				{
+					bRollbackRequested.store(false, std::memory_order_relaxed);
+					if (bRollbackActive)
+					{
+						LOG_WARN("[Rollback] Rollback requested while one is already active — ignored");
+					}
+					else
+					{
+						ExecuteRollback(PendingRollbackFrame.load(std::memory_order_relaxed));
+					}
+				}
 #endif
 			}
 			TrackFPS();
@@ -216,9 +229,8 @@ void LogicThread::ProcessSimInput(SimFloat dt)
 	SimInput->Swap();
 
 	// Server-side: pull each connected player's input from the PlayerInputLog for this frame.
-	// On miss (NotYetReceived), the player's InputBuffer carries forward the last held state
-	// automatically via InputBuffer::Swap(). Discrete events are not extrapolated.
-	// TODO(rollback): on LateOrAliased miss after this frame is consumed, schedule resim.
+	// The injector calls InjectState then buf->Swap() so the injected state is in ReadSlot
+	// when PrePhysics runs. On stall, Swap() is still called for carry-forward of held keys.
 	if (PlayerInputInjector) PlayerInputInjector(FrameNumber);
 }
 
@@ -489,21 +501,88 @@ void LogicThread::InjectFrameInput(uint32_t frameNum)
 	SimInput->ReadCursor           = 0;
 }
 
+void LogicThread::ExecuteRollback(uint32_t targetFrame)
+{
+	TNX_ZONE_N("Rollback");
+
+	bRollbackActive = true;
+
+	const uint32_t T           = FrameNumber - 1;
+	const uint32_t frameCount  = TemporalCache->GetTotalFrameCount();
+	const double fixedStepTime = ConfigPtr->GetFixedStepTime();
+
+	// Align to most recent Jolt flush boundary so physics state is consistent.
+	const uint32_t alignedTarget    = targetFrame - ((targetFrame % PhysicsDivizor + 1) % PhysicsDivizor);
+	const uint32_t totalResimFrames = T - alignedTarget;
+
+	LOG_INFO_F("[Rollback] Rewind to frame %u (aligned from %u), resim %u frames to frame %u",
+			   alignedTarget, targetFrame, totalResimFrames, T);
+
+	// ── Rewind ─────────────────────────────────────────────────────────────
+	{
+		TNX_ZONE_N("Rollback_Rewind");
+
+		TemporalCache->SetActiveWriteFrame(alignedTarget % frameCount);
+
+		TrinyxJobs::WaitForCounter(PhysicsPtr->GetJoltPhysCounter(), TrinyxJobs::Queue::Logic);
+
+		if (!PhysicsPtr->RestoreSnapshot(alignedTarget))
+		{
+			LOG_WARN("[Rollback] Snapshot not found, falling back to rebuild-from-slab");
+			PhysicsPtr->ResetAllBodies();
+			PhysicsPtr->FlushPendingBodies(RegistryPtr);
+			// Save a fresh baseline snapshot at the rebuild point.
+			PhysicsPtr->SaveSnapshot(alignedTarget);
+		}
+
+		FrameNumber    = alignedTarget + 1;
+		SimulationTime = FrameNumber * fixedStepTime;
+	}
+
+	LOG_INFO_F("[Rollback] Jolt restored, starting resim from frame %u", FrameNumber);
+
+	// ── Resimulate ─────────────────────────────────────────────────────────
+	{
+		TNX_ZONE_N("Rollback_Resim");
+
+		for (uint32_t i = 0; i < totalResimFrames; ++i)
+		{
+			InjectFrameInput(FrameNumber);
+			PrePhysics(fixedStepTime);
+			ScalarPrePhysicsBatch.Execute(fixedStepTime);
+
+			if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
+			{
+				PhysicsPtr->Step(static_cast<float>(fixedStepTime * PhysicsDivizor));
+			}
+
+			if (FrameNumber % PhysicsDivizor == PhysicsDivizor - 1) [[unlikely]]
+			{
+				PhysicsPtr->FlushPendingBodies(RegistryPtr);
+				PhysicsPtr->PullActiveTransforms(RegistryPtr);
+				PhysicsPtr->SaveSnapshot(FrameNumber);
+			}
+
+			PostPhysics(fixedStepTime);
+			ScalarPostPhysicsBatch.Execute(fixedStepTime);
+			SimulationTime += fixedStepTime;
+
+			RegistryPtr->PropagateFrame(FrameNumber++);
+		}
+
+		LOG_INFO_F("[Rollback] Resimulation complete, frame %u", FrameNumber);
+	}
+
+	bRollbackActive = false;
+}
+
 void LogicThread::ExecuteRollbackTest()
 {
 	TNX_ZONE_N("Rollback_Test");
 
-	const uint32_t T              = FrameNumber - 1; // last completed frame
+	const uint32_t T              = FrameNumber - 1;
 	const uint32_t rollbackTarget = T - RollbackFrameCount;
-	const uint32_t frameCount     = TemporalCache->GetTotalFrameCount();
-	const double fixedStepTime    = ConfigPtr->GetFixedStepTime();
-
-	// Align rollback to most recent Flush+Pull boundary (FrameNumber % PhysicsDivizor == PhysicsDivizor-1)
-	const uint32_t alignedTarget    = rollbackTarget - ((rollbackTarget % PhysicsDivizor + 1) % PhysicsDivizor);
-	const uint32_t totalResimFrames = T - alignedTarget;
-
-	LOG_INFO_F("[Rollback] Rewind to frame %u (aligned from %u), resim %u frames to frame %u",
-			   alignedTarget, rollbackTarget, totalResimFrames, T);
+	[[maybe_unused]] const double fixedStepTime = ConfigPtr->GetFixedStepTime();
 
 #ifdef TNX_TESTING
 	// ── Save ground truth (test harness only) ─────────────────────────────
@@ -543,57 +622,8 @@ void LogicThread::ExecuteRollbackTest()
 	const double savedSimTime       = SimulationTime;
 #endif // TNX_TESTING
 
-	// ── Rewind ─────────────────────────────────────────────────────────────
-	{
-		TNX_ZONE_N("Rollback_Rewind");
-
-		TemporalCache->SetActiveWriteFrame(alignedTarget % frameCount);
-
-		TrinyxJobs::WaitForCounter(PhysicsPtr->GetJoltPhysCounter(), TrinyxJobs::Queue::Logic);
-
-		if (!PhysicsPtr->RestoreSnapshot(alignedTarget))
-		{
-			LOG_WARN("[Rollback] Snapshot not found, falling back to rebuild-from-slab");
-			PhysicsPtr->ResetAllBodies();
-			PhysicsPtr->FlushPendingBodies(RegistryPtr);
-		}
-
-		FrameNumber    = alignedTarget + 1;
-		SimulationTime = FrameNumber * fixedStepTime;
-	}
-
-	LOG_INFO_F("[Rollback] Jolt restored, starting resim from frame %u", FrameNumber);
-
-	// ── Resimulate ─────────────────────────────────────────────────────────
-	{
-		TNX_ZONE_N("Rollback_Resim");
-
-		for (uint32_t i = 0; i < totalResimFrames; ++i)
-		{
-			InjectFrameInput(FrameNumber);
-			PrePhysics(fixedStepTime);
-			ScalarPrePhysicsBatch.Execute(fixedStepTime);
-
-			if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
-			{
-				PhysicsPtr->Step(static_cast<float>(fixedStepTime * PhysicsDivizor));
-			}
-
-			if (FrameNumber % PhysicsDivizor == PhysicsDivizor - 1) [[unlikely]]
-			{
-				PhysicsPtr->FlushPendingBodies(RegistryPtr);
-				PhysicsPtr->PullActiveTransforms(RegistryPtr);
-			}
-
-			PostPhysics(fixedStepTime);
-			ScalarPostPhysicsBatch.Execute(fixedStepTime);
-			SimulationTime += fixedStepTime;
-
-			RegistryPtr->PropagateFrame(FrameNumber++);
-		}
-
-		LOG_INFO_F("[Rollback] Resimulation complete, frame %u", FrameNumber);
-	}
+	// ── Rewind + Resimulate ────────────────────────────────────────────────
+	ExecuteRollback(rollbackTarget);
 
 #ifdef TNX_TESTING
 	// ── Compare (test harness only) ────────────────────────────────────────
@@ -608,11 +638,11 @@ void LogicThread::ExecuteRollbackTest()
 		if (cmp == 0)
 		{
 			LOG_INFO_F("[Rollback] PASSED — byte-perfect determinism (%zu bytes, %u frames resimulated)",
-					   fieldDataSize, totalResimFrames);
+					   fieldDataSize, RollbackFrameCount);
 		}
 		else
 		{
-			LOG_WARN_F("[Rollback] FAILED — divergence detected (%u frames resimulated)", totalResimFrames);
+			LOG_WARN_F("[Rollback] FAILED — divergence detected (%u frames resimulated)", RollbackFrameCount);
 
 			auto fieldInfos = TemporalCache->GetValidFieldInfos();
 			for (const auto& info : fieldInfos)

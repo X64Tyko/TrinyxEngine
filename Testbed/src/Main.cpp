@@ -19,7 +19,7 @@
 #endif
 #include "World.h"
 #include "Input.h"
-#include "Public/PlayerConstruct.h"
+#include "PlayerConstruct.h"
 
 using namespace tnx::Testing;
 

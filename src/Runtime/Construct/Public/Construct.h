@@ -5,6 +5,8 @@
 #include "Schema.h"
 #include "World.h"
 
+class Soul;
+
 struct ConstructViewRef
 {
 	void* View;
@@ -151,6 +153,9 @@ public:
 	uint32_t GetConstructID() const { return ConstructID; }
 	void SetConstructID(uint32_t id) { ConstructID = id; }
 
+	Soul* GetOwnerSoul() const { return OwnerSoul; }
+	void SetOwnerSoul(Soul* soul) { OwnerSoul = soul; }
+
 protected:
 	Construct() = default;
 
@@ -161,6 +166,7 @@ protected:
 
 private:
 	World* OwnerWorld    = nullptr;
+	Soul* OwnerSoul      = nullptr;
 	uint32_t ConstructID = 0;
 	bool bInitialized    = false;
 

@@ -17,7 +17,7 @@
         "GENERATE_ASSEMBLY": "OFF",
         "VECTORIZATION_REPORTS": "OFF",
         "TNX_ALIGN_64": "OFF",
-        "TNX_ENABLE_ROLLBACK": "OFF",
+        "TNX_ENABLE_ROLLBACK": "ON",
         "TNX_DETAILED_METRICS": "OFF",
         "TNX_ENABLE_EDITOR": "OFF",
         "TNX_GPU_PICKING": "OFF",

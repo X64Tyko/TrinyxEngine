@@ -92,6 +92,14 @@ public:
 #ifdef TNX_ENABLE_ROLLBACK
 	// Called from Sentinel thread (PumpEvents) on F5 press.
 	void RequestRollbackTest() { bRollbackTestRequested.store(true, std::memory_order_release); }
+
+	// Called from any thread (e.g. net reconciliation) to trigger a production rollback.
+	// targetFrame is the authoritative frame to rewind to; resim runs to current FrameNumber.
+	void RequestRollback(uint32_t targetFrame)
+	{
+		PendingRollbackFrame.store(targetFrame, std::memory_order_relaxed);
+		bRollbackRequested.store(true, std::memory_order_release);
+	}
 #endif
 
 private:
@@ -165,11 +173,15 @@ private:
 #ifdef TNX_ENABLE_ROLLBACK
 	// --- Rollback ---
 	std::atomic<bool> bRollbackTestRequested{false};
+	std::atomic<bool> bRollbackRequested{false};
+	std::atomic<uint32_t> PendingRollbackFrame{0};
+	bool bRollbackActive{false}; // Logic-thread-only guard: set during ExecuteRollback
 	static constexpr uint32_t RollbackFrameCount = 5;
 
-	void ExecuteRollbackTest();
-	void RecordFrameInput();                  // Copy SimInput into current frame header
-	void InjectFrameInput(uint32_t frameNum); // Restore from frame header into SimInput
+	void ExecuteRollback(uint32_t targetFrame);   // Production rewind+resim — no test scaffolding
+	void ExecuteRollbackTest();                    // Test wrapper: save → ExecuteRollback → compare → restore
+	void RecordFrameInput();                       // Copy SimInput into current frame header
+	void InjectFrameInput(uint32_t frameNum);      // Restore from frame header into SimInput
 
 #ifdef TNX_TESTING
 	// Pre-allocated backup buffers for determinism validation (test harness only)
