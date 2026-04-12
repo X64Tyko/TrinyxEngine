@@ -3,12 +3,12 @@
 #include "RegistryTypes.h"
 
 class Soul;
-struct SpawnRequestPayload;
+struct PlayerBeginRequestPayload;
 
 // ---------------------------------------------------------------------------
 // WithSpawnManagement — mixin for GameModes that own the player body spawn
 // pipeline. The engine detects this interface via dynamic_cast on the active
-// GameMode when a SpawnRequest message arrives.
+// GameMode when a PlayerBeginRequest message arrives.
 //
 // Required overrides:
 //   GetCharacterPrefab — server must specify what to spawn per Soul
@@ -34,9 +34,9 @@ virtual ~WithSpawnManagement() = default;
 // Pure virtual — the engine has no default spawn policy.
 virtual int64_t GetCharacterPrefab(const Soul& soul) const = 0;
 
-// Server: return true to allow the spawn, false to issue SpawnReject.
+// Server: return true to allow the spawn, false to issue PlayerBeginReject.
 // Override to enforce cooldowns, team limits, phase gates, etc.
-virtual bool ValidateSpawn(const Soul& soul, const SpawnRequestPayload& req)
+virtual bool ValidateSpawn(const Soul& soul, const PlayerBeginRequestPayload& req)
 {
 (void)soul; (void)req; return true;
 }

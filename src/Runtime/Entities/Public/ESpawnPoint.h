@@ -6,7 +6,7 @@
 #include "SchemaReflector.h"
 
 // Spawn point entity — a named world location where players can be spawned.
-// GameMode::ValidateSpawnRequest iterates these to pick an authoritative spawn.
+// GameMode::ValidatePlayerBeginRequest iterates these to pick an authoritative spawn.
 // Round-robin selection supported via TeamID=0 (any team).
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 class ESpawnPoint : public EntityView<ESpawnPoint, WIDTH>

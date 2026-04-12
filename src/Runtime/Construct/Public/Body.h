@@ -13,10 +13,10 @@
 // etc. without changing the engine spawn flow. The default is EPlayer.
 //
 // Ownership
-//   Server: created by GameMode::OnPlayerJoined (or ValidateSpawnRequest).
+//   Server: created by GameMode::OnPlayerJoined (or ValidatePlayerBeginRequest).
 //           OwnerNetHandle assigned by the replication system at spawn.
-//   Client: created predictively after SpawnRequest is sent. OwnerNetHandle
-//           is set to zero until SpawnConfirm arrives and wires the handle.
+//   Client: created predictively after PlayerBeginRequest is sent. OwnerNetHandle
+//           is set to zero until PlayerBeginConfirm arrives and wires the handle.
 //
 // Subclassing
 //   Game code subclasses Body to add movement logic, health, abilities, etc.:
@@ -34,7 +34,7 @@ public:
 	// World-lifetime — destroyed when the World resets or is torn down.
 	static constexpr ConstructLifetime Lifetime = ConstructLifetime::World;
 
-	uint32_t OwnerNetHandle = 0; // Confirmed by server at SpawnConfirm (0 = predicted/unconfirmed)
+	uint32_t OwnerNetHandle = 0; // Confirmed by server at PlayerBeginConfirm (0 = predicted/unconfirmed)
 	uint8_t  OwnerID        = 0; // NetOwnerID of the controlling Soul
 
 	ConstructView<TEntity> View;

@@ -212,62 +212,60 @@ void ReflectionRegistry::PublishToAssetRegistry() const
 
 void ReflectionRegistry::RegisterServerRPC(uint16_t methodID, uint16_t paramSize, SoulRPCHandler handler)
 {
-if (methodID >= ServerRPCTable.size())
-ServerRPCTable.resize(methodID + 1);
-ServerRPCTable[methodID] = { paramSize, handler };
+	if (methodID >= ServerRPCTable.size()) ServerRPCTable.resize(methodID + 1);
+	ServerRPCTable[methodID] = {paramSize, handler};
 }
 
 void ReflectionRegistry::RegisterClientRPC(uint16_t methodID, uint16_t paramSize, SoulRPCHandler handler)
 {
-if (methodID >= ClientRPCTable.size())
-ClientRPCTable.resize(methodID + 1);
-ClientRPCTable[methodID] = { paramSize, handler };
+	if (methodID >= ClientRPCTable.size()) ClientRPCTable.resize(methodID + 1);
+	ClientRPCTable[methodID] = {paramSize, handler};
 }
 
 bool ReflectionRegistry::DispatchServerRPC(Soul* soul, const RPCContext& ctx,
-                                            const RPCHeader& hdr, const uint8_t* params) const
+										   const RPCHeader& hdr, const uint8_t* params) const
 {
-if (hdr.MethodID >= ServerRPCTable.size())
-{
-LOG_WARN_F("[RPC] DispatchServerRPC: unknown MethodID %u", hdr.MethodID);
-return false;
-}
-const RPCEntry& entry = ServerRPCTable[hdr.MethodID];
-if (!entry.Handler)
-{
-LOG_WARN_F("[RPC] DispatchServerRPC: no handler for MethodID %u", hdr.MethodID);
-return false;
-}
-if (entry.ParamSize != hdr.ParamSize)
-{
-LOG_WARN_F("[RPC] DispatchServerRPC: ParamSize mismatch for MethodID %u (expected %u, got %u)",
-           hdr.MethodID, entry.ParamSize, hdr.ParamSize);
-return false;
-}
-entry.Handler(soul, ctx, params);
-return true;
+	if (hdr.MethodID >= ServerRPCTable.size())
+	{
+		LOG_WARN_F("[RPC] DispatchServerRPC: unknown MethodID %u", hdr.MethodID);
+		return false;
+	}
+	const RPCEntry& entry = ServerRPCTable[hdr.MethodID];
+	if (!entry.Handler)
+	{
+		LOG_WARN_F("[RPC] DispatchServerRPC: no handler for MethodID %u", hdr.MethodID);
+		return false;
+	}
+	if (entry.ParamSize != hdr.ParamSize)
+	{
+		LOG_WARN_F("[RPC] DispatchServerRPC: ParamSize mismatch for MethodID %u (expected %u, got %u)",
+				   hdr.MethodID, entry.ParamSize, hdr.ParamSize);
+		return false;
+	}
+	entry.Handler(soul, ctx, params);
+	return true;
 }
 
 bool ReflectionRegistry::DispatchClientRPC(Soul* soul, const RPCContext& ctx,
-                                            const RPCHeader& hdr, const uint8_t* params) const
+										   const RPCHeader& hdr, const uint8_t* params) const
 {
-if (hdr.MethodID >= ClientRPCTable.size())
-{
-LOG_WARN_F("[RPC] DispatchClientRPC: unknown MethodID %u", hdr.MethodID);
-return false;
-}
-const RPCEntry& entry = ClientRPCTable[hdr.MethodID];
-if (!entry.Handler)
-{
-LOG_WARN_F("[RPC] DispatchClientRPC: no handler for MethodID %u", hdr.MethodID);
-return false;
-}
-if (entry.ParamSize != hdr.ParamSize)
-{
-LOG_WARN_F("[RPC] DispatchClientRPC: ParamSize mismatch for MethodID %u (expected %u, got %u)",
-           hdr.MethodID, entry.ParamSize, hdr.ParamSize);
-return false;
-}
-entry.Handler(soul, ctx, params);
-return true;
+	if (hdr.MethodID >= ClientRPCTable.size())
+	{
+		LOG_WARN_F("[RPC] DispatchClientRPC: unknown MethodID %u", hdr.MethodID);
+		return false;
+	}
+	const RPCEntry& entry = ClientRPCTable[hdr.MethodID];
+	if (!entry.Handler)
+	{
+		LOG_WARN_F("[RPC] DispatchClientRPC: no handler for MethodID %u", hdr.MethodID);
+		return false;
+	}
+	if (entry.ParamSize != hdr.ParamSize)
+	{
+		LOG_WARN_F("[RPC] DispatchClientRPC: ParamSize mismatch for MethodID %u (expected %u, got %u)",
+				   hdr.MethodID, entry.ParamSize, hdr.ParamSize);
+		return false;
+	}
+	entry.Handler(soul, ctx, params);
+	return true;
 }

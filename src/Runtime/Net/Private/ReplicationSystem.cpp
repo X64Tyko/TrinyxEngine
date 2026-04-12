@@ -194,7 +194,7 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 
 		ci.bInitialSpawnFlushed = true;
 
-		// Send ServerReady — client will sweep Alive→Active then send SpawnRequest.
+		// Send ServerReady — client will sweep Alive→Active then send PlayerBeginRequest.
 		FlowEventPayload serverReadyMsg{};
 		serverReadyMsg.EventID = static_cast<uint8_t>(FlowEventID::ServerReady);
 
