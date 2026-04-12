@@ -4,16 +4,19 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "AssetRegistry.h"
 #include "ConstructRegistry.h"
+#include "NetTypes.h"
 #include "RegistryTypes.h"
 #include "Soul.h"
 #include "Types.h"
 
 class FlowState;
 class GameMode;
+class NetChannel;
 class World;
 class TrinyxEngine;
 struct EngineConfig;
@@ -143,7 +146,7 @@ public:
 
 	/// Called by ServerNetThread when a client's RepState reaches Loaded.
 	/// Creates a Soul for ownerID, calls GameMode::OnPlayerJoined.
-	/// Also called on the client for its own ownerID after SpawnConfirm.
+	/// Also called on the client for its own ownerID after PlayerBeginConfirm.
 	void OnClientLoaded(uint8_t ownerID);
 
 	/// Called by ServerNetThread when a client disconnects.
@@ -161,6 +164,31 @@ public:
 
 	GameMode* GetGameMode() const { return ActiveMode.get(); }
 
+	/// Called from ServerNetThread when a PlayerBeginRequest arrives for ownerID.
+	/// Delegates to GameMode::OnPlayerBeginRequest for all game decisions.
+	/// Returns the PlayerBeginResult on accept, nullopt on reject.
+	/// ServerNetThread reads the result to build PlayerBeginConfirmPayload — no Soul fields used as relay.
+	std::optional<PlayerBeginResult> HandlePlayerBeginRequest(uint8_t ownerID, const PlayerBeginRequestPayload& req);
+
+	/// Called from ClientNetThread after the Alive→Active sweep on ServerReady.
+	/// Creates the client-side Soul for ownerID (derived from channel) if absent,
+	/// sets its channel + FlowMgr, then fires the PlayerBegin RPC to the server.
+	/// ClientNetThread owns no game decisions — all payload details live here.
+	void SendPlayerBeginRequest(NetChannel channel, uint32_t frameNumber, PredictionLedger& ledger);
+
+	// ----- RPC dispatch (called from ServerNetThread / ClientNetThread) -----
+
+	/// Routes an inbound SoulRPC packet to the correct Soul on the server side.
+	/// Refreshes the Soul's channel from ctx before dispatching so reply thunks
+	/// route back to the originating client.
+	void DispatchServerRPC(uint8_t ownerID, const RPCContext& ctx,
+	                       const RPCHeader& hdr, const uint8_t* params);
+
+	/// Routes an inbound SoulRPC packet to the client-side Soul.
+	/// ownerID identifies which Soul slot to use (our own OwnerID on the client).
+	void DispatchClientRPC(uint8_t ownerID, const RPCContext& ctx,
+	                       const RPCHeader& hdr, const uint8_t* params);
+
 	/// Called from any thread (e.g., NetThread) when a net flow event arrives.
 	/// The active FlowState's OnNetEvent hook is dispatched on the next Tick.
 	/// eventID is a FlowEventID enum value cast to uint8_t.
@@ -169,6 +197,14 @@ public:
 	/// Called from NetThread when a TravelNotify arrives. Caches the level path
 	/// (readable by FlowState via GetPendingTravelPath) then posts the FlowEvent.
 	void PostTravelNotify(const char* levelPath);
+
+	/// Called from NetThread when a PlayerBeginConfirm arrives. Caches the payload
+	/// (readable by FlowState via GetPendingPlayerBeginConfirm) then posts the FlowEvent.
+	void PostPlayerBeginConfirm(const PlayerBeginConfirmPayload& payload);
+
+	/// Payload from the last PlayerBeginConfirm. FlowState reads this in
+	/// OnNetEvent(FlowEventID::PlayerBeginConfirm) to wire the Body and teleport.
+	PlayerBeginConfirmPayload GetPendingPlayerBeginConfirm() const { return PendingPlayerBeginConfirm; }
 
 	/// Path sent in the last TravelNotify. FlowState reads this in OnNetEvent
 	/// to know which level to load. Empty if no TravelNotify has arrived yet.
@@ -234,6 +270,7 @@ private:
 	std::unique_ptr<GameMode> ActiveMode;
 	std::string ActiveLevelPath;   // Path of currently loaded level (empty = none)
 	std::string PendingTravelPath; // Level path from last TravelNotify (read by FlowState in OnNetEvent)
+	PlayerBeginConfirmPayload PendingPlayerBeginConfirm{}; // Payload from last PlayerBeginConfirm (read by FlowState in OnNetEvent)
 
 	// Engine back-pointer (for World creation parameters)
 	TrinyxEngine* Engine       = nullptr;

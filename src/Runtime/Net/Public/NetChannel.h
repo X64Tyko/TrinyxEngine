@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cstring>
 #include <type_traits>
 
 #include "NetConnectionManager.h"
@@ -18,7 +19,7 @@
 //
 // Usage (client — one NetChannel for the server connection):
 //   NetChannel ch(ci, ConnectionMgr, /*frameSource=*/nullptr);
-//   ch.Send(NetMessageType::SpawnRequest, payload, /*reliable=*/true);
+//   ch.Send(NetMessageType::PlayerBeginRequest, payload, /*reliable=*/true);
 //
 // FrameNumber in the header is provided at send time (caller passes the
 // current server or logic frame). Pass 0 if not meaningful for the message.
@@ -82,6 +83,23 @@ public:
 		PacketHeader hdr = MakeHeader(type, 0, frameNumber);
 		return SendInternal(hdr, nullptr, 0, reliable);
 	}
+
+	// Send a SoulRPC — packs RPCHeader + TParams into one contiguous payload.
+	// TParams must be trivially copyable (enforced by the TNX_IMPL_* macros).
+	template<typename TParams>
+	bool SendRPC(const RPCHeader& rpcHdr, const TParams& params,
+	             bool reliable = true, uint32_t frameNumber = 0)
+	{
+		// Stack-allocate the combined payload: RPCHeader followed by TParams bytes.
+		constexpr uint16_t totalSize = static_cast<uint16_t>(sizeof(RPCHeader) + sizeof(TParams));
+		alignas(alignof(RPCHeader)) uint8_t buf[totalSize];
+		std::memcpy(buf,                  &rpcHdr, sizeof(RPCHeader));
+		std::memcpy(buf + sizeof(RPCHeader), &params, sizeof(TParams));
+		PacketHeader hdr = MakeHeader(NetMessageType::SoulRPC, totalSize, frameNumber);
+		return SendInternal(hdr, buf, totalSize, reliable);
+	}
+
+
 
 	// Send a Pong echoing the sequence and frame from the received Ping header.
 	// The sequence is echoed rather than incremented — Pong is a mirror, not a new message.

@@ -4,6 +4,7 @@
 #include "GameMode.h"
 #include "FlowState.h"
 #include "Logger.h"
+#include "NetChannel.h"
 #include "NetTypes.h"
 #include "ReflectionRegistry.h"
 #include "World.h"
@@ -368,6 +369,14 @@ void FlowManager::PostTravelNotify(const char* levelPath)
 	PostNetEvent(static_cast<uint8_t>(FlowEventID::TravelNotify));
 }
 
+void FlowManager::PostPlayerBeginConfirm(const PlayerBeginConfirmPayload& payload)
+{
+	// Same sequenced-happens-before contract as PostTravelNotify.
+	// Write before the event bit so Sentinel sees the payload atomically.
+	PendingPlayerBeginConfirm = payload;
+	PostNetEvent(static_cast<uint8_t>(FlowEventID::PlayerBeginConfirm));
+}
+
 void FlowManager::Tick(float dt)
 {
 	// Drain net events posted by NetThread — dispatch to active state on Sentinel.
@@ -470,9 +479,10 @@ void FlowManager::EnforceRequirements(FlowState* currentState, FlowState* nextSt
 
 void FlowManager::OnClientLoaded(uint8_t ownerID)
 {
-	if (Souls[ownerID]) return; // Already present — shouldn't happen, but guard anyway
+	if (Souls[ownerID]) return; // Already present — guard against double-create
 
 	Souls[ownerID] = std::make_unique<Soul>(ownerID);
+	Souls[ownerID]->FlowMgr = this;
 	Souls[ownerID]->OnJoined();
 
 	if (ActiveMode) ActiveMode->OnPlayerJoined(*Souls[ownerID]);
@@ -488,3 +498,82 @@ void FlowManager::OnClientDisconnected(uint8_t ownerID)
 	Souls[ownerID].reset();
 }
 
+std::optional<PlayerBeginResult> FlowManager::HandlePlayerBeginRequest(uint8_t ownerID, const PlayerBeginRequestPayload& req)
+{
+	Soul* soul = GetSoul(ownerID);
+	if (!soul)
+	{
+		LOG_WARN_F("[FlowMgr] HandlePlayerBeginRequest: no Soul for ownerID=%u", ownerID);
+		return std::nullopt;
+	}
+
+	// Delegate entirely to GameMode — all game-layer spawn logic lives there.
+	// GameMode returns a PlayerBeginResult; no Soul fields used as a data relay.
+	PlayerBeginResult result;
+	if (ActiveMode)
+		result = ActiveMode->OnPlayerBeginRequest(*soul, req);
+	else
+	{
+		// No GameMode: accept unconditionally, echo client hint.
+		result.Accepted = true;
+		result.PosX     = req.PosX;
+		result.PosY     = req.PosY;
+		result.PosZ     = req.PosZ;
+		soul->ClaimBody({});
+	}
+
+	if (!result.Accepted) return std::nullopt;
+	return result;
+}
+
+void FlowManager::SendPlayerBeginRequest(NetChannel channel, uint32_t frameNumber, PredictionLedger& ledger)
+{
+	const uint8_t ownerID = channel.OwnerID();
+	constexpr uint32_t PredictionID = 1; // Single in-flight entry today
+
+	// Create the client-side Soul on first call.
+	if (!Souls[ownerID])
+	{
+		Souls[ownerID] = std::make_unique<Soul>(ownerID);
+		Souls[ownerID]->FlowMgr = this;
+		Souls[ownerID]->OnJoined();
+	}
+	Souls[ownerID]->Channel = channel;
+
+	PlayerBeginRequestPayload req{};
+	req.PrefabID     = 0;    // 0 = server picks via GameMode::GetCharacterPrefab
+	req.PredictionID = PredictionID;
+	req.PosX         = 0.0f;
+	req.PosY         = 5.0f;
+	req.PosZ         = 0.0f;
+
+	ledger.Set(PredictionID, frameNumber, {}, req.PrefabID);
+
+	// Fire the PlayerBegin SoulRPC — thunk packs RPCHeader + payload and sends
+	// as NetMessageType::SoulRPC, replacing the old direct PlayerBeginRequest send.
+	Souls[ownerID]->PlayerBegin(req);
+}
+
+void FlowManager::DispatchServerRPC(uint8_t ownerID, const RPCContext& ctx,
+                                    const RPCHeader& hdr, const uint8_t* params)
+{
+	Soul* soul = Souls[ownerID].get();
+	if (!soul)
+	{
+		LOG_WARN_F("[FlowMgr] DispatchServerRPC: no Soul for ownerID=%u (MethodID=%u)", ownerID, hdr.MethodID);
+		return;
+	}
+	soul->DispatchServerRPC(ctx, hdr, params);
+}
+
+void FlowManager::DispatchClientRPC(uint8_t ownerID, const RPCContext& ctx,
+                                    const RPCHeader& hdr, const uint8_t* params)
+{
+	Soul* soul = Souls[ownerID].get();
+	if (!soul)
+	{
+		LOG_WARN_F("[FlowMgr] DispatchClientRPC: no Soul for ownerID=%u (MethodID=%u)", ownerID, hdr.MethodID);
+		return;
+	}
+	soul->DispatchClientRPC(ctx, hdr, params);
+}

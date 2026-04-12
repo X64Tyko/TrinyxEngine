@@ -4,6 +4,7 @@
 #include "NetChannel.h"
 #include "NetConnectionManager.h"
 #include "NetTypes.h"
+#include "RPC.h"
 #include "ReplicationSystem.h"
 #include "World.h"
 #include "Logger.h"
@@ -205,6 +206,44 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 
 		case NetMessageType::EntityDestroy:
 			// TODO
+			break;
+
+		case NetMessageType::SoulRPC:
+		{
+			// All Soul-layer RPCs arrive here. The header identifies the MethodID
+			// and ParamSize; FlowManager routes to the correct Soul handler.
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (!ci) break;
+
+			if (msg.Payload.size() < sizeof(RPCHeader))
+			{
+				LOG_WARN_F("[ServerNet] SoulRPC payload too small (%zu bytes)", msg.Payload.size());
+				break;
+			}
+
+			const auto* rpcHdr = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
+			const uint8_t* params = msg.Payload.data() + sizeof(RPCHeader);
+			const size_t paramBytes = msg.Payload.size() - sizeof(RPCHeader);
+
+			if (paramBytes < rpcHdr->ParamSize)
+			{
+				LOG_WARN_F("[ServerNet] SoulRPC param underrun (MethodID=%u, want=%u, got=%zu)",
+				           rpcHdr->MethodID, rpcHdr->ParamSize, paramBytes);
+				break;
+			}
+
+			if (FlowMgr)
+			{
+				RPCContext ctx{ ci, ConnectionMgr };
+				FlowMgr->DispatchServerRPC(ci->OwnerID, ctx, *rpcHdr, params);
+			}
+			break;
+		}
+
+		// PlayerBeginRequest (legacy) — superseded by SoulRPC/PlayerBegin. Kept
+		// for wire-compat during the transition; can be removed once clients are updated.
+		case NetMessageType::PlayerBeginRequest:
+			LOG_WARN("[ServerNet] Received legacy PlayerBeginRequest — client should use SoulRPC");
 			break;
 
 		default:

@@ -5,6 +5,7 @@
 #include "NetChannel.h"
 #include "NetConnectionManager.h"
 #include "NetTypes.h"
+#include "RPC.h"
 #include "Registry.h"
 #include "ReplicationSystem.h"
 #include "TemporalComponentCache.h"
@@ -171,6 +172,12 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 						LOG_INFO_F("[Replication] ServerReady: swept %d Alive→Active", sweepCount);
 					});
 				}
+
+				// FlowManager owns all spawn request decisions (prefab, prediction ID, position hint).
+				// ClientNetThread only provides the channel and ledger.
+				if (FlowMgr)
+					FlowMgr->SendPlayerBeginRequest(NetChannel(ci, ConnectionMgr), msg.Header.FrameNumber, ci->Predictions);
+
 				LOG_INFO("[ClientNet] FlowEvent::ServerReady → Loaded, Alive→Active sweep enqueued");
 			}
 
@@ -232,6 +239,46 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 
 		case NetMessageType::EntityDestroy:
 			// TODO
+			break;
+
+		case NetMessageType::SoulRPC:
+		{
+			// Inbound server→client SoulRPC. Route to client-side Soul via FlowManager.
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (!ci) break;
+
+			if (msg.Payload.size() < sizeof(RPCHeader))
+			{
+				LOG_WARN_F("[ClientNet] SoulRPC payload too small (%zu bytes)", msg.Payload.size());
+				break;
+			}
+
+			const auto* rpcHdr = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
+			const uint8_t* params = msg.Payload.data() + sizeof(RPCHeader);
+			const size_t paramBytes = msg.Payload.size() - sizeof(RPCHeader);
+
+			if (paramBytes < rpcHdr->ParamSize)
+			{
+				LOG_WARN_F("[ClientNet] SoulRPC param underrun (MethodID=%u, want=%u, got=%zu)",
+				           rpcHdr->MethodID, rpcHdr->ParamSize, paramBytes);
+				break;
+			}
+
+			if (FlowMgr)
+			{
+				RPCContext ctx{ ci, ConnectionMgr };
+				FlowMgr->DispatchClientRPC(ci->OwnerID, ctx, *rpcHdr, params);
+			}
+			break;
+		}
+
+		// Legacy cases — superseded by SoulRPC. Kept for wire-compat; remove once server is updated.
+		case NetMessageType::PlayerBeginConfirm:
+			LOG_WARN("[ClientNet] Received legacy PlayerBeginConfirm — server should use SoulRPC");
+			break;
+
+		case NetMessageType::PlayerBeginReject:
+			LOG_WARN("[ClientNet] Received legacy PlayerBeginReject — server should use SoulRPC");
 			break;
 
 		case NetMessageType::GameModeManifest:

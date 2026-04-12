@@ -1,7 +1,11 @@
 #pragma once
 #include <cstdint>
 
+#include "NetChannel.h"
+#include "RPC.h"
 #include "RegistryTypes.h"
+
+class FlowManager; // forward-declare so GetFlowManager() return type resolves
 
 // ---------------------------------------------------------------------------
 // Soul — per-player session object, one per connected OwnerID.
@@ -75,10 +79,38 @@ public:
 		OnBodyLost();
 	}
 
+	// -------------------------------------------------------------------------
+	// RPC dispatch — called by FlowManager when a SoulRPC packet arrives.
+	// The channel is refreshed from ctx before the handler runs so that any
+	// reply thunk called inside the handler routes correctly.
+	// -------------------------------------------------------------------------
+	void DispatchServerRPC(const RPCContext& ctx, const RPCHeader& hdr, const uint8_t* params);
+	void DispatchClientRPC(const RPCContext& ctx, const RPCHeader& hdr, const uint8_t* params);
+
+	// Returns the channel used by TNX_IMPL_SERVER / TNX_IMPL_CLIENT thunks to send.
+	// Refreshed by FlowManager on every RPC dispatch and at SendPlayerBeginRequest.
+	NetChannel& GetNetChannel() { return Channel; }
+
+	FlowManager* GetFlowManager() { return FlowMgr; }
+
+	// -------------------------------------------------------------------------
+	// Engine-reserved Soul RPCs — PlayerBegin lifecycle.
+	// Client calls PlayerBegin(params) → sends to server.
+	// Server calls PlayerBeginConfirm/Reject(params) → sends back to client.
+	// Implemented in Soul.cpp; game code never touches these directly.
+	// -------------------------------------------------------------------------
+	TNX_SERVER(PlayerBegin,        PlayerBeginRequestPayload);
+	TNX_CLIENT(PlayerBeginConfirm, PlayerBeginConfirmPayload);
+	TNX_CLIENT(PlayerBeginReject,  PlayerBeginRejectPayload);
+
 private:
 	friend class FlowManager;
 
 	uint8_t OwnerID                  = 0;  // Assigned at connection — stable for the session
 	uint32_t InputLead               = 0;  // Frames client leads the server — set after ClockSync
 	ConstructRef ConfirmedBodyHandle = {}; // Valid once ClaimBody() is called; cleared on ReleaseBody()
+
+	// Set by FlowManager at creation and refreshed on every RPC dispatch.
+	NetChannel   Channel = {};
+	FlowManager* FlowMgr = nullptr;
 };

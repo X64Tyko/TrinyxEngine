@@ -18,16 +18,17 @@ enum class NetMessageType : uint8_t
 	Ping                = 5,  // Bidirectional: RTT measurement
 	Pong                = 6,  // Bidirectional: RTT measurement response
 	FlowEvent           = 7,  // Server->Client: session flow signal (ServerReady, etc.)
-	SpawnRequest        = 8,  // Client->Server: request to spawn a player body
-	SpawnConfirm        = 9,  // Server->Client: authoritative spawn confirmation
-	SpawnReject         = 10, // Server->Client: spawn request denied
+	PlayerBeginRequest        = 8,  // Client->Server: request to spawn a player body
+	PlayerBeginConfirm        = 9,  // Server->Client: authoritative spawn confirmation
+	PlayerBeginReject         = 10, // Server->Client: spawn request denied
 	ClockSync           = 11, // Bidirectional: frame clock synchronisation
 	TravelNotify        = 12, // Server->Client: load this level (path + server frame)
 	LevelReady          = 13, // Client->Server: level load complete, ready for entity flush
 	GameModeManifest    = 14, // Server->Client: game-layer context publish (mode, level, rules, etc.)
 	ClientModeManifest  = 15, // Client->Server: optional reply to a GameModeManifest (preferences, loadout, etc.)
-	Custom              = 16, // Game-defined: first slot for user-extended message types
-	Unknown             = 17, // Sentinel: unrecognised message type — receiver must drop
+	SoulRPC             = 16, // Bidirectional: Soul-layer RPC (RPCHeader + TParams bytes). One type forever.
+	Custom              = 17, // Game-defined: first slot for user-extended message types
+	Unknown             = 18, // Sentinel: unrecognised message type — receiver must drop
 	Count
 };
 
@@ -254,7 +255,7 @@ static_assert(sizeof(HandshakePayload) == 8, "HandshakePayload must be 8 bytes")
 //   Loading          → LevelLoading   (TravelNotify sent to client)
 //   LevelLoading     → LevelLoaded    (LevelReady received from client)
 //   LevelLoaded      → Loaded         (initial EntitySpawn batch flushed, ServerReady sent)
-//   Loaded           → Playing        (SpawnConfirm sent)
+//   Loaded           → Playing        (PlayerBeginConfirm sent)
 // ---------------------------------------------------------------------------
 enum class ClientRepState : uint8_t
 {
@@ -264,7 +265,7 @@ enum class ClientRepState : uint8_t
 	LevelLoading     = 3, // TravelNotify sent; client loading level
 	LevelLoaded      = 4, // LevelReady received; flushing initial entity batch
 	Loaded           = 5, // Batch flushed, ServerReady sent; client sweeping Alive→Active
-	Playing          = 6, // SpawnConfirm sent; full simulation sync active
+	Playing          = 6, // PlayerBeginConfirm sent; full simulation sync active
 };
 
 // ---------------------------------------------------------------------------
@@ -272,8 +273,10 @@ enum class ClientRepState : uint8_t
 // ---------------------------------------------------------------------------
 enum class FlowEventID : uint8_t
 {
-	ServerReady  = 0, // Server has flushed initial entity batch; client sweeps Alive→Active then sends SpawnRequest
-	TravelNotify = 1, // Server tells client to load a level (payload: TravelPayload)
+	ServerReady   = 0, // Server has flushed initial entity batch; client sweeps Alive→Active then sends PlayerBeginRequest
+	TravelNotify  = 1, // Server tells client to load a level (payload: TravelPayload)
+	PlayerBeginConfirm  = 2, // Server confirmed the spawn; client reads FlowManager::PendingPlayerBeginConfirm
+	PlayerBeginReject   = 3, // Server rejected the spawn; client should destroy predicted body
 };
 
 // ---------------------------------------------------------------------------
@@ -289,10 +292,10 @@ struct FlowEventPayload
 static_assert(sizeof(FlowEventPayload) == 4, "FlowEventPayload must be 4 bytes");
 
 // ---------------------------------------------------------------------------
-// SpawnRequestPayload — client requests a player body spawn.
-// Sent reliable (NetMessageType::SpawnRequest).
+// PlayerBeginRequestPayload — client requests a player body spawn.
+// Sent reliable (NetMessageType::PlayerBeginRequest).
 // ---------------------------------------------------------------------------
-struct SpawnRequestPayload
+struct PlayerBeginRequestPayload
 {
 	int64_t PrefabID;      // AssetID raw value of the requested Construct prefab
 	uint32_t PredictionID; // Client-local prediction token; echoed in Confirm/Reject
@@ -301,35 +304,79 @@ struct SpawnRequestPayload
 	float _Pad2;
 };
 
-static_assert(sizeof(SpawnRequestPayload) == 32, "SpawnRequestPayload must be 32 bytes");
+static_assert(sizeof(PlayerBeginRequestPayload) == 32, "PlayerBeginRequestPayload must be 32 bytes");
 
 // ---------------------------------------------------------------------------
-// SpawnConfirmPayload — server confirms an authoritative spawn.
-// Sent reliable (NetMessageType::SpawnConfirm).
+// PlayerBeginConfirmPayload — server confirms an authoritative spawn.
+// Sent reliable (NetMessageType::PlayerBeginConfirm).
 // ---------------------------------------------------------------------------
-struct SpawnConfirmPayload
+struct PlayerBeginConfirmPayload
 {
 	uint32_t NetHandle;     // Authoritative EntityNetHandle.Value for the spawned body
-	uint32_t PredictionID;  // Echoed from SpawnRequestPayload
+	uint32_t PredictionID;  // Echoed from PlayerBeginRequestPayload
 	float PosX, PosY, PosZ; // Authoritative spawn position
 	uint16_t Generation;    // Entity generation — client uses this to form a valid EntityRef
 	uint16_t _Pad;
 };
 
-static_assert(sizeof(SpawnConfirmPayload) == 24, "SpawnConfirmPayload must be 24 bytes");
+static_assert(sizeof(PlayerBeginConfirmPayload) == 24, "PlayerBeginConfirmPayload must be 24 bytes");
 
 // ---------------------------------------------------------------------------
-// SpawnRejectPayload — server rejects a spawn request.
-// Sent reliable (NetMessageType::SpawnReject).
+// PlayerBeginRejectPayload — server rejects a spawn request.
+// Sent reliable (NetMessageType::PlayerBeginReject).
 // ---------------------------------------------------------------------------
-struct SpawnRejectPayload
+struct PlayerBeginRejectPayload
 {
-	uint32_t PredictionID; // Echoed from SpawnRequestPayload
+	uint32_t PredictionID; // Echoed from PlayerBeginRequestPayload
 	uint8_t Reason;        // Implementation-defined reject code
 	uint8_t _Pad[3];
 };
 
-static_assert(sizeof(SpawnRejectPayload) == 8, "SpawnRejectPayload must be 8 bytes");
+static_assert(sizeof(PlayerBeginRejectPayload) == 8, "PlayerBeginRejectPayload must be 8 bytes");
+
+// ---------------------------------------------------------------------------
+// RPCHeader — wire header prepended to every SoulRPC (NetMessageType::SoulRPC).
+//
+// Wire layout: PacketHeader | RPCHeader | TParams bytes
+// Net thread reads MethodID to route; rest of payload is opaque param bytes.
+// ---------------------------------------------------------------------------
+struct RPCHeader
+{
+	uint16_t MethodID;  // Identifies the handler — assigned by RPCMethodID<TParams>()
+	uint16_t ParamSize; // sizeof(TParams) — validated before dispatch, then dropped
+};
+static_assert(sizeof(RPCHeader) == 4, "RPCHeader must be 4 bytes");
+
+// ---------------------------------------------------------------------------
+// RPCContext — dispatch-time context threaded into every RPC handler.
+//
+// Built at the net thread boundary from the live connection that delivered
+// the SoulRPC message. NEVER serialized or transmitted over the wire.
+// The receiving side reconstructs it from the ConnectionInfo it already holds.
+// ---------------------------------------------------------------------------
+class  NetConnectionManager;
+struct ConnectionInfo;
+struct RPCContext
+{
+	ConnectionInfo*       CI          = nullptr; // Originating connection — valid for handler lifetime only
+	NetConnectionManager* Mgr         = nullptr;
+	uint32_t              FrameNumber = 0;
+};
+
+
+//
+// Decouples the game-layer spawn decision from Soul state. GameMode fills this
+// and returns it; FlowManager reads it to build the wire response. Soul is
+// never used as a data relay for transient authority values.
+// ---------------------------------------------------------------------------
+struct PlayerBeginResult
+{
+	bool        Accepted  = false;
+	float       PosX      = 0.0f;
+	float       PosY      = 5.0f; // Reasonable default so body isn't in the floor
+	float       PosZ      = 0.0f;
+	ConstructRef Body     = {};   // Handle to the created Body Construct (may be invalid until Constructs wire up)
+};
 
 // ---------------------------------------------------------------------------
 // ClockSyncPayload — bidirectional clock synchronisation probe.
@@ -421,12 +468,12 @@ struct ClientModeManifestPayload : BaseNetPayload<TDerived>
 // PredictionLedger — client-side record of in-flight spawn predictions.
 //
 // Lives in ConnectionInfo (transport layer). Keyed by PredictionID echoed
-// in SpawnConfirm/SpawnReject. Single-entry today; same structure scales to
+// in PlayerBeginConfirm/PlayerBeginReject. Single-entry today; same structure scales to
 // projectile/ability prediction by expanding capacity.
 //
-// On SpawnConfirm: promote the predicted Construct to authoritative, call
+// On PlayerBeginConfirm: promote the predicted Construct to authoritative, call
 //   Soul::ClaimBody(ref), clear the ledger entry.
-// On SpawnReject: destroy the predicted Construct, clear the ledger entry.
+// On PlayerBeginReject: destroy the predicted Construct, clear the ledger entry.
 // ---------------------------------------------------------------------------
 struct PredictionLedger
 {
@@ -435,7 +482,7 @@ struct PredictionLedger
 	struct Entry
 	{
 		uint32_t PredictionID = 0;  // echoed by server in Confirm/Reject
-		uint32_t RequestFrame = 0;  // local frame when SpawnRequest was sent
+		uint32_t RequestFrame = 0;  // local frame when PlayerBeginRequest was sent
 		ConstructRef LocalRef = {}; // predicted Construct handle (client-side)
 		int64_t PrefabUUID    = 0;  // prefab used for prediction
 		bool Active           = false;

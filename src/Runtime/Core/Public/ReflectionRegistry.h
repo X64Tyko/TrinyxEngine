@@ -16,6 +16,13 @@
 class FlowState;
 class GameMode;
 
+// Forward declarations for RPC dispatch table.
+// Full definitions live in RPC.h / NetTypes.h — included by ReflectionRegistry.cpp.
+class  Soul;
+struct RPCContext;
+struct RPCHeader;
+using  SoulRPCHandler = void(*)(Soul*, const RPCContext&, const uint8_t*);
+
 // ---------------------------------------------------------------------------
 // ReflectionRegistry — Single source of truth for all type metadata.
 //
@@ -196,6 +203,29 @@ public:
 	[[nodiscard]] const MixinEntry* FindMixin(const char* name) const;
 	[[nodiscard]] const MixinEntry* FindMixinByID(uint8_t baseTypeID) const;
 
+	// ===== SoulRPC dispatch table =====
+	//
+	// RegisterServerRPC / RegisterClientRPC are called at static init time by the
+	// TNX_IMPL_SERVER / TNX_IMPL_CLIENT registrar lambdas in each Soul .cpp file.
+	// DispatchServerRPC / DispatchClientRPC are called by FlowManager when a
+	// NetMessageType::SoulRPC packet arrives on the server or client respectively.
+	//
+	// Tables are flat vectors indexed by MethodID for O(1) dispatch.
+	// Read-only after engine init (all registration happens at static init).
+
+	struct RPCEntry
+	{
+		uint16_t       ParamSize = 0;
+		SoulRPCHandler Handler   = nullptr;
+	};
+
+	void RegisterServerRPC(uint16_t methodID, uint16_t paramSize, SoulRPCHandler handler);
+	void RegisterClientRPC(uint16_t methodID, uint16_t paramSize, SoulRPCHandler handler);
+
+	// Returns false if MethodID is out of range, ParamSize mismatches, or no handler registered.
+	bool DispatchServerRPC(Soul* soul, const RPCContext& ctx, const RPCHeader& hdr, const uint8_t* params) const;
+	bool DispatchClientRPC(Soul* soul, const RPCContext& ctx, const RPCHeader& hdr, const uint8_t* params) const;
+
 	/// Compute a deterministic UUID from a type + name (FNV-1a hash).
 	static int64_t UUIDFromName(const char* name);
 
@@ -208,4 +238,8 @@ public:
 
 private:
 	ReflectionRegistry() = default;
+
+	// RPC dispatch tables — flat vectors indexed by MethodID for O(1) lookup.
+	std::vector<RPCEntry> ServerRPCTable;
+	std::vector<RPCEntry> ClientRPCTable;
 };
