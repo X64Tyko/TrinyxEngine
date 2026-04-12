@@ -151,8 +151,7 @@ ReflectionRegistry::ModeFactory ReflectionRegistry::FindModeByUUID(int64_t uuid)
 void ReflectionRegistry::RegisterMixin(const char* name, uint8_t baseTypeID, bool isUserDefined)
 {
 	// Collision check — asserts rather than silently dropping to catch misconfigured ID bands early.
-	auto it = MixinIDIndex.find(baseTypeID);
-	assert(it == MixinIDIndex.end() &&
+	assert(MixinIDIndex.find(baseTypeID) == MixinIDIndex.end() &&
 		"ModeMixin ID collision: two mixins claim the same BaseTypeID. "
 		"Check TNX_REGISTER_MODEMIX order or engine mixin ID bands.");
 

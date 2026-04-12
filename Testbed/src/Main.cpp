@@ -16,12 +16,74 @@
 #include "GNSContext.h"
 #include "NetConnectionManager.h"
 #include "ServerNetThread.h"
+#include "GameMode.h"
+#include "ReplicationSystem.h"
+#include "ReflectionRegistry.h"
+#include "SchemaReflector.h"
 #endif
 #include "World.h"
 #include "Input.h"
 #include "PlayerConstruct.h"
 
 using namespace tnx::Testing;
+
+#ifdef TNX_ENABLE_NETWORK
+// ---------------------------------------------------------------------------
+// TestNetGameMode — spawns a per-client PlayerConstruct with staggered
+// spawn points so each client starts at a distinct position.
+// Select this mode in the editor's GameMode dropdown when running PIE.
+// ---------------------------------------------------------------------------
+class TestNetGameMode : public GameMode
+{
+public:
+	PlayerBeginResult OnPlayerBeginRequest(Soul& soul, const PlayerBeginRequestPayload& /*req*/) override
+	{
+		PlayerBeginResult result;
+		result.Accepted = true;
+
+		static constexpr float SpawnPoints[2][3] = {
+			{  2.0f, 5.0f, 0.0f },
+			{ -2.0f, 5.0f, 0.0f },
+		};
+		const uint8_t idx    = SpawnCounter.fetch_add(1, std::memory_order_relaxed) % 2;
+		const float spawnX   = SpawnPoints[idx][0];
+		const float spawnY   = SpawnPoints[idx][1];
+		const float spawnZ   = SpawnPoints[idx][2];
+
+		result.PosX = spawnX;
+		result.PosY = spawnY;
+		result.PosZ = spawnZ;
+
+		World*             world    = GetWorld();
+		ReplicationSystem* repl     = world->GetReplicationSystem();
+		const uint16_t     typeHash = ReflectionRegistry::ConstructTypeHashFromName("PlayerConstruct");
+
+		ConstructRef bodyRef{};
+		world->Spawn([&](Registry*)
+		{
+			ConstructRegistry* reg    = world->GetConstructRegistry();
+			PlayerConstruct*   player = reg->Create<PlayerConstruct>(world, [&](PlayerConstruct* p)
+			{
+				p->SpawnPosX = spawnX;
+				p->SpawnPosY = spawnY;
+				p->SpawnPosZ = spawnZ;
+				p->SetOwnerSoul(&soul);
+			});
+			bodyRef = repl->RegisterConstruct(reg, player, soul.GetOwnerID(), typeHash, 0);
+		});
+
+		soul.ClaimBody(bodyRef);
+		result.Body = bodyRef;
+		return result;
+	}
+
+private:
+	std::atomic<uint8_t> SpawnCounter{0};
+};
+
+TNX_REGISTER_MODE(TestNetGameMode)
+
+#endif // TNX_ENABLE_NETWORK
 
 #ifdef TNX_ENABLE_NETWORK
 // ---------------------------------------------------------------------------

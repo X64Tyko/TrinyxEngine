@@ -40,8 +40,12 @@ public:
 	{
 		if (bIsClientSide)
 		{
-			// Client-side: attach to the existing ECS entity delivered by ConstructSpawn.
+			// Client-side: attach to the existing ECS entity delivered by ConstructSpawn,
+			// then read its authoritative position to seed the JoltCharacter correctly.
 			Body.Attach(this, ReplicationEntityHandle);
+			SpawnPosX = Body.Transform.PosX.Value();
+			SpawnPosY = Body.Transform.PosY.Value();
+			SpawnPosZ = Body.Transform.PosZ.Value();
 		}
 		else
 		{

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <vector>
 #include <memory>
 #include <cstdint>
@@ -51,13 +52,14 @@ public:
 	using ReinitFn      = void(*)(void*, World*); // Construct::Initialize(World*)
 
 	template <typename T>
-	T* Create(World* InWorld)
+	T* Create(World* InWorld, std::function<void(T*)> preInit = nullptr)
 	{
 		auto typed = std::make_unique<TypedStorage<T>>();
 		T* raw     = &typed->Value;
 
 		uint32_t id = NextID++;
 		raw->SetConstructID(id);
+		if (preInit) preInit(raw);
 		raw->Initialize(InWorld);
 
 		Entry entry;
