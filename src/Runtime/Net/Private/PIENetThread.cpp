@@ -84,7 +84,10 @@ void PIENetThread::TickReplication()
 
 	if (ServerFlow) ServerFlow->Tick(dt);
 	for (auto& entry : Clients)
+	{
 		if (entry.Flow) entry.Flow->Tick(dt);
+		entry.Handler->TickReplication();
+	}
 }
 
 void PIENetThread::HandleMessage(const ReceivedMessage& msg)

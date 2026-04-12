@@ -22,6 +22,7 @@
 #include "Registry.h"
 #include "CScale.h"
 #include "TemporalComponentCache.h"
+#include "TrinyxEngine.h"
 #include "CTransform.h"
 #include "World.h"
 #include "WorldViewport.h"
@@ -126,8 +127,15 @@ bool EditorRenderer::InitImGui()
 	ImGuiIO& io    = ImGui::GetIO();
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+	io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
 	ImGui::StyleColorsDark();
+
+	// When viewports are enabled, OS-decorated windows must have no rounding
+	// and a fully-opaque background so they blend correctly on the desktop.
+	ImGuiStyle& style                 = ImGui::GetStyle();
+	style.WindowRounding              = 0.0f;
+	style.Colors[ImGuiCol_WindowBg].w = 1.0f;
 
 	int logicalW = 0, physicalW = 0;
 	SDL_GetWindowSize(WindowPtr, &logicalW, nullptr);
@@ -178,8 +186,14 @@ bool EditorRenderer::InitImGui()
 	Editor = new EditorContext();
 	Editor->Initialize(EnginePtr, LogicPtr, &Meshes);
 
+	// Allocate the persistent editor viewport for the main world.
+	// Use a modest initial resolution — the panel will resize it on the first frame.
+	EditorViewport.TargetWorld = EnginePtr->GetDefaultWorld();
+	AllocateViewportResources(&EditorViewport, 1280, 720);
+	ActiveViewports.insert(ActiveViewports.begin(), &EditorViewport);
+
 	bImGuiInitialized = true;
-	LOG_INFO("[EditorRenderer] ImGui initialized (dynamic rendering, docking enabled)");
+	LOG_INFO("[EditorRenderer] ImGui initialized (dynamic rendering, docking + multi-viewport enabled)");
 	return true;
 }
 
@@ -188,6 +202,12 @@ void EditorRenderer::ShutdownImGui()
 	if (!bImGuiInitialized) return;
 
 	vkDeviceWaitIdle(Device);
+
+	// Remove the editor viewport from the active list and free its GPU resources
+	// before tearing down ImGui (FreeViewportResources calls ImGui_ImplVulkan_RemoveTexture).
+	auto it = std::find(ActiveViewports.begin(), ActiveViewports.end(), &EditorViewport);
+	if (it != ActiveViewports.end()) ActiveViewports.erase(it);
+	FreeViewportResources(&EditorViewport);
 
 	delete Editor;
 	Editor = nullptr;
@@ -243,6 +263,32 @@ void EditorRenderer::BuildImGuiFrame()
 	if (Editor) Editor->BuildFrame();
 
 	ImGui::Render();
+
+	const ImGuiIO& io = ImGui::GetIO();
+	if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+	{
+		ImGui::UpdatePlatformWindows();
+		ImGui::RenderPlatformWindowsDefault();
+	}
+}
+
+// -----------------------------------------------------------------------
+// Editor viewport resize & texture access
+// -----------------------------------------------------------------------
+
+void EditorRenderer::ResizeEditorViewport(uint32_t width, uint32_t height)
+{
+	if (width == EditorViewport.Width && height == EditorViewport.Height) return;
+	if (width == 0 || height == 0) return;
+
+	vkDeviceWaitIdle(Device);
+	FreeViewportResources(&EditorViewport);
+	AllocateViewportResources(&EditorViewport, width, height);
+}
+
+VkDescriptorSet EditorRenderer::GetEditorViewportTexture() const
+{
+	return EditorViewport.ImGuiTexture;
 }
 
 // -----------------------------------------------------------------------
@@ -316,15 +362,14 @@ void EditorRenderer::AllocateViewportResources(WorldViewport* vp, uint32_t width
 	vp->AllocateDirtyPlanes(DirtyWordCount);
 
 	// Register offscreen color target as ImGui texture for compositing
-	VkSampler sampler = VK_NULL_HANDLE;
 	VkSamplerCreateInfo samplerCI{};
 	samplerCI.sType     = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
 	samplerCI.magFilter = VK_FILTER_LINEAR;
 	samplerCI.minFilter = VK_FILTER_LINEAR;
-	vkCreateSampler(Device, &samplerCI, nullptr, &sampler);
+	vkCreateSampler(Device, &samplerCI, nullptr, &vp->ImGuiSampler);
 
 	vp->ImGuiTexture = ImGui_ImplVulkan_AddTexture(
-		sampler,
+		vp->ImGuiSampler,
 		static_cast<VkImageView>(vp->ColorTarget.View),
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
@@ -338,6 +383,13 @@ void EditorRenderer::FreeViewportResources(WorldViewport* vp)
 	{
 		ImGui_ImplVulkan_RemoveTexture(vp->ImGuiTexture);
 		vp->ImGuiTexture = VK_NULL_HANDLE;
+	}
+
+	// Destroy the sampler that was paired with the ImGui texture
+	if (vp->ImGuiSampler != VK_NULL_HANDLE)
+	{
+		vkDestroySampler(Device, vp->ImGuiSampler, nullptr);
+		vp->ImGuiSampler = VK_NULL_HANDLE;
 	}
 
 	// Free dirty tracking
@@ -384,12 +436,6 @@ void EditorRenderer::UpdateViewportSlabs()
 
 void EditorRenderer::RecordFrame(FrameSync& frame, uint32_t imageIndex)
 {
-	if (ActiveViewports.empty())
-	{
-		RecordCommandBuffer(frame, imageIndex);
-		return;
-	}
-
 	RecordPIEFrame(frame, imageIndex);
 }
 

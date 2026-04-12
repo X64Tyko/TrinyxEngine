@@ -254,6 +254,12 @@ void NetThread::Tick()
 void NetThread::MapConnectionToWorld(uint8_t ownerID, World* world)
 {
 	WorldMap[ownerID] = world;
+
+	// Record which OwnerID this world is running as (client-side identification for
+	// ownership guards such as SetActiveCamera). OwnerID 0 is the server/standalone
+	// local player — its LocalOwnerID is meaningful only in standalone mode.
+	if (world && ownerID != 0) world->LocalOwnerID = ownerID;
+
 	LOG_INFO_F("[NetThread] Mapped OwnerID %u to World %p", ownerID, static_cast<void*>(world));
 }
 

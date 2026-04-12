@@ -3,6 +3,7 @@
 #include "Construct.h"
 #include "CameraConstruct.h"
 #include "EInstanced.h"
+#include "EngineConfig.h"
 #include "Input.h"
 #include "JoltPhysics.h"
 #include "Owned.h"
@@ -23,6 +24,8 @@
 class PlayerConstruct : public Construct<PlayerConstruct>
 {
 public:
+	TNX_CONSTRUCT_WORLD
+
 	uint8_t OwnerID = 0; // NetOwnerID of the controlling Soul (0 = local/standalone)
 
 	ConstructView<EPlayer> Body;
@@ -33,47 +36,64 @@ public:
 
 	void InitializeViews()
 	{
-		Body.Initialize(this);
+		if (bIsClientSide)
+		{
+			// Client-side: attach to the existing ECS entity delivered by ConstructSpawn.
+			Body.Attach(this, ReplicationEntityHandle);
+		}
+		else
+		{
+			Body.Initialize(this);
 
-		auto& tr = Body.Transform;
-		tr.PosX  = 0.0f;
-		tr.PosY  = 5.0f;
-		tr.PosZ  = 0.0f;
+			auto& tr = Body.Transform;
+			tr.PosX  = SpawnPosX;
+			tr.PosY  = SpawnPosY;
+			tr.PosZ  = SpawnPosZ;
 
-		tr.Rotation.SetIdentity();
+			tr.Rotation.SetIdentity();
 
-		auto& sc  = Body.Scale;
-		sc.ScaleX = 1.0f;
-		sc.ScaleY = 1.0f;
-		sc.ScaleZ = 1.0f;
+			auto& sc  = Body.Scale;
+			sc.ScaleX = 1.0f;
+			sc.ScaleY = 1.0f;
+			sc.ScaleZ = 1.0f;
 
-		auto& col = Body.Color;
-		col.R     = 0.2f;
-		col.G     = 0.8f;
-		col.B     = 0.2f;
-		col.A     = 1.0f;
+			auto& col = Body.Color;
+			col.R     = 0.2f;
+			col.G     = 0.8f;
+			col.B     = 0.2f;
+			col.A     = 1.0f;
 
-		auto& mesh  = Body.Mesh;
-		mesh.MeshID = 1u; // Capsule (slot 0=Cube, slot 1=Capsule)
+			auto& mesh  = Body.Mesh;
+			mesh.MeshID = 1u; // Capsule (slot 0=Cube, slot 1=Capsule)
 
-		Body.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Replicated);
+			Body.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Replicated);
+		}
 
 		auto* phys = GetWorld()->GetPhysics();
 		CharacterController.Initialize(
 			phys->GetPhysicsSystem(),
-			JPH::RVec3(tr.PosX.Value(), tr.PosY.Value(), tr.PosZ.Value()),
+			JPH::RVec3(SpawnPosX, SpawnPosY, SpawnPosZ),
 			0.3f,  // capsule radius
 			0.7f); // capsule half height
 
-		// Initialize cameras
+		// Initialize cameras (both paths)
 		FirstPersonCam->Initialize(GetWorld());
 		ThirdPersonCam->Initialize(GetWorld());
 
 		// Default to third-person (better for visualizing corrections)
 		ActiveCam = ThirdPersonCam.Get();
-		GetWorld()->GetLogicThread()->SetActiveCamera(ActiveCam);
+		SetActiveCameraIfOwned(ActiveCam);
 	}
-	
+
+	/// Replication entry point — called by ConstructRegistry::CreateForReplication.
+	/// Attaches to existing ECS entities instead of creating new ones.
+	void InitializeForReplication(World* world, EntityHandle* viewHandles, uint8_t viewCount)
+	{
+		bIsClientSide = true;
+		if (viewCount > 0) ReplicationEntityHandle = viewHandles[0];
+		Initialize(world);
+	}
+
 	void PhysicsStep(SimFloat dt)
 	{
 		// Let Jolt handle collision, slopes, stairs, grounding
@@ -151,7 +171,7 @@ public:
 			if (ActiveCam == FirstPersonCam.Get()) ActiveCam = ThirdPersonCam.Get();
 			else ActiveCam                                   = FirstPersonCam.Get();
 
-			GetWorld()->GetLogicThread()->SetActiveCamera(ActiveCam);
+			SetActiveCameraIfOwned(ActiveCam);
 		}
 		bToggleHeld = toggleDown;
 
@@ -187,8 +207,26 @@ public:
 		ThirdPersonCam->SetYawPitch(Yaw, Pitch);
 	}
 
+	// Spawn position — set by ArenaMode before Initialize is called.
+	float SpawnPosX = 0.0f;
+	float SpawnPosY = 5.0f;
+	float SpawnPosZ = 0.0f;
+
 private:
+	/// Set the active camera only if this is the owning client (or standalone).
+	/// Headless server never calls SetActiveCamera; remote client Constructs skip it too.
+	void SetActiveCameraIfOwned(CameraConstruct* cam)
+	{
+		if (GetWorld()->GetConfig().Mode == EngineMode::Server) return;
+		if (OwnerID != 0 && OwnerID != GetWorld()->LocalOwnerID) return;
+		GetWorld()->GetLogicThread()->SetActiveCamera(cam);
+	}
+
 	CameraConstruct* ActiveCam = nullptr;
+
+	// Replication state — set by InitializeForReplication before Initialize.
+	bool bIsClientSide = false;
+	EntityHandle ReplicationEntityHandle{};
 
 	float Yaw         = 0.0f;
 	float Pitch       = 0.0f;

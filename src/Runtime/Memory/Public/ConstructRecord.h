@@ -84,6 +84,9 @@ struct ConstructRecord
 	uint8_t OwnerID     = 0;        // Fast access; redundant with NetworkID.NetOwnerID
 	uint8_t _Pad[2]     = {};
 
+	// Type-erased accessor for replication — set at AllocateNetRef time.
+	// Fills out[] with the EntityHandle for each ConstructView.
+	// nullptr if this Construct has no registered views.
 	bool IsValid() const { return ConstructPtr != nullptr; }
 	uint8_t GetGeneration() const { return Generation; }
 	uint32_t GetOwnerID() const { return NetworkID.GetOwnerID(); }

@@ -187,18 +187,8 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 				ci->RepState = ClientRepState::LevelLoaded;
 				LOG_INFO_F("[ServerNet] LevelReady received — client LevelLoaded (ownerID=%u)", ci->OwnerID);
 
-				// TODO: flush initial entity batch to this client (EntitySpawn with Alive flag)
-				// For now advance immediately to Loaded and send ServerReady.
-
-				ci->RepState = ClientRepState::Loaded;
-
-				FlowEventPayload ready{};
-				ready.EventID = static_cast<uint8_t>(FlowEventID::ServerReady);
-				NetChannel(ci, ConnectionMgr).Send(
-					NetMessageType::FlowEvent, ready, /*reliable=*/true, msg.Header.FrameNumber);
-
-				LOG_INFO_F("[ServerNet] ServerReady sent (ownerID=%u)", ci->OwnerID);
-
+				// ReplicationSystem::SendSpawns Pass 1 will flush the initial entity batch,
+				// send ServerReady, and advance RepState → Loaded on the next Tick.
 				if (FlowMgr) FlowMgr->OnClientLoaded(ci->OwnerID);
 			}
 			break;

@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include "RendererCore.h"
+#include "WorldViewport.h"
 
 union SDL_Event;
 class EditorContext;
@@ -32,6 +33,13 @@ public:
 	/// is active (right-click held) or Play mode is running.
 	bool EditorOwnsKeyboard() const { return bEditorOwnsKeyboard.load(std::memory_order_relaxed); }
 	void SetEditorOwnsKeyboard(bool owns) { bEditorOwnsKeyboard.store(owns, std::memory_order_relaxed); }
+
+	// ── Editor viewport ──────────────────────────────────────────────────
+	/// Called by EditorContext when the "Viewport" panel resizes.
+	void ResizeEditorViewport(uint32_t width, uint32_t height);
+
+	/// ImGui texture handle for the editor's main viewport. Valid after OnPostStart.
+	VkDescriptorSet GetEditorViewportTexture() const;
 
 	// ── Multi-viewport (PIE) ────────────────────────────────────────────
 	void AddViewport(WorldViewport* vp);
@@ -69,6 +77,9 @@ private:
 	EditorContext* Editor                = nullptr;
 	TrinyxEngine* EnginePtr              = nullptr;
 	std::atomic<bool> bEditorOwnsKeyboard{true};
+
+	// Editor's own persistent viewport (always active, main world)
+	WorldViewport EditorViewport;
 
 	// Multi-viewport state
 	std::vector<WorldViewport*> ActiveViewports;

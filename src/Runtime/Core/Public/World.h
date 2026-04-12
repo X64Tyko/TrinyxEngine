@@ -12,6 +12,7 @@ class Registry;
 class LogicThread;
 class JoltPhysics;
 class ConstructRegistry;
+class ReplicationSystem;
 
 // ---------------------------------------------------------------------------
 // World — A self-contained simulation instance.
@@ -110,6 +111,9 @@ public:
 	EngineConfig& GetConfigMut() { return Config; }
 	ConstructRegistry* GetConstructRegistry() { return Constructs; }
 
+	ReplicationSystem* GetReplicationSystem() const { return Replicator; }
+	void SetReplicationSystem(ReplicationSystem* repl) { Replicator = repl; }
+
 	/// Set by engine after jobs are initialized. LogicThread polls this.
 	void SetJobsInitialized(bool v) { bJobsInitialized.store(v, std::memory_order_release); }
 	bool GetJobsInitialized() const { return bJobsInitialized.load(std::memory_order_relaxed); }
@@ -137,5 +141,6 @@ private:
 	SpawnSync Spawner;
 
 	ConstructRegistry* Constructs = nullptr; // Non-owning — FlowManager owns the registry
+	ReplicationSystem* Replicator = nullptr; // Non-owning — TrinyxEngine or EditorContext owns it
 	std::atomic<bool> bJobsInitialized{false};
 };

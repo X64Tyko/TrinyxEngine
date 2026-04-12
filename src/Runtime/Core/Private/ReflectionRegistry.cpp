@@ -182,6 +182,14 @@ int64_t ReflectionRegistry::UUIDFromName(const char* name)
 	return static_cast<int64_t>(hash) << 8;
 }
 
+uint16_t ReflectionRegistry::ConstructTypeHashFromName(const char* name)
+{
+	// FNV-1a 32-bit folded to 16 bits via XOR-folding
+	uint32_t hash = 2166136261u;
+	for (const char* p = name; *p; ++p) hash = (hash ^ static_cast<uint8_t>(*p)) * 16777619u;
+	return static_cast<uint16_t>(hash ^ (hash >> 16));
+}
+
 void ReflectionRegistry::PublishToAssetRegistry() const
 {
 	AssetRegistry& registry = AssetRegistry::Get();
@@ -204,6 +212,28 @@ void ReflectionRegistry::PublishToAssetRegistry() const
 		AssetID id   = AssetID::Create(uuid, AssetType::EntityType);
 		registry.Register(id, name, "", AssetType::EntityType);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Replicated Construct factory table
+// ---------------------------------------------------------------------------
+
+void ReflectionRegistry::RegisterConstruct(const char* name, uint16_t typeHash, ConstructClientFactory factory)
+{
+	for (const auto& entry : RegisteredConstructs)
+	{
+		if (strcmp(entry.Name, name) == 0) return; // already registered
+	}
+	RegisteredConstructs.push_back({name, typeHash, factory});
+}
+
+ReflectionRegistry::ConstructClientFactory ReflectionRegistry::FindConstructClientFactory(uint16_t typeHash) const
+{
+	for (const auto& entry : RegisteredConstructs)
+	{
+		if (entry.TypeHash == typeHash) return entry.ClientFactory;
+	}
+	return nullptr;
 }
 
 // ---------------------------------------------------------------------------

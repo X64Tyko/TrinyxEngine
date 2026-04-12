@@ -22,6 +22,9 @@
 #include "GameplayRenderer.h"
 #endif
 #include "JoltPhysics.h"
+#if defined(TNX_ENABLE_NETWORK) && !TNX_ENABLE_EDITOR
+#include "ReplicationSystem.h"
+#endif
 
 // Define global component/class counters (declared in Types.h / SchemaReflector.h)
 namespace Internal
@@ -175,6 +178,21 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 		return false;
 	}
 	DefaultWorld = Flow->GetWorld();
+
+#if defined(TNX_ENABLE_NETWORK) && !TNX_ENABLE_EDITOR
+	// Create ReplicationSystem for all server-role modes (including Standalone — Tick
+	// does nothing with zero connections, but RegisterConstruct works correctly).
+	if (Config.Mode != EngineMode::Client)
+	{
+		Replicator = std::make_unique<ReplicationSystem>();
+		Replicator->Initialize(DefaultWorld);
+		DefaultWorld->SetReplicationSystem(Replicator.get());
+#if defined(TNX_NET_MODEL_PIE) || defined(TNX_NET_MODEL_SERVER)
+	if (Net) Net->SetReplicationSystem(Replicator.get());
+#endif
+	}
+#endif
+
 	Pacer.Initialize(GpuDevice);
 
 	// ---- Renderer --------------------------------------------------------

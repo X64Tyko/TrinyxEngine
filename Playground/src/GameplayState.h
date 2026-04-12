@@ -6,13 +6,11 @@
 #include "Logger.h"
 #include "NetTypes.h"
 #include "SchemaReflector.h"
-#include "PlayerConstruct.h"
 
 #include <string>
 
 #include "World.h"
 
-class PlayerConstruct;
 // ---------------------------------------------------------------------------
 // GameplayState — The default in-game state for Playground.
 //
@@ -42,6 +40,9 @@ public:
 			return;
 		}
 
+		// Activate ArenaMode on all server-role modes before any player joins.
+		Flow->SetGameMode("ArenaMode");
+
 		std::string sceneName = cfg->DefaultScene;
 		auto dot = sceneName.rfind('.');
 		if (dot != std::string::npos) sceneName = sceneName.substr(0, dot);
@@ -49,10 +50,9 @@ public:
 
 		if (cfg->Mode == EngineMode::Standalone)
 		{
-			world->Spawn([world](Registry*)
-			{
-				world->GetConstructRegistry()->Create<PlayerConstruct>(world);
-			});
+			// Route through FlowManager → ArenaMode::OnPlayerJoined for the local player.
+			// OwnerID 0 is the standalone/server-local player's Soul.
+			Flow->OnClientLoaded(0);
 		}
 	}
 
@@ -65,8 +65,6 @@ public:
 	{
 		if (eventID == static_cast<uint8_t>(FlowEventID::TravelNotify))
 		{
-			// PendingTravelPath is the scene name (e.g. "Arena.tnxscene").
-			// Resolve via AssetRegistry — no raw path building needed.
 			const std::string& levelName = Flow->GetPendingTravelPath();
 			if (!levelName.empty())
 			{
@@ -90,4 +88,3 @@ public:
 };
 
 TNX_REGISTER_STATE(GameplayState)
-

@@ -77,7 +77,7 @@ static void RegisterFieldsImpl(std::index_sequence<Is...>)
 	fieldMetas.reserve(sizeof...(Is));
 
 	// Extract field metadata for each member pointer
-	(..., fieldMetas.push_back(ExtractFieldMeta<Derived, Is>(std::get < Is > (fields))));
+	(..., fieldMetas.push_back(ExtractFieldMeta<Derived, Is>(std::get<Is>(fields))));
 
 	// Register with global registry
 	ComponentTypeID typeID = Derived::StaticTypeID();
@@ -151,11 +151,10 @@ static constexpr size_t GetFieldCount()
 template <typename Derived>
 static bool RegisterFieldsStatic()
 {
-	RegisterFieldsImpl<Derived>(std::make_index_sequence < GetFieldCount<Derived>() >
-	{
-	}
-	)
-	;
+	RegisterFieldsImpl<Derived>(std::make_index_sequence<GetFieldCount<Derived>()>
+		{
+		}
+	);
 	return true;
 }
 
@@ -185,7 +184,7 @@ FORCE_INLINE void ForEachField(Func&& func)
 	constexpr auto fields = T::DefineFields();
 	[&]<size_t... Is>(std::index_sequence<Is...>)
 	{
-		(func(std::get < Is > (fields), Is), ...);
+		(func(std::get<Is>(fields), Is), ...);
 	}(std::make_index_sequence<std::tuple_size_v<decltype(fields)>>{});
 }
 
@@ -389,4 +388,36 @@ FORCE_INLINE void ForEachField(Func&& func)
             } \
         }; \
         [[maybe_unused]] TNX_USED_ATTR static _##MixinClass##_MixinReg _##MixinClass##_mixin_reg; \
+    }
+
+// ---------------------------------------------------------------------------
+// Required by TNX_REGISTER_CONSTRUCT — pulled in here so the macro is self-contained.
+#include "ConstructRegistry.h"
+#include "ReflectionRegistry.h"
+
+// TNX_REGISTER_CONSTRUCT — registers a replicated Construct type so that
+// ReplicationSystem::HandleConstructSpawn can instantiate it on the client.
+//
+// Usage (once per type, in a .cpp file):
+//   TNX_REGISTER_CONSTRUCT(PlayerConstruct)
+//
+// Requires the class to implement:
+//   void InitializeForReplication(World*, EntityHandle*, uint8_t viewCount)
+// ---------------------------------------------------------------------------
+#define TNX_REGISTER_CONSTRUCT(ConstructClass) \
+    static_assert(requires(ConstructClass& obj, World* w, EntityHandle* h, uint8_t n) { \
+        obj.InitializeForReplication(w, h, n); \
+    }, #ConstructClass " must implement InitializeForReplication(World*, EntityHandle*, uint8_t)"); \
+    namespace { \
+        struct _##ConstructClass##_ConstructReg { \
+            _##ConstructClass##_ConstructReg() { \
+                ReflectionRegistry::Get().RegisterConstruct( \
+                    #ConstructClass, \
+                    ReflectionRegistry::ConstructTypeHashFromName(#ConstructClass), \
+                    [](ConstructRegistry* reg, World* w, EntityHandle* handles, uint8_t count, uint8_t ownerID) -> void* { \
+                        return reg->CreateForReplication<ConstructClass>(w, handles, count, ownerID); \
+                    }); \
+            } \
+        }; \
+        [[maybe_unused]] TNX_USED_ATTR static _##ConstructClass##_ConstructReg _##ConstructClass##_construct_reg; \
     }

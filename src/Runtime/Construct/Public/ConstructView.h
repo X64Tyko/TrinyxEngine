@@ -50,7 +50,8 @@ public:
 		// Auto-register with owning Construct
 		owner->RegisterView({
 			this,
-			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); }
+			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); },
+			[](void* ptr) -> EntityHandle { return static_cast<Self*>(ptr)->GetEntityHandle(); }
 		});
 	}
 
@@ -68,7 +69,8 @@ public:
 
 		owner->RegisterView({
 			this,
-			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); }
+			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); },
+			[](void* ptr) -> EntityHandle { return static_cast<Self*>(ptr)->GetEntityHandle(); }
 		});
 	}
 

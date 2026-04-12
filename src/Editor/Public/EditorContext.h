@@ -12,6 +12,7 @@
 #include "EditorState.h"
 #include "EngineConfig.h"
 #include "WorldViewport.h"
+#include "imgui.h"
 
 class EditorPanel;
 class FlowManager;
@@ -148,6 +149,7 @@ private:
 	bool bServerVisible = true; // false = headless server (no viewport)
 	int PIEClientCount  = 1;    // Number of client worlds to spawn in PIE
 
+	void DrawEditorViewportPanel();
 	void DrawViewportPanel(const char* title, WorldViewport& vp);
 
 	enum class PendingActionType : uint8_t { None, OpenScene };
@@ -160,6 +162,9 @@ private:
 	bool bFileDialogForSave         = false;
 	bool bShowUnsavedWarning        = false;
 	bool bShowImportDialog          = false;
+	bool ViewportPanelHovered       = false;
+	ImVec2 ViewportPanelPos         = {0, 0};
+	ImVec2 ViewportPanelSize        = {0, 0};
 	PendingActionType PendingAction = PendingActionType::None;
 	std::string FileDialogPath;
 	std::string ImportDialogPath;

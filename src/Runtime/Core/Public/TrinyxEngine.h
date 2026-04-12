@@ -151,6 +151,11 @@ private:
 	// --- Networking ---
 	GNSContext GNS;
 	std::unique_ptr<NetThreadType> Net;
+#if !TNX_ENABLE_EDITOR
+	// ReplicationSystem is owned by the engine for non-editor builds.
+	// The editor creates its own per-PIE-session instance in EditorContext.
+	std::unique_ptr<ReplicationSystem> Replicator;
+#endif
 #endif
 
 	// --- Vulkan (owned here, shared across worlds) ---
@@ -188,10 +193,14 @@ void TrinyxEngine::Run(GameClass& game)
 	// Auto-load the default flow state if configured.
 	// World already exists (created in Initialize), so EnforceRequirements is a no-op
 	// for NeedsWorld states. The state's OnEnter drives level loading and mode activation.
+	// In editor builds the EditorContext drives flow/level loading — skip the auto-load
+	// here to prevent a double load into the editor DefaultWorld.
+#if !TNX_ENABLE_EDITOR
 	if (Config.DefaultState[0] != '\0')
 	{
 		Flow->LoadDefaultState(Config.DefaultState);
 	}
+#endif
 
 	RunMainLoop();
 	Shutdown();

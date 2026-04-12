@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EntityRecord.h"
 #include "LogicThread.h"
 #include "Schema.h"
 #include "World.h"
@@ -8,6 +9,7 @@ struct ConstructViewRef
 {
 	void* View;
 	void (*HydrateFn)(void*);
+	EntityHandle (*GetHandleFn)(void*); // Returns this view's backing ECS entity handle
 
 	void EnsureHydrated() { HydrateFn(View); }
 };
@@ -118,6 +120,17 @@ public:
 	void RegisterView(ConstructViewRef ref)
 	{
 		Views[ViewCount++] = ref;
+	}
+
+	/// Collect the ECS EntityHandle for each registered View.
+	/// Used by ReplicationSystem to build the ConstructSpawnPayload.
+	void CollectViewHandles(EntityHandle* out, uint8_t& count) const
+	{
+		count = 0;
+		for (uint32_t i = 0; i < ViewCount; ++i)
+		{
+			if (Views[i].GetHandleFn) out[count++] = Views[i].GetHandleFn(Views[i].View);
+		}
 	}
 
 	void DeregisterView(void* viewPtr)

@@ -27,8 +27,9 @@ enum class NetMessageType : uint8_t
 	GameModeManifest    = 14, // Server->Client: game-layer context publish (mode, level, rules, etc.)
 	ClientModeManifest  = 15, // Client->Server: optional reply to a GameModeManifest (preferences, loadout, etc.)
 	SoulRPC             = 16, // Bidirectional: Soul-layer RPC (RPCHeader + TParams bytes). One type forever.
-	Custom              = 17, // Game-defined: first slot for user-extended message types
-	Unknown             = 18, // Sentinel: unrecognised message type — receiver must drop
+	ConstructSpawn      = 17, // Server->Client: new Construct creation command (header + trailing EntityNetHandle[])
+	Custom              = 18, // Game-defined: first slot for user-extended message types
+	Unknown             = 19, // Sentinel: unrecognised message type — receiver must drop
 	Count
 };
 
@@ -230,6 +231,30 @@ struct StateCorrectionEntry
 };
 
 static_assert(sizeof(StateCorrectionEntry) == 32, "StateCorrectionEntry must be 32 bytes");
+
+// ---------------------------------------------------------------------------
+// ConstructSpawnPayload — header for a server→client Construct creation message.
+//
+// Variable-length: the header is followed by ViewCount EntityNetHandle values
+// (4 bytes each), one per ConstructView owned by the Construct.
+//
+// Total message size: sizeof(ConstructSpawnPayload) + ViewCount * sizeof(uint32_t)
+//
+// OwnerID is embedded in Handle.NetOwnerID — no separate field.
+// Position is omitted — arrives via normal EntitySpawn / StateCorrection for
+// each ConstructView's backing ECS entity.
+// ---------------------------------------------------------------------------
+struct ConstructSpawnPayload
+{
+	uint32_t Handle;   // ConstructNetHandle.Value (OwnerID + NetIndex)
+	uint32_t Manifest; // ConstructNetManifest.Value (PrefabIndex = type hash, NetFlags)
+	uint8_t ViewCount; // number of trailing EntityNetHandle values (4 bytes each)
+	uint8_t _Pad[3];
+
+	// Trailing: ViewCount * uint32_t (EntityNetHandle.Value)
+};
+
+static_assert(sizeof(ConstructSpawnPayload) == 12, "ConstructSpawnPayload header must be 12 bytes");
 
 // ---------------------------------------------------------------------------
 // HandshakePayload — server accept response carries session bootstrap data.

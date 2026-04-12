@@ -3,13 +3,18 @@
 #include "Archetype.h"
 #include "CacheSlotMeta.h"
 #include "CColor.h"
+#include "Construct.h"
+#include "ConstructRegistry.h"
+#include "FlowManager.h"
 #include "Logger.h"
 #include "LogicThread.h"
 #include "CMeshRef.h"
 #include "NetConnectionManager.h"
 #include "NetTypes.h"
+#include "ReflectionRegistry.h"
 #include "Registry.h"
 #include "CScale.h"
+#include "Soul.h"
 #include "TemporalComponentCache.h"
 #include "CTransform.h"
 #include "World.h"
@@ -32,14 +37,162 @@ void ReplicationSystem::Tick(NetConnectionManager* connMgr)
 	if (!ServerWorld || !connMgr) return;
 	if (connMgr->GetConnectionCount() == 0) return;
 
-	// Frame number comes from the server's LogicThread — the last fully committed
-	// simulation frame. This is what clients use to detect stale corrections.
 	const uint32_t frameNumber = ServerWorld->GetLogicThread()
 									 ? ServerWorld->GetLogicThread()->GetLastCompletedFrame()
 									 : 0;
 
 	SendSpawns(connMgr, frameNumber);
+	SendConstructSpawns(connMgr, frameNumber);
 	SendStateCorrections(connMgr, frameNumber);
+}
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// SendConstructSpawns — send pre-built ConstructSpawn payloads to all Loaded+ clients.
+// Payloads were fully assembled (EntityNetHandles resolved) at RegisterConstruct time.
+// ---------------------------------------------------------------------------
+
+void ReplicationSystem::SendConstructSpawns(NetConnectionManager* connMgr, uint32_t frameNumber)
+{
+	if (PendingConstructSpawns.empty()) return;
+
+	auto& connections = connMgr->GetConnections();
+
+	bool anyReady = false;
+	for (const auto& ci : connections)
+	{
+		if (ci.bConnected && ci.bServerSide && ci.OwnerID > 0 &&
+			ci.RepState >= ClientRepState::Loaded)
+		{
+			anyReady = true;
+			break;
+		}
+	}
+	if (!anyReady) return;
+
+	for (const std::vector<uint8_t>& buf : PendingConstructSpawns)
+	{
+		if (buf.size() < sizeof(ConstructSpawnPayload)) continue;
+
+		const auto* payload = reinterpret_cast<const ConstructSpawnPayload*>(buf.data());
+
+		PacketHeader header{};
+		header.Type        = static_cast<uint8_t>(NetMessageType::ConstructSpawn);
+		header.Flags       = PacketFlag::DefaultFlags;
+		header.PayloadSize = static_cast<uint16_t>(buf.size());
+		header.FrameNumber = frameNumber;
+		header.SenderID    = 0;
+
+		for (const auto& ci : connections)
+		{
+			if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
+			if (ci.RepState < ClientRepState::Loaded) continue;
+			connMgr->Send(ci.Handle, header, buf.data(), /*reliable=*/true);
+			LOG_INFO_F("[Replication] ConstructSpawn → ownerID=%u viewCount=%u",
+					   ci.OwnerID, payload->ViewCount);
+		}
+	}
+
+	PendingConstructSpawns.clear();
+}
+
+// ---------------------------------------------------------------------------
+// HandleConstructSpawn — client-side: create a Construct from a received message.
+// Returns false if any required entity view is not yet in the client registry.
+// The caller should defer the raw payload bytes and retry next tick.
+// ---------------------------------------------------------------------------
+
+bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* entityReg,
+											 FlowManager* flow, const uint8_t* data, size_t len)
+{
+	if (len < sizeof(ConstructSpawnPayload))
+	{
+		LOG_WARN("[Replication] HandleConstructSpawn: payload too small");
+		return true; // Malformed — don't retry
+	}
+
+	const auto* header             = reinterpret_cast<const ConstructSpawnPayload*>(data);
+	const uint32_t* viewNetHandles = reinterpret_cast<const uint32_t*>(data + sizeof(ConstructSpawnPayload));
+
+	ConstructNetHandle netHandle{};
+	netHandle.Value = header->Handle;
+
+	ConstructNetManifest manifest{};
+	manifest.Value = header->Manifest;
+
+	const uint16_t typeHash = static_cast<uint16_t>(manifest.PrefabIndex);
+	const uint8_t ownerID   = netHandle.GetOwnerID();
+	const uint8_t viewCount = header->ViewCount;
+
+	// Resolve EntityNetHandles → local EntityHandles.
+	// If any handle is unresolved, the EntitySpawn hasn't been processed yet — defer.
+	constexpr uint8_t MaxViews = 8;
+	EntityHandle resolvedHandles[MaxViews];
+	uint8_t resolvedCount = 0;
+
+	for (uint8_t i = 0; i < viewCount && i < MaxViews; ++i)
+	{
+		EntityNetHandle enh{};
+		enh.Value = viewNetHandles[i];
+
+		GlobalEntityHandle gH = entityReg->GlobalEntityRegistry.NetToRecord.get(enh.GetHandleIndex());
+		if (gH.GetIndex() == 0)
+		{
+			LOG_DEBUG_F("[Replication] HandleConstructSpawn: EntityNetHandle %u not yet available — deferring", enh.Value);
+			return false;
+		}
+
+		EntityRecord* entRec = entityReg->GlobalEntityRegistry.Records[gH.GetIndex()];
+		if (!entRec || !entRec->IsValid())
+		{
+			LOG_DEBUG_F("[Replication] HandleConstructSpawn: EntityNetHandle %u record invalid — deferring", enh.Value);
+			return false;
+		}
+
+		resolvedHandles[resolvedCount] = entityReg->MakeEntityHandle(gH, entRec->Arch->ArchClassID);
+		resolvedCount++;
+	}
+
+	// Find the client factory for this Construct type
+	const ReflectionRegistry::ConstructClientFactory factory =
+		ReflectionRegistry::Get().FindConstructClientFactory(typeHash);
+
+	if (!factory)
+	{
+		LOG_WARN_F("[Replication] HandleConstructSpawn: no factory for typeHash=%u", typeHash);
+		return true; // Bad type — don't retry
+	}
+
+	// Create the client-side Construct via the replication path
+	World* clientWorld = flow ? flow->GetWorld() : nullptr;
+	void* raw          = factory(reg, clientWorld, resolvedHandles, resolvedCount, ownerID);
+	if (!raw)
+	{
+		LOG_WARN("[Replication] HandleConstructSpawn: factory returned null");
+		return true;
+	}
+
+	// Wire ConstructRecord using the server-assigned net handle from the payload.
+	ConstructNetHandle serverHandle{};
+	serverHandle.Value = header->Handle;
+
+	ConstructNetManifest wireManifest{};
+	wireManifest.PrefabIndex = typeHash;
+
+	ConstructRef ref = reg->WireNetRef(raw, serverHandle, wireManifest, typeHash);
+
+	// Deliver to the owning Soul
+	Soul* soul = flow ? flow->GetSoul(ownerID) : nullptr;
+	if (soul)
+	{
+		soul->ClaimBody(ref);
+		LOG_INFO_F("[Replication] HandleConstructSpawn: ClaimBody → Soul ownerID=%u", ownerID);
+	}
+	else
+	{
+		LOG_WARN_F("[Replication] HandleConstructSpawn: no Soul found for ownerID=%u", ownerID);
+	}
+	return true;
 }
 
 // ---------------------------------------------------------------------------

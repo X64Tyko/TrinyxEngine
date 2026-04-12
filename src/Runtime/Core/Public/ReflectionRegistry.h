@@ -15,6 +15,9 @@
 
 class FlowState;
 class GameMode;
+class ConstructRegistry;
+class World;
+union EntityHandle;
 
 // Forward declarations for RPC dispatch table.
 // Full definitions live in RPC.h / NetTypes.h — included by ReflectionRegistry.cpp.
@@ -229,8 +232,32 @@ public:
 	/// Compute a deterministic UUID from a type + name (FNV-1a hash).
 	static int64_t UUIDFromName(const char* name);
 
+	/// Compute a 16-bit type hash from a Construct type name.
+	/// Used as ConstructNetManifest::PrefabIndex to identify the type on the client.
+	static uint16_t ConstructTypeHashFromName(const char* name);
+
 	/// Publish code-registered types (states, modes, entities) into AssetRegistry.
 	void PublishToAssetRegistry() const;
+
+	// ===== Replicated Construct factory table =====
+	//
+	// TNX_REGISTER_CONSTRUCT(T) populates this table at static init time.
+	// HandleConstructSpawn calls FindConstructClientFactory(typeHash) to get the
+	// client-side factory for the type identified by ConstructNetManifest::PrefabIndex.
+
+	using ConstructClientFactory = void*(*)(ConstructRegistry*, World*, EntityHandle*, uint8_t viewCount, uint8_t ownerID);
+
+	struct ConstructEntry
+	{
+		const char* Name;
+		uint16_t TypeHash;
+		ConstructClientFactory ClientFactory;
+	};
+
+	void RegisterConstruct(const char* name, uint16_t typeHash, ConstructClientFactory factory);
+	[[nodiscard]] ConstructClientFactory FindConstructClientFactory(uint16_t typeHash) const;
+
+	std::vector<ConstructEntry> RegisteredConstructs;
 
 	// ===== Bake / Snapshot / Diff (Step 5-6, stubs for now) =====
 

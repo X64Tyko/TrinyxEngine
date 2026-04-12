@@ -247,9 +247,8 @@ void EditorContext::DrawGizmo()
 	float modelMatrix[16];
 	BuildModelMatrix(modelMatrix, *pPosX, *pPosY, *pPosZ, qx, qy, qz, qw, sx, sy, sz);
 
-	// Set ImGuizmo to cover the full viewport
-	const ImGuiIO& io = ImGui::GetIO();
-	ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
+	// Set ImGuizmo to cover the editor viewport panel
+	ImGuizmo::SetRect(ViewportPanelPos.x, ViewportPanelPos.y, ViewportPanelSize.x, ViewportPanelSize.y);
 	ImGuizmo::SetOrthographic(false);
 
 	// ImGuizmo expects OpenGL-style projection (Y-up). Vulkan's projection has
@@ -417,28 +416,8 @@ void EditorContext::BuildFrame()
 	// Consume GPU pick results and update selection
 	ConsumePick();
 
-	// Viewport drop target — accept prefab drags from content browser.
-	// Only shown while a drag-drop is active to avoid eating viewport clicks.
-	if (ImGui::GetDragDropPayload() != nullptr)
-	{
-		ImGuiID dockspaceID        = ImGui::GetID("EditorDockspace");
-		ImGuiDockNode* centralNode = ImGui::DockBuilderGetCentralNode(dockspaceID);
-		if (centralNode)
-		{
-			ImRect viewportRect(centralNode->Pos,
-								ImVec2(centralNode->Pos.x + centralNode->Size.x,
-									   centralNode->Pos.y + centralNode->Size.y));
-			if (ImGui::BeginDragDropTargetCustom(viewportRect, dockspaceID))
-			{
-				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("PREFAB_PATH"))
-				{
-					std::string prefabPath(static_cast<const char*>(payload->Data));
-					SpawnPrefab(prefabPath);
-				}
-				ImGui::EndDragDropTarget();
-			}
-		}
-	}
+	// Main editor scene viewport — always visible, dockable
+	DrawEditorViewportPanel();
 
 	// Draw all panels
 	for (auto& panel : Panels)
@@ -481,7 +460,7 @@ void EditorContext::BuildFrame()
 	// Tell Sentinel whether the engine should own input.
 	// Engine gets input when: right-click held in viewport, or Play is running.
 	const ImGuiIO& io         = ImGui::GetIO();
-	bool rightClickInViewport = ImGui::IsMouseDown(ImGuiMouseButton_Right) && !io.WantCaptureMouse;
+	bool rightClickInViewport = ImGui::IsMouseDown(ImGuiMouseButton_Right) && ViewportPanelHovered;
 	bool playing              = (LogicPtr && !LogicPtr->IsSimPaused() && bHasSnapshot) || bPIEActive;
 	// Escape requests PIE stop — deferred to after the ImGui frame completes
 	// so we don't free GPU resources (descriptor sets, images) mid-frame.
@@ -521,7 +500,7 @@ void EditorContext::BuildDockspace()
 	ImGui::PopStyleVar(3);
 
 	ImGuiID dockspaceID = ImGui::GetID("EditorDockspaceID");
-	ImGui::DockSpace(dockspaceID, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
+	ImGui::DockSpace(dockspaceID, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
 
 	// Apply default layout on first frame
 	if (bFirstFrame)
@@ -555,6 +534,7 @@ void EditorContext::ApplyDefaultLayout(unsigned int dockspaceID)
 
 	// Dock panels
 	ImGui::DockBuilderDockWindow("World Outliner", left);
+	ImGui::DockBuilderDockWindow("Viewport", center);
 	ImGui::DockBuilderDockWindow("Details", right);
 
 	// Bottom: tabbed — Content Browser, Log, Engine Stats, Node Script, Component Generator
@@ -563,13 +543,6 @@ void EditorContext::ApplyDefaultLayout(unsigned int dockspaceID)
 	ImGui::DockBuilderDockWindow("Engine Stats", bottom);
 	ImGui::DockBuilderDockWindow("Node Script", bottom);
 	ImGui::DockBuilderDockWindow("Component Generator", bottom);
-
-	// Mark center node as the viewport (passthru so the 3D scene shows through)
-	ImGuiDockNode* centerNode = ImGui::DockBuilderGetNode(center);
-	if (centerNode)
-	{
-		centerNode->LocalFlags |= ImGuiDockNodeFlags_CentralNode;
-	}
 
 	ImGui::DockBuilderFinish(dockspaceID);
 }
@@ -1431,6 +1404,7 @@ void EditorContext::StartPIE()
 
 	Replicator = std::make_unique<ReplicationSystem>();
 	Replicator->Initialize(ServerFlow->GetWorld());
+	ServerFlow->GetWorld()->SetReplicationSystem(Replicator.get());
 	net->SetReplicationSystem(Replicator.get());
 
 	// Start the shared net thread (polls connections at NetworkUpdateHz)
@@ -1500,6 +1474,11 @@ void EditorContext::StopPIE()
 	{
 		// Detach replication before stopping net thread
 		net->SetReplicationSystem(nullptr);
+		if (ServerFlow&& ServerFlow
+		->
+		GetWorld()
+		)
+		ServerFlow->GetWorld()->SetReplicationSystem(nullptr);
 
 		// Stop net thread so we can safely manipulate connections
 		if (net->IsRunning())
@@ -1561,6 +1540,49 @@ void EditorContext::StopPIE()
 
 	bPIEActive = false;
 	LOG_INFO("[PIE] Stopped");
+}
+
+void EditorContext::DrawEditorViewportPanel()
+{
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+	ImGui::SetNextWindowDockID(ImGui::GetID("EditorDockspaceID"), ImGuiCond_FirstUseEver);
+	if (ImGui::Begin("Viewport"))
+	{
+		ImVec2 panelPos  = ImGui::GetCursorScreenPos();
+		ImVec2 panelSize = ImGui::GetContentRegionAvail();
+
+		// Store for gizmo and input tracking
+		ViewportPanelPos     = panelPos;
+		ViewportPanelSize    = panelSize;
+		ViewportPanelHovered = ImGui::IsWindowHovered();
+
+		// Ask the renderer to resize the offscreen target if the panel changed size
+		auto* renderer = static_cast<EditorRenderer*>(EnginePtr->GetRenderer());
+		if (panelSize.x > 1.0f && panelSize.y > 1.0f)
+		{
+			renderer->ResizeEditorViewport(static_cast<uint32_t>(panelSize.x),
+										   static_cast<uint32_t>(panelSize.y));
+		}
+
+		VkDescriptorSet tex = renderer->GetEditorViewportTexture();
+		if (tex != VK_NULL_HANDLE && panelSize.x > 0 && panelSize.y > 0)
+		{
+			ImGui::Image(tex, panelSize);
+
+			// Drag-drop target: accept prefab drops onto the viewport image
+			if (ImGui::BeginDragDropTarget())
+			{
+				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("PREFAB_PATH"))
+				{
+					std::string prefabPath(static_cast<const char*>(payload->Data));
+					SpawnPrefab(prefabPath);
+				}
+				ImGui::EndDragDropTarget();
+			}
+		}
+	}
+	ImGui::End();
+	ImGui::PopStyleVar();
 }
 
 void EditorContext::DrawViewportPanel(const char* title, WorldViewport& vp)
