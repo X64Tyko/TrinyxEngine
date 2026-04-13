@@ -26,7 +26,10 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 	{
 		if (ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection))
 		{
-			if (msg.Header.AckedClientFrame > ci->LastServerAckedFrame) ci->LastServerAckedFrame = msg.Header.AckedClientFrame;
+			if (msg.Header.AckedClientFrame > ci->LastServerAckedFrame)
+			{
+				ci->LastServerAckedFrame = msg.Header.AckedClientFrame;
+			}
 		}
 	}
 
@@ -440,7 +443,9 @@ void ClientNetThread::TickInputSend()
 		}
 
 		// Build wire payload from the full unacked window and send.
-		const uint32_t firstFrame       = ci->LastServerAckedFrame + 1;
+		// Clamp firstFrame to frame: if the server over-ACKed (e.g. a stale ACK arrives
+		// after a reconnect), firstFrame could exceed frame and produce an inverted payload.
+		const uint32_t firstFrame       = std::min(ci->LastServerAckedFrame + 1, frame);
 		const InputFramePayload payload = accum.BuildPayload(firstFrame, frame, frameTimeUS);
 
 		PacketHeader header{};

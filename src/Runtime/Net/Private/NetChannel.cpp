@@ -21,13 +21,14 @@ PacketHeader NetChannel::MakeHeader(NetMessageType type, uint16_t payloadSize, u
 bool NetChannel::SendPong(const PacketHeader& pingHeader)
 {
 	PacketHeader hdr{};
-	hdr.Type        = static_cast<uint8_t>(NetMessageType::Pong);
-	hdr.Flags       = PacketFlag::DefaultFlags;
-	hdr.SequenceNum = pingHeader.SequenceNum; // echo, not incremented
-	hdr.FrameNumber = pingHeader.FrameNumber;
-	hdr.SenderID    = CI ? CI->OwnerID : 0;
-	hdr.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
-	hdr.PayloadSize = 0;
+	hdr.Type             = static_cast<uint8_t>(NetMessageType::Pong);
+	hdr.Flags            = PacketFlag::DefaultFlags;
+	hdr.SequenceNum      = pingHeader.SequenceNum; // echo, not incremented
+	hdr.FrameNumber      = pingHeader.FrameNumber;
+	hdr.SenderID         = CI ? CI->OwnerID : 0;
+	hdr.Timestamp        = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
+	hdr.PayloadSize      = 0;
+	hdr.AckedClientFrame = CI ? CI->LastAckedClientFrame : 0;
 	return SendInternal(hdr, nullptr, 0, false);
 }
 

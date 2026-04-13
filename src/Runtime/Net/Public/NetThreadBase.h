@@ -244,7 +244,6 @@ void NetThreadBase<Derived>::Tick()
 		/ static_cast<double>(SDL_GetPerformanceFrequency());
 
 	TickClockSync(nowSec);
-	TickInputSend();
 	TickFPS(nowSec);
 }
 

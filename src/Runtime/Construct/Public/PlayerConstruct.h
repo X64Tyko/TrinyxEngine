@@ -7,6 +7,7 @@
 #include "Input.h"
 #include "JoltCharacter.h"
 #include "JoltPhysics.h"
+#include "Logger.h"
 #include "Owned.h"
 #include "Soul.h"
 
@@ -104,9 +105,13 @@ public:
 
 	void PhysicsStep(SimFloat dt)
 	{
-		// Remote players on the client have no JoltCharacter simulation — server corrections
-		// are the sole source of truth. Don't overwrite the server-corrected ECS position.
-		if (bIsClientSide && GetOwnerID() != GetWorld()->LocalOwnerID) return;
+		// Remote players (Echo) on the client have no JoltCharacter simulation — server
+		// corrections are the sole source of truth. Don't overwrite the ECS position.
+		if (bIsClientSide)
+		{
+			Soul* soul = GetOwnerSoul();
+			if (!soul || soul->GetRole() == SoulRole::Echo) return;
+		}
 
 		CharacterController.Update(
 			JPH::Vec3(DesiredVelX, 0, DesiredVelZ),
@@ -127,20 +132,21 @@ public:
 	{
 		// Two cases for client-side constructs:
 		//
-		// 1. Remote player — server corrections are authoritative. Sync JoltCharacter to the
-		//    ECS position (so collision shape stays in the right place) and skip input.
+		// 1. Remote player (Echo) — server corrections are authoritative. Sync JoltCharacter
+		//    to the ECS position (so collision shape stays in the right place) and skip input.
 		//
-		// 2. Local player — predict freely with local input. Server corrections are stale by
-		//    RTT; snapping to them every frame would undo the prediction. When rollback is
-		//    implemented, corrections trigger a resim from the corrected frame. Until then,
-		//    only snap on teleport-scale divergence (> 5 m).
+		// 2. Local player (Owner) — predict freely with local input. Server corrections are
+		//    stale by RTT; snapping to them every frame would undo the prediction. When
+		//    rollback is implemented, corrections trigger a resim from the corrected frame.
+		//    Until then, only snap on teleport-scale divergence (> 5 m).
 		if (bIsClientSide)
 		{
 			const float ecsPosX = Body.Transform.PosX.Value();
 			const float ecsPosY = Body.Transform.PosY.Value();
 			const float ecsPosZ = Body.Transform.PosZ.Value();
 
-			if (GetOwnerID() != GetWorld()->LocalOwnerID)
+			Soul* soul = GetOwnerSoul();
+			if (!soul || soul->GetRole() == SoulRole::Echo)
 			{
 				// Remote player: drive position entirely from server-corrected ECS.
 				CharacterController.SetPosition(JPH::RVec3(ecsPosX, ecsPosY, ecsPosZ));
@@ -155,7 +161,27 @@ public:
 			if (dx * dx + dy * dy + dz * dz > 25.0f) CharacterController.SetPosition(JPH::RVec3(ecsPosX, ecsPosY, ecsPosZ));
 		}
 
-		InputBuffer* simInput = GetWorld()->GetInputForPlayer(GetOwnerID());
+		// Route input through the Soul so Authority reads the injected net buffer
+		// and Owner reads the local keyboard — no raw World buffer access in gameplay.
+		// Standalone (no Soul, ownerID 0) falls back to the local sim buffer.
+		Soul* soul            = GetOwnerSoul();
+		InputBuffer* simInput = soul
+			? soul->GetSimInput(GetWorld())
+			: GetWorld()->GetSimInput(); // standalone fallback
+		if (!simInput) return; // Echo souls have no input
+
+		// DEBUG: log input state for server-side (Authority) constructs
+		if (!bIsClientSide)
+		{
+			static uint32_t dbgPrePhysCount = 0;
+			const bool fwd  = simInput->IsActionDown(Action::MoveForward);
+			const bool back = simInput->IsActionDown(Action::MoveBackward);
+			const bool left = simInput->IsActionDown(Action::MoveLeft);
+			const bool right= simInput->IsActionDown(Action::MoveRight);
+			if (fwd || back || left || right || (++dbgPrePhysCount % 512 == 0))
+				LOG_DEBUG_F("[PlayerConstruct::PrePhysics] ownerID=%u soul=%p simInput=%p fwd=%d back=%d left=%d right=%d",
+				            GetOwnerID(), soul, simInput, (int)fwd, (int)back, (int)left, (int)right);
+		}
 
 		float sinYaw = std::sin(Yaw);
 		float cosYaw = std::cos(Yaw);
@@ -180,12 +206,20 @@ public:
 
 	void ScalarUpdate(SimFloat /*dt*/)
 	{
-		const uint8_t ownerID     = GetOwnerID();
-		const bool bIsLocalPlayer = bIsClientSide
-										? (ownerID == GetWorld()->LocalOwnerID)
-										: (ownerID == 0); // server/standalone: only ownerID 0 is local
+		const uint8_t ownerID = GetOwnerID();
+		Soul* soul            = GetOwnerSoul();
 
-		InputBuffer* vizInput = GetWorld()->GetVizInputForPlayer(ownerID);
+		const bool bIsLocalPlayer = bIsClientSide
+										? (soul && soul->HasRole(SoulRole::Owner))
+										: (ownerID == 0); // standalone: ownerID 0 is local
+
+		// Route through Soul when available; fall back to world buffers for
+		// standalone (no Soul) and server-side remote players on the viz path.
+		InputBuffer* vizInput = soul
+			? soul->GetVizInput(GetWorld())
+			: (bIsLocalPlayer ? GetWorld()->GetVizInput() : nullptr);
+
+		if (!vizInput) return; // Echo or server-side remote: no viz processing
 
 		constexpr float MouseSens = 0.002f;
 		constexpr float MaxPitch  = 1.5533f; // ~89 degrees
@@ -261,13 +295,10 @@ private:
 	void SetActiveCameraIfOwned(CameraConstruct* cam)
 	{
 		if (GetWorld()->GetConfig().Mode == EngineMode::Server) return;
-		const uint8_t ownerID = GetOwnerID();
-		// On the client, ownerID==0 means the soul wasn't set (remote player
-		// construct received via ConstructSpawn before ClaimBody) — never steal
-		// the camera for it. On the server/listen-server, ownerID==0 is the
-		// local player and should own the camera.
-		if (bIsClientSide && ownerID == 0) return;
-		if (ownerID != 0 && ownerID != GetWorld()->LocalOwnerID) return;
+		Soul* soul = GetOwnerSoul();
+		// Standalone (no soul): always owns the camera.
+		// Client: only the Owner soul gets the camera — not Echo, not pre-claim nulls.
+		if (!soul || !soul->HasRole(SoulRole::Owner)) return;
 		GetWorld()->GetLogicThread()->SetActiveCamera(cam);
 	}
 

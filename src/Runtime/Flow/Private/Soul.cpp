@@ -3,6 +3,7 @@
 #include "FlowManager.h"
 #include "NetConnectionManager.h"
 #include "ReflectionRegistry.h"
+#include "World.h"
 
 // ---------------------------------------------------------------------------
 // Soul.cpp — engine-reserved SoulRPC implementations + dispatch.
@@ -15,6 +16,27 @@
 // Game-defined RPCs live in the user's Soul subclass .cpp files and claim
 // IDs from the user band [128+].
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Input routing
+// ---------------------------------------------------------------------------
+
+InputBuffer* Soul::GetSimInput(World* world) const
+{
+	if (!world) return nullptr;
+	// Owner flag: local keyboard always wins (handles Owner-only and Owner|Authority).
+	if (HasRole(SoulRole::Owner))     return world->GetSimInput();
+	if (HasRole(SoulRole::Authority)) return world->GetPlayerSimInput(OwnerID);
+	return nullptr; // Echo
+}
+
+InputBuffer* Soul::GetVizInput(World* world) const
+{
+	if (!world) return nullptr;
+	if (HasRole(SoulRole::Owner))     return world->GetVizInput();
+	if (HasRole(SoulRole::Authority)) return world->GetPlayerVizInput(OwnerID);
+	return nullptr; // Echo
+}
 
 // ---------------------------------------------------------------------------
 // DispatchServerRPC / DispatchClientRPC

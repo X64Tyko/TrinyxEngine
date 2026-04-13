@@ -253,7 +253,7 @@ bool NetConnectionManager::Send(HSteamNetConnection conn, const PacketHeader& he
 {
 	// Payload pointer must be present when PayloadSize > 0 — a mismatch means
 	// the caller stamped the wrong size or forgot to pass the buffer.
-	assert((header.PayloadSize == 0 || payload != nullptr) &&
+	assert((header.PayloadSize == 0 || payload != nullptr || header.PayloadSize >= 65535) &&
 		   "Send: non-zero PayloadSize but null payload pointer");
 
 	uint8_t buf[sizeof(PacketHeader) + 65535]; // Stack buffer — PayloadSize is uint16

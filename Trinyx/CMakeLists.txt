@@ -353,7 +353,7 @@ if(ENABLE_TRACY)
         TRACY_NO_ROCPROF=1
     )
     if(WIN32)
-        target_link_libraries(${PROJECT_NAME} PUBLIC ws2_32 dbghelp)
+        target_link_libraries(${PROJECT_NAME} PUBLIC ws2_32 dbghelp Winmm)
     elseif(UNIX)
         target_link_libraries(${PROJECT_NAME} PUBLIC pthread dl)
         # Some toolchains / distros still put clock_gettime in librt

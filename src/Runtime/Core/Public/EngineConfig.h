@@ -70,9 +70,10 @@ struct EngineConfig
 
 	// Server: how many sim frames the server is allowed to predict ahead of a client's
 	// last received input before stalling the sim for that client.
-	// Rule of thumb: (FixedHz / InputNetHz) * 4 to cover one delivery batch + RTT headroom.
-	// At 512Hz sim / 128Hz input = 4 frames/batch → default 16. Set to 0 for strict lockstep.
-	int MaxClientInputLead = 16;
+	// Needs to cover one delivery batch + RTT headroom + startup timing offset.
+	// At 512Hz sim / 128Hz input = 4 frames/batch; 64 covers ~125ms of jitter/offset.
+	// Set to 0 for strict lockstep.
+	int MaxClientInputLead = 64;
 
 	// Arena 1 capacity (Render + Dual partitions). Determines the slab boundary
 	// between Arena 1 and Arena 2. Must be <= MAX_CACHED_ENTITIES.

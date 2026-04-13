@@ -116,7 +116,11 @@ struct PlayerInputLog
 			bActive             = true;
 		}
 
-		if (payload.LastClientFrame <= LastConsumedFrame) return; // entire span already simulated
+		// Drop only if the entire span is strictly behind what we've already consumed AND
+		// we've seen a later window start (so there's nothing to correct). The inner loop
+		// handles the correction path for frames that were predicted — removing this early
+		// return is safe because the loop skips already-consumed non-predicted frames.
+		if (payload.LastClientFrame < HighWaterFirstFrame) return;
 
 		const uint32_t frameTimeUS = 1'000'000u / fixedUpdateHz;
 
@@ -125,7 +129,15 @@ struct PlayerInputLog
 		// later packet has already superseded.
 		if (payload.FirstClientFrame > HighWaterFirstFrame) HighWaterFirstFrame = payload.FirstClientFrame;
 
-		const uint32_t effectiveFirst = std::max(payload.FirstClientFrame, HighWaterFirstFrame);
+		const uint32_t effectiveFirst = [&]() -> uint32_t {
+			uint32_t first = std::max(payload.FirstClientFrame, HighWaterFirstFrame);
+			// Frames older than one full ring-buffer depth before LastConsumedFrame have been
+			// evicted — their slots have been overwritten and can never be corrected. Clamping
+			// here keeps Store() O(ring_depth + new_frames) regardless of session duration.
+			if (LastConsumedFrame >= Depth)
+				first = std::max(first, LastConsumedFrame - Depth + 1);
+			return first;
+		}();
 
 		for (uint32_t frame = effectiveFirst; frame <= payload.LastClientFrame; ++frame)
 		{
@@ -200,7 +212,12 @@ struct PlayerInputLog
 			}
 		}
 
-		if (payload.LastClientFrame > LastReceivedFrame) LastReceivedFrame = payload.LastClientFrame;
+		// Only advance LastReceivedFrame when the range is valid and frames were actually stored.
+		// An inverted range (FirstClientFrame > LastClientFrame) means nothing was stored —
+		// advancing here would make ConsumeFrame return LateOrAliased for unstored frames.
+		if (payload.FirstClientFrame <= payload.LastClientFrame
+			&& payload.LastClientFrame > LastReceivedFrame)
+			LastReceivedFrame = payload.LastClientFrame;
 	}
 
 	/// Called by server LogicThread injector each sim tick.

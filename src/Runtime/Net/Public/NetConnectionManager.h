@@ -196,9 +196,16 @@ public:
 
 	/// Find connection info by OwnerID. Returns nullptr if not found.
 	/// O(n) over active connections — only use outside hot-path code.
-	ConnectionInfo* FindConnectionByOwnerID(uint8_t ownerID)
+	/// In PIE, two ConnectionInfo entries share the same OwnerID (bServerSide and
+	/// bClientInitiated). Pass requireServerSide=true to get the server-accepted leg.
+	ConnectionInfo* FindConnectionByOwnerID(uint8_t ownerID, bool requireServerSide = false)
 	{
-		for (ConnectionInfo& ci : Connections) if (ci.OwnerID == ownerID) return &ci;
+		for (ConnectionInfo& ci : Connections)
+		{
+			if (ci.OwnerID != ownerID) continue;
+			if (requireServerSide && !ci.bServerSide) continue;
+			return &ci;
+		}
 		return nullptr;
 	}
 

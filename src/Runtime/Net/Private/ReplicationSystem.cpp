@@ -167,6 +167,12 @@ bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* e
 	FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr;
 	Soul* soul        = flow ? flow->GetSoul(ownerID) : nullptr;
 
+	// If no Soul exists for this ownerID, lazily create an Echo Soul so the
+	// Construct can be claimed and input-gated correctly (e.g., server-owned
+	// constructs received on the client have ownerID=0 and no prior Soul).
+	if (!soul && flow)
+		soul = flow->EnsureEchoSoul(ownerID);
+
 	// Create the client-side Construct via the replication path
 	void* raw = factory(reg, clientWorld, resolvedHandles, resolvedCount, soul);
 	if (!raw)
@@ -188,11 +194,11 @@ bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* e
 	if (soul)
 	{
 		soul->ClaimBody(ref);
-		LOG_INFO_F("[Replication] HandleConstructSpawn: ClaimBody → Soul ownerID=%u", ownerID);
+		LOG_INFO_F("[Replication] HandleConstructSpawn: ClaimBody → Soul ownerID=%u role=%u", ownerID, static_cast<uint8_t>(soul->GetRole()));
 	}
 	else
 	{
-		LOG_WARN_F("[Replication] HandleConstructSpawn: no Soul found for ownerID=%u", ownerID);
+		LOG_WARN_F("[Replication] HandleConstructSpawn: no Soul and no FlowManager for ownerID=%u", ownerID);
 	}
 	return true;
 }

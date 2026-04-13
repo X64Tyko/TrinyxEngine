@@ -485,6 +485,10 @@ void FlowManager::OnClientLoaded(uint8_t ownerID)
 
 	Souls[ownerID] = std::make_unique<Soul>(ownerID);
 	Souls[ownerID]->FlowMgr = this;
+	// ownerID=0 is the listen-server's own local player — drives via keyboard AND
+	// is the simulation authority. ownerID>0 are remote clients — authority only.
+	Souls[ownerID]->SetRole(SoulRole::Authority);
+	if (ownerID == 0) Souls[ownerID]->AddRole(SoulRole::Owner);
 	Souls[ownerID]->OnJoined();
 
 	if (ActiveMode) ActiveMode->OnPlayerJoined(*Souls[ownerID]);
@@ -537,6 +541,7 @@ void FlowManager::SendPlayerBeginRequest(NetChannel channel, uint32_t frameNumbe
 	{
 		Souls[ownerID] = std::make_unique<Soul>(ownerID);
 		Souls[ownerID]->FlowMgr = this;
+		Souls[ownerID]->SetRole(SoulRole::Owner); // owning client: predicts locally
 		Souls[ownerID]->OnJoined();
 	}
 	Souls[ownerID]->Channel = channel;

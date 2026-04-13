@@ -72,23 +72,24 @@ public:
 	InputBuffer* GetVizInput() { return &VizInput; }
 	InputBuffer* GetNetInput() { return &NetInput; }
 
-	/// Returns the sim input for a specific player on the server, or the local
-	/// SimInput when ownerID == 0 (client world or standalone). This is the
-	/// single call site for player-driven input regardless of network role.
+	/// Engine-internal: returns the correct sim input buffer for a player by ownerID.
+	/// Gameplay code must use Soul::GetSimInput(world) — it applies SoulRole routing.
 	InputBuffer* GetInputForPlayer(uint8_t ownerID)
 	{
 		if (ownerID == 0) return &SimInput;
 		InputBuffer* buf = GetPlayerSimInput(ownerID);
 		return buf ? buf : &SimInput;
 	}
+	/// Engine-internal: returns the correct viz input buffer for a player by ownerID.
+	/// Gameplay code must use Soul::GetVizInput(world) — it applies SoulRole routing.
 	InputBuffer* GetVizInputForPlayer(uint8_t ownerID)
 	{
 		if (ownerID == 0) return &VizInput;
 		InputBuffer* buf = GetPlayerVizInput(ownerID);
 		return buf ? buf : &VizInput;
 	}
-	/// Returns nullptr if ownerID is 0 or beyond the currently connected player
-	/// count. Use EnsurePlayerInputSlot() before the first inject to allocate.
+	/// Engine-internal: returns the injected net sim buffer for a remote player slot,
+	/// or nullptr if the slot is unallocated. Use EnsurePlayerInputSlot() first.
 	InputBuffer* GetPlayerSimInput(uint8_t ownerID)
 	{
 		if (ownerID == 0 || ownerID > PlayerSimInputs.size()) return nullptr;

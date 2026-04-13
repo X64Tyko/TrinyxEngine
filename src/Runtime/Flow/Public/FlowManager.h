@@ -156,6 +156,20 @@ public:
 	/// Returns the Soul for a given ownerID, or nullptr if not present.
 	Soul* GetSoul(uint8_t ownerID) const { return Souls[ownerID].get(); }
 
+	/// Create an Echo Soul for ownerID if none exists. Used by the replication system
+	/// when a Construct arrives from a remote peer whose Soul hasn't been created yet
+	/// (e.g., the server's own player construct received on the client).
+	Soul* EnsureEchoSoul(uint8_t ownerID)
+	{
+		if (!Souls[ownerID])
+		{
+			Souls[ownerID]          = std::make_unique<Soul>(ownerID);
+			Souls[ownerID]->FlowMgr = this;
+			Souls[ownerID]->SetRole(SoulRole::Echo);
+		}
+		return Souls[ownerID].get();
+	}
+
 	// ----- GameMode -----
 
 	/// Set the active GameMode for the current World.

@@ -139,11 +139,21 @@ void LogicThread::ThreadMain()
 			int steps = 0;
 			while (Accumulator.load(std::memory_order_relaxed) <= 0 && steps < MaxPhysSubSteps)
 			{
+				const bool bInputStalled = ProcessSimInput(fixedStepTime);
+				if (bInputStalled)
+				{
+					// A player's input window hasn't arrived yet — hold FrameNumber by returning
+					// the time budget to the accumulator. The outer loop will wait for the next
+					// wall-clock tick and retry. FrameNumber does not advance.
+					Accumulator.store(Accumulator.load(std::memory_order_relaxed) + fixedStepTime,
+									  std::memory_order_relaxed);
+					break;
+				}
+
 				// FPS tracking
 				FpsFixedCount++;
 				FpsFixedTimer += fixedStepTime;
 
-				ProcessSimInput(fixedStepTime);
 #ifdef TNX_ENABLE_ROLLBACK
 				RecordFrameInput();
 #endif
@@ -224,14 +234,14 @@ void LogicThread::ThreadMain()
 	}
 }
 
-void LogicThread::ProcessSimInput(SimFloat dt)
+bool LogicThread::ProcessSimInput(SimFloat dt)
 {
 	SimInput->Swap();
 
 	// Server-side: pull each connected player's input from the PlayerInputLog for this frame.
-	// The injector calls InjectState then buf->Swap() so the injected state is in ReadSlot
-	// when PrePhysics runs. On stall, Swap() is still called for carry-forward of held keys.
-	if (PlayerInputInjector) PlayerInputInjector(FrameNumber);
+	// Returns true if any player's input window hasn't arrived yet — caller must hold FrameNumber.
+	if (PlayerInputInjector) return PlayerInputInjector(FrameNumber);
+	return false;
 }
 
 void LogicThread::ProcessVizInput(SimFloat dt)

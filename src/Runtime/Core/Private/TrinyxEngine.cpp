@@ -4,6 +4,13 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL_vulkan.h>
+#ifdef _WIN32
+// Forward-declare rather than including mmsystem/timeapi to avoid Windows header pollution.
+extern "C" {
+	__declspec(dllimport) unsigned long __stdcall timeBeginPeriod(unsigned int uPeriod);
+	__declspec(dllimport) unsigned long __stdcall timeEndPeriod(unsigned int uPeriod);
+}
+#endif
 
 #include "AssetRegistry.h"
 #include "EngineConfig.h"
@@ -81,6 +88,11 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 
 	TrinyxThreading::Initialize();
 	TrinyxThreading::PinCurrentThread(TrinyxThreading::GetIdealCore(CoreAffinity::Input));
+
+	// ---- Windows timer resolution ----------------------------------------
+#ifdef _WIN32
+	timeBeginPeriod(1); // Raise OS timer to 1ms for SDL_Delay accuracy in net/logic threads
+#endif
 
 	// ---- SDL init --------------------------------------------------------
 	if (!SDL_WasInit(SDL_INIT_VIDEO))
@@ -373,6 +385,9 @@ void TrinyxEngine::Shutdown()
 	}
 
 	SDL_Quit();
+#ifdef _WIN32
+	timeEndPeriod(1);
+#endif
 	Logger::Get().Shutdown();
 }
 

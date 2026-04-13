@@ -47,31 +47,39 @@ void ServerNetThread::WirePlayerInputInjector(World* world)
 	if (!logic) return;
 
 	// Capture 'this' — ServerNetThread outlives the LogicThread (engine shutdown order).
-	// Each sim tick: gate on MaxClientInputLead, consume (real or predicted), inject, check dirty.
-	logic->SetPlayerInputInjector([this, world, logic](uint32_t frameNumber)
+	// Returns true if the sim should stall (at least one player's input hasn't arrived).
+	// Two-pass: stall check first so we never partially inject a frame.
+	logic->SetPlayerInputInjector([this, world, logic](uint32_t frameNumber) -> bool
 	{
 		const int maxLead = Config ? Config->MaxClientInputLead : 16;
 
+		// Pass 1 — stall check: if any active player is beyond the lead budget, hold the
+		// entire sim this tick. No input is consumed or injected until all are in window.
+		if (maxLead >= 0)
+		{
+			for (uint32_t ownerID = 1; ownerID < MaxOwnerIDs; ++ownerID)
+			{
+				const PlayerInputLog* log = InputLogs[ownerID].get();
+				if (!log || !log->bActive) continue;
+
+				if (frameNumber > log->LastReceivedFrame + static_cast<uint32_t>(maxLead))
+				{
+					// Rate-limit: log once per second (512 frames) per owner to avoid flooding.
+					if (frameNumber % 512 == 0)
+						LOG_WARN_F("[ServerNet] Stalling sim for ownerID %u: frame %u, lastReceived %u, lead %d",
+								   ownerID, frameNumber, log->LastReceivedFrame, maxLead);
+					return true;
+				}
+			}
+		}
+
+		// Pass 2 — injection: all players are within the lead window.
 		for (uint32_t ownerID = 1; ownerID < MaxOwnerIDs; ++ownerID)
 		{
 			PlayerInputLog* log = InputLogs[ownerID].get();
-			if (!log) continue;
-
-			// Don't process input until Activate() has been called (PlayerBeginConfirm sent).
-			if (!log->bActive) continue;
+			if (!log || !log->bActive) continue;
 
 			InputBuffer* buf = world->GetPlayerSimInput(static_cast<uint8_t>(ownerID));
-
-			// Frame gate: stall if the client is too far behind.
-			// Still call Swap() so carry-forward of the last held state is visible via ReadSlot.
-			if (maxLead >= 0
-				&& frameNumber > log->LastReceivedFrame + static_cast<uint32_t>(maxLead))
-			{
-				LOG_WARN_F("[ServerNet] Stalling sim for ownerID %u: frame %u, lastReceived %u, lead %d",
-						   ownerID, frameNumber, log->LastReceivedFrame, maxLead);
-				if (buf) buf->Swap();
-				continue;
-			}
 
 			InputConsumeResult result = log->ConsumeFrame(frameNumber);
 			if (result)
@@ -95,9 +103,6 @@ void ServerNetThread::WirePlayerInputInjector(World* world)
 					}
 					// TODO: inject discrete events into player event queue
 				}
-
-				if (ConnectionInfo* ci = ConnectionMgr ? ConnectionMgr->FindConnectionByOwnerID(static_cast<uint8_t>(ownerID)) : nullptr)
-					ci->LastAckedClientFrame = log->LastConsumedFrame;
 			}
 			else if (result.Reason == InputMissReason::LateOrAliased)
 			{
@@ -107,6 +112,14 @@ void ServerNetThread::WirePlayerInputInjector(World* world)
 
 			// Expose the injected (or predicted/carried-forward) state to the sim this frame.
 			if (buf) buf->Swap();
+
+			// ACK the highest frame for which we have real received data.
+			// Use LastReceivedFrame — NOT LastConsumedFrame — because LastConsumedFrame
+			// advances on predicted entries too. ACKing a predicted frame would tell the
+			// client to trim its retransmit window past frames the server never actually
+			// received, causing firstFrame > frame (inverted payload range) on the client.
+			if (ConnectionInfo* ci = ConnectionMgr ? ConnectionMgr->FindConnectionByOwnerID(static_cast<uint8_t>(ownerID), /*requireServerSide=*/true) : nullptr)
+				ci->LastAckedClientFrame = log->LastReceivedFrame;
 
 			// Trigger resim if a real packet corrected predicted frames.
 			if (log->IsDirty())
@@ -119,12 +132,27 @@ void ServerNetThread::WirePlayerInputInjector(World* world)
 #endif
 			}
 		}
+
+		return false;
 	});
 }
 
 void ServerNetThread::TickReplication()
 {
 	if (Replicator) Replicator->Tick(ConnectionMgr);
+
+	// Heartbeat ping to each Playing client so AckedClientFrame propagates even during
+	// quiet frames (no corrections or spawns). NetChannel::MakeHeader stamps LastAckedClientFrame
+	// into every outbound header — the client reads it in HandleMessage before the switch/case.
+	if (!ConnectionMgr) return;
+	for (const auto& ci : ConnectionMgr->GetConnections())
+	{
+		if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
+		if (ci.RepState < ClientRepState::Playing) continue;
+		ConnectionInfo* mutableCi = ConnectionMgr->FindConnection(ci.Handle);
+		if (!mutableCi) continue;
+		NetChannel(mutableCi, ConnectionMgr).SendHeaderOnly(NetMessageType::Ping, /*reliable=*/false);
+	}
 }
 
 void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
@@ -161,9 +189,6 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 										 ? static_cast<uint32_t>(Config->FixedUpdateHz)
 										 : 512u;
 			log->Store(*payload, fixedHz);
-
-			// TODO(rollback): if payload->LastClientFrame < serverCurrentFrame (late packet),
-			// trigger ExecuteRollback(payload->FirstClientFrame) to resim with corrected input.
 			break;
 		}
 
@@ -330,11 +355,6 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 				{
 					if (Soul* soul = flow->GetSoul(ci->OwnerID))
 					{
-						// Refresh the channel so server→client reply RPCs (e.g.
-						// PlayerBeginConfirm) have a valid send target. The channel
-						// is not set during OnClientLoaded because ConnectionInfo
-						// isn't available there.
-						soul->GetNetChannel() = NetChannel(ci, ConnectionMgr);
 						RPCContext ctx{ci, ConnectionMgr};
 						soul->DispatchServerRPC(ctx, *rpcHdr, params);
 					}

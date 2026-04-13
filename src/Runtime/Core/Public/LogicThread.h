@@ -43,8 +43,9 @@ public:
 	/// Server-side hook: inject per-player input from PlayerInputLog into each player's
 	/// InputBuffer before gameplay logic runs. Called each fixed tick inside ProcessSimInput.
 	/// Wire up after both LogicThread and ServerNetThread are initialized.
-	/// Signature: void(uint32_t frameNumber)
-	void SetPlayerInputInjector(std::function<void(uint32_t)> injector)
+	/// Returns true if the sim should stall (at least one player's input window hasn't arrived).
+	/// Signature: bool(uint32_t frameNumber)
+	void SetPlayerInputInjector(std::function<bool(uint32_t)> injector)
 	{
 		PlayerInputInjector = std::move(injector);
 	}
@@ -106,8 +107,8 @@ private:
 	void ThreadMain(); // Thread entry point
 
 	// Lifecycle Methods
-	void ProcessSimInput(SimFloat dt); // Swap input buffer, update camera from WASD + mouse
 	void ProcessVizInput(SimFloat dt); // Swap FizInput buffer, update camera from WASD + mouse
+	bool ProcessSimInput(SimFloat dt); // Swap SimInput, call injector; returns true if input-stalled
 	void ScalarUpdate(SimFloat dt);    // Variable update (runs every frame)
 	void PrePhysics(SimFloat dt);      // Fixed update at FixedUpdateHz
 	void PostPhysics(SimFloat dt);     // Fixed update at FixedUpdateHz
@@ -131,7 +132,8 @@ private:
 	InputBuffer* VizInput = nullptr;
 
 	// Server-side: per-player input injection hook (null on clients/standalone)
-	std::function<void(uint32_t)> PlayerInputInjector;
+	// Returns true if the sim should stall this tick (at least one player is behind).
+	std::function<bool(uint32_t)> PlayerInputInjector;
 
 	// Camera state (FPS-style: yaw around Y, pitch around X)
 	Vector3 CamPos{0.0f, 0.0f, 0.0f};
