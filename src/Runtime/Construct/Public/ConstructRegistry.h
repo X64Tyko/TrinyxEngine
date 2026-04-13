@@ -1,6 +1,6 @@
 #pragma once
 
-#include <functional>
+#include <type_traits>
 #include <vector>
 #include <memory>
 #include <cstdint>
@@ -51,15 +51,16 @@ public:
 	using ShutdownFn    = void(*)(void*);         // Construct::Shutdown()
 	using ReinitFn      = void(*)(void*, World*); // Construct::Initialize(World*)
 
-	template <typename T>
-	T* Create(World* InWorld, std::function<void(T*)> preInit = nullptr)
+	template <typename T, typename PreInit = std::nullptr_t>
+	T* Create(World* InWorld, PreInit&& preInit = nullptr)
 	{
 		auto typed = std::make_unique<TypedStorage<T>>();
 		T* raw     = &typed->Value;
 
 		uint32_t id = NextID++;
 		raw->SetConstructID(id);
-		if (preInit) preInit(raw);
+		if constexpr (!std::is_same_v<std::decay_t<PreInit>, std::nullptr_t>)
+			preInit(raw);
 		raw->Initialize(InWorld);
 
 		Entry entry;
