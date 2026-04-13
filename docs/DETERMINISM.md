@@ -34,19 +34,23 @@ Key mechanisms:
 
 ## MetaRegistry and Deterministic Identity
 
-### MetaRegistry is an asset
+> **Status: Design intent — not yet implemented.** The MetaRegistry concept is designed but does
+> not exist in the current codebase. Component registration is currently driven by static
+> initializers (`TNX_TEMPORAL_FIELDS`, `TNX_REGISTER_FIELDS`, etc.) with no baked asset.
 
-`MetaRegistry` is a baked asset that represents the engine’s semantic truth:
+### MetaRegistry is an asset (design intent)
+
+`MetaRegistry` is a baked asset that would represent the engine's semantic truth:
 
 - component list
 - component tier (Temporal/Volatile/Static/Cold)
 - per-component field layout and ordering
 - field semantic indices and offsets
 
-**Workflow contract:** the baked `MetaRegistry` asset is checked into source control like any other asset.
+**Workflow contract (planned):** the baked `MetaRegistry` asset would be checked into source control.
 If the baked MetaRegistry changes unexpectedly, the build/editor must be loud about it.
 
-### Loud validation
+### Loud validation (planned)
 
 The engine/editor should warn/fail loudly when:
 
@@ -56,9 +60,10 @@ The engine/editor should warn/fail loudly when:
 
 ### Static registration vs baked registry
 
-Static registration is useful for development iteration. In deterministic builds it may be disabled.
+Static registration is used for development iteration. A baked registry would be introduced for
+hardened/shipping builds.
 
-Implementation model:
+Implementation model (planned):
 
 - static registrars emit registration records
 - at startup, engine loads baked MetaRegistry and finalizes the runtime registry from it
@@ -99,11 +104,13 @@ This ensures that free order is not affected by thread scheduling or timing jitt
 
 ## Numeric Determinism
 
-Simulation code should use the engine’s canonical numeric alias types:
+Simulation code should use the engine's canonical numeric alias types:
 
-- `SimFloat` (may map to `float` or `Fixed32` depending on build options)
+- `SimFloat` — currently aliased to `float`. Designed to map to `Fixed32` in deterministic builds,
+  but `Fixed32` is not yet implemented. This is a hardening-phase task.
 
-Deterministic builds may disable float-based simulation paths entirely by enabling Fixed32.
+> **Status:** `Fixed32` is designed but not yet wired. See `docs/ARCHITECTURE.md` Fixed-Point section
+> for the design. Jolt determinism is already byte-perfect via `CROSS_PLATFORM_DETERMINISTIC`.
 
 ---
 

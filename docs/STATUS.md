@@ -21,13 +21,13 @@ begins.
 
 ### Stage 1: Foundation (current)
 
-| # | Milestone               | Status      | Notes                                                                                                                                                                       |
-|---|-------------------------|-------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 1 | **Editor (bare-bones)** | Complete    | Scene hierarchy, entity inspection, reflected properties, save/load. ImGui docking, 6 panels. JSON serialization.                                                           |
-| 2 | **Construct/View OOP**  | Complete    | `Construct<T>`, `Owned<T>`, `ConstructView<TEntity>`, `ConstructBatch` tick dispatch. PlayerConstruct proven with JoltCharacter.                                            |
-| 3 | **Networking**          | In Progress | GNS wrapper, PIE loopback, entity replication, clock sync, client input routing. Soul + NetChannel + SpawnRequest pipeline in progress. See [NETWORKING.md](NETWORKING.md). |
-| 4 | **Audio**               | Not started | SDL3 thin wrapper first (handle-based for Anti-Event compatibility). Minimal — just enough for gameplay feedback.                                                           |
-| 5 | **Game Flow**           | Designed    | Session lifecycle, Soul/Body pattern, FlowManager/FlowState, network connection flow, travel. See [FLOW.md](FLOW.md).                                                       |
+| # | Milestone               | Status      | Notes                                                                                                                                                                            |
+|---|-------------------------|-------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 | **Editor (bare-bones)** | Complete    | Scene hierarchy, entity inspection, reflected properties, save/load. ImGui docking, 6 panels. JSON serialization.                                                                |
+| 2 | **Construct/View OOP**  | Complete    | `Construct<T>`, `Owned<T>`, `ConstructView<TEntity>`, `ConstructBatch` tick dispatch. PlayerConstruct proven with JoltCharacter.                                                 |
+| 3 | **Networking**          | In Progress | GNS wrapper, PIE loopback, entity replication, clock sync, client input routing. Soul + NetChannel + SpawnRequest pipeline in progress. See [NETWORKING.md](NETWORKING.md).      |
+| 4 | **Audio**               | Not started | SDL3 thin wrapper first (handle-based for Anti-Event compatibility). Minimal — just enough for gameplay feedback.                                                                |
+| 5 | **Game Flow**           | In Progress | FlowManager, FlowState, GameMode, Soul, NetChannel implemented. Audio not started. ModeMixin system, WithSpawnManagement, SpawnRequest pipeline pending. See [FLOW.md](FLOW.md). |
 
 ### Stage 2: Hardening
 
@@ -62,14 +62,14 @@ latency, rollback netcode, networked multiplayer.
 - Trinyx Trinity (Sentinel/Brain/Encoder) fully operational
 - Sentinel runs 1000Hz SDL event loop, owns VulkanContext + VulkanMemory
 - Brain runs 512Hz fixed-timestep loop via accumulator (std::atomic<double>)
-- Encoder (VulkRender) functional — full GPU loop rendering entity data from TemporalComponentCache
+- Encoder (RendererCore/GameplayRenderer) functional — full GPU loop rendering entity data from TemporalComponentCache
 
 **Raw Vulkan Stack:**
 - Migrated from SDL3 GPU backend to raw Vulkan (volk 1.4.304 + VMA 3.3.0)
 - VulkanContext + VulkanMemory migrated to vk::raii::
 - VulkanContext: instance, device, swapchain, queues, sync primitives
 - VulkanMemory: VMA allocator lifetime, buffer/image allocation helpers
-- VulkRender Steps 1–4 complete: clear → indexed cube pipeline → GpuFrameData + BDA draw → entity data from
+- RendererCore Steps 1–4 complete: clear → indexed cube pipeline → GpuFrameData + BDA draw → entity data from
   TemporalComponentCache
   Live entity data rendering at full rate via Buffer Device Address pipeline
 
@@ -182,13 +182,17 @@ in the long run.
 **Game Flow (2026-04 — in progress):**
 
 - `FlowManager` — state stack manager, travel primitives, World/Level/Mode lifetime management
-- `GameState` — base class for flow states (menu, loading, gameplay, post-match). Declares requirements
-  (NeedsWorld, NeedsLevel, NeedsNetSession). FlowManager enforces requirements during transitions.
+- `FlowState` — base class for flow states (menu, loading, gameplay, post-match). Declares requirements
+  via `GetRequirements()` returning `StateRequirements{NeedsWorld, NeedsLevel, NeedsNetSession}`. FlowManager
+  enforces requirements during transitions.
 - `GameMode` — server-authoritative rules runtime. One per World. Inheritable base (not CRTP). Users
   opt into Construct ticks via multiple inheritance when needed.
+- `Soul` — session-scoped player identity (not a Construct). Created by FlowManager::OnClientLoaded,
+  destroyed by OnClientDisconnected. Holds OwnerID, InputLead, ConfirmedBodyHandle, NetChannel.
+- `NetChannel` — typed per-connection send wrapper. Implemented in `NetChannel.h`.
 - Travel toolbox model — three orthogonal levers (domain lifetime, Construct lifetime, network continuity)
   instead of a single travel policy. Games compose primitives to build their flow.
-- Persistent Constructs survive World resets via reinitialization mechanism (replaces Soul concept).
+- Persistent Constructs survive World resets via reinitialization mechanism.
 - Bootstrap contract: engine loads a single user-specified default state by name; user code owns the
   entire flow graph from there.
 - Vocabulary: State (drives app), Mode (drives match), Level (content chunk)
@@ -266,42 +270,52 @@ in the long run.
 ### Implemented
 
 - [x] Three-thread architecture (Sentinel / Brain / Encoder)
-- [x] Raw Vulkan: VulkanContext, VulkanMemory (volk + VMA)
+- [x] Raw Vulkan: VulkanContext, VulkanMemory (volk + VMA), RendererCore/GameplayRenderer (Encoder thread)
 - [x] FieldProxy (Scalar / Wide / WideMask, FieldProxyMask zero-size base)
-- [x] TemporalComponentCache dual-buffer SoA (proto-slab)
+- [x] TemporalComponentCache SoA ring buffer (ComponentCacheBase / ComponentCache<Tier>, Volatile=3 frames, Temporal=N
+  frames)
 - [x] Dirty bit tracking (Active = 1<<31, Dirty = 1<<30, DirtiedFrame = 1<<29)
 - [x] Registry dirty bit marking after each chunk update
 - [x] Dirty-bit-driven selective GPU upload (RenderAck handshake, per-slab bitplanes, AVX2 scan)
 - [x] LogicThread::PublishCompletedFrame (Vulkan RH perspective + identity view)
-- [x] GPU-driven compute pipeline (predicate → prefix_sum → scatter, Slang shaders)
+- [x] GPU-driven compute pipeline (predicate → prefix_sum → scatter → build_draws → sort_instances, Slang shaders)
 - [x] InstanceBuffer SoA + indirect draw (DrawArgs)
-- [x] VulkRender Steps 1–4: clear → indexed cube → GpuFrameData + BDA draw → entity data from TemporalComponentCache
+- [x] RendererCore: clear → indexed cube → GpuFrameData + BDA draw → entity data from TemporalComponentCache
 - [x] 3-level Tracy profiling (Coarse/Medium/Fine)
-- [x] `TNX_TEMPORAL_FIELDS` with SystemGroup tag (drives entity group auto-derivation)
-- [x] `TemporalFlags` with Active/Dirty bits
+- [x] `TNX_TEMPORAL_FIELDS` / `TNX_VOLATILE_FIELDS` with SystemGroup tag (drives entity group auto-derivation)
+- [x] `TemporalFlags` with Active/Dirty/DirtiedFrame/Alive/Replicated bits
 - [x] Lock-free job system (MPMC ring buffers, futex-based wake, per-chunk dispatch)
 - [x] Core-aware thread pinning (physical cores first, SMT siblings second)
 - [x] GameManager CRTP pattern (`TNX_IMPLEMENT_GAME` macro)
 - [x] Project-relative INI config (`*Defaults.ini` scanning from source directory)
 - [x] Tiered storage partition layout (Cold/Static/Volatile/Temporal with dual-ended arena layout)
-- [x] 5 GPU InstanceBuffers (circular buffer while rGPU compute pipeline is in progress)
-- [x] Jolt Physics v5.5.0 (JoltJobSystemAdapter, JoltBody volatile component, slab-direct
+- [x] 5 GPU InstanceBuffers (cycling independently of 2 GPU frame-in-flight slots)
+- [x] Jolt Physics v5.5.0 (JoltJobSystemAdapter, CJoltBody volatile component, slab-direct
   FlushPendingBodies/PullActiveTransforms)
 - [x] Cold component infrastructure (TNX_REGISTER_FIELDS → CacheTier::None → SoA in chunk)
 - [x] Input buffering (double-buffered, lock-free polling, event + bitstate querying)
 - [x] VecMath / QuatMath / FieldMath libraries
 - [x] Component validation: no vtable + all fields must be FieldProxy (SchemaValidation.h)
-
-### Designed, Not Yet Implemented
-
 - [x] **Construct/View OOP layer** — `Construct<T>`, `Owned<T>`, `ConstructView<TEntity>`, `ConstructBatch`,
   `TickGroup`, JoltCharacter, defrag listeners, spawn handshake integration (2026-04)
-- [x] **Dirty-bit selective GPU upload** — RenderAck handshake, 5 dirty bitplanes, AVX2 scan + ctzll scatter (2026-03)
-- [ ] **Game Flow implementation** — FlowManager state transitions, World create/destroy wiring, level load/unload,
-  GameMode lifecycle, persistent Construct reinitialization
+- [x] **Rollback substrate** — LogicThread ExecuteRollback/ExecuteRollbackTest, JoltPhysics SaveSnapshot/RestoreSnapshot
+  ring buffer (TNX_ENABLE_ROLLBACK). Byte-perfect ECS + Jolt determinism verified (2026-03-29).
+- [x] **Game Flow (partial)** — FlowManager state stack + travel primitives, FlowState base class, GameMode base class,
+  Soul class (OwnerID identity, ClaimBody/ReleaseBody, RPC dispatch), NetChannel typed send wrapper,
+  ConstructRegistry lifetime-bucketed storage (Level/World/Session/Persistent) (2026-04)
+- [x] **Networking** — GNS, GNSContext, NetConnectionManager, NetThreadBase (
+  ClientNetThread/ServerNetThread/PIENetThread),
+  entity spawn replication, ConstructSpawn replication, state corrections, PIE loopback,
+  PlayerInputLog per-player ring buffer, clock sync, Soul RPC system (PlayerBegin/Confirm/Reject) (2026-04)
+
+### Not Yet Implemented
+
 - [ ] **Fixed-point coordinate system** — `Fixed32` value type (1 unit = 0.1mm), `FieldProxy<Fixed32, WIDTH>`, render thread conversion to camera-relative float32 at upload, Jolt bridge (int32↔float32 at cell boundary)
 - [ ] **ConstraintEntity system** — constraint entities in LOGIC partition, `ConstraintType` enum (Rigid/Hinge/BallSocket/Prismatic/Distance/Spring), render thread rigid attachment pass (2-pass depth ordering), physics root determination
 - [ ] **Space partition cell registry** — cell world origins as float64/int64, cell assignment at entity spawn, cross-cell reparenting
+- [ ] **Presentation Reconciler** — Anti-Events (RapidFadeOut, SoftCancel, RapidDecay) for rollback-driven effect
+  correction
+- [ ] **Audio** — SDL3 thin wrapper (handle-based for Anti-Event compatibility)
 - [ ] `GetTemporalFieldWritePtr` migration from Archetype to TemporalComponentCache
 - [ ] `TemporalFrameStride` removal from Archetype (duplicated from cache)
 

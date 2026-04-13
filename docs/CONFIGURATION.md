@@ -12,6 +12,12 @@ All engine timing, threading, and memory parameters are configured through `Engi
 ```cpp
 struct EngineConfig
 {
+    // === Mode ===
+
+    // Engine mode — determines which subsystems are initialized.
+    // Set via CLI args (--server, --client, --listen) or programmatically.
+    EngineMode Mode = EngineMode::Standalone;
+
     // === Timing Configuration ===
 
     // Render rate cap. 0 = uncapped. Cannot exceed FixedUpdateHz when set.
@@ -27,13 +33,27 @@ struct EngineConfig
     // e.g. FixedUpdateHz=512, PhysicsUpdateInterval=8 → 64Hz physics
     int PhysicsUpdateInterval = 8;
 
-    // Network Tick Rate
-    // How often to send/receive network packets.
+    // Network Tick Rate — state corrections and entity spawns.
     int NetworkUpdateHz = 30;
 
-    // Input Polling Rate (Main Thread / Sentinel)
-    // How often Sentinel samples SDL input events.
+    // Rate at which the client sends InputFrame packets to the server.
+    // Decoupled from NetworkUpdateHz. At 512Hz sim / 128Hz input = 4 sim frames per packet.
+    int InputNetHz = 128;
+
+    // Number of RTT probe pings sent during the Synchronizing phase.
+    // Higher = more accurate InputLead estimate; lower = faster load. Default: 8.
+    int ClockSyncProbes = 8;
+
+    // Input Polling Rate (Sentinel thread).
     int InputPollHz = 1000;
+
+    // Artificial input delay in sim frames for lockstep/deterministic play.
+    // 0 = disabled (default).
+    int InputDelayFrames = 0;
+
+    // Server: how many sim frames ahead of a client's last input before stalling.
+    // At 512Hz sim / 128Hz input = 4 frames/batch → default 16.
+    int MaxClientInputLead = 16;
 
     // === Entity Budget Configuration ===
     //
@@ -78,12 +98,28 @@ struct EngineConfig
     // Job queue pre-allocation size. Exceeding this limit will assert.
     int JobCacheSize = 16 * 1024;
 
+    // === Path / Asset Configuration ===
+
+    // Project root directory (set from TNX_PROJECT_DIR or Initialize() argument).
+    char ProjectDir[512] = "";
+
+    // Editor: default scene to load on startup (relative to ProjectDir/content/).
+    char DefaultScene[256] = "";
+
+    // Default flow state to load on startup (registered name, e.g. "MainMenu").
+    char DefaultState[256] = "";
+
+    // === Networking ===
+
+    uint16_t NetPort     = 27015;
+    char NetAddress[128] = "127.0.0.1";
+
     // === Helper Functions ===
 
-    // Returns 0.0 when TargetFPS is 0 (uncapped).
     double GetTargetFrameTime() const;
-    double GetFixedStepTime() const { return 1.0 / FixedUpdateHz; }
-    double GetNetworkStepTime() const { return (NetworkUpdateHz > 0) ? 1.0 / NetworkUpdateHz : 0.0; }
+    double GetFixedStepTime() const;
+    double GetNetworkStepTime() const;
+    int GetInputNetHz() const;
 };
 ```
 
@@ -92,7 +128,8 @@ struct EngineConfig
 being read by the Encoder, and one is free. This is not configurable.
 
 **Note on GPU instance buffers:** Five `PersistentMapped` GPU InstanceBuffers are maintained in flight
-by `VulkRender`. This count is hardcoded to decouple the VSync clock from the logic thread's slab
+by `RendererCore` (`InstanceBufferCount = 5`). This count is hardcoded to decouple the VSync clock from the logic
+thread's slab
 locks and is not exposed through `EngineConfig`.
 
 

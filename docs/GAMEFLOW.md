@@ -63,7 +63,7 @@ sequenceDiagram
     GM->>GM: Phase → Playing
 
     Note over GM: Server spawns PlayerConstruct authoritatively
-    GM->>C: SpawnConfirm (ConstructNetHandle, EntityNetHandle, authPos)
+    GM->>C: PlayerBeginConfirm (ConstructNetHandle, EntityNetHandle, authPos)
     Note over C: Soul::OnBodyConfirmed(ref)<br/>Wire replication, input routing<br/>Send cosmetics/loadout RPC
 
     Note over C,GM: Full simulation sync active

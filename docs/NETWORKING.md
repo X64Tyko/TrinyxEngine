@@ -39,9 +39,9 @@ Runs `HandleMessage` dispatch loop, routes by `NetMessageType`:
 | `StateCorrection`     | S→C       | ReplicationSystem::HandleStateCorrections             |
 | `FlowEvent`           | S→C       | FlowManager::PostNetEvent (TravelNotify, ServerReady) |
 | `ClockSync`           | S↔C       | RTT + clock offset estimation                         |
-| `SpawnRequest`        | C→S       | GameMode::OnSpawnRequest (planned)                    |
-| `SpawnConfirm`        | S→C       | Client creates PlayerConstruct (planned)              |
-| `SpawnReject`         | S→C       | Client handles rejection (planned)                    |
+| `PlayerBeginRequest`  | C→S       | Soul RPC: client requests spawn (ID=8)                |
+| `PlayerBeginConfirm`  | S→C       | Soul RPC: server confirms spawn (ID=9)                |
+| `PlayerBeginReject`   | S→C       | Soul RPC: server rejects spawn (ID=10)                |
 | `Ping/Pong`           | both      | RTT EWMA (0.875/0.125 weights)                        |
 
 ### ReplicationSystem
@@ -54,11 +54,10 @@ Server-side entity replication. Runs each net tick:
 
 ---
 
-## NetChannel (Planned)
+## NetChannel
 
-The current pattern — manually building `PacketHeader` inline at every send site — does not scale.
-`NetChannel` replaces it with a per-connection typed send API that is the natural home for all future
-per-connection state.
+`NetChannel` is a per-connection typed send API — the natural home for all future per-connection state.
+Implemented in `NetChannel.h`.
 
 ### Design
 
@@ -258,13 +257,13 @@ Soul lifecycle:
 
 1. Client connects → server assigns OwnerID → both sides create Soul for that OwnerID
 2. Client loads level, sends `LevelReady` → server sends `ServerReady`
-3. Client sweeps `Alive→Active`, sends `SpawnRequest`
-4. Server: `GameMode::OnSpawnRequest(soul)` → spawn PlayerConstruct → send `SpawnConfirm`
-5. Client receives `SpawnConfirm` → create local PlayerConstruct at auth position
+3. Client sweeps `Alive→Active`, sends `PlayerBeginRequest` (ID=8)
+4. Server: `GameMode::OnPlayerBeginRequest(soul)` → spawn PlayerConstruct → send `PlayerBeginConfirm` (ID=9)
+5. Client receives `PlayerBeginConfirm` → Soul::OnBodyConfirmed fires, wire replication and input routing
 6. Client disconnects → both sides destroy Soul, call `GameMode::OnPlayerLeft(soul)`
 
-`FlowManager` owns the Soul array: `Soul* Souls[MaxOwnerIDs]`. Keyed by OwnerID.
-`GameMode` hooks: `OnPlayerJoined(Soul&)`, `OnPlayerLeft(Soul&)`, `OnSpawnRequest(Soul&)`.
+`FlowManager` owns the Soul array indexed by OwnerID (`std::unique_ptr<Soul>[MaxOwnerIDs]`).
+`GameMode` hooks: `OnPlayerJoined(Soul&)`, `OnPlayerLeft(Soul&)`, `OnPlayerBeginRequest(Soul&, req)`.
 
 ---
 
@@ -303,7 +302,5 @@ Delta compression yields mostly zeros per tick. Far superior to AoS where mixed 
 - No delta compression (full state every tick)
 - No interest management / relevancy culling
 - No entity destruction replication
-- `SpawnRequest`/`SpawnConfirm`/`SpawnReject` pipeline not yet wired
-- `NetChannel` not yet implemented (raw `HSteamNetConnection` used inline)
+- `PlayerBeginRequest`/`PlayerBeginConfirm`/`PlayerBeginReject` spawn pipeline not yet fully wired
 - `ConstructHandle` not yet implemented
-- Soul not yet implemented (forward-declared in GameMode.h only)

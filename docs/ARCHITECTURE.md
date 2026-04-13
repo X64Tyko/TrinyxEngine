@@ -176,7 +176,7 @@ entity type's component SystemGroup tags — no manual annotation.
 
 ```cpp
 ConstructView<EInstanced> Body;  // CTransform(Phys) + CJoltBody(Phys) + CScale + CColor + CMeshRef(Render) → DUAL
-ConstructView<EPlayer> Body;     // CTransform(Phys) + CScale + CColor + CMeshRef(Render) → DUAL (no JoltBody)
+ConstructView<EPlayer> Body;     // CTransform(Phys) + CVelocity(Phys) + CScale + CColor + CMeshRef(Render) → DUAL (no JoltBody)
 ConstructView<EPoint> Body;      // CTransform(Phys) only → PHYS
 ```
 
@@ -185,7 +185,7 @@ Common entity types and their derived partitions:
 | Entity Type | Components                                          | Partition |
 |-------------|-----------------------------------------------------|-----------|
 | EInstanced  | CTransform + CJoltBody + CScale + CColor + CMeshRef | DUAL      |
-| EPlayer     | CTransform + CScale + CColor + CMeshRef             | DUAL      |
+| EPlayer     | CTransform + CVelocity + CScale + CColor + CMeshRef | DUAL      |
 | EPoint      | CTransform only                                     | PHYS      |
 
 **Ownership chain:** Construct → ConstructView → ECS Entity → Components → FieldArrays → FieldProxies
@@ -195,9 +195,10 @@ Common entity types and their derived partitions:
 Complex Constructs compose via `Owned<T>` value members:
 
 ```cpp
-class Turret : public Construct<Turret>, public InstanceView<Turret>
+class Turret : public Construct<Turret>
 {
-    Owned<BarrelAssembly>  Barrel;    // has its own InstanceView, own tick
+    ConstructView<EInstanced> Body;
+    Owned<BarrelAssembly>  Barrel;    // has its own ConstructView, own tick
     Owned<TargetingSystem> Targeting; // pure logic, LogicView only
     Owned<AmmoFeed>        Ammo;     // StatsView, no physics
 };
@@ -614,7 +615,7 @@ diverges; snapshot restore is required for deterministic resim.
 ## FlowManager
 
 `FlowManager` is owned by `TrinyxEngine` and runs on the Sentinel thread. It manages a stack of
-`GameState` objects and orchestrates subsystem lifetimes (World, GameMode, Level) based on each
+`FlowState` objects and orchestrates subsystem lifetimes (World, GameMode, Level) based on each
 state's declared requirements.
 
 ### Bootstrap Contract
@@ -644,7 +645,7 @@ Engine boots → loads one named state → user code owns the flow graph.
 
 ### StateRequirements
 
-Each `GameState` declares what it needs:
+Each `FlowState` declares what it needs:
 
 ```cpp
 struct StateRequirements
@@ -696,15 +697,15 @@ stays alive, but their Views are torn down and rebuilt against the new World's R
 - **Roguelike:** Reset World often, persistent Constructs for meta-progression
 - **MMO zone travel:** Swap NetSession + Reset World, persistent Constructs carry over
 
-## GameState
+## FlowState
 
 Base class with virtual hooks. Runs on Sentinel thread:
 
 ```cpp
-class MainMenuState : public GameState
+class MainMenuState : public FlowState
 {
     void OnEnter(FlowManager& flow, World* world) override;
-    void OnExit(FlowManager& flow) override;
+    void OnExit() override;
     void Tick(float dt) override;
     StateRequirements GetRequirements() const override { return {}; } // no World needed
     const char* GetName() const override { return "MainMenu"; }
@@ -1095,7 +1096,8 @@ Render can listen for a staticChange event and kick off an async worker to updat
 - **VMA 3.3.0** — memory allocator, vendored at `libs/vma/`
 - **VulkanContext** — instance, device, swapchain, queues, sync primitives
 - **VulkanMemory** — VMA allocator lifetime, buffer/image allocation helpers
-- **VulkRender** — Encoder thread: GPU upload, compute dispatch, graphics draw
+- **RendererCore / GameplayRenderer** — Encoder thread: GPU upload, compute dispatch, graphics draw (CRTP base +
+  no-editor concrete implementation)
 
 ## GPU-Driven Compute Pipeline (Slang shaders in `shaders/`)
 
@@ -1148,8 +1150,8 @@ target; dedicated server follows from the same code paths.
 - **NetConnectionManager** — per-connection `ConnectionInfo` (GNS handle, OwnerID, RTT, `ClientRepState`)
 - **NetThread** — 30Hz poller (configurable), routes `NetMessageType` dispatch
 - **ReplicationSystem** — server-side entity flush (EntitySpawn + StateCorrection), fires `ServerReady`
-- **NetChannel** *(planned)* — typed per-connection send API; home for delta state, coalescing, RPC dispatch
-- **Soul** *(planned)* — one per OwnerID (even splitscreen), owns the `NetChannel`, drives spawn flow
+- **NetChannel** — typed per-connection send API; home for delta state, coalescing, RPC dispatch
+- **Soul** — one per OwnerID (even splitscreen), owns the `NetChannel`, drives spawn flow
 - **ConstructHandle** *(planned)* — 32-bit handle (`OwnerID:8 | LocalIndex:16 | Generation:8`), modeled
   on `EntityRecord`/`PagedMap`; addresses Constructs on the wire independent of entity handles
 
@@ -1183,8 +1185,9 @@ Server + N client Worlds in same process. Each client: own OwnerID, viewport, sl
 - [x] Dirty bit tracking (TemporalFlagBits::Active, Dirty)
 - [x] Registry dirty bit marking after each chunk update
 - [x] LogicThread::PublishCompletedFrame (Vulkan RH perspective + identity view)
-- [x] GPU-driven compute pipeline (predicate → prefix_sum → scatter, Slang shaders)
-- [x] VulkRender Steps 1–4: clear → indexed cube → GpuFrameData + BDA draw → entity data from TemporalComponentCache
+- [x] GPU-driven compute pipeline (predicate → prefix_sum → scatter → build_draws → sort_instances, Slang shaders)
+- [x] RendererCore (GameplayRenderer/EditorRenderer) Steps 1–4: clear → indexed cube → GpuFrameData + BDA draw → entity
+  data from TemporalComponentCache
   Live entity data rendering at full rate via Buffer Device Address pipeline
 - [x] Tracy profiler integration (3-level: Coarse/Medium/Fine)
 - [x] Lock-free job system (MPMC ring buffers, futex-based wake, per-chunk dispatch)
@@ -1194,10 +1197,12 @@ Server + N client Worlds in same process. Each client: own OwnerID, viewport, sl
 - [x] Tiered storage partition layout (Cold/Static/Volatile/Temporal with dual-ended arena layout)
 - [x] SystemGroup tag on `TNX_TEMPORAL_FIELDS` (drives entity group auto-derivation)
 - [x] 5 GPU InstanceBuffers (circular buffer while rGPU compute pipeline is in progress)
-- [x] Quaternion-based transforms (TransRot component with nested RotationAccessor, QuatMath library)
-- [x] Component decomposition: Translation, Rotation, TransRot (combined), Scale (Volatile/Render)
+- [x] Quaternion-based transforms (CTransform Temporal component with Vec3Accessor + QuatAccessor, QuatMath library)
+- [x] Component naming: CTransform (Temporal/Physics, pos+rot), CTranslation (Temporal/Physics, pos only), CRotation (
+  Temporal/Physics, rot only), CScale (Volatile/Render), CColor (Volatile/Render), CMeshRef (Volatile/Render),
+  CJoltBody (Volatile/Physics), CVelocity (Temporal/Physics), CRigidBody (Temporal/Physics)
 - [x] Component validation: no vtable + all fields must be FieldProxy (SchemaValidation.h)
-- [x] Jolt Physics v5.5.0 integration (JoltJobSystemAdapter, JoltBody cold component,
+- [x] Jolt Physics v5.5.0 integration (JoltJobSystemAdapter, CJoltBody volatile component,
   FlushPendingBodies/PullActiveTransforms)
 - [x] Cold component infrastructure (TNX_REGISTER_FIELDS → CacheTier::None → SoA in chunk, not slab)
 - [x] Input buffering (double-buffered input, lock-free polling, event + bitstate querying)
@@ -1206,19 +1211,19 @@ Server + N client Worlds in same process. Each client: own OwnerID, viewport, sl
 - [x] Archetype dual-counter slot management (AllocatedEntityCount high-water + TotalEntityCount live count)
 - [x] Archetype tombstone-in-place removal (Active flag cleared, slot moved to InactiveEntitySlots for reuse)
 - [x] ArchetypeFieldLayout as single source of truth (FlatMap<FieldKey, FieldDescriptor>, branchless frame math)
-
-## Designed, Not Yet Implemented
-
-- [x] **Construct/View OOP layer** — `Construct<T>`, `Owned<T>`, `ConstructBatch`, `TickGroup`, 4 View types, defrag
-  listeners, spawn handshake registration (2026-04)
+- [x] **Construct/View OOP layer** — `Construct<T>`, `Owned<T>`, `ConstructBatch`, `TickGroup`,
+  `ConstructView<TEntity>`,
+  defrag listeners, spawn handshake registration (2026-04)
 - [x] **Networking (basic)** — GNS wrapper, NetThread, ReplicationSystem (EntitySpawn + StateCorrection), PIE loopback,
-  focus-based input routing, EntityNetHandle ownership model (2026-04, in progress)
+  focus-based input routing, EntityNetHandle ownership model (2026-04)
 - [x] **Cumulative dirty bit array wired to GPU upload** (2026-03-29)
-- [ ] **NetChannel** — typed per-connection send API; replaces inline PacketHeader construction; home for
-  delta state, message coalescing, RPC dispatch table. See [NETWORKING.md](NETWORKING.md).
-- [ ] **Soul + ConstructHandle** — Soul owns NetChannel and OwnerID identity (one per OwnerID, even splitscreen).
-  ConstructHandle: 32-bit `OwnerID:8|LocalIndex:16|Generation:8`, PagedMap-backed ConstructRegistry, owner-local
-  indices. See [NETWORKING.md](NETWORKING.md).
+- [x] **NetChannel** — typed per-connection send API; implemented in `NetChannel.h`
+- [x] **Soul** — one per OwnerID (even splitscreen), OwnerID identity, ClaimBody/ReleaseBody; implemented in `Soul.h`
+
+## Not Yet Implemented
+
+- [ ] **ConstructHandle** — 32-bit `OwnerID:8|LocalIndex:16|Generation:8`, PagedMap-backed ConstructRegistry,
+  owner-local indices. See [NETWORKING.md](NETWORKING.md).
 - [ ] `GetTemporalFieldWritePtr` migrated from Archetype to TemporalComponentCache
 - [ ] `TemporalFrameStride` removed from Archetype (duplicated state — call cache->GetFrameStride())
 - [ ] `GetLiveChunkCount` needs per-chunk live counters or Active flag scanning (currently approximation from global
@@ -1230,11 +1235,13 @@ Server + N client Worlds in same process. Each client: own OwnerID, viewport, sl
 ## Planned (Next Phase)
 
 - [x] Render pipeline optimization (dirty-bit selective GPU upload, 2026-03-29)
+- [x] Rollback determinism — full slab rollback + Jolt SaveState/RestoreState, byte-perfect ECS + Jolt verified (
+  2026-03-29)
 - [ ] Delta compression for state replication
 - [ ] Client-side owned entity detection + camera attachment
 - [ ] Frustum culling (SIMD 6-plane test)
 - [ ] State-sorted rendering (64-bit sort keys, GPU radix sort)
-- [ ] Rollback netcode (Temporal slab rollback + dirty resimulation)
+- [ ] Rollback netcode (network integration using proven rollback substrate + dirty resimulation)
 
 ---
 
@@ -1245,19 +1252,18 @@ and network-driven spawn flow — is designed and documented separately.
 
 **Key concepts:**
 
-- `FlowManager` (evolves `GameManager`) — owns the state stack, `ConstructRegistry`, and
-  `LocalSession`. Enforces declaration contracts on transitions. Drains `FlowEvent` messages from
-  NetThread on the Sentinel thread.
-- `FlowState` — declares what it requires (`RequiresWorld`, `RequiresNetSession`). `OnEnter` /
-  `OnExit` hooks drive World and NetSession lifecycle.
+- `FlowManager` — owned by `TrinyxEngine`, runs on Sentinel thread. Owns the state stack, `ConstructRegistry`,
+  and orchestrates World/Level/Mode lifetimes. Drains `FlowEvent` messages from NetThread.
+- `FlowState` — declares what it requires via `GetRequirements()` returning `StateRequirements`.
+  `OnEnter(FlowManager&, World*)` /
+  `OnExit()` hooks drive World and NetSession lifecycle.
 - `ConstructLifetime` — `Level / World / Session / Persistent`. Determines what survives a World
-  reset. `Session`-lifetime Constructs (Souls, Mode) survive; `World`-lifetime Constructs (Bodies)
-  do not.
-- **Soul / Body pattern** — Soul (`Session` lifetime) holds player identity; Body (`World`
-  lifetime) holds world presence via `ConstructView`. Soul triggers a Body spawn when entering
-  gameplay; Body is destroyed on World reset, Soul is not.
+  reset. `Persistent`-lifetime Constructs survive World resets via reinitialization.
+- **Soul / Body pattern** — Soul holds player identity (not a Construct); Body holds world presence
+  via `ConstructView`. Soul triggers a Body spawn when entering gameplay; Body is destroyed on World
+  reset, Soul is not. Soul is owned by FlowManager.
 - **`FlowEvent`** — network payload for flow control (load level, client/server ready signals).
-  Added as `NetMessageType::FlowEvent = 7`.
+  Defined as `NetMessageType::FlowEvent = 7`.
 
 **Full design:** [docs/FLOW.md](FLOW.md)
 
