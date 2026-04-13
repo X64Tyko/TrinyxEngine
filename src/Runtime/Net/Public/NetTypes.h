@@ -342,10 +342,10 @@ static_assert(sizeof(PlayerBeginRequestPayload) == 32, "PlayerBeginRequestPayloa
 // ---------------------------------------------------------------------------
 struct PlayerBeginConfirmPayload
 {
-	uint32_t NetHandle;     // Authoritative EntityNetHandle.Value for the spawned body
+	uint32_t NetHandle;     // ConstructNetHandle.Value for the spawned body Construct
 	uint32_t PredictionID;  // Echoed from PlayerBeginRequestPayload
 	float PosX, PosY, PosZ; // Authoritative spawn position
-	uint16_t Generation;    // Entity generation — client uses this to form a valid EntityRef
+	uint16_t Generation;    // ConstructRef generation — client uses this to form a valid ConstructRef
 	uint16_t _Pad;
 };
 

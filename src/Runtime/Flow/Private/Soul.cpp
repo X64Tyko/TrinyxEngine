@@ -71,8 +71,8 @@ TNX_IMPL_SERVER(Soul, PlayerBegin, PlayerBeginRequestPayload)
 	{
 		PlayerBeginConfirmPayload confirm{};
 		confirm.PredictionID = params.PredictionID;
-		confirm.NetHandle    = 0;
-		confirm.Generation   = 0;
+		confirm.NetHandle    = result->Body.Handle.Value;
+		confirm.Generation   = result->Body.Generation;
 		confirm.PosX         = result->PosX;
 		confirm.PosY         = result->PosY;
 		confirm.PosZ         = result->PosZ;

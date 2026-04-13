@@ -51,6 +51,12 @@ public:
 	using ShutdownFn    = void(*)(void*);         // Construct::Shutdown()
 	using ReinitFn      = void(*)(void*, World*); // Construct::Initialize(World*)
 
+	// PreInit is a zero-cost compile-time callable (no std::function overhead).
+	// Called after allocation but before Initialize, allowing the caller to
+	// set spawn position, soul, etc. before InitializeViews runs.
+	// The CRTP PreInit() hook in Construct<T> is still called from Initialize
+	// after OwnerWorld is set (and can use GetWorld()). Both paths coexist.
+	// Omit the second argument for the no-op path — the branch is compiled away.
 	template <typename T, typename PreInit = std::nullptr_t>
 	T* Create(World* InWorld, PreInit&& preInit = nullptr)
 	{

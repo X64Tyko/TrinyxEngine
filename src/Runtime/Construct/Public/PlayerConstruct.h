@@ -201,6 +201,10 @@ private:
 	{
 		if (GetWorld()->GetConfig().Mode == EngineMode::Server) return;
 		const uint8_t ownerID = GetOwnerID();
+		// In networked mode a zero ownerID means the soul wasn't set (e.g. this
+		// is a remote player's construct received via ConstructSpawn) — never
+		// steal the camera for it.
+		if (GetWorld()->GetConfig().Mode != EngineMode::Standalone && ownerID == 0) return;
 		if (ownerID != 0 && ownerID != GetWorld()->LocalOwnerID) return;
 		GetWorld()->GetLogicThread()->SetActiveCamera(cam);
 	}

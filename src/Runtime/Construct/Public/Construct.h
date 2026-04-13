@@ -58,9 +58,25 @@ public:
 	// Default lifetime tier. Derived classes override via TNX_CONSTRUCT_SESSION, etc.
 	static constexpr ConstructLifetime Lifetime = ConstructLifetime::World;
 
+	// Optional pre-init hook — runs after OwnerWorld is set but before InitializeViews,
+	// so derived classes can read GetWorld() to configure spawn parameters.
+	// Implement void PreInit() in a derived class to opt in.
+	// ConstructRegistry::Create<T> also accepts a zero-cost template callable for
+	// external configuration (e.g., GameMode setting spawn pos/soul from outside).
+	void PreInitBase()
+	{
+		if constexpr (requires { static_cast<Derived*>(this)->PreInit(); })
+		{
+			static_cast<Derived*>(this)->PreInit();
+		}
+	}
+	
 	void Initialize(World* InWorld)
 	{
 		OwnerWorld = InWorld;
+
+		// CRTP PreInit hook: runs after OwnerWorld is set, before InitializeViews.
+		PreInitBase();
 
 		// Let the derived class create and set up its Views
 		if constexpr (requires { static_cast<Derived*>(this)->InitializeViews(); })
