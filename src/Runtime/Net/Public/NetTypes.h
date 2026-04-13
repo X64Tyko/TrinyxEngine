@@ -143,7 +143,9 @@ static_assert(sizeof(PacketHeader) == 28, "PacketHeader must be 28 bytes");
 template <typename TDerived>
 struct BaseNetPayload
 {
-	static constexpr uint16_t PayloadSize = sizeof(TDerived);
+	// sizeof(TDerived) is deferred into the function body — TDerived is incomplete at base
+	// instantiation time (CRTP), so we cannot use it in a static constexpr data member initializer.
+	static constexpr uint16_t PayloadSize() { return sizeof(TDerived); }
 	// Trivial-copy check deferred to first use — TDerived incomplete at base instantiation time.
 	static constexpr void ValidateTrivial()
 	{

@@ -398,26 +398,32 @@ FORCE_INLINE void ForEachField(Func&& func)
 // TNX_REGISTER_CONSTRUCT — registers a replicated Construct type so that
 // ReplicationSystem::HandleConstructSpawn can instantiate it on the client.
 //
-// Usage (once per type, in a .cpp file):
-//   TNX_REGISTER_CONSTRUCT(PlayerConstruct)
+// Usage: place inside the class body (in the .h file), same pattern as
+// TNX_REGISTER_SCHEMA. The static inline member is tied to the class itself,
+// so the linker cannot strip it even on MSVC with /OPT:REF.
+//
+//   class PlayerConstruct : public Construct<PlayerConstruct>
+//   {
+//       ...
+//       TNX_REGISTER_CONSTRUCT(PlayerConstruct)
+//   };
 //
 // Requires the class to implement:
 //   void InitializeForReplication(World*, EntityHandle*, uint8_t viewCount)
 // ---------------------------------------------------------------------------
 #define TNX_REGISTER_CONSTRUCT(ConstructClass) \
-    static_assert(requires(ConstructClass& obj, World* w, EntityHandle* h, uint8_t n) { \
-        obj.InitializeForReplication(w, h, n); \
-    }, #ConstructClass " must implement InitializeForReplication(World*, EntityHandle*, uint8_t)"); \
-    namespace { \
-        struct _##ConstructClass##_ConstructReg { \
-            _##ConstructClass##_ConstructReg() { \
-                ReflectionRegistry::Get().RegisterConstruct( \
-                    #ConstructClass, \
-                    ReflectionRegistry::ConstructTypeHashFromName(#ConstructClass), \
-                    [](ConstructRegistry* reg, World* w, EntityHandle* handles, uint8_t count, Soul* soul) -> void* { \
-                        return reg->CreateForReplication<ConstructClass>(w, handles, count, soul); \
-                    }); \
-            } \
-        }; \
-        [[maybe_unused]] TNX_USED_ATTR static _##ConstructClass##_ConstructReg _##ConstructClass##_construct_reg; \
-    }
+private: \
+    struct _ConstructReg { \
+        _ConstructReg() { \
+            ReflectionRegistry::Get().RegisterConstruct( \
+                #ConstructClass, \
+                ReflectionRegistry::ConstructTypeHashFromName(#ConstructClass), \
+                [](ConstructRegistry* reg, World* w, EntityHandle* handles, uint8_t count, Soul* soul) -> void* { \
+                    static_assert(requires(ConstructClass& obj, World* w2, EntityHandle* h, uint8_t n) { \
+                        obj.InitializeForReplication(w2, h, n); \
+                    }, #ConstructClass " must implement InitializeForReplication(World*, EntityHandle*, uint8_t)"); \
+                    return reg->CreateForReplication<ConstructClass>(w, handles, count, soul); \
+                }); \
+        } \
+    }; \
+    [[maybe_unused]] TNX_USED_ATTR static inline _ConstructReg _construct_reg;
