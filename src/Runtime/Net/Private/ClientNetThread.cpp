@@ -426,10 +426,10 @@ void ClientNetThread::TickInputSend()
 		ClientInputAccumulator& accum = ci->InputAccum;
 		accum.TrimAcked(ci->LastServerAckedFrame);
 
-		netInput->SnapshotKeyState(accum.KeyState, sizeof(accum.KeyState));
-		accum.MouseDX      = netInput->GetMouseDX();
-		accum.MouseDY      = netInput->GetMouseDY();
-		accum.MouseButtons = netInput->GetMouseButtonMask();
+		netInput->SnapshotKeyState(accum.State.KeyState, sizeof(accum.State.KeyState));
+		accum.State.MouseDX      = netInput->GetMouseDX();
+		accum.State.MouseDY      = netInput->GetMouseDY();
+		accum.State.MouseButtons = netInput->GetMouseButtonMask();
 
 		// Append new discrete events, tagging each with its absolute sim frame.
 		const uint16_t eventCount = netInput->GetEventCount();

@@ -206,11 +206,6 @@ public:
 			DesiredVelX += moveX / len * MoveSpeed;
 			DesiredVelZ += moveZ / len * MoveSpeed;
 		}
-		else
-		{
-			DesiredVelX = 0.0f;
-			DesiredVelZ = 0.0f;
-		}
 	}
 
 	void ScalarUpdate(SimFloat /*dt*/)
