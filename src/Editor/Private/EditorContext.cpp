@@ -1326,6 +1326,12 @@ void EditorContext::StartPIE()
 		return;
 	}
 
+	// Wire the server world pointer before clients connect so that ConnectionHandshake
+	// processing (EnsurePlayerInputSlot) finds a valid ServerWorld.
+	// WirePlayerInputInjector stays below — it requires the LogicThread to be initialized,
+	// but SetServerWorld just stores the pointer and is safe to call early.
+	net->SetServerWorld(ServerFlow->GetWorld());
+
 	// Connect each client via loopback and discover server-side handles
 	std::vector<uint32_t> knownHandles;
 	for (const auto& ci : connMgr->GetConnections()) knownHandles.push_back(ci.Handle);
@@ -1408,8 +1414,8 @@ void EditorContext::StartPIE()
 		}
 	}
 
-	// Wire server world and replication
-	net->SetServerWorld(ServerFlow->GetWorld());
+	// Wire player input injector (requires LogicThread initialized via CreateWorld; called
+	// here before StartWorld so the lambda is ready before the first fixed tick fires).
 	net->GetServer().WirePlayerInputInjector(ServerFlow->GetWorld());
 
 	Replicator = std::make_unique<ReplicationSystem>();

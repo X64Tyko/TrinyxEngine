@@ -92,6 +92,7 @@ struct ConnectionInfo
 	uint32_t AckBitfield            = 0;    // Received-packet bitfield (for ack piggybacking)
 	float RTT_ms                    = 0.0f; // Smoothed round-trip time in milliseconds
 	uint32_t ServerFrameAtHandshake = 0;    // Server FrameNumber when HandshakeAccept was sent
+	uint32_t LocalFrameAtHandshake  = 0;    // Client's own frame when HandshakeAccept was received
 	uint32_t InputLead              = 0;    // Frames to lead the server — set after ClockSync
 	uint8_t ClockSyncProbesSent     = 0;    // Ping probes sent during Synchronizing phase
 	uint8_t ClockSyncProbesRecvd    = 0;    // Pong responses received during Synchronizing phase

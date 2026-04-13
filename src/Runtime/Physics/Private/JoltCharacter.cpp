@@ -65,6 +65,7 @@ void JoltCharacter::Update(JPH::Vec3 desiredVelocity, JPH::Vec3 gravity, float d
 JPH::RVec3 JoltCharacter::GetPosition() const { return Character->GetPosition(); }
 JPH::Quat JoltCharacter::GetRotation() const { return Character->GetRotation(); }
 JPH::Vec3 JoltCharacter::GetLinearVelocity() const { return Character->GetLinearVelocity(); }
+void JoltCharacter::SetPosition(JPH::RVec3 position) { Character->SetPosition(position); }
 
 bool JoltCharacter::IsGrounded() const
 {

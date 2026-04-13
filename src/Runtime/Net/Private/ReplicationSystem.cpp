@@ -504,86 +504,95 @@ void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayloa
 	}
 	record->NetworkID = receivedNetHandle;
 
-	// Write field data into the newly created entity's archetype slot
+	// Write field data into the newly created entity's archetype slot.
+	// Newly spawned entities must be initialized in BOTH frames so that FieldProxy
+	// reads (which target the read frame) see correct data immediately — without
+	// waiting for the next PropagateFrame.  State corrections run at 30 Hz so a
+	// one-frame gap would cause JoltCharacter to be placed at the origin.
 	Archetype* arch   = record->Arch;
 	Chunk* chunk      = record->TargetChunk;
 	uint32_t localIdx = record->LocalIndex;
 
-	void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
-	arch->BuildFieldArrayTable(chunk, fieldArrayTable,
-							   reg->GetTemporalCache()->GetActiveWriteFrame(),
-							   reg->GetVolatileCache()->GetActiveWriteFrame());
-
-	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
+	auto WriteFields = [&](uint32_t temporalFrame, uint32_t volatileFrame)
 	{
-		void* fieldBase = fieldArrayTable[fdesc.fieldSlotIndex];
-		if (!fieldBase) continue;
+		void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+		arch->BuildFieldArrayTable(chunk, fieldArrayTable, temporalFrame, volatileFrame);
 
-		auto* floatArr = static_cast<float*>(fieldBase);
-		auto* intArr   = static_cast<int32_t*>(fieldBase);
-		auto* uintArr  = static_cast<uint32_t*>(fieldBase);
-
-		ComponentTypeID compID = fdesc.componentID;
-
-		if (compID == CacheSlotMeta<>::StaticTypeID())
+		for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 		{
-			// GetFlags() returns the TemporalFlagBits directly — write them straight to the slab.
-			if (fdesc.componentSlotIndex == 0) intArr[localIdx] = EntitySpawnPayload::GetFlags(payload.SpawnFlags);
-		}
-		else if (compID == CTransform<>::StaticTypeID())
-		{
-			switch (fdesc.componentSlotIndex)
+			void* fieldBase = fieldArrayTable[fdesc.fieldSlotIndex];
+			if (!fieldBase) continue;
+
+			auto* floatArr = static_cast<float*>(fieldBase);
+			auto* intArr   = static_cast<int32_t*>(fieldBase);
+			auto* uintArr  = static_cast<uint32_t*>(fieldBase);
+
+			ComponentTypeID compID = fdesc.componentID;
+
+			if (compID == CacheSlotMeta<>::StaticTypeID())
 			{
-				case 0: floatArr[localIdx] = payload.PosX;
-					break;
-				case 1: floatArr[localIdx] = payload.PosY;
-					break;
-				case 2: floatArr[localIdx] = payload.PosZ;
-					break;
-				case 3: floatArr[localIdx] = payload.RotQx;
-					break;
-				case 4: floatArr[localIdx] = payload.RotQy;
-					break;
-				case 5: floatArr[localIdx] = payload.RotQz;
-					break;
-				case 6: floatArr[localIdx] = payload.RotQw;
-					break;
-				default: break;
+				if (fdesc.componentSlotIndex == 0) intArr[localIdx] = EntitySpawnPayload::GetFlags(payload.SpawnFlags);
+			}
+			else if (compID == CTransform<>::StaticTypeID())
+			{
+				switch (fdesc.componentSlotIndex)
+				{
+					case 0: floatArr[localIdx] = payload.PosX;
+						break;
+					case 1: floatArr[localIdx] = payload.PosY;
+						break;
+					case 2: floatArr[localIdx] = payload.PosZ;
+						break;
+					case 3: floatArr[localIdx] = payload.RotQx;
+						break;
+					case 4: floatArr[localIdx] = payload.RotQy;
+						break;
+					case 5: floatArr[localIdx] = payload.RotQz;
+						break;
+					case 6: floatArr[localIdx] = payload.RotQw;
+						break;
+					default: break;
+				}
+			}
+			else if (compID == CScale<>::StaticTypeID())
+			{
+				switch (fdesc.componentSlotIndex)
+				{
+					case 0: floatArr[localIdx] = payload.ScaleX;
+						break;
+					case 1: floatArr[localIdx] = payload.ScaleY;
+						break;
+					case 2: floatArr[localIdx] = payload.ScaleZ;
+						break;
+					default: break;
+				}
+			}
+			else if (compID == CColor<>::StaticTypeID())
+			{
+				switch (fdesc.componentSlotIndex)
+				{
+					case 0: floatArr[localIdx] = payload.ColorR;
+						break;
+					case 1: floatArr[localIdx] = payload.ColorG;
+						break;
+					case 2: floatArr[localIdx] = payload.ColorB;
+						break;
+					case 3: floatArr[localIdx] = payload.ColorA;
+						break;
+					default: break;
+				}
+			}
+			else if (compID == CMeshRef<>::StaticTypeID())
+			{
+				if (fdesc.componentSlotIndex == 0) uintArr[localIdx] = payload.MeshID;
 			}
 		}
-		else if (compID == CScale<>::StaticTypeID())
-		{
-			switch (fdesc.componentSlotIndex)
-			{
-				case 0: floatArr[localIdx] = payload.ScaleX;
-					break;
-				case 1: floatArr[localIdx] = payload.ScaleY;
-					break;
-				case 2: floatArr[localIdx] = payload.ScaleZ;
-					break;
-				default: break;
-			}
-		}
-		else if (compID == CColor<>::StaticTypeID())
-		{
-			switch (fdesc.componentSlotIndex)
-			{
-				case 0: floatArr[localIdx] = payload.ColorR;
-					break;
-				case 1: floatArr[localIdx] = payload.ColorG;
-					break;
-				case 2: floatArr[localIdx] = payload.ColorB;
-					break;
-				case 3: floatArr[localIdx] = payload.ColorA;
-					break;
-				default: break;
-			}
-		}
-		else if (compID == CMeshRef<>::StaticTypeID())
-		{
-			if (fdesc.componentSlotIndex == 0) uintArr[localIdx] = payload.MeshID;
-		}
-	}
+	};
+
+	WriteFields(reg->GetTemporalCache()->GetActiveWriteFrame(),
+				reg->GetVolatileCache()->GetActiveWriteFrame());
+	WriteFields(reg->GetTemporalCache()->GetActiveReadFrame(),
+				reg->GetVolatileCache()->GetActiveReadFrame());
 }
 
 // ---------------------------------------------------------------------------

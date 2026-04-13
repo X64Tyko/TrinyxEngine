@@ -72,7 +72,7 @@ public:
 			auto& mesh  = Body.Mesh;
 			mesh.MeshID = 1u; // Capsule (slot 0=Cube, slot 1=Capsule)
 
-			Body.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Replicated);
+			Body.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive | TemporalFlagBits::Replicated);
 		}
 
 		auto* phys = GetWorld()->GetPhysics();
@@ -102,6 +102,10 @@ public:
 
 	void PhysicsStep(SimFloat dt)
 	{
+		// Remote players on the client have no JoltCharacter simulation — server corrections
+		// are the sole source of truth. Don't overwrite the server-corrected ECS position.
+		if (bIsClientSide && GetOwnerID() != GetWorld()->LocalOwnerID) return;
+
 		CharacterController.Update(
 			JPH::Vec3(DesiredVelX, 0, DesiredVelZ),
 			JPH::Vec3(0, -9.81f, 0),
@@ -119,6 +123,36 @@ public:
 
 	void PrePhysics(SimFloat /*dt*/)
 	{
+		// Two cases for client-side constructs:
+		//
+		// 1. Remote player — server corrections are authoritative. Sync JoltCharacter to the
+		//    ECS position (so collision shape stays in the right place) and skip input.
+		//
+		// 2. Local player — predict freely with local input. Server corrections are stale by
+		//    RTT; snapping to them every frame would undo the prediction. When rollback is
+		//    implemented, corrections trigger a resim from the corrected frame. Until then,
+		//    only snap on teleport-scale divergence (> 5 m).
+		if (bIsClientSide)
+		{
+			const float ecsPosX = Body.Transform.PosX.Value();
+			const float ecsPosY = Body.Transform.PosY.Value();
+			const float ecsPosZ = Body.Transform.PosZ.Value();
+
+			if (GetOwnerID() != GetWorld()->LocalOwnerID)
+			{
+				// Remote player: drive position entirely from server-corrected ECS.
+				CharacterController.SetPosition(JPH::RVec3(ecsPosX, ecsPosY, ecsPosZ));
+				return;
+			}
+
+			// Local player: only teleport-snap for gross corrections (> 5 m).
+			JPH::RVec3 joltPos = CharacterController.GetPosition();
+			const float dx     = ecsPosX - static_cast<float>(joltPos.GetX());
+			const float dy     = ecsPosY - static_cast<float>(joltPos.GetY());
+			const float dz     = ecsPosZ - static_cast<float>(joltPos.GetZ());
+			if (dx * dx + dy * dy + dz * dz > 25.0f) CharacterController.SetPosition(JPH::RVec3(ecsPosX, ecsPosY, ecsPosZ));
+		}
+
 		InputBuffer* simInput = GetWorld()->GetInputForPlayer(GetOwnerID());
 
 		float sinYaw = std::sin(Yaw);
@@ -144,7 +178,24 @@ public:
 
 	void ScalarUpdate(SimFloat /*dt*/)
 	{
-		InputBuffer* vizInput = GetWorld()->GetVizInputForPlayer(GetOwnerID());
+		const uint8_t ownerID     = GetOwnerID();
+		const bool bIsLocalPlayer = bIsClientSide
+										? (ownerID == GetWorld()->LocalOwnerID)
+										: (ownerID == 0); // server/standalone: only ownerID 0 is local
+
+		InputBuffer* vizInput = GetWorld()->GetVizInputForPlayer(ownerID);
+
+		constexpr float MouseSens = 0.002f;
+		constexpr float MaxPitch  = 1.5533f; // ~89 degrees
+
+		Yaw   += vizInput->GetMouseDX() * MouseSens;
+		Pitch -= vizInput->GetMouseDY() * MouseSens;
+		if (Pitch > MaxPitch) Pitch = MaxPitch;
+		if (Pitch < -MaxPitch) Pitch = -MaxPitch;
+
+		// Camera and camera-toggle are local-player-only operations.
+		// Remote player constructs on the server have no cameras.
+		if (!bIsLocalPlayer) return;
 
 		bool toggleDown = vizInput->IsActionDown(Action::ToggleCamera);
 		if (toggleDown && !bToggleHeld)
@@ -156,18 +207,26 @@ public:
 		}
 		bToggleHeld = toggleDown;
 
-		constexpr float MouseSens = 0.002f;
-		constexpr float MaxPitch  = 1.5533f; // ~89 degrees
-
-		Yaw   += vizInput->GetMouseDX() * MouseSens;
-		Pitch -= vizInput->GetMouseDY() * MouseSens;
-		if (Pitch > MaxPitch) Pitch = MaxPitch;
-		if (Pitch < -MaxPitch) Pitch = -MaxPitch;
-
-		auto& tr    = Body.Transform;
-		SimFloat px = tr.PosX.Value();
-		SimFloat py = tr.PosY.Value();
-		SimFloat pz = tr.PosZ.Value();
+		SimFloat px, py, pz;
+		// Client-side local player: read from JoltCharacter (locally predicted position,
+		// not overwritten by state corrections) to avoid rubber-banding camera.
+		// Server-side / standalone: Body.Transform IS the authoritative source (PhysicsStep
+		// writes JoltCharacter→Body.Transform and state corrections never touch server state),
+		// so reading it directly is correct and avoids any potential Jolt vs. ECS sync gap.
+		if (bIsClientSide && bIsLocalPlayer)
+		{
+			JPH::RVec3 joltPos = CharacterController.GetPosition();
+			px                 = static_cast<SimFloat>(joltPos.GetX());
+			py                 = static_cast<SimFloat>(joltPos.GetY());
+			pz                 = static_cast<SimFloat>(joltPos.GetZ());
+		}
+		else
+		{
+			auto& tr = Body.Transform;
+			px       = tr.PosX.Value();
+			py       = tr.PosY.Value();
+			pz       = tr.PosZ.Value();
+		}
 
 		float sinYaw = std::sin(Yaw);
 		float cosYaw = std::cos(Yaw);
@@ -201,10 +260,11 @@ private:
 	{
 		if (GetWorld()->GetConfig().Mode == EngineMode::Server) return;
 		const uint8_t ownerID = GetOwnerID();
-		// In networked mode a zero ownerID means the soul wasn't set (e.g. this
-		// is a remote player's construct received via ConstructSpawn) — never
-		// steal the camera for it.
-		if (GetWorld()->GetConfig().Mode != EngineMode::Standalone && ownerID == 0) return;
+		// On the client, ownerID==0 means the soul wasn't set (remote player
+		// construct received via ConstructSpawn before ClaimBody) — never steal
+		// the camera for it. On the server/listen-server, ownerID==0 is the
+		// local player and should own the camera.
+		if (bIsClientSide && ownerID == 0) return;
 		if (ownerID != 0 && ownerID != GetWorld()->LocalOwnerID) return;
 		GetWorld()->GetLogicThread()->SetActiveCamera(cam);
 	}

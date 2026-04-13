@@ -82,6 +82,17 @@ void ServerNetThread::WirePlayerInputInjector(World* world)
 									 result.Entry->MouseDX,
 									 result.Entry->MouseDY,
 									 result.Entry->MouseButtons);
+					// Mirror into viz slot so PlayerConstruct::ScalarUpdate reads the
+					// client's actual mouse look rather than falling back to the server's
+					// raw mouse buffer.
+					if (InputBuffer* viz = world->GetPlayerVizInput(static_cast<uint8_t>(ownerID)))
+					{
+						viz->InjectState(result.Entry->KeyState,
+										 result.Entry->MouseDX,
+										 result.Entry->MouseDY,
+										 result.Entry->MouseButtons);
+						viz->Swap();
+					}
 					// TODO: inject discrete events into player event queue
 				}
 
@@ -319,6 +330,11 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 				{
 					if (Soul* soul = flow->GetSoul(ci->OwnerID))
 					{
+						// Refresh the channel so server→client reply RPCs (e.g.
+						// PlayerBeginConfirm) have a valid send target. The channel
+						// is not set during OnClientLoaded because ConnectionInfo
+						// isn't available there.
+						soul->GetNetChannel() = NetChannel(ci, ConnectionMgr);
 						RPCContext ctx{ci, ConnectionMgr};
 						soul->DispatchServerRPC(ctx, *rpcHdr, params);
 					}

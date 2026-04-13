@@ -39,7 +39,9 @@ entry.OwnerID        = 0; // promoted to real OwnerID in UpdateClientOwnerID aft
 entry.ClientWorld    = world;
 entry.Handler        = std::make_unique<ClientNetThread>();
 entry.Handler->InitAsHandler(GNS, Config, ConnectionMgr);
-// World and OwnerID wired in UpdateClientOwnerID once server assigns the ID
+// Register under slot 0 immediately so TravelNotify/ServerReady handlers can
+// find the world before UpdateClientOwnerID promotes the real ownerID slot.
+entry.Handler->SetClientWorld(0, world);
 }
 
 void PIENetThread::UpdateClientOwnerID(HSteamNetConnection clientHandle, uint8_t ownerID, World* world)

@@ -79,10 +79,23 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 
 				ConnectionMgr->AssignOwnerID(msg.Connection, msg.Header.SenderID);
 
+				// Promote the world from the temporary slot-0 registration (set in
+				// PIENetThread::AddClient) to the real ownerID slot so subsequent handlers
+				// (TravelNotify, FlowEvent/ServerReady) can find it before
+				// PIENetThread::UpdateClientOwnerID is called from the startup loop.
+				if (WorldMap[msg.Header.SenderID] == nullptr && WorldMap[0] != nullptr) WorldMap[msg.Header.SenderID] = WorldMap[0];
+
 				if (msg.Payload.size() >= sizeof(HandshakePayload))
 				{
 					const auto* hsPay          = reinterpret_cast<const HandshakePayload*>(msg.Payload.data());
 					ci->ServerFrameAtHandshake = hsPay->ServerFrame;
+
+					// Record our own frame so we can translate local frame numbers to
+					// server-relative frames when building InputFrame packets.
+					World* w                  = WorldMap[msg.Header.SenderID];
+					ci->LocalFrameAtHandshake = (w && w->GetLogicThread())
+													? w->GetLogicThread()->GetLastCompletedFrame()
+													: 0;
 				}
 				ci->RepState = ClientRepState::Synchronizing;
 
@@ -393,9 +406,15 @@ void ClientNetThread::TickInputSend()
 		InputBuffer* netInput = world->GetNetInput();
 		netInput->Swap();
 
-		const uint32_t frame = world->GetLogicThread()
-								   ? world->GetLogicThread()->GetLastCompletedFrame()
-								   : 0;
+		const uint32_t localFrame = world->GetLogicThread()
+										? world->GetLogicThread()->GetLastCompletedFrame()
+										: 0;
+
+		// Translate local frame to server-relative frame. The server's frame counter has been
+		// running since startup; ours starts when our World was created. Without this offset
+		// the server stalls because our frame IDs fall far behind the server's FrameNumber.
+		const uint32_t frameOffset = ci->ServerFrameAtHandshake - ci->LocalFrameAtHandshake;
+		const uint32_t frame       = localFrame + frameOffset;
 
 		const uint32_t fixedHz     = (Config->FixedUpdateHz == EngineConfig::Unset) ? 512 : Config->FixedUpdateHz;
 		const uint32_t frameTimeUS = 1'000'000u / fixedHz;

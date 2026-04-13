@@ -19,6 +19,9 @@ public:
 	JPH::Vec3 GetLinearVelocity() const;
 	bool IsGrounded() const;
 
+	// Teleport character to a new position (e.g., server correction).
+	void SetPosition(JPH::RVec3 position);
+
 	// Write results back to slab fields
 	void SyncToSlab(float* posX, float* posY, float* posZ,
 					float* rotX, float* rotY, float* rotZ, float* rotW,

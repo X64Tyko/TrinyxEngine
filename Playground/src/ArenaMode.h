@@ -36,12 +36,11 @@ public:
 	}
 
 	// Called by FlowManager when a client is fully loaded (LevelReady received).
-	// In networked play the client will subsequently send a PlayerBeginRequest RPC
-	// to trigger the actual spawn — don't spawn here. In Standalone there is no
-	// RPC round-trip, so spawn immediately.
+	// In networked play, remote clients send a PlayerBeginRequest RPC — don't spawn for them here.
+	// In Standalone and ListenServer, the local player (ownerID=0) spawns immediately.
 	void OnPlayerJoined(Soul& soul) override
 	{
-		if (GetWorld()->GetReplicationSystem()) return; // Networked: wait for PlayerBeginRequest RPC
+		if (GetWorld()->GetReplicationSystem() && soul.GetOwnerID() != 0) return;
 
 		SpawnPlayerBody(soul);
 	}
@@ -66,9 +65,9 @@ public:
 		return result;
 	}
 
-	const char* GetModeName() const override { return "ArenaMode"; }
-
 private:
+	int SpawnCounter = 0;
+
 	void SpawnPlayerBody(Soul& soul)
 	{
 		World* world            = GetWorld();
@@ -78,11 +77,18 @@ private:
 		const int64_t prefabIDRaw = GetCharacterPrefab(soul);
 		const uint16_t typeHash   = ReflectionRegistry::ConstructTypeHashFromName("PlayerConstruct");
 
-		auto* player         = reg->Create<PlayerConstruct>(world);
-		player->SetOwnerSoul(&soul);
-		player->SpawnPosX    = 0.0f;
-		player->SpawnPosY = 5.0f;
-		player->SpawnPosZ = 0.0f;
+		// Stagger spawn positions so players don't overlap.
+		const float spawnX = (SpawnCounter % 2 == 0) ? -2.0f : 2.0f;
+		++SpawnCounter;
+
+		// Use PreInit callable so spawn position is set BEFORE Initialize() seeds JoltCharacter.
+		auto* player = reg->Create<PlayerConstruct>(world, [&](PlayerConstruct* p)
+		{
+			p->SetOwnerSoul(&soul);
+			p->SpawnPosX = spawnX;
+			p->SpawnPosY = 5.0f;
+			p->SpawnPosZ = 0.0f;
+		});
 
 		ConstructRef ref;
 		if (repl)
@@ -98,7 +104,7 @@ private:
 		}
 
 		soul.ClaimBody(ref);
-		LOG_INFO_F("[ArenaMode] Spawned body for ownerID=%u (networked=%s)",
-				   soul.GetOwnerID(), repl ? "yes" : "no");
+		LOG_INFO_F("[ArenaMode] Spawned body for ownerID=%u at (%.1f,5,0) (networked=%s)",
+				   soul.GetOwnerID(), spawnX, repl ? "yes" : "no");
 	}
 };
