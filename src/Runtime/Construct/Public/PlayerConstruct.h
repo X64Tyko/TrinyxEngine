@@ -27,6 +27,8 @@
 // ---------------------------------------------------------------------------
 class PlayerConstruct : public Construct<PlayerConstruct>
 {
+	TNX_REGISTER_CONSTRUCT(PlayerConstruct)
+	
 public:
 	TNX_CONSTRUCT_WORLD
 

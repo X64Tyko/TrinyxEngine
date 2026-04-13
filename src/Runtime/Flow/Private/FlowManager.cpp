@@ -391,7 +391,7 @@ void FlowManager::Tick(float dt)
 			while (bits)
 			{
 				const uint32_t bit = bits & (~bits + 1); // isolate lowest set bit
-				const uint8_t id   = static_cast<uint8_t>(__builtin_ctz(bit));
+				const uint8_t id   = static_cast<uint8_t>(TNX_CTZ32(bit));
 				active->OnNetEvent(id);
 				bits &= bits - 1;
 			}
