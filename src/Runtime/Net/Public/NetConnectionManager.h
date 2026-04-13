@@ -25,10 +25,7 @@ struct PendingNetInputEvent
 
 struct ClientInputAccumulator
 {
-	uint8_t KeyState[64] = {};
-	float MouseDX        = 0.0f;
-	float MouseDY        = 0.0f;
-	uint8_t MouseButtons = 0;
+	InputSnapshot State{};
 	std::vector<PendingNetInputEvent> PendingEvents;
 
 	// Remove events that the server has already consumed.
@@ -45,10 +42,7 @@ struct ClientInputAccumulator
 	InputFramePayload BuildPayload(uint32_t firstFrame, uint32_t lastFrame, uint32_t frameTimeUS) const
 	{
 		InputFramePayload p{};
-		std::memcpy(p.KeyState, KeyState, 64);
-		p.MouseDX          = MouseDX;
-		p.MouseDY          = MouseDY;
-		p.MouseButtons     = MouseButtons;
+		p.State            = State;
 		p.FirstClientFrame = firstFrame;
 		p.LastClientFrame  = lastFrame;
 

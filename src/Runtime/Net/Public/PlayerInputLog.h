@@ -46,13 +46,10 @@ struct PlayerInputLogEntry
 	// Lower = older snapshot = more accurate for this sim frame.
 	// Out-of-order arrivals only overwrite if they carry a fresher (older) snapshot.
 	uint32_t SnapshotFrame  = UINT32_MAX;
-	uint8_t KeyState[64]    = {};
-	float MouseDX           = 0.f;
-	float MouseDY           = 0.f;
-	uint8_t MouseButtons    = 0;
+	InputSnapshot State     = {};
 	uint8_t EventCount      = 0;
 	bool bPredicted         = false; // true = extrapolated from last known state, not real input
-	uint8_t _Pad            = {};
+	uint8_t _Pad[2]         = {};
 	NetInputEvent Events[8] = {};
 };
 
@@ -153,10 +150,10 @@ struct PlayerInputLog
 				// mark dirty so the server can resim with the real input.
 				if (entry.SimFrame != frame || !entry.bPredicted) continue;
 
-				const bool keystateChanged = (std::memcmp(entry.KeyState, payload.KeyState, 64) != 0)
-										  || (entry.MouseDX != payload.MouseDX)
-										  || (entry.MouseDY != payload.MouseDY)
-										  || (entry.MouseButtons != payload.MouseButtons);
+				const bool keystateChanged = (std::memcmp(entry.State.KeyState, payload.State.KeyState, 64) != 0)
+										  || (entry.State.MouseDX != payload.State.MouseDX)
+										  || (entry.State.MouseDY != payload.State.MouseDY)
+										  || (entry.State.MouseButtons != payload.State.MouseButtons);
 
 				// Check if the incoming event set for this frame differs.
 				uint8_t incomingEventCount = 0;
@@ -175,10 +172,7 @@ struct PlayerInputLog
 				if (keystateChanged || eventsChanged)
 				{
 					// Overwrite with real data and mark the log dirty for resim.
-					std::memcpy(entry.KeyState, payload.KeyState, 64);
-					entry.MouseDX      = payload.MouseDX;
-					entry.MouseDY      = payload.MouseDY;
-					entry.MouseButtons = payload.MouseButtons;
+					entry.State        = payload.State;
 					entry.bPredicted   = false;
 					entry.EventCount   = static_cast<uint8_t>(incomingEventCount);
 					std::memcpy(entry.Events, incomingEvents, incomingEventCount * sizeof(NetInputEvent));
@@ -195,10 +189,7 @@ struct PlayerInputLog
 			const bool incomingIsFresher = (payload.LastClientFrame < entry.SnapshotFrame);
 			if (slotMatchesFrame && !incomingIsFresher) continue;
 
-			std::memcpy(entry.KeyState, payload.KeyState, 64);
-			entry.MouseDX       = payload.MouseDX;
-			entry.MouseDY       = payload.MouseDY;
-			entry.MouseButtons  = payload.MouseButtons;
+			entry.State = payload.State;
 			entry.SimFrame      = frame;
 			entry.SnapshotFrame = payload.LastClientFrame;
 			entry.bPredicted    = false;
@@ -243,26 +234,26 @@ struct PlayerInputLog
 		if (reason == InputMissReason::NotYetReceived)
 		{
 			// Extrapolate: copy last known state into this slot and mark predicted.
-			// Find the most recent real or predicted entry to copy from.
-			const PlayerInputLogEntry* lastKnown = nullptr;
+			// Prefer the most recent REAL (non-predicted) entry. Predicted entries carry
+			// forward whatever their source held, but if the ring contains a mix of
+			// predicted-zeros (written before real data arrived) and real entries, stopping
+			// at the first predicted-zero would propagate zeros past the real data.
+			const PlayerInputLogEntry* lastReal      = nullptr;
+			const PlayerInputLogEntry* lastPredicted = nullptr;
 			for (uint32_t f = frameNumber - 1; f != UINT32_MAX && f + Depth >= frameNumber; --f)
 			{
 				const PlayerInputLogEntry& prev = Entries[f % Depth];
-				if (prev.SimFrame == f) { lastKnown = &prev; break; }
+				if (prev.SimFrame != f) continue;
+				if (!prev.bPredicted) { lastReal = &prev; break; }
+				if (!lastPredicted) lastPredicted = &prev;
 			}
+			const PlayerInputLogEntry* lastKnown = lastReal ? lastReal : lastPredicted;
 
 			entry.SimFrame      = frameNumber;
 			entry.SnapshotFrame = UINT32_MAX;
 			entry.bPredicted    = true;
 			entry.EventCount    = 0; // discrete events are never predicted
-			if (lastKnown)
-			{
-				std::memcpy(entry.KeyState, lastKnown->KeyState, 64);
-				entry.MouseDX      = lastKnown->MouseDX;
-				entry.MouseDY      = lastKnown->MouseDY;
-				entry.MouseButtons = lastKnown->MouseButtons;
-			}
-			else std::memset(entry.KeyState, 0, 64);
+			entry.State = lastKnown ? lastKnown->State : InputSnapshot{};
 
 			if (frameNumber > LastConsumedFrame) LastConsumedFrame = frameNumber;
 			return {&entry, InputMissReason::NotYetReceived};

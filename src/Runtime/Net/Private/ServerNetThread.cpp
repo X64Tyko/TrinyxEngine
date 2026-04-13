@@ -11,6 +11,7 @@
 #include "Logger.h"
 
 #include <SDL3/SDL_timer.h>
+#include <algorithm>
 #include <cstring>
 
 void ServerNetThread::BindSoulCallbacks()
@@ -36,8 +37,14 @@ void ServerNetThread::CreateInputLog(uint8_t ownerID)
 											? static_cast<uint32_t>(Config->TemporalFrameCount)
 											: 32u;
 
+	// The log must be deep enough to cover the full lead window. If maxLead > Depth,
+	// the backward search in ConsumeFrame can't reach real data when the server is near
+	// the lead limit, and predictions fall back to zeros. Use the larger of the two.
+	const uint32_t maxLead = static_cast<uint32_t>(Config ? Config->MaxClientInputLead : 16);
+	const uint32_t logDepth = std::max(temporalFrameCount, maxLead + 1);
+
 	InputLogs[ownerID] = std::make_unique<PlayerInputLog>();
-	InputLogs[ownerID]->Initialize(temporalFrameCount);
+	InputLogs[ownerID]->Initialize(logDepth);
 }
 
 
@@ -86,22 +93,33 @@ void ServerNetThread::WirePlayerInputInjector(World* world)
 			{
 				if (buf)
 				{
-					buf->InjectState(result.Entry->KeyState,
-									 result.Entry->MouseDX,
-									 result.Entry->MouseDY,
-									 result.Entry->MouseButtons);
+					buf->InjectState(result.Entry->State.KeyState,
+									 result.Entry->State.MouseDX,
+									 result.Entry->State.MouseDY,
+									 result.Entry->State.MouseButtons);
 					// Mirror into viz slot so PlayerConstruct::ScalarUpdate reads the
 					// client's actual mouse look rather than falling back to the server's
 					// raw mouse buffer.
 					if (InputBuffer* viz = world->GetPlayerVizInput(static_cast<uint8_t>(ownerID)))
 					{
-						viz->InjectState(result.Entry->KeyState,
-										 result.Entry->MouseDX,
-										 result.Entry->MouseDY,
-										 result.Entry->MouseButtons);
+						viz->InjectState(result.Entry->State.KeyState,
+										 result.Entry->State.MouseDX,
+										 result.Entry->State.MouseDY,
+										 result.Entry->State.MouseButtons);
 						viz->Swap();
 					}
 					// TODO: inject discrete events into player event queue
+				}
+
+				// Diagnostic: log injected keystate once per second to confirm data flows.
+				if (frameNumber % 512 == 0)
+				{
+					const char* tag = (result.Reason == InputMissReason::Hit) ? "Hit" : "Predicted";
+					LOG_DEBUG_F("[Injector] ownerID=%u frame=%u %s anyKey=%d k[0]=0x%02X k[3]=0x%02X lastRecv=%u lastConsumed=%u",
+								ownerID, frameNumber, tag,
+								(result.Entry->State.KeyState[0] || result.Entry->State.KeyState[3]) ? 1 : 0,
+								result.Entry->State.KeyState[0], result.Entry->State.KeyState[3],
+								log->LastReceivedFrame, log->LastConsumedFrame);
 				}
 			}
 			else if (result.Reason == InputMissReason::LateOrAliased)

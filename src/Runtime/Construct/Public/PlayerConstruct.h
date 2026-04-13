@@ -199,8 +199,17 @@ public:
 		float len = std::sqrt(moveX * moveX + moveZ * moveZ);
 		if (len > 0.001f)
 		{
+			// PrePhysics fires PhysicsDivizor times (8×) before PhysicsStep runs once.
+			// Each call contributes one 512Hz frame of movement intent. PhysicsStep
+			// consumes the accumulated sum and resets it to 0, so the character covers
+			// all 8 frames of intended movement in one Jolt solve.
 			DesiredVelX += moveX / len * MoveSpeed;
 			DesiredVelZ += moveZ / len * MoveSpeed;
+		}
+		else
+		{
+			DesiredVelX = 0.0f;
+			DesiredVelZ = 0.0f;
 		}
 	}
 
@@ -313,6 +322,6 @@ private:
 	float DesiredVelZ = 0.0f;
 	bool bToggleHeld  = false;
 
-	static constexpr float MoveSpeed = 1.0f;
+	static constexpr float MoveSpeed = 1.0f;   // per-frame velocity contribution (m/s); effective speed = MoveSpeed × PhysicsDivizor (8× → 8 m/s at default ratio)
 	static constexpr float EyeHeight = 1.5f;
 };

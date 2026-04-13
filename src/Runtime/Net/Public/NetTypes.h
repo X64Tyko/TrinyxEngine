@@ -566,21 +566,30 @@ struct NetInputEvent
 
 static_assert(sizeof(NetInputEvent) == 8, "NetInputEvent must be 8 bytes");
 
-// Input snapshot sent by the client at InputNetHz (default 128Hz).
+// Held input state snapshotted each net tick. Stored per-frame in PlayerInputLog
+// independently from the discrete event list carried in InputFramePayload.
+struct InputSnapshot
+{
+	uint8_t KeyState[64] = {}; // held-key bitfield (all 512 SDL scancodes)
+	float   MouseDX      = 0.f;
+	float   MouseDY      = 0.f;
+	uint8_t MouseButtons = 0;
+	uint8_t _Pad[3]      = {};
+};
+static_assert(sizeof(InputSnapshot) == 76, "InputSnapshot must be 76 bytes");
+
+// Input frame sent by the client at InputNetHz (default 128Hz).
 // Covers [FirstClientFrame, LastClientFrame] — typically 4 sim frames at 512Hz/128Hz.
 // ---------------------------------------------------------------------------
 struct InputFramePayload
 {
-	uint8_t KeyState[64]; // held-key bitfield (all 512 SDL scancodes)
-	float MouseDX;
-	float MouseDY;
-	uint8_t MouseButtons;
-	uint8_t EventCount; // number of valid entries in Events[] (max 8)
-	uint8_t _Pad[2];
-	uint32_t FirstClientFrame; // first sim frame this payload applies to
-	uint32_t LastClientFrame;  // last sim frame (client frame at send time)
-	NetInputEvent Events[8];   // discrete events within the window
+	InputSnapshot State;        // held key + mouse state for [FirstClientFrame, LastClientFrame]
+	uint32_t FirstClientFrame;  // first sim frame this payload applies to
+	uint32_t LastClientFrame;   // last sim frame (client frame at send time)
+	uint8_t EventCount;         // number of valid entries in Events[] (max 8)
+	uint8_t _Pad[3];
+	NetInputEvent Events[8];    // discrete events within the window
 };
 
-static_assert(sizeof(InputFramePayload) == 148, "InputFramePayload must be 148 bytes");
+static_assert(sizeof(InputFramePayload) == 152, "InputFramePayload must be 152 bytes");
 
