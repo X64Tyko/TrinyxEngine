@@ -2,11 +2,13 @@
 #include <cstdint>
 
 #include "Input.h"
+#include "Logger.h"
 #include "NetChannel.h"
 #include "RPC.h"
 #include "RegistryTypes.h"
 
 class FlowManager;
+class Soul;
 class World;
 
 // ---------------------------------------------------------------------------
@@ -26,9 +28,9 @@ class World;
 // ---------------------------------------------------------------------------
 enum class SoulRole : uint8_t
 {
-	Echo      = 0,        // No flags — follow corrections only
-	Owner     = 1 << 0,  // Local keyboard drives this player
-	Authority = 1 << 1,  // Simulation authority (server-side or listen-server)
+	Echo      = 0,      // No flags — follow corrections only
+	Owner     = 1 << 0, // Local keyboard drives this player
+	Authority = 1 << 1, // Simulation authority (server-side or listen-server)
 };
 
 // ---------------------------------------------------------------------------
@@ -54,7 +56,11 @@ enum class SoulRole : uint8_t
 class Soul
 {
 public:
-	explicit Soul(uint8_t ownerID) : OwnerID(ownerID) {}
+	explicit Soul(uint8_t ownerID)
+		: OwnerID(ownerID)
+	{
+	}
+
 	virtual ~Soul() = default;
 
 	Soul(const Soul&)            = delete;
@@ -64,11 +70,11 @@ public:
 	uint32_t GetInputLead() const { return InputLead; }
 
 	SoulRole GetRole() const { return Role; }
-	void     SetRole(SoulRole role) { Role = role; }
+	void SetRole(SoulRole role) { Role = role; }
 	/// Add one or more role flags without clearing existing ones.
-	void     AddRole(SoulRole flag) { Role = static_cast<SoulRole>(static_cast<uint8_t>(Role) | static_cast<uint8_t>(flag)); }
+	void AddRole(SoulRole flag) { Role = static_cast<SoulRole>(static_cast<uint8_t>(Role) | static_cast<uint8_t>(flag)); }
 	/// Returns true if ALL bits in flag are set on this Soul's role.
-	bool     HasRole(SoulRole flag) const { return (static_cast<uint8_t>(Role) & static_cast<uint8_t>(flag)) == static_cast<uint8_t>(flag); }
+	bool HasRole(SoulRole flag) const { return (static_cast<uint8_t>(Role) & static_cast<uint8_t>(flag)) == static_cast<uint8_t>(flag); }
 
 	bool HasBody() const { return ConfirmedBodyHandle.IsValid(); }
 	ConstructRef GetBodyHandle() const { return ConfirmedBodyHandle; }
@@ -146,20 +152,117 @@ public:
 	// Server calls PlayerBeginConfirm/Reject(params) → sends back to client.
 	// Implemented in Soul.cpp; game code never touches these directly.
 	// -------------------------------------------------------------------------
-	TNX_SERVER(PlayerBegin,        PlayerBeginRequestPayload);
+	TNX_SERVER(PlayerBegin, PlayerBeginRequestPayload);
 	TNX_CLIENT(PlayerBeginConfirm, PlayerBeginConfirmPayload);
-	TNX_CLIENT(PlayerBeginReject,  PlayerBeginRejectPayload);
+	TNX_CLIENT(PlayerBeginReject, PlayerBeginRejectPayload);
 
 private:
 	friend class FlowManager;
 
-	uint8_t OwnerID                  = 0;                // Assigned at connection — stable for session
-	uint32_t InputLead               = 0;                // Frames client leads the server
+	uint8_t OwnerID                  = 0; // Assigned at connection — stable for session
+	uint32_t InputLead               = 0; // Frames client leads the server
 	SoulRole Role                    = SoulRole::Authority;
-	ConstructRef ConfirmedBodyHandle = {};               // Valid once ClaimBody() is called
+	ConstructRef ConfirmedBodyHandle = {}; // Valid once ClaimBody() is called
 
 	// Set by FlowManager at creation and refreshed on every RPC dispatch.
-	NetChannel   Channel = {};
+	NetChannel Channel   = {};
 	FlowManager* FlowMgr = nullptr;
 };
 
+// ---------------------------------------------------------------------------
+// Soul role tag helper — converts a Soul's bitmask role into a short display
+// string used by the LOG_NET_* macros below.
+//
+//   Echo (0)              → "ECHO"
+//   Owner                 → "OWNER"
+//   Authority             → "AUTH"
+//   Owner | Authority     → "LISTEN"  (listen-server local player)
+//   nullptr               → "NULL"
+// ---------------------------------------------------------------------------
+inline const char* SoulRoleTag(const Soul* soul)
+{
+	if (!soul) return "NULL";
+	const uint8_t r              = static_cast<uint8_t>(soul->GetRole());
+	constexpr uint8_t kOwner     = static_cast<uint8_t>(SoulRole::Owner);
+	constexpr uint8_t kAuthority = static_cast<uint8_t>(SoulRole::Authority);
+	if ((r & (kOwner | kAuthority)) == (kOwner | kAuthority)) return "LISTEN";
+	if (r & kOwner) return "OWNER";
+	if (r & kAuthority) return "AUTH";
+	return "ECHO";
+}
+
+// ---------------------------------------------------------------------------
+// LOG_NET_* — Soul-aware logging macros.
+//
+// Each macro prepends the Soul's role tag so log lines read:
+//   [14:56:27.031] [DEBUG] (Soul.cpp:120) [AUTH] Player 2 joined
+//
+// Usage:
+//   LOG_NET_INFO(soul,    "Player joined");
+//   LOG_NET_INFO_F(soul,  "Player %u joined", ownerID);
+//
+// soul must be a const Soul* (or Soul*). nullptr is handled safely → [NULL].
+// ---------------------------------------------------------------------------
+
+// Non-formatted variants
+#define LOG_NET_TRACE(soul, msg) do { \
+    char _TnxNetBuf[512]; \
+    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] %s", SoulRoleTag(soul), (msg)); \
+    LOG_ENG_TRACE(_TnxNetBuf); \
+} while(0)
+
+#define LOG_NET_DEBUG(soul, msg) do { \
+    char _TnxNetBuf[512]; \
+    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] %s", SoulRoleTag(soul), (msg)); \
+    LOG_ENG_DEBUG(_TnxNetBuf); \
+} while(0)
+
+#define LOG_NET_INFO(soul, msg) do { \
+    char _TnxNetBuf[512]; \
+    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] %s", SoulRoleTag(soul), (msg)); \
+    LOG_ENG_INFO(_TnxNetBuf); \
+} while(0)
+
+#define LOG_NET_WARN(soul, msg) do { \
+    char _TnxNetBuf[512]; \
+    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] %s", SoulRoleTag(soul), (msg)); \
+    LOG_ENG_WARN(_TnxNetBuf); \
+} while(0)
+
+#define LOG_NET_ERROR(soul, msg) do { \
+    char _TnxNetBuf[512]; \
+    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] %s", SoulRoleTag(soul), (msg)); \
+    LOG_ENG_ERROR(_TnxNetBuf); \
+} while(0)
+
+// Formatted variants — fmt must be a string literal so the role prefix
+// can be concatenated at compile time.
+#define LOG_NET_TRACE_F(soul, fmt, ...) do { \
+    char _TnxNetBuf[512]; \
+    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] " fmt, SoulRoleTag(soul), ##__VA_ARGS__); \
+    LOG_ENG_TRACE(_TnxNetBuf); \
+} while(0)
+
+#define LOG_NET_DEBUG_F(soul, fmt, ...) do { \
+    char _TnxNetBuf[512]; \
+    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] " fmt, SoulRoleTag(soul), ##__VA_ARGS__); \
+    LOG_ENG_DEBUG(_TnxNetBuf); \
+} while(0)
+
+#define LOG_NET_INFO_F(soul, fmt, ...) do { \
+    char _TnxNetBuf[512]; \
+    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] " fmt, SoulRoleTag(soul), ##__VA_ARGS__); \
+    LOG_ENG_INFO(_TnxNetBuf); \
+} while(0)
+
+#define LOG_NET_WARN_F(soul, fmt, ...) do { \
+    char _TnxNetBuf[512]; \
+    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] " fmt, SoulRoleTag(soul), ##__VA_ARGS__); \
+    LOG_ENG_WARN(_TnxNetBuf); \
+} while(0)
+
+#define LOG_NET_ERROR_F(soul, fmt, ...) do { \
+    char _TnxNetBuf[512]; \
+    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] " fmt, SoulRoleTag(soul), ##__VA_ARGS__); \
+    LOG_ENG_ERROR(_TnxNetBuf); \
+} while(0)

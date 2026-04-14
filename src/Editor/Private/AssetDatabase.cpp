@@ -111,7 +111,7 @@ void AssetDatabase::Initialize(const char* contentRoot)
 	if (!fs::exists(ContentRoot))
 	{
 		fs::create_directories(ContentRoot);
-		LOG_INFO_F("[AssetDB] Created content directory: %s", ContentRoot.c_str());
+		LOG_ENG_INFO_F("[AssetDB] Created content directory: %s", ContentRoot.c_str());
 	}
 
 	// Set content root on the runtime registry so paths resolve to absolute paths.
@@ -129,7 +129,7 @@ void AssetDatabase::Initialize(const char* contentRoot)
 	// Push to runtime registry
 	PublishToRegistry();
 
-	LOG_INFO_F("[AssetDB] Initialized with %zu assets from %s", Entries.size(), ContentRoot.c_str());
+	LOG_ENG_INFO_F("[AssetDB] Initialized with %zu assets from %s", Entries.size(), ContentRoot.c_str());
 }
 
 void AssetDatabase::Reconcile()
@@ -179,7 +179,7 @@ void AssetDatabase::Reconcile()
 					PathIndex.erase(entry.Path);
 					entry.Path         = relPath;
 					PathIndex[relPath] = idx;
-					LOG_INFO_F("[AssetDB] Asset moved: %s -> %s", entry.Path.c_str(), relPath.c_str());
+					LOG_ENG_INFO_F("[AssetDB] Asset moved: %s -> %s", entry.Path.c_str(), relPath.c_str());
 				}
 
 				if (currentHash != sc.ContentHash)
@@ -189,7 +189,7 @@ void AssetDatabase::Reconcile()
 					sc.ContentHash    = currentHash;
 					sc.Flags          |= static_cast<uint8_t>(SidecarFlags::Dirty);
 					AssetSidecar::Write(sidecar.c_str(), sc);
-					LOG_INFO_F("[AssetDB] Asset modified: %s", relPath.c_str());
+					LOG_ENG_INFO_F("[AssetDB] Asset modified: %s", relPath.c_str());
 				}
 			}
 			else
@@ -207,7 +207,7 @@ void AssetDatabase::Reconcile()
 				PathIndex[relPath]            = idx;
 				seen.push_back(true);
 
-				LOG_INFO_F("[AssetDB] Re-registered: %s", relPath.c_str());
+				LOG_ENG_INFO_F("[AssetDB] Re-registered: %s", relPath.c_str());
 			}
 		}
 		else
@@ -246,8 +246,8 @@ void AssetDatabase::Reconcile()
 			PathIndex[relPath]            = idx;
 			seen.push_back(true);
 
-			LOG_INFO_F("[AssetDB] New asset imported: %s (UUID: %lld)", relPath.c_str(),
-					   static_cast<long long>(uuid));
+			LOG_ENG_INFO_F("[AssetDB] New asset imported: %s (UUID: %lld)", relPath.c_str(),
+						   static_cast<long long>(uuid));
 		}
 	}
 
@@ -256,7 +256,7 @@ void AssetDatabase::Reconcile()
 	{
 		if (!seen[i])
 		{
-			LOG_WARN_F("[AssetDB] Asset missing from filesystem: %s", Entries[i].Path.c_str());
+			LOG_ENG_WARN_F("[AssetDB] Asset missing from filesystem: %s", Entries[i].Path.c_str());
 		}
 	}
 }
@@ -297,7 +297,7 @@ bool AssetDatabase::Save() const
 	std::ofstream file(dbPath, std::ios::trunc);
 	if (!file.is_open())
 	{
-		LOG_ERROR_F("[AssetDB] Failed to write database: %s", dbPath.c_str());
+		LOG_ENG_ERROR_F("[AssetDB] Failed to write database: %s", dbPath.c_str());
 		return false;
 	}
 	file << json;
@@ -370,7 +370,7 @@ bool AssetDatabase::Load()
 		if (seq >= NextCounter[typeIdx]) NextCounter[typeIdx] = seq + 1;
 	}
 
-	LOG_INFO_F("[AssetDB] Loaded %zu entries from %s", Entries.size(), dbPath.c_str());
+	LOG_ENG_INFO_F("[AssetDB] Loaded %zu entries from %s", Entries.size(), dbPath.c_str());
 	return true;
 }
 

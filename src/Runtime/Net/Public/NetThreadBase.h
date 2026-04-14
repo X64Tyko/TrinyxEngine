@@ -323,7 +323,7 @@ void NetThreadBase<Derived>::TickFPS(double nowSec)
 		float ms  = static_cast<float>((FpsTimer / FpsFrameCount) * 1000.0);
 		NetFPS.store(fps, std::memory_order_relaxed);
 		NetFrameMs.store(ms, std::memory_order_relaxed);
-		LOG_DEBUG_F("Net FPS: %d | Frame: %.2fms", static_cast<int>(fps), static_cast<double>(ms));
+		LOG_ENG_DEBUG_F("Net FPS: %d | Frame: %.2fms", static_cast<int>(fps), static_cast<double>(ms));
 		FpsFrameCount = 0;
 		FpsTimer      = 0.0;
 	}
@@ -342,7 +342,7 @@ void NetThreadBase<Derived>::TickInputFPS(double nowSec)
 		float ms  = static_cast<float>((InputFpsTimer / InputFpsFrameCount) * 1000.0);
 		InputNetFPS.store(fps, std::memory_order_relaxed);
 		InputNetFrameMs.store(ms, std::memory_order_relaxed);
-		LOG_DEBUG_F("NetInput FPS: %d | Frame: %.3fms", static_cast<int>(fps), static_cast<double>(ms));
+		LOG_ENG_DEBUG_F("NetInput FPS: %d | Frame: %.3fms", static_cast<int>(fps), static_cast<double>(ms));
 		InputFpsFrameCount = 0;
 		InputFpsTimer      = 0.0;
 	}

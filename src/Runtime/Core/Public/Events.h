@@ -64,8 +64,8 @@ struct FixedMultiCallback
 				return;
 			}
 		}
-		
-		LOG_ERROR("FixedMultiCallback::Bind - No free slots available for binding");
+
+		LOG_ENG_ERROR("FixedMultiCallback::Bind - No free slots available for binding");
 	}
 
 	FORCE_INLINE void operator()(Args... args) const requires std::is_void_v<Ret>
@@ -83,7 +83,7 @@ struct FixedMultiCallback
 			if (CB.IsBound()) return CB(args...);
 		}
 
-		LOG_ERROR("FixedMultiCallback::operator() - No bound callbacks to invoke");
+		LOG_ENG_ERROR("FixedMultiCallback::operator() - No bound callbacks to invoke");
 		return Ret();
 	}
 	

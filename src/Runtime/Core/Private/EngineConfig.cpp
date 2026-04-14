@@ -12,6 +12,24 @@ static std::string Trim(const std::string& s)
 	return (start == std::string::npos) ? "" : s.substr(start, end - start + 1);
 }
 
+// Parse "Trace"/"Debug"/"Info"/"Warning"/"Warn"/"Error"/"Fatal" → int value matching LogLevel.
+// Returns -1 (Unset) on unrecognised input.
+static int ParseLogLevel(const std::string& val)
+{
+	if (val == "Trace") return 0;
+	if (val == "Debug") return 1;
+	if (val == "Info") return 2;
+	if (val == "Warning" || val == "Warn") return 3;
+	if (val == "Error") return 4;
+	if (val == "Fatal") return 5;
+	// Accept raw integers too
+	try { return std::stoi(val); }
+	catch (...)
+	{
+	}
+	return -1;
+}
+
 static void WriteDefaults(const char* path)
 {
 	std::ofstream out(path);
@@ -72,6 +90,8 @@ static void FillFromFile(const char* path, EngineConfig& cfg)
 		else if (key == "PhysicsUpdateInterval" && cfg.PhysicsUpdateInterval == EngineConfig::Unset) cfg.PhysicsUpdateInterval = std::stoi(val);
 		else if (key == "DefaultScene" && cfg.DefaultScene[0] == '\0') snprintf(cfg.DefaultScene, sizeof(cfg.DefaultScene), "%s", val.c_str());
 		else if (key == "DefaultState" && cfg.DefaultState[0] == '\0') snprintf(cfg.DefaultState, sizeof(cfg.DefaultState), "%s", val.c_str());
+		else if (key == "EngineLogLevel" && cfg.EngineLogLevel == EngineConfig::Unset) cfg.EngineLogLevel = ParseLogLevel(val);
+		else if (key == "GameLogLevel" && cfg.GameLogLevel == EngineConfig::Unset) cfg.GameLogLevel = ParseLogLevel(val);
 	}
 }
 

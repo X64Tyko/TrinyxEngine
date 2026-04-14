@@ -339,14 +339,14 @@ inline void Registry::InvokeScalarUpdate(SimFloat dt)
 #ifdef TNX_ENABLE_ROLLBACK
 	if (!HistorySlab.TryLockFrameForWrite(hisWrite))
 	{
-		LOG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
+		LOG_ENG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
 		return;
 	}
 #endif
 	uint32_t volWrite = 0;
 	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
 	{
-		LOG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
+		LOG_ENG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
 #ifdef TNX_ENABLE_ROLLBACK
 		HistorySlab.UnlockFrameWrite();
 #endif
@@ -396,14 +396,14 @@ inline void Registry::InvokePrePhys(SimFloat dt)
 #ifdef TNX_ENABLE_ROLLBACK
 	if (!HistorySlab.TryLockFrameForWrite(hisWrite))
 	{
-		LOG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
+		LOG_ENG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
 		return;
 	}
 #endif
 	uint32_t volWrite = 0;
 	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
 	{
-		LOG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
+		LOG_ENG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
 #ifdef TNX_ENABLE_ROLLBACK
 		HistorySlab.UnlockFrameWrite();
 #endif
@@ -454,14 +454,14 @@ inline void Registry::InvokePostPhys(SimFloat dt)
 #ifdef TNX_ENABLE_ROLLBACK
 	if (!HistorySlab.TryLockFrameForWrite(hisWrite))
 	{
-		LOG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
+		LOG_ENG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
 		return;
 	}
 #endif
 	uint32_t volWrite = 0;
 	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
 	{
-		LOG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
+		LOG_ENG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
 #ifdef TNX_ENABLE_ROLLBACK
 		HistorySlab.UnlockFrameWrite();
 #endif

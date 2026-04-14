@@ -17,8 +17,8 @@ ComponentCacheBase::ComponentCacheBase()
 
 ComponentCacheBase::~ComponentCacheBase()
 {
-	LOG_INFO_F("Destroying %s Component Slab with %zu bytes",
-			   Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal", TotalSlabSize);
+	LOG_ENG_INFO_F("Destroying %s Component Slab with %zu bytes",
+				   Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal", TotalSlabSize);
 
 #ifdef _MSC_VER
 	_aligned_free(SlabPtr);
@@ -135,8 +135,8 @@ void ComponentCacheBase::InitializeInternal(const EngineConfig* Config, uint32_t
 
 	if (SlabPtr == nullptr)
 	{
-		LOG_ERROR_F("Failed to allocate memory for %s ComponentCache slab: %zu bytes",
-					Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal", TotalSlabSize);
+		LOG_ENG_ERROR_F("Failed to allocate memory for %s ComponentCache slab: %zu bytes",
+						Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal", TotalSlabSize);
 		return;
 	}
 
@@ -162,8 +162,8 @@ void ComponentCacheBase::InitializeInternal(const EngineConfig* Config, uint32_t
 		currentFramePtr += frameStride;
 	}
 
-	LOG_INFO_F("Initialized %s ComponentCache: %zu fields, %zu frames × %zu bytes = %zu total bytes",
-			   Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal",
+	LOG_ENG_INFO_F("Initialized %s ComponentCache: %zu fields, %zu frames × %zu bytes = %zu total bytes",
+				   Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal",
 			   ValidFields.size(), TemporalFrameCount, frameStride, TotalSlabSize);
 }
 
@@ -186,7 +186,7 @@ void* ComponentCacheBase::AllocateFieldArray(Archetype* owner, Chunk* chunk,
 	// Direct O(1) lookup into flat table
 	if (compType >= MAX_COMPONENTS || fieldIndex >= MAX_TEMPORAL_FIELDS_PER_COMPONENT)
 	{
-		LOG_ERROR_F("ComponentCacheBase: Invalid component type %u or field index %zu", compType, fieldIndex);
+		LOG_ENG_ERROR_F("ComponentCacheBase: Invalid component type %u or field index %zu", compType, fieldIndex);
 		return nullptr;
 	}
 
@@ -195,8 +195,8 @@ void* ComponentCacheBase::AllocateFieldArray(Archetype* owner, Chunk* chunk,
 
 	if (!info.bValid)
 	{
-		LOG_ERROR_F("ComponentCacheBase: Field %s (component %u, field %zu) not initialized",
-					fieldName, compType, fieldIndex);
+		LOG_ENG_ERROR_F("ComponentCacheBase: Field %s (component %u, field %zu) not initialized",
+						fieldName, compType, fieldIndex);
 		return nullptr;
 	}
 
@@ -210,8 +210,8 @@ void* ComponentCacheBase::AllocateFieldArray(Archetype* owner, Chunk* chunk,
 		{
 			// resize?
 		}
-		LOG_ERROR_F("ComponentCacheBase: Out of space for field %s (component %u, field %zu)",
-					fieldName, compType, fieldIndex);
+		LOG_ENG_ERROR_F("ComponentCacheBase: Out of space for field %s (component %u, field %zu)",
+						fieldName, compType, fieldIndex);
 		return nullptr;
 	}
 

@@ -88,7 +88,7 @@ void EditorContext::Initialize(TrinyxEngine* engine, LogicThread* logic, MeshMan
 	AddPanel<NodeScriptPanel>();
 	AddPanel<ComponentGeneratorPanel>();
 
-	LOG_INFO_F("[Editor] Initialized with %zu panels", Panels.size());
+	LOG_ENG_INFO_F("[Editor] Initialized with %zu panels", Panels.size());
 }
 
 void EditorContext::LoadScene(const std::string& path, bool bReset)
@@ -97,7 +97,7 @@ void EditorContext::LoadScene(const std::string& path, bool bReset)
 	std::ifstream file(path);
 	if (!file.is_open())
 	{
-		LOG_ERROR_F("[Editor] Failed to open scene '%s'", path.c_str());
+		LOG_ENG_ERROR_F("[Editor] Failed to open scene '%s'", path.c_str());
 		return;
 	}
 	std::ostringstream ss;
@@ -105,7 +105,7 @@ void EditorContext::LoadScene(const std::string& path, bool bReset)
 	JsonValue root = JsonParse(ss.str());
 	if (root.IsNull())
 	{
-		LOG_ERROR_F("[Editor] Failed to parse JSON from '%s'", path.c_str());
+		LOG_ENG_ERROR_F("[Editor] Failed to parse JSON from '%s'", path.c_str());
 		return;
 	}
 
@@ -850,9 +850,9 @@ void EditorContext::DrawImportDialog()
 		{
 			uint32_t slot = ImportMeshAsset(ImportDialogPath);
 			if (slot != UINT32_MAX)
-				LOG_INFO_F("[Editor] Imported mesh → slot %u", slot);
+				LOG_ENG_INFO_F("[Editor] Imported mesh → slot %u", slot);
 			else
-				LOG_ERROR_F("[Editor] Failed to import: %s", ImportDialogPath.c_str());
+				LOG_ENG_ERROR_F("[Editor] Failed to import: %s", ImportDialogPath.c_str());
 
 			bShowImportDialog = false;
 			ImGui::CloseCurrentPopup();
@@ -882,11 +882,11 @@ uint32_t EditorContext::ImportMeshAsset(const std::string& gltfPath)
 	// Import glTF → .tnxmesh
 	if (!ImportGLTF(gltfPath, outPath))
 	{
-		LOG_ERROR_F("[Editor] ImportGLTF failed: %s", gltfPath.c_str());
+		LOG_ENG_ERROR_F("[Editor] ImportGLTF failed: %s", gltfPath.c_str());
 		return UINT32_MAX;
 	}
 
-	LOG_INFO_F("[Editor] Wrote %s", outPath.c_str());
+	LOG_ENG_INFO_F("[Editor] Wrote %s", outPath.c_str());
 
 	// Reconcile AssetDatabase to pick up the new file
 	AssetDB.Reconcile();
@@ -895,7 +895,7 @@ uint32_t EditorContext::ImportMeshAsset(const std::string& gltfPath)
 	MeshAsset asset;
 	if (!LoadMeshAsset(asset, outPath))
 	{
-		LOG_ERROR_F("[Editor] LoadMeshAsset failed: %s", outPath.c_str());
+		LOG_ENG_ERROR_F("[Editor] LoadMeshAsset failed: %s", outPath.c_str());
 		return UINT32_MAX;
 	}
 
@@ -906,7 +906,7 @@ uint32_t EditorContext::ImportMeshAsset(const std::string& gltfPath)
 
 	uint32_t slot = MeshMgr->RegisterMesh(asset, stem, meshID);
 	if (slot != UINT32_MAX)
-		LOG_INFO_F("[Editor] Registered mesh '%s' at slot %u (AssetID: %lld)",
+	LOG_ENG_INFO_F("[Editor] Registered mesh '%s' at slot %u (AssetID: %lld)",
 				   stem.c_str(), slot, static_cast<long long>(meshID.GetUUID() >> 8));
 
 	return slot;
@@ -930,13 +930,13 @@ void EditorContext::LoadAllMeshAssets()
 		MeshAsset asset;
 		if (!LoadMeshAsset(asset, fullPath))
 		{
-			LOG_WARN_F("[Editor] Failed to load mesh asset: %s", entry.Path.c_str());
+			LOG_ENG_WARN_F("[Editor] Failed to load mesh asset: %s", entry.Path.c_str());
 			continue;
 		}
 
 		uint32_t slot = MeshMgr->RegisterMesh(asset, entry.Name, entry.ID);
 		if (slot != UINT32_MAX)
-			LOG_INFO_F("[Editor] Loaded mesh '%s' → slot %u", entry.Path.c_str(), slot);
+			LOG_ENG_INFO_F("[Editor] Loaded mesh '%s' → slot %u", entry.Path.c_str(), slot);
 	}
 }
 
@@ -953,9 +953,9 @@ void EditorContext::HandleDroppedFile(const std::string& path)
 	{
 		uint32_t slot = ImportMeshAsset(path);
 		if (slot != UINT32_MAX)
-			LOG_INFO_F("[Editor] Drag-and-drop imported mesh → slot %u", slot);
+			LOG_ENG_INFO_F("[Editor] Drag-and-drop imported mesh → slot %u", slot);
 		else
-			LOG_ERROR_F("[Editor] Failed to import dropped file: %s", path.c_str());
+			LOG_ENG_ERROR_F("[Editor] Failed to import dropped file: %s", path.c_str());
 	}
 	else if (ext == ".tnxmesh")
 	{
@@ -978,7 +978,7 @@ void EditorContext::HandleDroppedFile(const std::string& path)
 
 				uint32_t slot = MeshMgr->RegisterMesh(asset, dropName, dropID);
 				if (slot != UINT32_MAX)
-					LOG_INFO_F("[Editor] Loaded dropped mesh '%s' → slot %u", dropName.c_str(), slot);
+					LOG_ENG_INFO_F("[Editor] Loaded dropped mesh '%s' → slot %u", dropName.c_str(), slot);
 			}
 		}
 	}
@@ -988,7 +988,7 @@ void EditorContext::HandleDroppedFile(const std::string& path)
 	}
 	else
 	{
-		LOG_WARN_F("[Editor] Unsupported drop file type: %s", ext.c_str());
+		LOG_ENG_WARN_F("[Editor] Unsupported drop file type: %s", ext.c_str());
 	}
 }
 
@@ -998,9 +998,9 @@ void EditorContext::SpawnPrefab(const std::string& prefabPath)
 	{
 		size_t count = EntityBuilder::SpawnFromFile(reg, prefabPath.c_str());
 		if (count > 0)
-			LOG_INFO_F("[Editor] Spawned %zu entities from prefab: %s", count, prefabPath.c_str());
+			LOG_ENG_INFO_F("[Editor] Spawned %zu entities from prefab: %s", count, prefabPath.c_str());
 		else
-			LOG_ERROR_F("[Editor] Failed to spawn prefab: %s", prefabPath.c_str());
+			LOG_ENG_ERROR_F("[Editor] Failed to spawn prefab: %s", prefabPath.c_str());
 	});
 
 	State.bSceneDirty = true;
@@ -1022,11 +1022,11 @@ void EditorContext::DeleteSelectedEntity()
 		GlobalEntityHandle gHandle = reg->FindEntityByLocation(cacheIdx);
 		if (gHandle.GetIndex() == 0)
 		{
-			LOG_WARN("[Editor] Could not find entity to delete");
+			LOG_ENG_WARN("[Editor] Could not find entity to delete");
 			return;
 		}
 		reg->DestroyByGlobalHandle(gHandle);
-		LOG_INFO_F("[Editor] Deleted entity (cache index %u)", cacheIdx);
+		LOG_ENG_INFO_F("[Editor] Deleted entity (cache index %u)", cacheIdx);
 	});
 
 	State.bSceneDirty = true;
@@ -1090,7 +1090,7 @@ void EditorContext::SnapshotScene()
 	}
 
 	bHasSnapshot = true;
-	LOG_INFO("[Editor] Scene snapshot taken for Play session");
+	LOG_ENG_INFO("[Editor] Scene snapshot taken for Play session");
 }
 
 void EditorContext::RestoreSnapshot()
@@ -1151,8 +1151,8 @@ void EditorContext::RestoreSnapshot()
 			if (ownerArch->TotalEntityCount > archSnap.TotalEntityCount)
 			{
 				uint32_t extraCount = ownerArch->TotalEntityCount - archSnap.TotalEntityCount;
-				LOG_INFO_F("[Editor] Tombstoning %u entities created during Play in archetype %u",
-						   extraCount, archSnap.ArchClassID);
+				LOG_ENG_INFO_F("[Editor] Tombstoning %u entities created during Play in archetype %u",
+							   extraCount, archSnap.ArchClassID);
 
 				// Look up the Flags field descriptor once
 				Archetype::FieldKey flagKey{CacheSlotMeta<>::StaticTypeID(), ReflectionRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID()), 0};
@@ -1183,8 +1183,8 @@ void EditorContext::RestoreSnapshot()
 				// Entities were deleted during Play (swap-and-pop). Field data for surviving
 				// entities has been restored, but the deleted ones can't be reconstructed without
 				// full entity records. This will be properly solved by PIE world duplication.
-				LOG_INFO_F("[Editor] Warning: %u entities were deleted during Play in archetype %u — "
-						   "deleted entities cannot be restored (PIE world duplication needed)",
+				LOG_ENG_INFO_F("[Editor] Warning: %u entities were deleted during Play in archetype %u — "
+							   "deleted entities cannot be restored (PIE world duplication needed)",
 						   archSnap.TotalEntityCount - ownerArch->TotalEntityCount, archSnap.ArchClassID);
 			}
 		}
@@ -1195,7 +1195,7 @@ void EditorContext::RestoreSnapshot()
 
 	PlaySnapshot.clear();
 	bHasSnapshot = false;
-	LOG_INFO("[Editor] Scene restored from snapshot");
+	LOG_ENG_INFO("[Editor] Scene restored from snapshot");
 }
 
 // -----------------------------------------------------------------------
@@ -1220,7 +1220,7 @@ void EditorContext::StartPIE()
 	ServerFlow->Initialize(EnginePtr, &ServerConfig, 960, 540);
 	if (!ServerFlow->CreateWorld())
 	{
-		LOG_ERROR("[PIE] Failed to initialize server world");
+		LOG_ENG_ERROR("[PIE] Failed to initialize server world");
 		ServerFlow.reset();
 		return;
 	}
@@ -1250,7 +1250,7 @@ void EditorContext::StartPIE()
 		client.Flow->Initialize(EnginePtr, &client.Config, 960, 540);
 		if (!client.Flow->CreateWorld())
 		{
-			LOG_ERROR_F("[PIE] Failed to initialize client world %d", ci);
+			LOG_ENG_ERROR_F("[PIE] Failed to initialize client world %d", ci);
 			// Clean up server + already-created clients
 			for (auto& c : PIEClients)
 			{
@@ -1285,7 +1285,7 @@ void EditorContext::StartPIE()
 
 	if (!EnginePtr->EnsureNetworking())
 	{
-		LOG_ERROR("[PIE] Failed to initialize networking — aborting");
+		LOG_ENG_ERROR("[PIE] Failed to initialize networking — aborting");
 		// Clean up viewports
 		for (auto& c : PIEClients)
 		{
@@ -1309,7 +1309,7 @@ void EditorContext::StartPIE()
 	// Server: listen on PIE loopback port
 	if (!connMgr->Listen(PIEPort))
 	{
-		LOG_ERROR("[PIE] Failed to listen — aborting");
+		LOG_ENG_ERROR("[PIE] Failed to listen — aborting");
 		for (auto& c : PIEClients)
 		{
 			renderer->RemoveViewport(c.Viewport.get());
@@ -1341,7 +1341,7 @@ void EditorContext::StartPIE()
 		uint32_t clientHandle = connMgr->Connect("127.0.0.1", PIEPort);
 		if (clientHandle == 0)
 		{
-			LOG_ERROR_F("[PIE] Client %zu failed to connect — aborting", i);
+			LOG_ENG_ERROR_F("[PIE] Client %zu failed to connect — aborting", i);
 			connMgr->StopListening();
 			for (auto& c : PIEClients)
 			{
@@ -1386,7 +1386,7 @@ void EditorContext::StartPIE()
 
 		if (serverHandle == 0)
 		{
-			LOG_WARN_F("[PIE] Could not identify server-side handle for client %zu", i);
+			LOG_ENG_WARN_F("[PIE] Could not identify server-side handle for client %zu", i);
 		}
 		else
 		{
@@ -1406,7 +1406,7 @@ void EditorContext::StartPIE()
 			}
 
 			if (ownerID == 0)
-				LOG_WARN_F("[PIE] OwnerID never assigned for client %zu server handle %u", i, serverHandle);
+				LOG_ENG_WARN_F("[PIE] OwnerID never assigned for client %zu server handle %u", i, serverHandle);
 
 			// Promote client entry: wire world to the now-known OwnerID.
 			PIEClients[i].Flow->GetWorld()->LocalOwnerID = ownerID;
@@ -1463,8 +1463,8 @@ void EditorContext::StartPIE()
 
 	bPIEActive = true;
 	State.ClearSelection();
-	LOG_INFO_F("[PIE] Started: 1 server%s + %zu client(s), port %u",
-			   bServerVisible ? " (visible)" : " (headless)",
+	LOG_ENG_INFO_F("[PIE] Started: 1 server%s + %zu client(s), port %u",
+				   bServerVisible ? " (visible)" : " (headless)",
 			   PIEClients.size(), PIEPort);
 }
 
@@ -1554,7 +1554,7 @@ void EditorContext::StopPIE()
 	if (LogicPtr) LogicPtr->SetSimPaused(bPrePIESimWasPaused);
 
 	bPIEActive = false;
-	LOG_INFO("[PIE] Stopped");
+	LOG_ENG_INFO("[PIE] Stopped");
 }
 
 void EditorContext::DrawEditorViewportPanel()

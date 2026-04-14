@@ -103,8 +103,8 @@ public:
 
 		PendingConstructSpawns.push_back(std::move(buf));
 
-		LOG_INFO_F("[Replication] RegisterConstruct: ownerID=%u typeHash=%u netIndex=%u views=%u",
-				   ownerID, typeHash, ref.Handle.NetIndex, viewCount);
+		LOG_ENG_INFO_F("[Replication] RegisterConstruct: ownerID=%u typeHash=%u netIndex=%u views=%u",
+					   ownerID, typeHash, ref.Handle.NetIndex, viewCount);
 		return ref;
 	}
 

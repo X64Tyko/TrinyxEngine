@@ -54,11 +54,11 @@ entry.OwnerID     = ownerID;
 entry.ClientWorld = world;
 entry.Handler->SetClientWorld(ownerID, world);
 MapConnectionToWorld(ownerID, world);
-LOG_INFO_F("[PIENet] Client handle %u promoted to OwnerID=%u", clientHandle, ownerID);
+LOG_ENG_INFO_F("[PIENet] Client handle %u promoted to OwnerID=%u", clientHandle, ownerID);
 return;
 }
 }
-LOG_WARN_F("[PIENet] UpdateClientOwnerID: no entry for handle %u", clientHandle);
+LOG_ENG_WARN_F("[PIENet] UpdateClientOwnerID: no entry for handle %u", clientHandle);
 }
 
 void PIENetThread::RemoveClient(uint8_t ownerID)
@@ -112,7 +112,7 @@ const ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
 
 if (!ci)
 {
-LOG_WARN_F("[PIENet] HandleMessage: unknown connection %u", msg.Connection);
+LOG_ENG_WARN_F("[PIENet] HandleMessage: unknown connection %u", msg.Connection);
 return;
 }
 
@@ -133,8 +133,8 @@ return;
 }
 }
 
-LOG_WARN_F("[PIENet] HandleMessage: no client handler for connection %u (OwnerID=%u)",
-   msg.Connection, ci->OwnerID);
+LOG_ENG_WARN_F("[PIENet] HandleMessage: no client handler for connection %u (OwnerID=%u)",
+			   msg.Connection, ci->OwnerID);
 }
 }
 

@@ -89,7 +89,7 @@ static void WriteFieldValue(void* dst, size_t fieldSize, FieldValueType valueTyp
 						std::memcpy(dst, &v, 1);
 						break;
 					}
-				default: LOG_WARN_F("[EntityBuilder] Unsupported field size %zu, skipping", fieldSize);
+				default: LOG_ENG_WARN_F("[EntityBuilder] Unsupported field size %zu, skipping", fieldSize);
 					break;
 			}
 			break;
@@ -146,7 +146,7 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 	const JsonValue* typeVal = entityJson.Find("type");
 	if (!typeVal || !typeVal->IsString())
 	{
-		LOG_ERROR("[EntityBuilder] Entity missing 'type' field");
+		LOG_ENG_ERROR("[EntityBuilder] Entity missing 'type' field");
 		return EntityHandle{};
 	}
 
@@ -162,7 +162,7 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 	ClassID classID = MR.GetEntityByName(typeName);
 	if (classID == 0)
 	{
-		LOG_ERROR_F("[EntityBuilder] Unknown entity type '%s'", typeName.c_str());
+		LOG_ENG_ERROR_F("[EntityBuilder] Unknown entity type '%s'", typeName.c_str());
 		return EntityHandle{};
 	}
 
@@ -215,8 +215,8 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 				const FieldLookup* field = FindField(fieldMap, fieldName);
 				if (!field)
 				{
-					LOG_WARN_F("[EntityBuilder] Unknown field '%s.%s' on entity type '%s'",
-							   compName.c_str(), fieldName.c_str(), typeName.c_str());
+					LOG_ENG_WARN_F("[EntityBuilder] Unknown field '%s.%s' on entity type '%s'",
+								   compName.c_str(), fieldName.c_str(), typeName.c_str());
 					continue;
 				}
 
@@ -258,7 +258,7 @@ static JsonValue LoadAssetJSON(const std::string& path)
 	std::ifstream file(path);
 	if (!file.is_open())
 	{
-		LOG_ERROR_F("[EntityBuilder] Failed to open asset '%s'", path.c_str());
+		LOG_ENG_ERROR_F("[EntityBuilder] Failed to open asset '%s'", path.c_str());
 		return JsonValue{};
 	}
 	std::ostringstream ss;
@@ -309,7 +309,7 @@ static size_t SpawnFromAssetJSON(Registry* reg, const std::string& path,
 {
 	if (ActivePrefabLoads.count(path))
 	{
-		LOG_ERROR_F("[EntityBuilder] Prefab cycle detected at '%s'", path.c_str());
+		LOG_ENG_ERROR_F("[EntityBuilder] Prefab cycle detected at '%s'", path.c_str());
 		return 0;
 	}
 
@@ -340,7 +340,7 @@ static size_t SpawnFromAssetJSON(Registry* reg, const std::string& path,
 		}
 		else
 		{
-			LOG_WARN_F("[EntityBuilder] Unrecognized asset format: '%s'", path.c_str());
+			LOG_ENG_WARN_F("[EntityBuilder] Unrecognized asset format: '%s'", path.c_str());
 		}
 	}
 
@@ -353,7 +353,7 @@ static size_t SpawnSceneInternal(Registry* reg, const JsonValue& sceneJson, bool
 	const JsonValue* entities = sceneJson.Find("entities");
 	if (!entities || !entities->IsArray())
 	{
-		LOG_ERROR("[EntityBuilder] Scene/group missing 'entities' array");
+		LOG_ENG_ERROR("[EntityBuilder] Scene/group missing 'entities' array");
 		return 0;
 	}
 
@@ -367,8 +367,8 @@ static size_t SpawnSceneInternal(Registry* reg, const JsonValue& sceneJson, bool
 			std::string path = ResolveAssetIDFromJSON(*prefabRef);
 			if (path.empty())
 			{
-				LOG_WARN_F("[EntityBuilder] Prefab AssetID %lld not found in registry",
-						   static_cast<long long>(static_cast<int64_t>(prefabRef->AsNumber())));
+				LOG_ENG_WARN_F("[EntityBuilder] Prefab AssetID %lld not found in registry",
+							   static_cast<long long>(static_cast<int64_t>(prefabRef->AsNumber())));
 				continue;
 			}
 			count += SpawnFromAssetJSON(reg, path, entry.Find("overrides"), bBackground);
@@ -389,7 +389,7 @@ size_t EntityBuilder::SpawnScene(Registry* reg, const JsonValue& sceneJson, bool
 
 	const JsonValue* nameVal = sceneJson.Find("name");
 	const char* sceneName    = (nameVal && nameVal->IsString()) ? nameVal->AsString().c_str() : "unnamed";
-	LOG_INFO_F("[EntityBuilder] Spawned %zu entities from scene '%s'", count, sceneName);
+	LOG_ENG_INFO_F("[EntityBuilder] Spawned %zu entities from scene '%s'", count, sceneName);
 
 	return count;
 }
@@ -600,7 +600,7 @@ JsonValue EntityBuilder::SerializeScene(Registry* reg, const char* sceneName,
 	size_t entityCount = entities.GetArray().size();
 	scene["entities"]  = std::move(entities);
 
-	LOG_INFO_F("[EntityBuilder] Serialized %zu entities into scene '%s'", entityCount, sceneName);
+	LOG_ENG_INFO_F("[EntityBuilder] Serialized %zu entities into scene '%s'", entityCount, sceneName);
 	return scene;
 }
 
@@ -613,13 +613,13 @@ bool EntityBuilder::SaveToFile(Registry* reg, const char* sceneName, const char*
 	std::ofstream file(filePath);
 	if (!file.is_open())
 	{
-		LOG_ERROR_F("[EntityBuilder] Failed to open file '%s' for writing", filePath);
+		LOG_ENG_ERROR_F("[EntityBuilder] Failed to open file '%s' for writing", filePath);
 		return false;
 	}
 
 	file << json;
 	file.close();
 
-	LOG_INFO_F("[EntityBuilder] Saved scene to '%s'", filePath);
+	LOG_ENG_INFO_F("[EntityBuilder] Saved scene to '%s'", filePath);
 	return true;
 }

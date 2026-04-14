@@ -18,15 +18,15 @@ bool GNSContext::Initialize(GNSStatusChangedFn statusFn)
 	SteamNetworkingErrMsg errMsg;
 	if (!GameNetworkingSockets_Init(nullptr, errMsg))
 	{
-		LOG_ERROR("[GNSContext] GameNetworkingSockets_Init failed");
-		LOG_ERROR(errMsg);
+		LOG_ENG_ERROR("[GNSContext] GameNetworkingSockets_Init failed");
+		LOG_ENG_ERROR(errMsg);
 		return false;
 	}
 
 	SocketsInterface = SteamNetworkingSockets();
 	if (!SocketsInterface)
 	{
-		LOG_ERROR("[GNSContext] SteamNetworkingSockets() returned nullptr after init");
+		LOG_ENG_ERROR("[GNSContext] SteamNetworkingSockets() returned nullptr after init");
 		GameNetworkingSockets_Kill();
 		return false;
 	}
@@ -38,7 +38,7 @@ bool GNSContext::Initialize(GNSStatusChangedFn statusFn)
 	}
 
 	bInitialized = true;
-	LOG_INFO("[GNSContext] Initialized");
+	LOG_ENG_INFO("[GNSContext] Initialized");
 	return true;
 }
 
@@ -50,5 +50,5 @@ void GNSContext::Shutdown()
 	GameNetworkingSockets_Kill();
 	bInitialized = false;
 
-	LOG_INFO("[GNSContext] Shutdown");
+	LOG_ENG_INFO("[GNSContext] Shutdown");
 }

@@ -25,7 +25,7 @@ void ReplicationSystem::Initialize(World* serverWorld)
 {
 	ServerWorld = serverWorld;
 	Replicated.clear();
-	LOG_INFO("[Replication] Initialized");
+	LOG_ENG_INFO("[Replication] Initialized");
 }
 
 // ---------------------------------------------------------------------------
@@ -88,8 +88,13 @@ void ReplicationSystem::SendConstructSpawns(NetConnectionManager* connMgr, uint3
 			if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
 			if (ci.RepState < ClientRepState::Loaded) continue;
 			connMgr->Send(ci.Handle, header, buf.data(), /*reliable=*/true);
-			LOG_INFO_F("[Replication] ConstructSpawn → ownerID=%u viewCount=%u",
-					   ci.OwnerID, payload->ViewCount);
+			{
+				Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
+								 ? ServerWorld->GetFlowManager()->GetSoul(ci.OwnerID)
+								 : nullptr;
+				LOG_NET_INFO_F(soul, "[Replication] ConstructSpawn → ownerID=%u viewCount=%u",
+							   ci.OwnerID, payload->ViewCount);
+			}
 		}
 	}
 
@@ -107,7 +112,7 @@ bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* e
 {
 	if (len < sizeof(ConstructSpawnPayload))
 	{
-		LOG_WARN("[Replication] HandleConstructSpawn: payload too small");
+		LOG_NET_WARN(nullptr, "[Replication] HandleConstructSpawn: payload too small");
 		return true; // Malformed — don't retry
 	}
 
@@ -124,6 +129,10 @@ bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* e
 	const uint8_t ownerID   = netHandle.GetOwnerID();
 	const uint8_t viewCount = header->ViewCount;
 
+	// Hoist soul lookup so all early-return log paths can show the role tag.
+	FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr;
+	Soul* soul        = flow ? flow->GetSoul(ownerID) : nullptr;
+
 	// Resolve EntityNetHandles → local EntityHandles.
 	// If any handle is unresolved, the EntitySpawn hasn't been processed yet — defer.
 	constexpr uint8_t MaxViews = 8;
@@ -138,14 +147,14 @@ bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* e
 		GlobalEntityHandle gH = entityReg->GlobalEntityRegistry.NetToRecord.get(enh.GetHandleIndex());
 		if (gH.GetIndex() == 0)
 		{
-			LOG_DEBUG_F("[Replication] HandleConstructSpawn: EntityNetHandle %u not yet available — deferring", enh.Value);
+			LOG_NET_DEBUG_F(soul, "[Replication] HandleConstructSpawn: EntityNetHandle %u not yet available — deferring", enh.Value);
 			return false;
 		}
 
 		EntityRecord* entRec = entityReg->GlobalEntityRegistry.Records[gH.GetIndex()];
 		if (!entRec || !entRec->IsValid())
 		{
-			LOG_DEBUG_F("[Replication] HandleConstructSpawn: EntityNetHandle %u record invalid — deferring", enh.Value);
+			LOG_NET_DEBUG_F(soul, "[Replication] HandleConstructSpawn: EntityNetHandle %u record invalid — deferring", enh.Value);
 			return false;
 		}
 
@@ -159,13 +168,9 @@ bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* e
 
 	if (!factory)
 	{
-		LOG_WARN_F("[Replication] HandleConstructSpawn: no factory for typeHash=%u", typeHash);
+		LOG_NET_WARN_F(soul, "[Replication] HandleConstructSpawn: no factory for typeHash=%u", typeHash);
 		return true; // Bad type — don't retry
 	}
-
-	// Look up the owning Soul before creating — passed into the Construct base.
-	FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr;
-	Soul* soul        = flow ? flow->GetSoul(ownerID) : nullptr;
 
 	// If no Soul exists for this ownerID, lazily create an Echo Soul so the
 	// Construct can be claimed and input-gated correctly (e.g., server-owned
@@ -177,7 +182,7 @@ bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* e
 	void* raw = factory(reg, clientWorld, resolvedHandles, resolvedCount, soul);
 	if (!raw)
 	{
-		LOG_WARN("[Replication] HandleConstructSpawn: factory returned null");
+		LOG_NET_WARN(soul, "[Replication] HandleConstructSpawn: factory returned null");
 		return true;
 	}
 
@@ -194,11 +199,11 @@ bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* e
 	if (soul)
 	{
 		soul->ClaimBody(ref);
-		LOG_INFO_F("[Replication] HandleConstructSpawn: ClaimBody → Soul ownerID=%u role=%u", ownerID, static_cast<uint8_t>(soul->GetRole()));
+		LOG_NET_INFO_F(soul, "[Replication] HandleConstructSpawn: ClaimBody → Soul ownerID=%u role=%u", ownerID, static_cast<uint8_t>(soul->GetRole()));
 	}
 	else
 	{
-		LOG_WARN_F("[Replication] HandleConstructSpawn: no Soul and no FlowManager for ownerID=%u", ownerID);
+		LOG_NET_WARN_F(soul, "[Replication] HandleConstructSpawn: no Soul and no FlowManager for ownerID=%u", ownerID);
 	}
 	return true;
 }
@@ -212,7 +217,7 @@ void ReplicationSystem::RegisterEntity(Registry* reg, EntityHandle localHandle, 
 	GlobalEntityHandle gHandle = reg->GlobalEntityRegistry.LookupGlobalHandle(localHandle);
 	if (gHandle.GetIndex() == 0)
 	{
-		LOG_WARN("[Replication] RegisterEntity: invalid handle");
+		LOG_ENG_WARN("[Replication] RegisterEntity: invalid handle");
 		return;
 	}
 	AssignNetHandle(reg, gHandle, ownerID);
@@ -369,8 +374,13 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 		connMgr->Send(ci.Handle, serverReadyHeader, reinterpret_cast<const uint8_t*>(&serverReadyMsg), true);
 
 		ci.RepState = ClientRepState::Loaded;
-		LOG_INFO_F("[Replication] Initial flush: %d entities → ownerID=%u, ServerReady sent → Loaded",
-				   flushCount, ci.OwnerID);
+		{
+			Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
+							 ? ServerWorld->GetFlowManager()->GetSoul(ci.OwnerID)
+							 : nullptr;
+			LOG_NET_INFO_F(soul, "[Replication] Initial flush: %d entities → ownerID=%u, ServerReady sent → Loaded",
+						   flushCount, ci.OwnerID);
+		}
 	}
 
 	// --- Pass 2: Incremental spawns for fully loaded connections ---
@@ -396,7 +406,7 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 	}
 
 	if (spawnCount > 0)
-	LOG_DEBUG_F("[Replication] Sent %d incremental EntitySpawn(s)", spawnCount);
+		LOG_NET_DEBUG_F(nullptr, "[Replication] Sent %d incremental EntitySpawn(s)", spawnCount);
 }
 
 // ---------------------------------------------------------------------------
@@ -494,7 +504,7 @@ void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayloa
 	reg->CreateInternal(classType, {&gHandle, 1});
 	if (gHandle.GetIndex() == 0)
 	{
-		LOG_WARN_F("[Replication] Failed to create entity ClassID %u", classType);
+		LOG_ENG_WARN_F("[Replication] Failed to create entity ClassID %u", classType);
 		return;
 	}
 
@@ -505,7 +515,7 @@ void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayloa
 	EntityRecord* record = reg->GlobalEntityRegistry.Records[gHandle.GetIndex()];
 	if (!record || !record->IsValid())
 	{
-		LOG_WARN("[Replication] Entity created but record invalid");
+		LOG_ENG_WARN("[Replication] Entity created but record invalid");
 		return;
 	}
 	record->NetworkID = receivedNetHandle;

@@ -24,7 +24,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
 {
 	if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
 	{
-		LOG_WARN_F("[Vulkan Validation] %s", callbackData->pMessage);
+		LOG_ENG_WARN_F("[Vulkan Validation] %s", callbackData->pMessage);
 	}
 	return VK_FALSE;
 }
@@ -36,7 +36,7 @@ bool VulkanContext::Initialize(SDL_Window* window, bool enableValidation)
 
 	if (volkInitialize() != VK_SUCCESS)
 	{
-		LOG_ERROR("[VulkanContext] volkInitialize failed – Vulkan loader not found");
+		LOG_ENG_ERROR("[VulkanContext] volkInitialize failed – Vulkan loader not found");
 		return false;
 	}
 
@@ -53,7 +53,7 @@ bool VulkanContext::Initialize(SDL_Window* window, bool enableValidation)
 
 	if (enableValidation && !SetupDebugMessenger())
 	{
-		LOG_WARN("[VulkanContext] Could not set up debug messenger (continuing without validation output)");
+		LOG_ENG_WARN("[VulkanContext] Could not set up debug messenger (continuing without validation output)");
 	}
 
 	if (!CreateSurface(window)) return false;
@@ -65,7 +65,7 @@ bool VulkanContext::Initialize(SDL_Window* window, bool enableValidation)
 	if (!CreateSwapchain(window)) return false;
 	// Depth image is owned by VulkRender (VMA-allocated, recreated on resize).
 
-	LOG_INFO("[VulkanContext] Initialized successfully");
+	LOG_ENG_INFO("[VulkanContext] Initialized successfully");
 	return true;
 }
 
@@ -122,8 +122,7 @@ bool VulkanContext::CreateInstance(SDL_Window* /*window*/, bool enableValidation
 					break;
 				}
 			if (found) layers.push_back(ValidationLayer);
-			else
-				LOG_WARN("[VulkanContext] Validation layer requested but not available");
+			else LOG_ENG_WARN("[VulkanContext] Validation layer requested but not available");
 		}
 
 		vk::ApplicationInfo appInfo{};
@@ -141,12 +140,12 @@ bool VulkanContext::CreateInstance(SDL_Window* /*window*/, bool enableValidation
 		createInfo.ppEnabledLayerNames     = layers.data();
 
 		Instance = VkContext.createInstance(createInfo);
-		LOG_INFO("[VulkanContext] Vulkan instance created");
+		LOG_ENG_INFO("[VulkanContext] Vulkan instance created");
 		return true;
 	}
 	catch (const vk::SystemError& e)
 	{
-		LOG_ERROR_F("[VulkanContext] vkCreateInstance failed: %s", e.what());
+		LOG_ENG_ERROR_F("[VulkanContext] vkCreateInstance failed: %s", e.what());
 		return false;
 	}
 }
@@ -169,7 +168,7 @@ bool VulkanContext::SetupDebugMessenger()
 	VkResult result                       = vkCreateDebugUtilsMessengerEXT(*Instance, &createInfo, nullptr, &rawMessenger);
 	if (result != VK_SUCCESS)
 	{
-		LOG_WARN_F("[VulkanContext] vkCreateDebugUtilsMessengerEXT failed: %d", result);
+		LOG_ENG_WARN_F("[VulkanContext] vkCreateDebugUtilsMessengerEXT failed: %d", result);
 		return false;
 	}
 	DebugMessenger = vk::raii::DebugUtilsMessengerEXT{Instance, rawMessenger};
@@ -182,7 +181,7 @@ bool VulkanContext::CreateSurface(SDL_Window* window)
 	VkSurfaceKHR rawSurface = VK_NULL_HANDLE;
 	if (!SDL_Vulkan_CreateSurface(window, *Instance, nullptr, &rawSurface))
 	{
-		LOG_ERROR_F("[VulkanContext] SDL_Vulkan_CreateSurface failed: %s", SDL_GetError());
+		LOG_ENG_ERROR_F("[VulkanContext] SDL_Vulkan_CreateSurface failed: %s", SDL_GetError());
 		return false;
 	}
 	// Wrap the SDL-provided C handle in a raii::SurfaceKHR (takes ownership of destruction).
@@ -198,7 +197,7 @@ bool VulkanContext::SelectPhysicalDevice()
 		auto physDevices = Instance.enumeratePhysicalDevices();
 		if (physDevices.empty())
 		{
-			LOG_ERROR("[VulkanContext] No Vulkan-capable GPUs found");
+			LOG_ENG_ERROR("[VulkanContext] No Vulkan-capable GPUs found");
 			return false;
 		}
 
@@ -229,7 +228,7 @@ bool VulkanContext::SelectPhysicalDevice()
 			if (props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu)
 			{
 				selectedIdx = i;
-				LOG_INFO_F("[VulkanContext] Selected discrete GPU: %s", props.deviceName.data());
+				LOG_ENG_INFO_F("[VulkanContext] Selected discrete GPU: %s", props.deviceName.data());
 				break;
 			}
 			if (fallbackIdx == physDevices.size()) fallbackIdx = i;
@@ -238,7 +237,7 @@ bool VulkanContext::SelectPhysicalDevice()
 		if (selectedIdx == physDevices.size()) selectedIdx = fallbackIdx;
 		if (selectedIdx == physDevices.size())
 		{
-			LOG_ERROR("[VulkanContext] No suitable GPU found (VK_KHR_SWAPCHAIN not supported)");
+			LOG_ENG_ERROR("[VulkanContext] No suitable GPU found (VK_KHR_SWAPCHAIN not supported)");
 			return false;
 		}
 
@@ -288,8 +287,8 @@ bool VulkanContext::SelectPhysicalDevice()
 					{
 						bHasReBAR      = true;
 						ReBarHeapIndex = j;
-						LOG_INFO_F("[VulkanContext] ReBAR detected: heap %u, memory type %u (%.0f GB)",
-								   i, j,
+						LOG_ENG_INFO_F("[VulkanContext] ReBAR detected: heap %u, memory type %u (%.0f GB)",
+									   i, j,
 								   static_cast<double>(memProps.memoryHeaps[i].size) /
 								   (1024.0 * 1024.0 * 1024.0));
 					}
@@ -297,20 +296,19 @@ bool VulkanContext::SelectPhysicalDevice()
 			}
 		}
 
-		if (!bHasReBAR)
-			LOG_INFO("[VulkanContext] ReBAR not detected – will use staging buffer for delta uploads");
+		if (!bHasReBAR) LOG_ENG_INFO("[VulkanContext] ReBAR not detected – will use staging buffer for delta uploads");
 
-		LOG_INFO_F("[VulkanContext] Buffer device address: %s", bSupportsBufferDeviceAddress ? "YES" : "NO");
-		LOG_INFO_F("[VulkanContext] Host image copy:       %s", bSupportsHostImageCopy ? "YES" : "NO");
-		LOG_INFO_F("[VulkanContext] Push descriptors:      %s", bSupportsPushDescriptors ? "YES" : "NO");
-		LOG_INFO_F("[VulkanContext] Shader objects:        %s",
-				   bSupportsShaderObject ? "YES" : "NO (will use traditional pipelines)");
+		LOG_ENG_INFO_F("[VulkanContext] Buffer device address: %s", bSupportsBufferDeviceAddress ? "YES" : "NO");
+		LOG_ENG_INFO_F("[VulkanContext] Host image copy:       %s", bSupportsHostImageCopy ? "YES" : "NO");
+		LOG_ENG_INFO_F("[VulkanContext] Push descriptors:      %s", bSupportsPushDescriptors ? "YES" : "NO");
+		LOG_ENG_INFO_F("[VulkanContext] Shader objects:        %s",
+					   bSupportsShaderObject ? "YES" : "NO (will use traditional pipelines)");
 
 		return true;
 	}
 	catch (const vk::SystemError& e)
 	{
-		LOG_ERROR_F("[VulkanContext] Physical device selection failed: %s", e.what());
+		LOG_ENG_ERROR_F("[VulkanContext] Physical device selection failed: %s", e.what());
 		return false;
 	}
 }
@@ -351,7 +349,7 @@ bool VulkanContext::CreateLogicalDevice()
 
 		if (Queues.GraphicsFamily == UINT32_MAX)
 		{
-			LOG_ERROR("[VulkanContext] No graphics+present queue family found");
+			LOG_ENG_ERROR("[VulkanContext] No graphics+present queue family found");
 			return false;
 		}
 		if (Queues.ComputeFamily == UINT32_MAX) Queues.ComputeFamily = Queues.GraphicsFamily;
@@ -432,13 +430,13 @@ bool VulkanContext::CreateLogicalDevice()
 		Queues.Compute  = getQ(Queues.ComputeFamily);
 		Queues.Transfer = getQ(Queues.TransferFamily);
 
-		LOG_INFO_F("[VulkanContext] Logical device created (Graphics=%u, Compute=%u, Transfer=%u)",
-				   Queues.GraphicsFamily, Queues.ComputeFamily, Queues.TransferFamily);
+		LOG_ENG_INFO_F("[VulkanContext] Logical device created (Graphics=%u, Compute=%u, Transfer=%u)",
+					   Queues.GraphicsFamily, Queues.ComputeFamily, Queues.TransferFamily);
 		return true;
 	}
 	catch (const vk::SystemError& e)
 	{
-		LOG_ERROR_F("[VulkanContext] vkCreateDevice failed: %s", e.what());
+		LOG_ENG_ERROR_F("[VulkanContext] vkCreateDevice failed: %s", e.what());
 		return false;
 	}
 }
@@ -463,7 +461,7 @@ bool VulkanContext::CreateCommandPools()
 	}
 	catch (const vk::SystemError& e)
 	{
-		LOG_ERROR_F("[VulkanContext] Failed to create command pools: %s", e.what());
+		LOG_ENG_ERROR_F("[VulkanContext] Failed to create command pools: %s", e.what());
 		return false;
 	}
 }
@@ -529,14 +527,14 @@ bool VulkanContext::CreateSwapchain(SDL_Window* window)
 			Swapchain.ImageViews.push_back(Device.createImageView(viewInfo));
 		}
 
-		LOG_INFO_F("[VulkanContext] Swapchain created: %ux%u, %zu images, format %d",
-				   extent.width, extent.height, images.size(),
+		LOG_ENG_INFO_F("[VulkanContext] Swapchain created: %ux%u, %zu images, format %d",
+					   extent.width, extent.height, images.size(),
 				   static_cast<int>(surfaceFormat.format));
 		return true;
 	}
 	catch (const vk::SystemError& e)
 	{
-		LOG_ERROR_F("[VulkanContext] Swapchain creation failed: %s", e.what());
+		LOG_ENG_ERROR_F("[VulkanContext] Swapchain creation failed: %s", e.what());
 		return false;
 	}
 }

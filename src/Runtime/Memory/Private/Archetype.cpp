@@ -68,11 +68,11 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& c
 
 		if (!fields || fields->empty())
 		{
-			LOG_ERROR_F("Component %u has no fields registered", typeID);
+			LOG_ENG_ERROR_F("Component %u has no fields registered", typeID);
 			return;
 		}
 
-		LOG_INFO_F("Component %u: %zu fields", typeID, fields->size());
+		LOG_ENG_INFO_F("Component %u: %zu fields", typeID, fields->size());
 
 		for (uint8_t fieldIdx = 0; fieldIdx < fields->size(); ++fieldIdx)
 		{
@@ -100,8 +100,8 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& c
 	static constexpr size_t MinEntitySize = 64;
 	TotalChunkDataSize                    = std::max(currentOffset, MinEntitySize);
 
-	LOG_INFO_F("Archetype layout: %zu field arrays, %zu bytes, %u entities/chunk",
-			   ArchetypeFieldLayout.count(), TotalChunkDataSize, EntitiesPerChunk);
+	LOG_ENG_INFO_F("Archetype layout: %zu field arrays, %zu bytes, %u entities/chunk",
+				   ArchetypeFieldLayout.count(), TotalChunkDataSize, EntitiesPerChunk);
 
 	// Validate temporal field count doesn't exceed chunk header capacity
 	assert(ArchetypeFieldLayout.count() <= Chunk::MAX_CHUNK_FIELDS);
@@ -235,7 +235,7 @@ std::vector<void*> Archetype::GetFieldArrays(Chunk* targetChunk, ComponentTypeID
 
 	if (!fields || fields->empty())
 	{
-		LOG_ERROR_F("Component %u has no fields registered", typeID);
+		LOG_ENG_ERROR_F("Component %u has no fields registered", typeID);
 		return {};
 	}
 
@@ -315,7 +315,7 @@ Chunk* Archetype::AllocateChunk()
 	Reg->GetTemporalCache()->AdvanceAllocator(ArchSystemID, EntitiesPerChunk, largestSize);
 #endif
 
-	LOG_INFO_F("Allocated chunk with %i entities at cache index %zi", EntitiesPerChunk, NewChunk->Header.CacheIndexStart);
+	LOG_ENG_INFO_F("Allocated chunk with %i entities at cache index %zi", EntitiesPerChunk, NewChunk->Header.CacheIndexStart);
 
 	// Debug: Track virtual memory fragmentation
 	// This helps answer: "Why is 'spanned' so much larger than 'used'?"

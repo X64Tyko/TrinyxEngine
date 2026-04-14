@@ -119,7 +119,7 @@ namespace TrinyxJobs
 		{
 			if (!s_Queues[q].Initialize(queueCapacity))
 			{
-				LOG_ERROR("[Jobs] Failed to allocate queue");
+				LOG_ENG_ERROR("[Jobs] Failed to allocate queue");
 				return false;
 			}
 		}
@@ -130,7 +130,7 @@ namespace TrinyxJobs
 		s_WorkerCount = TrinyxThreading::GetWorkerThreadCapacity();
 		if (s_WorkerCount == 0)
 		{
-			LOG_ERROR("[Jobs] No cores available for workers");
+			LOG_ENG_ERROR("[Jobs] No cores available for workers");
 			return false;
 		}
 
@@ -145,8 +145,8 @@ namespace TrinyxJobs
 			TrinyxThreading::PinThread(s_Workers.back());
 		}
 
-		LOG_INFO_F("[Jobs] Initialized: %u workers, %zu-slot queues (Phys/Rend/Genl)",
-				   s_WorkerCount, queueCapacity);
+		LOG_ENG_INFO_F("[Jobs] Initialized: %u workers, %zu-slot queues (Phys/Rend/Genl)",
+					   s_WorkerCount, queueCapacity);
 		return true;
 	}
 
@@ -169,7 +169,7 @@ namespace TrinyxJobs
 
 		for (uint32_t q = 0; q < QueueCount; ++q) s_Queues[q].Shutdown();
 
-		LOG_INFO("[Jobs] Shutdown complete");
+		LOG_ENG_INFO("[Jobs] Shutdown complete");
 	}
 
 	void SubmitJob(const Job& job, Queue queue)
@@ -184,7 +184,7 @@ namespace TrinyxJobs
 		if (!pushed && queue != Queue::General)
 		{
 			pushed = s_Queues[std::countr_zero(static_cast<uint8_t>(Queue::General))].TryPush(job);
-			LOG_ERROR("[Jobs] Queue full");
+			LOG_ENG_ERROR("[Jobs] Queue full");
 		}
 
 		assert(pushed && "Job queues full — increase JobCacheSize in config");

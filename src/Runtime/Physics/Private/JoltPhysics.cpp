@@ -40,19 +40,19 @@ JPH_SUPPRESS_WARNINGS
 #ifdef JPH_ENABLE_ASSERTS
 static void JoltTraceImpl(const char* inFMT, ...)
 {
-	char buffer[500]; // fits in LOG_DEBUG_F's 512-byte internal buffer with "[Jolt] " prefix
+	char buffer[500]; // fits in LOG_ENG_DEBUG_F's 512-byte internal buffer with "[Jolt] " prefix
 	va_list list;
 	va_start(list, inFMT);
 	vsnprintf(buffer, sizeof(buffer), inFMT, list);
 	va_end(list);
-	LOG_DEBUG_F("[Jolt] %s", buffer);
+	LOG_ENG_DEBUG_F("[Jolt] %s", buffer);
 }
 
 static bool JoltAssertFailedImpl(const char* inExpression, const char* inMessage,
 								 const char* inFile, JPH::uint inLine)
 {
-	LOG_ERROR_F("[Jolt] ASSERT FAILED: %s:%u: (%s) %s",
-				inFile, inLine, inExpression, inMessage ? inMessage : "");
+	LOG_ENG_ERROR_F("[Jolt] ASSERT FAILED: %s:%u: (%s) %s",
+					inFile, inLine, inExpression, inMessage ? inMessage : "");
 	return true; // trigger debugger breakpoint
 }
 #endif
@@ -169,8 +169,8 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 	EntityToBody.resize(config->MAX_JOLT_BODIES, JPH::BodyID());
 	BodyToEntity.resize(config->MAX_JOLT_BODIES, InvalidEntityIndex);
 
-	LOG_INFO_F("[JoltPhysics] Initialized — maxBodies=%u, tempAlloc=%uMB, maxConcurrency=%d",
-			   cMaxBodies, (2048 * config->MAX_JOLT_BODIES) / (1024 * 1024),
+	LOG_ENG_INFO_F("[JoltPhysics] Initialized — maxBodies=%u, tempAlloc=%uMB, maxConcurrency=%d",
+				   cMaxBodies, (2048 * config->MAX_JOLT_BODIES) / (1024 * 1024),
 			   JobSystem->GetMaxConcurrency());
 
 	for (auto& vec : fieldScratch)
@@ -185,7 +185,7 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 	// One snapshot per Flush+Pull boundary frame.
 	SnapshotCapacity = static_cast<uint32_t>(config->TemporalFrameCount / config->PhysicsUpdateInterval);
 	SnapshotRing.resize(SnapshotCapacity);
-	LOG_INFO_F("[JoltPhysics] Snapshot ring: %u slots for rollback", SnapshotCapacity);
+	LOG_ENG_INFO_F("[JoltPhysics] Snapshot ring: %u slots for rollback", SnapshotCapacity);
 #endif
 
 	return true;
@@ -211,7 +211,7 @@ void JoltPhysics::Shutdown()
 	delete s_BPLayerInterface;
 	s_BPLayerInterface = nullptr;
 
-	LOG_INFO("[JoltPhysics] Shutdown complete");
+	LOG_ENG_INFO("[JoltPhysics] Shutdown complete");
 }
 
 void JoltPhysics::Step(float dt)
@@ -383,7 +383,7 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 
 	if (bodiesCreated > 0 || bodiesDestroyed > 0)
 	{
-		LOG_INFO_F("[JoltPhysics] Created %u bodies, destroyed %u orphans", bodiesCreated, bodiesDestroyed);
+		LOG_ENG_INFO_F("[JoltPhysics] Created %u bodies, destroyed %u orphans", bodiesCreated, bodiesDestroyed);
 	}
 }
 
@@ -576,7 +576,7 @@ void JoltPhysics::ResetAllBodies()
 
 	if (bodiesDestroyed > 0)
 	{
-		LOG_INFO_F("[JoltPhysics] Reset: destroyed %u bodies", bodiesDestroyed);
+		LOG_ENG_INFO_F("[JoltPhysics] Reset: destroyed %u bodies", bodiesDestroyed);
 	}
 }
 
@@ -635,8 +635,8 @@ bool JoltPhysics::RestoreSnapshot(uint32_t frameNumber)
 	auto& slot = SnapshotRing[physStep % SnapshotCapacity];
 	if (slot.FrameNumber != frameNumber)
 	{
-		LOG_WARN_F("[JoltPhysics] Snapshot for frame %u not found (slot has frame %u)",
-				   frameNumber, slot.FrameNumber);
+		LOG_ENG_WARN_F("[JoltPhysics] Snapshot for frame %u not found (slot has frame %u)",
+					   frameNumber, slot.FrameNumber);
 		return false;
 	}
 

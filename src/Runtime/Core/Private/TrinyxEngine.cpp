@@ -77,8 +77,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	TNX_ZONE_N("Engine_Init");
 
 	Logger::Get().Init("TrinyxEngine.log", LogLevel::Debug);
-	LOG_INFO("TrinyxEngine initialization started");
-
+	LOG_ENG_INFO("TrinyxEngine initialization started");
 	TrinyxThreading::Initialize();
 	TrinyxThreading::PinCurrentThread(TrinyxThreading::GetIdealCore(CoreAffinity::Input));
 
@@ -140,6 +139,18 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 #endif
 	snprintf(Config.ProjectDir, sizeof(Config.ProjectDir), "%s", GameConfig.ProjectDir);
 
+	// Apply per-channel log levels from config (Unset → Info for Engine, Debug for Game).
+	{
+		const LogLevel engineLevel = (Config.EngineLogLevel >= 0)
+										 ? static_cast<LogLevel>(Config.EngineLogLevel)
+										 : LogLevel::Info;
+		const LogLevel gameLevel = (Config.GameLogLevel >= 0)
+									   ? static_cast<LogLevel>(Config.GameLogLevel)
+									   : LogLevel::Debug;
+		Logger::Get().SetMinLevel(LogChannel::Engine, engineLevel);
+		Logger::Get().SetMinLevel(LogChannel::Game, gameLevel);
+	}
+
 	// Publish all static-init registered types (states, modes, entity types)
 	// to the AssetRegistry so they're resolvable by name at runtime.
 	ReflectionRegistry::Get().PublishToAssetRegistry();
@@ -157,7 +168,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	{
 		if (!GNS.Initialize())
 		{
-			LOG_ERROR("GNSContext::Initialize failed — falling back to Standalone");
+			LOG_ENG_ERROR("GNSContext::Initialize failed — falling back to Standalone");
 			Config.Mode = EngineMode::Standalone;
 		}
 		else
@@ -216,7 +227,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	Render->SetEngine(this);
 #endif
 
-	LOG_INFO("TrinyxEngine initialization complete");
+	LOG_ENG_INFO("TrinyxEngine initialization complete");
 	return true;
 }
 
@@ -249,7 +260,7 @@ bool TrinyxEngine::EnsureNetworking()
 	{
 		if (!GNS.Initialize())
 		{
-			LOG_ERROR("[Engine] EnsureNetworking: GNS init failed");
+			LOG_ENG_ERROR("[Engine] EnsureNetworking: GNS init failed");
 			return false;
 		}
 	}
@@ -320,12 +331,12 @@ void TrinyxEngine::RunMainLoop()
 
 		if (DefaultWorld->GetLogicThread() && !DefaultWorld->GetLogicThread()->IsRunning())
 		{
-			LOG_ERROR("[Sentinel] Logic thread stopped unexpectedly — shutting down");
+			LOG_ENG_ERROR("[Sentinel] Logic thread stopped unexpectedly — shutting down");
 			bIsRunning.store(false, std::memory_order_release);
 		}
 		if (Render && !Render->IsRunning())
 		{
-			LOG_ERROR("[Sentinel] Render thread stopped unexpectedly — shutting down");
+			LOG_ENG_ERROR("[Sentinel] Render thread stopped unexpectedly — shutting down");
 			bIsRunning.store(false, std::memory_order_release);
 		}
 
@@ -338,7 +349,7 @@ void TrinyxEngine::RunMainLoop()
 
 void TrinyxEngine::Shutdown()
 {
-	LOG_INFO("TrinyxEngine shutting down");
+	LOG_ENG_INFO("TrinyxEngine shutting down");
 
 	// Stop threads — FlowManager owns World lifecycle
 	Flow->StopWorld();
@@ -490,8 +501,8 @@ void TrinyxEngine::CalculateFPS()
 
 	if (FpsTimer >= 1.0) [[unlikely]]
 	{
-		LOG_DEBUG_F("Main FPS: %d | Frame: %.2fms",
-					static_cast<int>(FrameCount / FpsTimer),
+		LOG_ENG_DEBUG_F("Main FPS: %d | Frame: %.2fms",
+						static_cast<int>(FrameCount / FpsTimer),
 					(FpsTimer / FrameCount) * 1000.0);
 		FrameCount = 0;
 		FpsTimer   = 0.0;

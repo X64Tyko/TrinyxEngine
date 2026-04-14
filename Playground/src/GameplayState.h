@@ -87,7 +87,8 @@ public:
 				LOG_WARN("[GameplayState] ServerReady: no world, sweep skipped");
 				return;
 			}
-			world->Spawn([](Registry* reg)
+			FlowManager* flow = Flow;
+			world->Spawn([flow](Registry* reg)
 			{
 				ComponentCacheBase* cache  = reg->GetTemporalCache();
 				const uint32_t frame       = cache->GetActiveWriteFrame();
@@ -109,7 +110,7 @@ public:
 					sweepCount          += static_cast<int>((activeBit & mask & ~f) >> activeShift);
 					flags[i]            = static_cast<int32_t>(f | (activeBit & mask));
 				}
-				LOG_INFO_F("[Replication] ServerReady: swept %d Alive→Active", sweepCount);
+				LOG_NET_INFO_F(flow->GetSoul(0), "[Replication] ServerReady: swept %d Alive→Active", sweepCount);
 			});
 		}
 	}

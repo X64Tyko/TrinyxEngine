@@ -28,13 +28,13 @@ Registry::Registry(const EngineConfig* config)
 
 Registry::~Registry()
 {
-	LOG_INFO_F("Destroying Registry with %zu archetypes", Archetypes.size());
+	LOG_ENG_INFO_F("Destroying Registry with %zu archetypes", Archetypes.size());
 
 	for (auto& Pair : Archetypes)
 	{
-		LOG_INFO_F("Deleting archetype with %zu chunks", Pair.second->Chunks.size());
+		LOG_ENG_INFO_F("Deleting archetype with %zu chunks", Pair.second->Chunks.size());
 		delete Pair.second;
-		LOG_INFO("Archetype deleted successfully");
+		LOG_ENG_INFO("Archetype deleted successfully");
 	}
 	Archetypes.clear();
 }
@@ -168,7 +168,7 @@ GlobalEntityHandle Registry::AllocateGlobalHandle()
 		EntityRecord& Record = GlobalEntityRegistry.Records.findOrAdd(Index);
 		if (Record.IsValid())
 		{
-			LOG_ERROR_F("Existing entity requested at index: %u", Index);
+			LOG_ENG_ERROR_F("Existing entity requested at index: %u", Index);
 			assert(false && "Reallocating entity record");
 		}
 
@@ -196,7 +196,7 @@ void Registry::FreeGlobalHandle(GlobalEntityHandle gHandle)
 	EntityRecord* record = GlobalEntityRegistry.Records[index];
 	if (!record || !record->IsValid())
 	{
-		LOG_WARN_F("Invalid entity record at index %u", index);
+		LOG_ENG_WARN_F("Invalid entity record at index %u", index);
 		return;
 	}
 
@@ -275,8 +275,8 @@ void Registry::CreateInternal(ClassID classID, std::span<GlobalEntityHandle> out
 	if (MR.ClassToArchetype.find(classID) == MR.ClassToArchetype.end())
 	{
 		const char* name = (classID < 4096) ? MR.EntityGetters[classID].Name : nullptr;
-		LOG_ERROR_F("CreateInternal: ClassID %u ('%s') not registered",
-					classID, name ? name : "unknown");
+		LOG_ENG_ERROR_F("CreateInternal: ClassID %u ('%s') not registered",
+						classID, name ? name : "unknown");
 		assert(false && "Entity ClassID not registered");
 		return;
 	}
@@ -330,7 +330,7 @@ bool Registry::DestroyRecord(GlobalEntityHandle& gHandle)
 	EntityRecord* record = GlobalEntityRegistry.Records[gHandle.GetIndex()];
 	if (!record)
 	{
-		LOG_ERROR_F("Failed to find record for handle %u during destruction", gHandle.GetIndex());
+		LOG_ENG_ERROR_F("Failed to find record for handle %u during destruction", gHandle.GetIndex());
 		return false;
 	}
 	Archetype* arch = record->Arch;
@@ -344,7 +344,7 @@ bool Registry::DestroyRecord(EntityRecord& record)
 {
 	if (!record.IsValid())
 	{
-		LOG_ERROR("Requested record is invalid for destruction");
+		LOG_ENG_ERROR("Requested record is invalid for destruction");
 		return false;
 	}
 	Archetype* arch = record.Arch;

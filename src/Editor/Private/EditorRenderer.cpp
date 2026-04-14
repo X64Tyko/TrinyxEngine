@@ -76,7 +76,7 @@ void EditorRenderer::OnPostStart()
 {
 	if (!InitImGui())
 	{
-		LOG_ERROR("[EditorRenderer] ImGui initialization failed; editor disabled");
+		LOG_ENG_ERROR("[EditorRenderer] ImGui initialization failed; editor disabled");
 	}
 }
 
@@ -117,7 +117,7 @@ bool EditorRenderer::InitImGui()
 
 	if (vkCreateDescriptorPool(Device, &poolCI, nullptr, &ImGuiDescriptorPool) != VK_SUCCESS)
 	{
-		LOG_ERROR("[EditorRenderer] Failed to create ImGui descriptor pool");
+		LOG_ENG_ERROR("[EditorRenderer] Failed to create ImGui descriptor pool");
 		return false;
 	}
 
@@ -177,7 +177,7 @@ bool EditorRenderer::InitImGui()
 
 	if (!ImGui_ImplVulkan_Init(&initInfo))
 	{
-		LOG_ERROR("[EditorRenderer] ImGui_ImplVulkan_Init failed");
+		LOG_ENG_ERROR("[EditorRenderer] ImGui_ImplVulkan_Init failed");
 		return false;
 	}
 
@@ -193,7 +193,7 @@ bool EditorRenderer::InitImGui()
 	ActiveViewports.insert(ActiveViewports.begin(), &EditorViewport);
 
 	bImGuiInitialized = true;
-	LOG_INFO("[EditorRenderer] ImGui initialized (dynamic rendering, docking + multi-viewport enabled)");
+	LOG_ENG_INFO("[EditorRenderer] ImGui initialized (dynamic rendering, docking + multi-viewport enabled)");
 	return true;
 }
 
@@ -225,7 +225,7 @@ void EditorRenderer::ShutdownImGui()
 	}
 
 	bImGuiInitialized = false;
-	LOG_INFO("[EditorRenderer] ImGui shut down");
+	LOG_ENG_INFO("[EditorRenderer] ImGui shut down");
 }
 
 void EditorRenderer::PushImGuiEvent(const SDL_Event& event)
@@ -298,8 +298,8 @@ VkDescriptorSet EditorRenderer::GetEditorViewportTexture() const
 void EditorRenderer::AddViewport(WorldViewport* vp)
 {
 	ActiveViewports.push_back(vp);
-	LOG_INFO_F("[EditorRenderer] Added viewport %p (world %p), %u active",
-			   static_cast<void*>(vp), static_cast<void*>(vp->TargetWorld),
+	LOG_ENG_INFO_F("[EditorRenderer] Added viewport %p (world %p), %u active",
+				   static_cast<void*>(vp), static_cast<void*>(vp->TargetWorld),
 			   static_cast<uint32_t>(ActiveViewports.size()));
 }
 
@@ -309,8 +309,8 @@ void EditorRenderer::RemoveViewport(WorldViewport* vp)
 	if (it != ActiveViewports.end())
 	{
 		ActiveViewports.erase(it);
-		LOG_INFO_F("[EditorRenderer] Removed viewport %p, %u remaining",
-				   static_cast<void*>(vp),
+		LOG_ENG_INFO_F("[EditorRenderer] Removed viewport %p, %u remaining",
+					   static_cast<void*>(vp),
 				   static_cast<uint32_t>(ActiveViewports.size()));
 	}
 }
@@ -373,7 +373,7 @@ void EditorRenderer::AllocateViewportResources(WorldViewport* vp, uint32_t width
 		static_cast<VkImageView>(vp->ColorTarget.View),
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-	LOG_INFO_F("[EditorRenderer] Allocated viewport resources %ux%u", width, height);
+	LOG_ENG_INFO_F("[EditorRenderer] Allocated viewport resources %ux%u", width, height);
 }
 
 void EditorRenderer::FreeViewportResources(WorldViewport* vp)
@@ -406,7 +406,7 @@ void EditorRenderer::FreeViewportResources(WorldViewport* vp)
 	vp->Width  = 0;
 	vp->Height = 0;
 
-	LOG_INFO("[EditorRenderer] Freed viewport resources");
+	LOG_ENG_INFO("[EditorRenderer] Freed viewport resources");
 }
 
 // -----------------------------------------------------------------------

@@ -105,31 +105,6 @@ public:
 
 	void PhysicsStep(SimFloat dt)
 	{
-		// Remote players (Echo) on the client have no JoltCharacter simulation — server
-		// corrections are the sole source of truth. Don't overwrite the ECS position.
-		if (bIsClientSide)
-		{
-			Soul* soul = GetOwnerSoul();
-			if (!soul || soul->GetRole() == SoulRole::Echo) return;
-		}
-
-		CharacterController.Update(
-			JPH::Vec3(DesiredVelX, 0, DesiredVelZ),
-			JPH::Vec3(0, -9.81f, 0),
-			static_cast<float>(dt),
-			*GetWorld()->GetPhysics()->GetTempAllocator());
-
-		JPH::RVec3 pos      = CharacterController.GetPosition();
-		Body.Transform.PosX = pos.GetX();
-		Body.Transform.PosY = pos.GetY();
-		Body.Transform.PosZ = pos.GetZ();
-
-		DesiredVelX = 0.0f;
-		DesiredVelZ = 0.0f;
-	}
-
-	void PrePhysics(SimFloat /*dt*/)
-	{
 		// Two cases for client-side constructs:
 		//
 		// 1. Remote player (Echo) — server corrections are authoritative. Sync JoltCharacter
@@ -154,13 +129,33 @@ public:
 			}
 
 			// Local player: only teleport-snap for gross corrections (> 5 m).
-			JPH::RVec3 joltPos = CharacterController.GetPosition();
-			const float dx     = ecsPosX - static_cast<float>(joltPos.GetX());
-			const float dy     = ecsPosY - static_cast<float>(joltPos.GetY());
-			const float dz     = ecsPosZ - static_cast<float>(joltPos.GetZ());
-			if (dx * dx + dy * dy + dz * dz > 25.0f) CharacterController.SetPosition(JPH::RVec3(ecsPosX, ecsPosY, ecsPosZ));
+			// JPH::RVec3 joltPos = CharacterController.GetPosition();
+			// const float dx     = ecsPosX - static_cast<float>(joltPos.GetX());
+			// const float dy     = ecsPosY - static_cast<float>(joltPos.GetY());
+			// const float dz     = ecsPosZ - static_cast<float>(joltPos.GetZ());
+			// if (dx * dx + dy * dy + dz * dz > 25.0f)
+			{
+				CharacterController.SetPosition(JPH::RVec3(ecsPosX, ecsPosY, ecsPosZ));
+			}
 		}
 
+		CharacterController.Update(
+			JPH::Vec3(DesiredVelX, 0, DesiredVelZ),
+			JPH::Vec3(0, -9.81f, 0),
+			static_cast<float>(dt),
+			*GetWorld()->GetPhysics()->GetTempAllocator());
+
+		JPH::RVec3 pos      = CharacterController.GetPosition();
+		Body.Transform.PosX = pos.GetX();
+		Body.Transform.PosY = pos.GetY();
+		Body.Transform.PosZ = pos.GetZ();
+
+		DesiredVelX = 0.0f;
+		DesiredVelZ = 0.0f;
+	}
+
+	void PrePhysics(SimFloat /*dt*/)
+	{
 		// Route input through the Soul so Authority reads the injected net buffer
 		// and Owner reads the local keyboard — no raw World buffer access in gameplay.
 		// Standalone (no Soul, ownerID 0) falls back to the local sim buffer.
@@ -169,19 +164,6 @@ public:
 			? soul->GetSimInput(GetWorld())
 			: GetWorld()->GetSimInput(); // standalone fallback
 		if (!simInput) return; // Echo souls have no input
-
-		// DEBUG: log input state for server-side (Authority) constructs
-		if (!bIsClientSide)
-		{
-			static uint32_t dbgPrePhysCount = 0;
-			const bool fwd  = simInput->IsActionDown(Action::MoveForward);
-			const bool back = simInput->IsActionDown(Action::MoveBackward);
-			const bool left = simInput->IsActionDown(Action::MoveLeft);
-			const bool right= simInput->IsActionDown(Action::MoveRight);
-			if (fwd || back || left || right || (++dbgPrePhysCount % 512 == 0))
-				LOG_DEBUG_F("[PlayerConstruct::PrePhysics] ownerID=%u soul=%p simInput=%p fwd=%d back=%d left=%d right=%d",
-				            GetOwnerID(), soul, simInput, (int)fwd, (int)back, (int)left, (int)right);
-		}
 
 		float sinYaw = std::sin(Yaw);
 		float cosYaw = std::cos(Yaw);

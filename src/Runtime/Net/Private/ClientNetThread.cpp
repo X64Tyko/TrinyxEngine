@@ -70,13 +70,13 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
 				if (!ci)
 				{
-					LOG_WARN_F("[ClientNet] ConnectionHandshake from unknown connection %u", msg.Connection);
+					LOG_ENG_WARN_F("[ClientNet] ConnectionHandshake from unknown connection %u", msg.Connection);
 					break;
 				}
 
 				if (msg.Header.SenderID == 0)
 				{
-					LOG_WARN("[ClientNet] Invalid HandshakeAccept — SenderID is 0");
+					LOG_ENG_WARN("[ClientNet] Invalid HandshakeAccept — SenderID is 0");
 					break;
 				}
 
@@ -102,8 +102,12 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 				}
 				ci->RepState = ClientRepState::Synchronizing;
 
-				LOG_INFO_F("[ClientNet] HandshakeAccept received — OwnerID=%u serverFrame=%u",
-						   msg.Header.SenderID, ci->ServerFrameAtHandshake);
+				{
+					World* w2  = WorldMap[msg.Header.SenderID];
+					Soul* soul = (w2 && w2->GetFlowManager()) ? w2->GetFlowManager()->GetSoul(msg.Header.SenderID) : nullptr;
+					LOG_NET_INFO_F(soul, "[ClientNet] HandshakeAccept received — OwnerID=%u serverFrame=%u",
+								   msg.Header.SenderID, ci->ServerFrameAtHandshake);
+				}
 				break;
 			}
 
@@ -114,7 +118,7 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 
 				if (msg.Payload.size() < sizeof(ClockSyncPayload))
 				{
-					LOG_WARN_F("[ClientNet] ClockSync payload too small (%zu)", msg.Payload.size());
+					LOG_ENG_WARN_F("[ClientNet] ClockSync payload too small (%zu)", msg.Payload.size());
 					break;
 				}
 
@@ -125,8 +129,12 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 				ci->InputLead      = static_cast<uint32_t>(ci->RTT_ms * 0.5f / stepMs) + 2u;
 				ci->RepState       = ClientRepState::Loading;
 
-				LOG_INFO_F("[ClientNet] ClockSync complete — InputLead=%u RTT=%.1fms → Loading",
-						   ci->InputLead, ci->RTT_ms);
+				{
+					World* w2  = WorldMap[ci->OwnerID];
+					Soul* soul = (w2 && w2->GetFlowManager()) ? w2->GetFlowManager()->GetSoul(ci->OwnerID) : nullptr;
+					LOG_NET_INFO_F(soul, "[ClientNet] ClockSync complete — InputLead=%u RTT=%.1fms → Loading",
+								   ci->InputLead, ci->RTT_ms);
+				}
 				break;
 			}
 
@@ -137,19 +145,19 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 
 				if (msg.Payload.size() < sizeof(TravelPayload))
 				{
-					LOG_WARN_F("[ClientNet] TravelNotify payload too small (%zu)", msg.Payload.size());
+					LOG_ENG_WARN_F("[ClientNet] TravelNotify payload too small (%zu)", msg.Payload.size());
 					break;
 				}
 
 				const auto* travelMsg = reinterpret_cast<const TravelPayload*>(msg.Payload.data());
 				ci->RepState          = ClientRepState::LevelLoading;
 
-				LOG_INFO_F("[ClientNet] TravelNotify received — loading level '%s'", travelMsg->LevelPath);
-
 				{
 					World* clientWorld = WorldMap[ci->OwnerID];
-					if (FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr)
-						flow->PostTravelNotify(travelMsg->LevelPath);
+					FlowManager* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
+					Soul* soul         = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
+					LOG_NET_INFO_F(soul, "[ClientNet] TravelNotify received — loading level '%s'", travelMsg->LevelPath);
+					if (flow) flow->PostTravelNotify(travelMsg->LevelPath);
 				}
 
 				// Auto-acknowledge (synchronous load in PIE).
@@ -157,7 +165,12 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 				NetChannel(ci, ConnectionMgr).SendHeaderOnly(NetMessageType::LevelReady, /*reliable=*/true);
 
 				ci->RepState = ClientRepState::LevelLoaded;
-				LOG_INFO("[ClientNet] LevelReady sent → client LevelLoaded");
+				{
+					World* clientWorld = WorldMap[ci->OwnerID];
+					FlowManager* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
+					Soul* soul         = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
+					LOG_NET_INFO(soul, "[ClientNet] LevelReady sent → client LevelLoaded");
+				}
 				break;
 			}
 
@@ -165,7 +178,7 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 			{
 				if (msg.Payload.size() < sizeof(FlowEventPayload))
 				{
-					LOG_WARN_F("[ClientNet] FlowEvent payload too small (%zu)", msg.Payload.size());
+					LOG_ENG_WARN_F("[ClientNet] FlowEvent payload too small (%zu)", msg.Payload.size());
 					break;
 				}
 
@@ -173,29 +186,26 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
 				if (!ci) break;
 
-				if (ci->RepState == ClientRepState::LevelLoaded
-					&& ev->EventID == static_cast<uint8_t>(FlowEventID::ServerReady))
-				{
-					ci->RepState = ClientRepState::Loaded;
-
-					// SendPlayerBeginRequest just sends a packet — safe to call from NetThread.
-					{
-						World* clientWorld = WorldMap[ci->OwnerID];
-						if (FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr)
-							flow->SendPlayerBeginRequest(NetChannel(ci, ConnectionMgr), msg.Header.FrameNumber, ci->Predictions);
-					}
-
-					// The Alive→Active sweep is deferred to FlowManager's Sentinel tick so it runs
-					// AFTER the level load Spawn() (posted via TravelNotify) completes. Posting the
-					// event here (rather than calling Spawn directly) prevents a SpawnSync race where
-					// the sweep wins the mutex before level entities exist.
-					LOG_INFO("[ClientNet] FlowEvent::ServerReady → Loaded, sweep deferred to FlowManager");
-				}
-
 				{
 					World* clientWorld = WorldMap[ci->OwnerID];
-					if (FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr)
-						flow->PostNetEvent(ev->EventID);
+					FlowManager* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
+					Soul* soul         = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
+
+					if (ci->RepState == ClientRepState::LevelLoaded
+						&& ev->EventID == static_cast<uint8_t>(FlowEventID::ServerReady))
+					{
+						ci->RepState = ClientRepState::Loaded;
+
+						if (flow) flow->SendPlayerBeginRequest(NetChannel(ci, ConnectionMgr), msg.Header.FrameNumber, ci->Predictions);
+
+						// The Alive→Active sweep is deferred to FlowManager's Sentinel tick so it runs
+						// AFTER the level load Spawn() (posted via TravelNotify) completes. Posting the
+						// event here (rather than calling Spawn directly) prevents a SpawnSync race where
+						// the sweep wins the mutex before level entities exist.
+						LOG_NET_INFO(soul, "[ClientNet] FlowEvent::ServerReady → Loaded, sweep deferred to FlowManager");
+					}
+
+					if (flow) flow->PostNetEvent(ev->EventID);
 				}
 				break;
 			}
@@ -204,7 +214,7 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 			{
 				if (msg.Payload.size() < sizeof(EntitySpawnPayload))
 				{
-					LOG_WARN_F("[ClientNet] EntitySpawn payload too small (%zu)", msg.Payload.size());
+					LOG_ENG_WARN_F("[ClientNet] EntitySpawn payload too small (%zu)", msg.Payload.size());
 					break;
 				}
 
@@ -214,7 +224,7 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 				World* clientWorld    = WorldMap[ownerID];
 				if (!clientWorld)
 				{
-					LOG_WARN_F("[ClientNet] EntitySpawn but no client world for OwnerID %u", ownerID);
+					LOG_ENG_WARN_F("[ClientNet] EntitySpawn but no client world for OwnerID %u", ownerID);
 					break;
 				}
 
@@ -230,7 +240,7 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 			{
 				if (msg.Payload.size() < sizeof(ConstructSpawnPayload))
 				{
-					LOG_WARN_F("[ClientNet] ConstructSpawn payload too small (%zu)", msg.Payload.size());
+					LOG_ENG_WARN_F("[ClientNet] ConstructSpawn payload too small (%zu)", msg.Payload.size());
 					break;
 				}
 
@@ -239,7 +249,7 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 				World* clientWorld    = WorldMap[ownerID];
 				if (!clientWorld)
 				{
-					LOG_WARN_F("[ClientNet] ConstructSpawn but no client world for OwnerID %u", ownerID);
+					LOG_ENG_WARN_F("[ClientNet] ConstructSpawn but no client world for OwnerID %u", ownerID);
 					break;
 				}
 
@@ -254,7 +264,7 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 			{
 				if (msg.Payload.size() < sizeof(StateCorrectionEntry))
 				{
-					LOG_WARN("[ClientNet] StateCorrection payload too small");
+					LOG_ENG_WARN("[ClientNet] StateCorrection payload too small");
 					break;
 				}
 
@@ -288,7 +298,7 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 
 				if (msg.Payload.size() < sizeof(RPCHeader))
 				{
-					LOG_WARN_F("[ClientNet] SoulRPC payload too small (%zu bytes)", msg.Payload.size());
+					LOG_ENG_WARN_F("[ClientNet] SoulRPC payload too small (%zu bytes)", msg.Payload.size());
 					break;
 				}
 
@@ -298,8 +308,8 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 
 				if (paramBytes < rpcHdr->ParamSize)
 				{
-					LOG_WARN_F("[ClientNet] SoulRPC param underrun (MethodID=%u, want=%u, got=%zu)",
-							   rpcHdr->MethodID, rpcHdr->ParamSize, paramBytes);
+					LOG_ENG_WARN_F("[ClientNet] SoulRPC param underrun (MethodID=%u, want=%u, got=%zu)",
+								   rpcHdr->MethodID, rpcHdr->ParamSize, paramBytes);
 					break;
 				}
 
@@ -314,8 +324,8 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 						}
 						else
 						{
-							LOG_WARN_F("[ClientNet] SoulRPC: no Soul for ownerID=%u (MethodID=%u)",
-									   ci->OwnerID, rpcHdr->MethodID);
+							LOG_NET_WARN_F(soul, "[ClientNet] SoulRPC: no Soul for ownerID=%u (MethodID=%u)",
+										   ci->OwnerID, rpcHdr->MethodID);
 						}
 					}
 				}
@@ -324,11 +334,11 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 
 		// Legacy cases — superseded by SoulRPC. Kept for wire-compat; remove once server is updated.
 		case NetMessageType::PlayerBeginConfirm:
-			LOG_WARN("[ClientNet] Received legacy PlayerBeginConfirm — server should use SoulRPC");
+			LOG_ENG_WARN("[ClientNet] Received legacy PlayerBeginConfirm — server should use SoulRPC");
 			break;
 
 		case NetMessageType::PlayerBeginReject:
-			LOG_WARN("[ClientNet] Received legacy PlayerBeginReject — server should use SoulRPC");
+			LOG_ENG_WARN("[ClientNet] Received legacy PlayerBeginReject — server should use SoulRPC");
 			break;
 
 		case NetMessageType::GameModeManifest:
@@ -340,18 +350,18 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 				};
 				if (msg.Header.PayloadSize < sizeof(BaseManifest))
 				{
-					LOG_WARN_F("[ClientNet] GameModeManifest too small (got %u)", msg.Header.PayloadSize);
+					LOG_ENG_WARN_F("[ClientNet] GameModeManifest too small (got %u)", msg.Header.PayloadSize);
 					break;
 				}
 				// TODO: forward raw bytes to GameMode::OnGameModeManifest(payload, size)
 				const auto* base = reinterpret_cast<const BaseManifest*>(msg.Payload.data());
-				LOG_INFO_F("[ClientNet] GameModeManifest received (seq=%u, mode='%s') — GameMode routing not yet wired",
-						   base->SequenceID, base->ModeName);
+				LOG_ENG_INFO_F("[ClientNet] GameModeManifest received (seq=%u, mode='%s') — GameMode routing not yet wired",
+							   base->SequenceID, base->ModeName);
 				break;
 			}
 
 		default:
-			LOG_WARN_F("[ClientNet] Unhandled message type %u", msg.Header.Type);
+			LOG_ENG_WARN_F("[ClientNet] Unhandled message type %u", msg.Header.Type);
 			break;
 	}
 }
@@ -434,7 +444,7 @@ void ClientNetThread::TickInputSend()
 		// Append new discrete events, tagging each with its absolute sim frame.
 		const uint16_t eventCount = netInput->GetEventCount();
 		if (eventCount > 8) [[unlikely]]
-			LOG_WARN_F("[ClientNet] Input event overflow: %u events in net window", eventCount);
+		LOG_ENG_WARN_F("[ClientNet] Input event overflow: %u events in net window", eventCount);
 		for (uint16_t i = 0; i < eventCount; ++i)
 		{
 			InputData e       = netInput->ReadEvent();

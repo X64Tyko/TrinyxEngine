@@ -132,7 +132,7 @@ bool ComponentGeneratorPanel::ExportToFile()
 	{
 		snprintf(StatusMessage, sizeof(StatusMessage), "Failed to create output directory: %s", ex.what());
 		bStatusError = true;
-		LOG_ERROR_F("[ComponentGenerator] Failed to create output directory: %s", ex.what());
+		LOG_ENG_ERROR_F("[ComponentGenerator] Failed to create output directory: %s", ex.what());
 		return false;
 	}
 
@@ -149,10 +149,10 @@ bool ComponentGeneratorPanel::ExportToFile()
 		const std::string s = std::string("Exported: ") + OutputPath;
 		strncpy(StatusMessage, s.c_str(), sizeof(StatusMessage) - 1);
 		StatusMessage[sizeof(StatusMessage) - 1] = '\0';
-		LOG_INFO(s.c_str());
+		LOG_ENG_INFO(s.c_str());
 	}
 	bStatusError = false;
-	LOG_INFO_F("[ComponentGenerator] Exported '%s'", CompName);
+	LOG_ENG_INFO_F("[ComponentGenerator] Exported '%s'", CompName);
 	return true;
 }
 

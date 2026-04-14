@@ -289,21 +289,21 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 	cgltf_result result = cgltf_parse_file(&options, srcPath.c_str(), &data);
 	if (result != cgltf_result_success)
 	{
-		LOG_ERROR_F("[MeshImporter] Failed to parse '%s' (cgltf error %d)", srcPath.c_str(), result);
+		LOG_ENG_ERROR_F("[MeshImporter] Failed to parse '%s' (cgltf error %d)", srcPath.c_str(), result);
 		return false;
 	}
 
 	result = cgltf_load_buffers(&options, data, srcPath.c_str());
 	if (result != cgltf_result_success)
 	{
-		LOG_ERROR_F("[MeshImporter] Failed to load buffers for '%s'", srcPath.c_str());
+		LOG_ENG_ERROR_F("[MeshImporter] Failed to load buffers for '%s'", srcPath.c_str());
 		cgltf_free(data);
 		return false;
 	}
 
 	if (data->meshes_count == 0)
 	{
-		LOG_ERROR_F("[MeshImporter] No meshes found in '%s'", srcPath.c_str());
+		LOG_ENG_ERROR_F("[MeshImporter] No meshes found in '%s'", srcPath.c_str());
 		cgltf_free(data);
 		return false;
 	}
@@ -368,7 +368,7 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 
 		if (ShouldSkipNode(node))
 		{
-			LOG_INFO_F("[MeshImporter] Skipping node '%s' (filter)", nodeName);
+			LOG_ENG_INFO_F("[MeshImporter] Skipping node '%s' (filter)", nodeName);
 			continue;
 		}
 
@@ -377,7 +377,7 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 
 		if (ShouldSkipMeshName(meshName))
 		{
-			LOG_INFO_F("[MeshImporter] Skipping mesh '%s' from node '%s' (name filter)", meshName, nodeName);
+			LOG_ENG_INFO_F("[MeshImporter] Skipping mesh '%s' from node '%s' (name filter)", meshName, nodeName);
 			continue;
 		}
 
@@ -396,8 +396,8 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 			}
 			else
 			{
-				LOG_WARN_F("[MeshImporter] Skipped primitive %zu in mesh '%s' (non-triangle or no positions)",
-						   pi, meshName);
+				LOG_ENG_WARN_F("[MeshImporter] Skipped primitive %zu in mesh '%s' (non-triangle or no positions)",
+							   pi, meshName);
 			}
 		}
 
@@ -405,8 +405,8 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 		cgltf_size meshIdx = static_cast<cgltf_size>(mesh - data->meshes);
 		if (meshIdx < data->meshes_count) meshImported[meshIdx] = true;
 
-		LOG_INFO_F("[MeshImporter] Node '%s' mesh '%s': %zu primitives, %zu verts",
-				   nodeName, meshName, mesh->primitives_count, rawVerts.size() - meshVertsBefore);
+		LOG_ENG_INFO_F("[MeshImporter] Node '%s' mesh '%s': %zu primitives, %zu verts",
+					   nodeName, meshName, mesh->primitives_count, rawVerts.size() - meshVertsBefore);
 	}
 
 	// Import unreferenced meshes at identity (some exporters store bind-pose
@@ -423,7 +423,7 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 
 		if (ShouldSkipMeshName(meshName))
 		{
-			LOG_INFO_F("[MeshImporter] Skipping unreferenced mesh %zu '%s' (name filter)", mi, meshName);
+			LOG_ENG_INFO_F("[MeshImporter] Skipping unreferenced mesh %zu '%s' (name filter)", mi, meshName);
 			continue;
 		}
 
@@ -438,13 +438,13 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 			}
 		}
 
-		LOG_INFO_F("[MeshImporter] Unreferenced mesh %zu '%s': %zu verts (identity transform)",
-				   mi, meshName, rawVerts.size() - meshVertsBefore);
+		LOG_ENG_INFO_F("[MeshImporter] Unreferenced mesh %zu '%s': %zu verts (identity transform)",
+					   mi, meshName, rawVerts.size() - meshVertsBefore);
 	}
 
 	if (rawVerts.empty())
 	{
-		LOG_ERROR_F("[MeshImporter] No valid primitives found in '%s'", srcPath.c_str());
+		LOG_ENG_ERROR_F("[MeshImporter] No valid primitives found in '%s'", srcPath.c_str());
 		cgltf_free(data);
 		return false;
 	}
@@ -486,11 +486,11 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 	std::memcpy(outAsset.AABBMin, aabbMin, sizeof(float) * 3);
 	std::memcpy(outAsset.AABBMax, aabbMax, sizeof(float) * 3);
 
-	LOG_INFO_F("[MeshImporter] Imported '%s': %zu meshes, %zu primitives, %zu verts, %zu indices (deduped from %zu)",
-			   srcPath.c_str(), data->meshes_count, totalPrimitives,
+	LOG_ENG_INFO_F("[MeshImporter] Imported '%s': %zu meshes, %zu primitives, %zu verts, %zu indices (deduped from %zu)",
+				   srcPath.c_str(), data->meshes_count, totalPrimitives,
 			   outAsset.Vertices.size(), outAsset.Indices.size(), totalRawVerts);
-	LOG_INFO_F("[MeshImporter] AABB: min(%.3f, %.3f, %.3f) max(%.3f, %.3f, %.3f) size(%.3f, %.3f, %.3f)",
-			   aabbMin[0], aabbMin[1], aabbMin[2],
+	LOG_ENG_INFO_F("[MeshImporter] AABB: min(%.3f, %.3f, %.3f) max(%.3f, %.3f, %.3f) size(%.3f, %.3f, %.3f)",
+				   aabbMin[0], aabbMin[1], aabbMin[2],
 			   aabbMax[0], aabbMax[1], aabbMax[2],
 			   aabbMax[0]-aabbMin[0], aabbMax[1]-aabbMin[1], aabbMax[2]-aabbMin[2]);
 

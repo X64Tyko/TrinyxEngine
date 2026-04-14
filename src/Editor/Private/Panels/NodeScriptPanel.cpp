@@ -841,7 +841,7 @@ bool NodeScriptPanel::ExportToFile()
 	{
 		snprintf(StatusMsg, sizeof(StatusMsg), "Failed to create output directory: %s", ex.what());
 		bStatusError = true;
-		LOG_ERROR_F("[NodeScript] Failed to create output directory: %s", ex.what());
+		LOG_ENG_ERROR_F("[NodeScript] Failed to create output directory: %s", ex.what());
 		return false;
 	}
 
@@ -858,7 +858,7 @@ bool NodeScriptPanel::ExportToFile()
 		const std::string s = std::string("Exported: ") + OutputPath;
 		strncpy(StatusMsg, s.c_str(), sizeof(StatusMsg) - 1);
 		StatusMsg[sizeof(StatusMsg) - 1] = '\0';
-		LOG_INFO(s.c_str());
+		LOG_ENG_INFO(s.c_str());
 	}
 	bStatusError = false;
 	return true;

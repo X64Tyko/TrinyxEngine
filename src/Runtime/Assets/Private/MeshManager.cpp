@@ -91,7 +91,7 @@ bool MeshManager::Initialize(VulkanMemory* vkMem)
 
 	if (!VertexMegaBuffer.IsValid())
 	{
-		LOG_ERROR("[MeshManager] Vertex mega-buffer allocation failed");
+		LOG_ENG_ERROR("[MeshManager] Vertex mega-buffer allocation failed");
 		return false;
 	}
 
@@ -103,7 +103,7 @@ bool MeshManager::Initialize(VulkanMemory* vkMem)
 
 	if (!IndexMegaBuffer.IsValid())
 	{
-		LOG_ERROR("[MeshManager] Index mega-buffer allocation failed");
+		LOG_ENG_ERROR("[MeshManager] Index mega-buffer allocation failed");
 		return false;
 	}
 
@@ -115,13 +115,13 @@ bool MeshManager::Initialize(VulkanMemory* vkMem)
 
 	if (!MeshTableBuffer.IsValid())
 	{
-		LOG_ERROR("[MeshManager] Mesh table buffer allocation failed");
+		LOG_ENG_ERROR("[MeshManager] Mesh table buffer allocation failed");
 		return false;
 	}
 	std::memset(MeshTableBuffer.MappedPtr, 0, MAX_MESH_SLOTS * sizeof(GpuMeshInfo));
 
-	LOG_INFO_F("[MeshManager] Initialized (vertex: %u MB, index: %u MB)",
-			   VERTEX_MEGA_BUFFER_SIZE / (1024 * 1024),
+	LOG_ENG_INFO_F("[MeshManager] Initialized (vertex: %u MB, index: %u MB)",
+				   VERTEX_MEGA_BUFFER_SIZE / (1024 * 1024),
 			   INDEX_MEGA_BUFFER_SIZE / (1024 * 1024));
 	return true;
 }
@@ -134,7 +134,7 @@ uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& na
 {
 	if (MeshCount >= MAX_MESH_SLOTS)
 	{
-		LOG_ERROR("[MeshManager] Mesh slot limit reached");
+		LOG_ENG_ERROR("[MeshManager] Mesh slot limit reached");
 		return UINT32_MAX;
 	}
 
@@ -143,12 +143,12 @@ uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& na
 
 	if ((NextVertexOffset * sizeof(Vertex) + vertBytes) > VERTEX_MEGA_BUFFER_SIZE)
 	{
-		LOG_ERROR("[MeshManager] Vertex mega-buffer overflow");
+		LOG_ENG_ERROR("[MeshManager] Vertex mega-buffer overflow");
 		return UINT32_MAX;
 	}
 	if ((NextIndexOffset * sizeof(uint32_t) + indexBytes) > INDEX_MEGA_BUFFER_SIZE)
 	{
-		LOG_ERROR("[MeshManager] Index mega-buffer overflow");
+		LOG_ENG_ERROR("[MeshManager] Index mega-buffer overflow");
 		return UINT32_MAX;
 	}
 
@@ -183,8 +183,8 @@ uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& na
 	NextVertexOffset += static_cast<uint32_t>(asset.Vertices.size());
 	NextIndexOffset  += static_cast<uint32_t>(asset.Indices.size());
 
-	LOG_INFO_F("[MeshManager] Registered mesh slot %u (%zu verts, %zu indices)",
-			   slotID, asset.Vertices.size(), asset.Indices.size());
+	LOG_ENG_INFO_F("[MeshManager] Registered mesh slot %u (%zu verts, %zu indices)",
+				   slotID, asset.Vertices.size(), asset.Indices.size());
 	return slotID;
 }
 

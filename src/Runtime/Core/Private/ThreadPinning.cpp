@@ -208,11 +208,11 @@ namespace TrinyxThreading
 		ScanTopology();
 		s_Initialized = true;
 
-		LOG_INFO_F("[ThreadPinning] Detected %u physical cores, %u logical cores (SMT: %s)",
-				   s_PhysicalCores, s_LogicalCores, s_HasSMT ? "yes" : "no");
-		LOG_INFO_F("[ThreadPinning] %u cores available for pinning (skipping core 0)",
-				   static_cast<uint32_t>(s_CoreList.size()));
-		LOG_INFO_F("[ThreadPinning] Worker pool capacity: %u threads", GetWorkerThreadCapacity());
+		LOG_ENG_INFO_F("[ThreadPinning] Detected %u physical cores, %u logical cores (SMT: %s)",
+					   s_PhysicalCores, s_LogicalCores, s_HasSMT ? "yes" : "no");
+		LOG_ENG_INFO_F("[ThreadPinning] %u cores available for pinning (skipping core 0)",
+					   static_cast<uint32_t>(s_CoreList.size()));
+		LOG_ENG_INFO_F("[ThreadPinning] Worker pool capacity: %u threads", GetWorkerThreadCapacity());
 	}
 
 	void PinThread(std::thread& t)
@@ -238,8 +238,8 @@ namespace TrinyxThreading
 #endif
 
 		core.bIsPinned = true;
-		LOG_INFO_F("[ThreadPinning] Pinned thread to logical core %u (physical %u, %s)",
-				   core.LogicalId, core.PhysicalId, core.bIsSMT ? "SMT" : "primary");
+		LOG_ENG_INFO_F("[ThreadPinning] Pinned thread to logical core %u (physical %u, %s)",
+					   core.LogicalId, core.PhysicalId, core.bIsSMT ? "SMT" : "primary");
 	}
 
 	uint32_t GetIdealCore(CoreAffinity affinity)
@@ -282,8 +282,8 @@ namespace TrinyxThreading
 				break;
 			}
 		}
-		
-		LOG_INFO_F("[ThreadPinning] Pinned current thread to core %u", coreId);
+
+		LOG_ENG_INFO_F("[ThreadPinning] Pinned current thread to core %u", coreId);
 	}
 
 	uint32_t GetPhysicalCoreCount() { return s_PhysicalCores; }

@@ -31,12 +31,12 @@ bool VulkanMemory::Initialize(const VulkanContext& ctx)
 	VkResult result = vmaCreateAllocator(&allocInfo, &Allocator);
 	if (result != VK_SUCCESS)
 	{
-		LOG_ERROR_F("[VulkanMemory] vmaCreateAllocator failed: %d", result);
+		LOG_ENG_ERROR_F("[VulkanMemory] vmaCreateAllocator failed: %d", result);
 		return false;
 	}
 
-	LOG_INFO_F("[VulkanMemory] Initialized (ReBAR: %s, BDA: %s, HostImageCopy: %s)",
-			   bHasReBAR ? "YES" : "NO",
+	LOG_ENG_INFO_F("[VulkanMemory] Initialized (ReBAR: %s, BDA: %s, HostImageCopy: %s)",
+				   bHasReBAR ? "YES" : "NO",
 			   bBDA ? "YES" : "NO",
 			   bHostImageCopy ? "YES" : "NO");
 	return true;
@@ -105,8 +105,8 @@ VulkanBuffer VulkanMemory::AllocateBuffer(VkDeviceSize size,
 									  &rawBuffer, &out.Allocation, &allocResult);
 	if (result != VK_SUCCESS)
 	{
-		LOG_ERROR_F("[VulkanMemory] vmaCreateBuffer failed (size=%llu domain=%d): %d",
-					static_cast<unsigned long long>(size),
+		LOG_ENG_ERROR_F("[VulkanMemory] vmaCreateBuffer failed (size=%llu domain=%d): %d",
+						static_cast<unsigned long long>(size),
 					static_cast<int>(domain),
 					result);
 		out.Allocator = VK_NULL_HANDLE; // prevent double-free in destructor
@@ -161,8 +161,8 @@ VulkanImage VulkanMemory::AllocateImage(VkExtent2D extent,
 									 &rawImage, &out.Allocation, nullptr);
 	if (result != VK_SUCCESS)
 	{
-		LOG_ERROR_F("[VulkanMemory] vmaCreateImage failed (format=%d): %d",
-					static_cast<int>(format), result);
+		LOG_ENG_ERROR_F("[VulkanMemory] vmaCreateImage failed (format=%d): %d",
+						static_cast<int>(format), result);
 		out.Allocator = VK_NULL_HANDLE;
 		return out;
 	}
@@ -182,7 +182,7 @@ VulkanImage VulkanMemory::AllocateImage(VkExtent2D extent,
 	result = vkCreateImageView(DeviceCache, &viewInfo, nullptr, &rawView);
 	if (result != VK_SUCCESS)
 	{
-		LOG_ERROR_F("[VulkanMemory] vkCreateImageView failed: %d", result);
+		LOG_ENG_ERROR_F("[VulkanMemory] vkCreateImageView failed: %d", result);
 		// Destroy the image we just made; destructor won't fire since
 		// we're about to clear Allocator to signal invalid state.
 		vmaDestroyImage(Allocator, rawImage, out.Allocation);
@@ -205,7 +205,7 @@ bool VulkanMemory::UploadImage(VulkanImage& image,
 {
 	if (!bHostImageCopy)
 	{
-		LOG_WARN("[VulkanMemory] UploadImage: host image copy not supported on this device");
+		LOG_ENG_WARN("[VulkanMemory] UploadImage: host image copy not supported on this device");
 		return false;
 	}
 
@@ -236,7 +236,7 @@ bool VulkanMemory::UploadImage(VulkanImage& image,
 	VkResult result = vkCopyMemoryToImage(DeviceCache, &copyInfo);
 	if (result != VK_SUCCESS)
 	{
-		LOG_ERROR_F("[VulkanMemory] vkCopyMemoryToImage failed: %d", result);
+		LOG_ENG_ERROR_F("[VulkanMemory] vkCopyMemoryToImage failed: %d", result);
 		return false;
 	}
 	return true;

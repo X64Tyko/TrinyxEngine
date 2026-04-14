@@ -72,7 +72,7 @@ TNX_IMPL_SERVER(Soul, PlayerBegin, PlayerBeginRequestPayload)
 {
 	if (!ctx.CI)
 	{
-		LOG_WARN("[Soul] PlayerBegin: no ConnectionInfo in ctx");
+		LOG_NET_WARN(this, "[Soul] PlayerBegin: no ConnectionInfo in ctx");
 		return;
 	}
 
@@ -100,8 +100,8 @@ TNX_IMPL_SERVER(Soul, PlayerBegin, PlayerBeginRequestPayload)
 		confirm.PosZ         = result->PosZ;
 		ctx.CI->RepState = ClientRepState::Playing;
 		PlayerBeginConfirm(confirm);
-		LOG_INFO_F("[Soul] PlayerBeginConfirm sent (ownerID=%u, pos=%.1f,%.1f,%.1f)",
-		           OwnerID, confirm.PosX, confirm.PosY, confirm.PosZ);
+		LOG_NET_INFO_F(this, "[Soul] PlayerBeginConfirm sent (ownerID=%u, pos=%.1f,%.1f,%.1f)",
+					   OwnerID, confirm.PosX, confirm.PosY, confirm.PosZ);
 	}
 	else
 	{
@@ -109,7 +109,7 @@ TNX_IMPL_SERVER(Soul, PlayerBegin, PlayerBeginRequestPayload)
 		reject.PredictionID = params.PredictionID;
 		reject.Reason       = 2; // GameMode rejected
 		PlayerBeginReject(reject);
-		LOG_INFO_F("[Soul] PlayerBeginReject sent (ownerID=%u)", OwnerID);
+		LOG_NET_INFO_F(this, "[Soul] PlayerBeginReject sent (ownerID=%u)", OwnerID);
 	}
 }
 
@@ -140,8 +140,8 @@ TNX_IMPL_CLIENT(Soul, PlayerBeginConfirm, PlayerBeginConfirmPayload)
 		FlowMgr->OnClientLoaded(OwnerID);
 	}
 
-	LOG_INFO_F("[Soul] PlayerBeginConfirm received (PredictionID=%u, pos=%.1f,%.1f,%.1f)",
-	           params.PredictionID, params.PosX, params.PosY, params.PosZ);
+	LOG_NET_INFO_F(this, "[Soul] PlayerBeginConfirm received (PredictionID=%u, pos=%.1f,%.1f,%.1f)",
+				   params.PredictionID, params.PosX, params.PosY, params.PosZ);
 }
 
 // ---------------------------------------------------------------------------
@@ -162,6 +162,6 @@ TNX_IMPL_CLIENT(Soul, PlayerBeginReject, PlayerBeginRejectPayload)
 	if (FlowMgr)
 		FlowMgr->PostNetEvent(static_cast<uint8_t>(FlowEventID::PlayerBeginReject));
 
-	LOG_WARN_F("[Soul] PlayerBeginReject received (PredictionID=%u, reason=%u)",
-	           params.PredictionID, params.Reason);
+	LOG_NET_WARN_F(this, "[Soul] PlayerBeginReject received (PredictionID=%u, reason=%u)",
+				   params.PredictionID, params.Reason);
 }

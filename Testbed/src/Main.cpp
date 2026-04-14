@@ -197,7 +197,7 @@ TEST(Net_LoopbackPingPong)
 	ASSERT_EQ(msgs[0].Header.SenderID, 0);
 	ASSERT_EQ(msgs[0].Connection, clientConn); // Arrived on the client connection
 
-	LOG_ALWAYS("[Net_LoopbackPingPong] Loopback ping/pong successful — GNS connectivity verified");
+	LOG_ENG_ALWAYS("[Net_LoopbackPingPong] Loopback ping/pong successful — GNS connectivity verified");
 
 	mgr.Shutdown();
 	// gnsLocal destroyed by stack unwinding after mgr
@@ -264,11 +264,11 @@ TEST(Net_InputFrameRouting)
 
 	// Build an InputFrame payload with 'W' key pressed (SDL_SCANCODE_W = 26)
 	InputFramePayload payload{};
-	memset(payload.KeyState, 0, 64);
-	constexpr uint8_t wScancode      = 26; // SDL_SCANCODE_W
-	payload.KeyState[wScancode >> 3] |= (1u << (wScancode & 7));
-	payload.MouseDX                  = 1.5f;
-	payload.MouseDY                  = -0.5f;
+	memset(payload.State.KeyState, 0, 64);
+	constexpr uint8_t wScancode            = 26; // SDL_SCANCODE_W
+	payload.State.KeyState[wScancode >> 3] |= (1u << (wScancode & 7));
+	payload.State.MouseDX                  = 1.5f;
+	payload.State.MouseDY                  = -0.5f;
 
 	// Send InputFrame from client
 	PacketHeader header{};
@@ -303,7 +303,7 @@ TEST(Net_InputFrameRouting)
 	}
 	ASSERT(received);
 
-	LOG_ALWAYS("[Net_InputFrameRouting] InputFrame routed through NetThread to World's InputBuffer — verified");
+	LOG_ENG_ALWAYS("[Net_InputFrameRouting] InputFrame routed through NetThread to World's InputBuffer — verified");
 
 	mgr->StopListening();
 	// gnsLocal and net destroyed in correct order by stack unwinding
@@ -640,8 +640,8 @@ RUNTIME_TEST(Spawn_JoltPyramid)
 		WriteCubeSetups(reg, setups, gPyramidIds);
 	});
 
-	LOG_ALWAYS_F("Jolt Pyramid: %d-tier, %d dynamic + 1 floor = %zu entities (persistent)",
-				 cPyramidHeight, static_cast<int>(setups.size()) - 1, setups.size());
+	LOG_ENG_ALWAYS_F("Jolt Pyramid: %d-tier, %d dynamic + 1 floor = %zu entities (persistent)",
+					 cPyramidHeight, static_cast<int>(setups.size()) - 1, setups.size());
 }
 
 // ---------------------------------------------------------------------------
@@ -689,8 +689,8 @@ RUNTIME_TEST(Spawn_SuperCubeGrid)
 		WriteSuperCubeSetups(reg, setups, gSuperCubeIds);
 	});
 
-	LOG_ALWAYS_F("SuperCube Grid: %d entities in %dx%d grid (30s lifetime)",
-				 Count, gridSide, gridSide);
+	LOG_ENG_ALWAYS_F("SuperCube Grid: %d entities in %dx%d grid (30s lifetime)",
+					 Count, gridSide, gridSide);
 
 	// Self-destruct after 30 seconds
 	auto* idsPtr = &gSuperCubeIds;
@@ -700,8 +700,8 @@ RUNTIME_TEST(Spawn_SuperCubeGrid)
 		TrinyxEngine::Get().Spawn([idsPtr](Registry* reg)
 		{
 			for (EntityHandle id : *idsPtr) reg->Destroy(id);
-			LOG_ALWAYS_F("[RuntimeTest] SuperCube Grid: destroyed %zu entities after 30s",
-						 idsPtr->size());
+			LOG_ENG_ALWAYS_F("[RuntimeTest] SuperCube Grid: destroyed %zu entities after 30s",
+							 idsPtr->size());
 			idsPtr->clear();
 		});
 	}).detach();
@@ -744,8 +744,8 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 		WriteProjectileSetups(reg, setups, gProjectileIds);
 	});
 
-	LOG_ALWAYS_F("Projectile Burst: %d projectiles from origin (0, %.0f, %.0f) (30s lifetime)",
-				 Count, OriginY, OriginZ);
+	LOG_ENG_ALWAYS_F("Projectile Burst: %d projectiles from origin (0, %.0f, %.0f) (30s lifetime)",
+					 Count, OriginY, OriginZ);
 
 	// Self-destruct after 30 seconds
 	auto* idsPtr = &gProjectileIds;
@@ -755,8 +755,8 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 		TrinyxEngine::Get().Spawn([idsPtr](Registry* reg)
 		{
 			for (EntityHandle id : *idsPtr) reg->Destroy(id);
-			LOG_ALWAYS_F("[RuntimeTest] Projectile Burst: destroyed %zu entities after 30s",
-						 idsPtr->size());
+			LOG_ENG_ALWAYS_F("[RuntimeTest] Projectile Burst: destroyed %zu entities after 30s",
+							 idsPtr->size());
 			idsPtr->clear();
 		});
 	}).detach();
@@ -766,7 +766,7 @@ RUNTIME_TEST(Runtime_EntityCountValid)
 {
 	Registry* Reg        = Engine.GetRegistry();
 	size_t totalEntities = Reg->GetTotalEntityCount();
-	LOG_ALWAYS_F("[RuntimeTest] Total entities alive: %zu", totalEntities);
+	LOG_ENG_ALWAYS_F("[RuntimeTest] Total entities alive: %zu", totalEntities);
 	ASSERT(totalEntities > 0);
 }
 
@@ -785,7 +785,7 @@ RUNTIME_TEST(Spawn_PlayerConstruct)
 	});
 	*/
 
-	LOG_ALWAYS("[RuntimeTest] PlayerConstruct spawned — oscillating capsule with color pulse");
+	LOG_ENG_ALWAYS("[RuntimeTest] PlayerConstruct spawned — oscillating capsule with color pulse");
 }
 
 // ---------------------------------------------------------------------------

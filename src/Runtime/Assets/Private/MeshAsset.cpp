@@ -9,14 +9,14 @@ bool SaveMeshAsset(const MeshAsset& asset, const std::string& path)
 {
 	if (!asset.IsValid())
 	{
-		LOG_ERROR("[MeshAsset] Cannot save empty mesh asset");
+		LOG_ENG_ERROR("[MeshAsset] Cannot save empty mesh asset");
 		return false;
 	}
 
 	std::ofstream file(path, std::ios::binary);
 	if (!file.is_open())
 	{
-		LOG_ERROR_F("[MeshAsset] Failed to open '%s' for writing", path.c_str());
+		LOG_ENG_ERROR_F("[MeshAsset] Failed to open '%s' for writing", path.c_str());
 		return false;
 	}
 
@@ -34,12 +34,12 @@ bool SaveMeshAsset(const MeshAsset& asset, const std::string& path)
 
 	if (!file.good())
 	{
-		LOG_ERROR_F("[MeshAsset] Write error for '%s'", path.c_str());
+		LOG_ENG_ERROR_F("[MeshAsset] Write error for '%s'", path.c_str());
 		return false;
 	}
 
-	LOG_INFO_F("[MeshAsset] Saved '%s' (%u verts, %u indices)",
-			   path.c_str(), header.VertexCount, header.IndexCount);
+	LOG_ENG_INFO_F("[MeshAsset] Saved '%s' (%u verts, %u indices)",
+				   path.c_str(), header.VertexCount, header.IndexCount);
 	return true;
 }
 
@@ -48,7 +48,7 @@ bool LoadMeshAsset(MeshAsset& outAsset, const std::string& path)
 	std::ifstream file(path, std::ios::binary);
 	if (!file.is_open())
 	{
-		LOG_ERROR_F("[MeshAsset] Failed to open '%s' for reading", path.c_str());
+		LOG_ENG_ERROR_F("[MeshAsset] Failed to open '%s' for reading", path.c_str());
 		return false;
 	}
 
@@ -57,19 +57,19 @@ bool LoadMeshAsset(MeshAsset& outAsset, const std::string& path)
 
 	if (header.Magic != TnxMeshMagic)
 	{
-		LOG_ERROR_F("[MeshAsset] Invalid magic in '%s'", path.c_str());
+		LOG_ENG_ERROR_F("[MeshAsset] Invalid magic in '%s'", path.c_str());
 		return false;
 	}
 
 	if (header.Version != TnxMeshVersion)
 	{
-		LOG_ERROR_F("[MeshAsset] Unsupported version %u in '%s'", header.Version, path.c_str());
+		LOG_ENG_ERROR_F("[MeshAsset] Unsupported version %u in '%s'", header.Version, path.c_str());
 		return false;
 	}
 
 	if (header.VertexCount == 0 || header.IndexCount == 0)
 	{
-		LOG_ERROR_F("[MeshAsset] Empty mesh in '%s'", path.c_str());
+		LOG_ENG_ERROR_F("[MeshAsset] Empty mesh in '%s'", path.c_str());
 		return false;
 	}
 
@@ -85,12 +85,12 @@ bool LoadMeshAsset(MeshAsset& outAsset, const std::string& path)
 
 	if (!file.good())
 	{
-		LOG_ERROR_F("[MeshAsset] Read error for '%s'", path.c_str());
+		LOG_ENG_ERROR_F("[MeshAsset] Read error for '%s'", path.c_str());
 		outAsset = {};
 		return false;
 	}
 
-	LOG_INFO_F("[MeshAsset] Loaded '%s' (%u verts, %u indices)",
-			   path.c_str(), header.VertexCount, header.IndexCount);
+	LOG_ENG_INFO_F("[MeshAsset] Loaded '%s' (%u verts, %u indices)",
+				   path.c_str(), header.VertexCount, header.IndexCount);
 	return true;
 }

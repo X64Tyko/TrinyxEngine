@@ -40,7 +40,7 @@ void LogicThread::Initialize(Registry* registry, const EngineConfig* config, Jol
 
 	LastCompletedFrame.store(0, std::memory_order_release);
 
-	LOG_INFO("[LogicThread] Initialized");
+	LOG_ENG_INFO("[LogicThread] Initialized");
 }
 
 void LogicThread::Start()
@@ -48,13 +48,13 @@ void LogicThread::Start()
 	bIsRunning.store(true, std::memory_order_release);
 	Thread = std::thread(&LogicThread::ThreadMain, this);
 	TrinyxThreading::PinThread(Thread);
-	LOG_INFO("[LogicThread] Started");
+	LOG_ENG_INFO("[LogicThread] Started");
 }
 
 void LogicThread::Stop()
 {
 	bIsRunning.store(false, std::memory_order_release);
-	LOG_INFO("[LogicThread] Stop requested");
+	LOG_ENG_INFO("[LogicThread] Stop requested");
 }
 
 void LogicThread::Join()
@@ -62,7 +62,7 @@ void LogicThread::Join()
 	if (Thread.joinable())
 	{
 		Thread.join();
-		LOG_INFO("[LogicThread] Joined");
+		LOG_ENG_INFO("[LogicThread] Joined");
 	}
 }
 
@@ -205,7 +205,7 @@ void LogicThread::ThreadMain()
 					bRollbackRequested.store(false, std::memory_order_relaxed);
 					if (bRollbackActive)
 					{
-						LOG_WARN("[Rollback] Rollback requested while one is already active — ignored");
+						LOG_ENG_WARN("[Rollback] Rollback requested while one is already active — ignored");
 					}
 					else
 					{
@@ -412,7 +412,7 @@ void LogicThread::PublishCompletedFrame()
 	{
 		double bufferMs = static_cast<double>(VizInput->GetCurrentSwapTime() - VizInput->GetSwapPerfCount())
 			/ static_cast<double>(SDL_GetPerformanceFrequency()) * 1000.0;
-		LOG_DEBUG_F("[Latency] Buffer: %.2fms (input wait in swap buffer)", bufferMs);
+		LOG_ENG_DEBUG_F("[Latency] Buffer: %.2fms (input wait in swap buffer)", bufferMs);
 	}
 #endif
 #endif
@@ -470,7 +470,7 @@ void LogicThread::TrackFPS()
 		float ms  = static_cast<float>((FpsTimer / FpsFrameCount) * 1000.0);
 		LogicFPS.store(fps, std::memory_order_relaxed);
 		LogicFrameMs.store(ms, std::memory_order_relaxed);
-		LOG_DEBUG_F("Logic FPS: %d | Frame: %.2fms", static_cast<int>(fps), static_cast<double>(ms));
+		LOG_ENG_DEBUG_F("Logic FPS: %d | Frame: %.2fms", static_cast<int>(fps), static_cast<double>(ms));
 		FpsFrameCount = 0;
 		FpsTimer      = 0.0;
 	}
@@ -481,7 +481,7 @@ void LogicThread::TrackFPS()
 		float fms  = static_cast<float>((FpsFixedTimer / FpsFixedCount) * 1000.0);
 		FixedFPS.store(ffps, std::memory_order_relaxed);
 		FixedFrameMs.store(fms, std::memory_order_relaxed);
-		LOG_DEBUG_F("Fixed FPS: %d | Frame: %.2fms", static_cast<int>(ffps), static_cast<double>(fms));
+		LOG_ENG_DEBUG_F("Fixed FPS: %d | Frame: %.2fms", static_cast<int>(ffps), static_cast<double>(fms));
 		FpsFixedCount = 0;
 		FpsFixedTimer = 0.0;
 	}
@@ -525,8 +525,8 @@ void LogicThread::ExecuteRollback(uint32_t targetFrame)
 	const uint32_t alignedTarget    = targetFrame - ((targetFrame % PhysicsDivizor + 1) % PhysicsDivizor);
 	const uint32_t totalResimFrames = T - alignedTarget;
 
-	LOG_INFO_F("[Rollback] Rewind to frame %u (aligned from %u), resim %u frames to frame %u",
-			   alignedTarget, targetFrame, totalResimFrames, T);
+	LOG_ENG_INFO_F("[Rollback] Rewind to frame %u (aligned from %u), resim %u frames to frame %u",
+				   alignedTarget, targetFrame, totalResimFrames, T);
 
 	// ── Rewind ─────────────────────────────────────────────────────────────
 	{
@@ -538,7 +538,7 @@ void LogicThread::ExecuteRollback(uint32_t targetFrame)
 
 		if (!PhysicsPtr->RestoreSnapshot(alignedTarget))
 		{
-			LOG_WARN("[Rollback] Snapshot not found, falling back to rebuild-from-slab");
+			LOG_ENG_WARN("[Rollback] Snapshot not found, falling back to rebuild-from-slab");
 			PhysicsPtr->ResetAllBodies();
 			PhysicsPtr->FlushPendingBodies(RegistryPtr);
 			// Save a fresh baseline snapshot at the rebuild point.
@@ -549,7 +549,7 @@ void LogicThread::ExecuteRollback(uint32_t targetFrame)
 		SimulationTime = FrameNumber * fixedStepTime;
 	}
 
-	LOG_INFO_F("[Rollback] Jolt restored, starting resim from frame %u", FrameNumber);
+	LOG_ENG_INFO_F("[Rollback] Jolt restored, starting resim from frame %u", FrameNumber);
 
 	// ── Resimulate ─────────────────────────────────────────────────────────
 	{
@@ -580,7 +580,7 @@ void LogicThread::ExecuteRollback(uint32_t targetFrame)
 			RegistryPtr->PropagateFrame(FrameNumber++);
 		}
 
-		LOG_INFO_F("[Rollback] Resimulation complete, frame %u", FrameNumber);
+		LOG_ENG_INFO_F("[Rollback] Resimulation complete, frame %u", FrameNumber);
 	}
 
 	bRollbackActive = false;
@@ -647,12 +647,12 @@ void LogicThread::ExecuteRollbackTest()
 		int cmp = std::memcmp(GroundTruthBackup.data(), resimFieldData, fieldDataSize);
 		if (cmp == 0)
 		{
-			LOG_INFO_F("[Rollback] PASSED — byte-perfect determinism (%zu bytes, %u frames resimulated)",
-					   fieldDataSize, RollbackFrameCount);
+			LOG_ENG_INFO_F("[Rollback] PASSED — byte-perfect determinism (%zu bytes, %u frames resimulated)",
+						   fieldDataSize, RollbackFrameCount);
 		}
 		else
 		{
-			LOG_WARN_F("[Rollback] FAILED — divergence detected (%u frames resimulated)", RollbackFrameCount);
+			LOG_ENG_WARN_F("[Rollback] FAILED — divergence detected (%u frames resimulated)", RollbackFrameCount);
 
 			auto fieldInfos = TemporalCache->GetValidFieldInfos();
 			for (const auto& info : fieldInfos)
@@ -681,8 +681,8 @@ void LogicThread::ExecuteRollbackTest()
 					size_t divergentBytes = 0;
 					for (size_t b = 0; b < info.CurrentUsed; ++b) divergentBytes += (truthField[b] != resimField[b]);
 
-					LOG_WARN_F("  DIVERGE: %s (comp=%u field=%zu) entity=%zu+%zu "
-							   "divergent=%zu/%zu (%.2f%%)",
+					LOG_ENG_WARN_F("  DIVERGE: %s (comp=%u field=%zu) entity=%zu+%zu "
+								   "divergent=%zu/%zu (%.2f%%)",
 							   info.FieldName, info.CompType, info.FieldIndex,
 							   entityIdx, byteInField,
 							   divergentBytes, info.CurrentUsed,
@@ -699,19 +699,19 @@ void LogicThread::ExecuteRollbackTest()
 
 		if (resimJoltData == savedJoltData)
 		{
-			LOG_INFO_F("[Rollback] Jolt physics: MATCH (%zu bytes)", resimJoltData.size());
+			LOG_ENG_INFO_F("[Rollback] Jolt physics: MATCH (%zu bytes)", resimJoltData.size());
 		}
 		else
 		{
-			LOG_WARN_F("[Rollback] Jolt physics: DIVERGED (truth=%zu bytes, resim=%zu bytes)",
-					   savedJoltData.size(), resimJoltData.size());
+			LOG_ENG_WARN_F("[Rollback] Jolt physics: DIVERGED (truth=%zu bytes, resim=%zu bytes)",
+						   savedJoltData.size(), resimJoltData.size());
 			size_t minLen = std::min(savedJoltData.size(), resimJoltData.size());
 			for (size_t i = 0; i < minLen; ++i)
 			{
 				if (savedJoltData[i] != resimJoltData[i])
 				{
-					LOG_WARN_F("  First Jolt divergence at byte %zu: truth=0x%02x resim=0x%02x",
-							   i, static_cast<uint8_t>(savedJoltData[i]), static_cast<uint8_t>(resimJoltData[i]));
+					LOG_ENG_WARN_F("  First Jolt divergence at byte %zu: truth=0x%02x resim=0x%02x",
+								   i, static_cast<uint8_t>(savedJoltData[i]), static_cast<uint8_t>(resimJoltData[i]));
 					break;
 				}
 			}
@@ -737,7 +737,7 @@ void LogicThread::ExecuteRollbackTest()
 		SimulationTime = savedSimTime;
 	}
 
-	LOG_INFO("[Rollback] State restored, simulation continuing.");
+	LOG_ENG_INFO("[Rollback] State restored, simulation continuing.");
 #endif // TNX_TESTING
 }
 

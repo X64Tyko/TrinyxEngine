@@ -386,8 +386,8 @@ public:
 			{
 				if (++spins > 10'000'000)
 				{
-					LOG_ERROR_F("[Temporal] PropagateFrame stuck — frame %u has leaked lock (flags=0x%02x)",
-								targetSlot, base->GetFrameHeader(targetSlot)->OwnershipFlags.load(std::memory_order_relaxed));
+					LOG_ENG_ERROR_F("[Temporal] PropagateFrame stuck — frame %u has leaked lock (flags=0x%02x)",
+									targetSlot, base->GetFrameHeader(targetSlot)->OwnershipFlags.load(std::memory_order_relaxed));
 					return;
 				}
 			}

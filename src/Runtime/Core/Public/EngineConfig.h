@@ -107,6 +107,11 @@ struct EngineConfig
 	uint16_t NetPort     = 27015;
 	char NetAddress[128] = "127.0.0.1";
 
+	// Log channel min levels. Unset → engine defaults (Info for Engine, Debug for Game).
+	// Set via EngineLogLevel / GameLogLevel in *.ini.  Values map to LogLevel: 0=Trace … 4=Error.
+	int EngineLogLevel = Unset;
+	int GameLogLevel   = Unset;
+
 	// --- Helpers ---
 	// These resolve Unset to compiled defaults for safe use.
 	double GetTargetFrameTime() const

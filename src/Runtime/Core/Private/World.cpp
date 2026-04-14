@@ -33,7 +33,7 @@ bool World::Initialize(const EngineConfig& config, ConstructRegistry* constructR
 	Physics = std::make_unique<JoltPhysics>();
 	if (!Physics->Initialize(&Config))
 	{
-		LOG_ERROR("[World] JoltPhysics::Initialize failed");
+		LOG_ENG_ERROR("[World] JoltPhysics::Initialize failed");
 		return false;
 	}
 	RegistryPtr->SetPhysics(Physics.get());
@@ -45,7 +45,7 @@ bool World::Initialize(const EngineConfig& config, ConstructRegistry* constructR
 					  windowWidth, windowHeight);
 	Logic->SetConstructRegistry(Constructs);
 
-	LOG_INFO("[World] Initialized");
+	LOG_ENG_INFO("[World] Initialized");
 	return true;
 }
 
@@ -78,7 +78,7 @@ void World::Shutdown()
 	RegistryPtr.reset();
 
 	Constructs = nullptr;
-	LOG_INFO("[World] Shut down");
+	LOG_ENG_INFO("[World] Shut down");
 }
 
 void World::ResetRegistry() const
