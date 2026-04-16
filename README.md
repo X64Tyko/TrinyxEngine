@@ -1,6 +1,7 @@
 # TrinyxEngine
 
-[![CI](https://github.com/X64Tyko/StrigidEngine/actions/workflows/ci.yml/badge.svg)](https://github.com/X64Tyko/StrigidEngine/actions/workflows/ci.yml)
+[![CI (main)](https://github.com/X64Tyko/TrinyxEngine/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/X64Tyko/TrinyxEngine/actions/workflows/ci.yml?query=branch%3Amain)
+[![CI (Dev-Main)](https://github.com/X64Tyko/TrinyxEngine/actions/workflows/ci.yml/badge.svg?branch=Dev-Main)](https://github.com/X64Tyko/TrinyxEngine/actions/workflows/ci.yml?query=branch%3ADev-Main)
 
 **A high-performance, data-oriented game engine for R&D and experimentation**
 
