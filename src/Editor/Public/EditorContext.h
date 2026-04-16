@@ -75,6 +75,10 @@ public:
 		return ptr;
 	}
 
+	/// Returns the screen-space top-left of the 3D viewport panel (logical pixels).
+	/// Updated each frame during DrawEditorViewportPanel(); valid after BuildFrame() returns.
+	ImVec2 GetViewportPanelPos() const { return ViewportPanelPos; }
+
 private:
 	void BuildDockspace();
 	void BuildMenuBar();

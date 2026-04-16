@@ -35,6 +35,9 @@ struct WorldViewport
 	VulkanImage ColorTarget;                       // RGBA8, rendered scene
 	VulkanImage DepthTarget;                       // D32_SFLOAT
 	VkDescriptorSet ImGuiTexture = VK_NULL_HANDLE; // For ImGui::Image()
+#ifdef TNX_GPU_PICKING
+	VulkanImage PickTarget;                        // R32_UINT, entity cache index per pixel
+#endif
 
 	// ── Per-viewport sampler (for ImGui::Image compositing) ─────────────
 	VkSampler ImGuiSampler = VK_NULL_HANDLE;

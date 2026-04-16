@@ -335,6 +335,15 @@ void EditorRenderer::AllocateViewportResources(WorldViewport* vp, uint32_t width
 		VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
 		VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
 
+#ifdef TNX_GPU_PICKING
+	// Pick attachment — R32_UINT, one pixel readback per click
+	vp->PickTarget = VkMem->AllocateImage(
+		{width, height},
+		VK_FORMAT_R32_UINT,
+		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+		VK_IMAGE_ASPECT_COLOR_BIT);
+#endif
+
 	// Per-world field slabs (same layout as main renderer's)
 	const VkDeviceSize slabSize = static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES)
 		* sizeof(float) * GpuOutFieldCount;
@@ -402,6 +411,9 @@ void EditorRenderer::FreeViewportResources(WorldViewport* vp)
 	// Free offscreen images
 	vp->ColorTarget.Free();
 	vp->DepthTarget.Free();
+#ifdef TNX_GPU_PICKING
+	vp->PickTarget.Free();
+#endif
 
 	vp->Width  = 0;
 	vp->Height = 0;
@@ -601,9 +613,47 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 {
 	const VkExtent2D ext = {vp->Width, vp->Height};
 
-	// Barriers: offscreen color + depth to attachment optimal
+#ifdef TNX_GPU_PICKING
+	// Only pick for the editor viewport — PIE viewports don't have a pick target.
+	const bool bIsEditorVP = (vp == &EditorViewport);
+	bool bDoPick = false;
+	int32_t pickX = 0, pickY = 0;
+
+#if defined(TNX_GPU_PICKING_FAST)
+	// FAST: pick every frame at the mouse position, but only for the editor viewport.
+	// SDL_GetMouseState returns logical window coords; subtract the viewport panel origin
+	// (set by EditorContext::DrawEditorViewportPanel during OnPreRecord) and DPI-scale
+	// to match the offscreen pick target's physical pixel resolution.
+	if (bIsEditorVP && Editor)
 	{
-		VkImageMemoryBarrier2 barriers[2]{};
+		float mx, my;
+		SDL_GetMouseState(&mx, &my);
+		int logicalW = 0, physicalW = 0;
+		SDL_GetWindowSize(WindowPtr, &logicalW, nullptr);
+		SDL_GetWindowSizeInPixels(WindowPtr, &physicalW, nullptr);
+		const float dpiScale = (logicalW > 0) ? static_cast<float>(physicalW) / static_cast<float>(logicalW) : 1.0f;
+
+		// Convert window-relative mouse to viewport-panel-relative, then to physical pixels.
+		pickX  = static_cast<int32_t>((mx - Editor->GetViewportPanelPos().x) * dpiScale);
+		pickY  = static_cast<int32_t>((my - Editor->GetViewportPanelPos().y) * dpiScale);
+		bDoPick = true;
+	}
+#else
+	// On-demand: pick only when EditorContext called RequestPick() on a click.
+	if (bIsEditorVP && bPickRequested.load(std::memory_order_acquire))
+	{
+		pickX = PickX.load(std::memory_order_relaxed);
+		pickY = PickY.load(std::memory_order_relaxed);
+		bPickRequested.store(false, std::memory_order_relaxed);
+		bDoPick = true;
+	}
+#endif
+#endif
+
+	// Barriers: offscreen color + depth (+ pick when requested) to attachment optimal
+	{
+		VkImageMemoryBarrier2 barriers[3]{};
+		uint32_t barrierCount = 2;
 
 		barriers[0].sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
 		barriers[0].srcStageMask     = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
@@ -626,9 +676,25 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 		barriers[1].image            = static_cast<VkImage>(vp->DepthTarget.Image);
 		barriers[1].subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1};
 
+#ifdef TNX_GPU_PICKING
+		if (bDoPick && vp->PickTarget.IsValid())
+		{
+			barriers[2].sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+			barriers[2].srcStageMask     = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+			barriers[2].srcAccessMask    = 0;
+			barriers[2].dstStageMask     = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+			barriers[2].dstAccessMask    = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+			barriers[2].oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
+			barriers[2].newLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			barriers[2].image            = static_cast<VkImage>(vp->PickTarget.Image);
+			barriers[2].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+			barrierCount                 = 3;
+		}
+#endif
+
 		VkDependencyInfo dep{};
 		dep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-		dep.imageMemoryBarrierCount = 2;
+		dep.imageMemoryBarrierCount = barrierCount;
 		dep.pImageMemoryBarriers    = barriers;
 		vkCmdPipelineBarrier2(cmd, &dep);
 	}
@@ -683,7 +749,12 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 		vkCmdDispatch(cmd, dispatchX, 1, 1);
 		ComputeBarrier();
 
+#ifdef TNX_GPU_PICKING
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+						  bDoPick ? ScatterPickPipeline : ScatterPipeline);
+#else
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ScatterPipeline);
+#endif
 		vkCmdDispatch(cmd, dispatchX, 1, 1);
 		ComputeBarrier();
 
@@ -691,7 +762,12 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 		vkCmdDispatch(cmd, 1, 1, 1);
 		ComputeBarrier();
 
+#ifdef TNX_GPU_PICKING
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+						  bDoPick ? SortPickPipeline : SortInstancesPipeline);
+#else
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, SortInstancesPipeline);
+#endif
 		vkCmdDispatch(cmd, dispatchX, 1, 1);
 
 		// Final barrier: sorted instances + draw args → vertex shader + indirect draw
@@ -735,6 +811,36 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 		depthAttach.storeOp     = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		depthAttach.clearValue  = depthClear;
 
+#ifdef TNX_GPU_PICKING
+		VkRenderingAttachmentInfo colorAttachments[2];
+		uint32_t colorAttachCount = 1;
+		colorAttachments[0]       = colorAttach;
+
+		if (bDoPick && vp->PickTarget.IsValid())
+		{
+			VkClearValue pickClear{};
+			pickClear.color.uint32[0] = UINT32_MAX;
+
+			VkRenderingAttachmentInfo pickAttach{};
+			pickAttach.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+			pickAttach.imageView   = static_cast<VkImageView>(vp->PickTarget.View);
+			pickAttach.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			pickAttach.loadOp      = VK_ATTACHMENT_LOAD_OP_CLEAR;
+			pickAttach.storeOp     = VK_ATTACHMENT_STORE_OP_STORE;
+			pickAttach.clearValue  = pickClear;
+
+			colorAttachments[1] = pickAttach;
+			colorAttachCount    = 2;
+		}
+
+		VkRenderingInfo ri{};
+		ri.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
+		ri.renderArea           = {{0, 0}, ext};
+		ri.layerCount           = 1;
+		ri.colorAttachmentCount = colorAttachCount;
+		ri.pColorAttachments    = colorAttachments;
+		ri.pDepthAttachment     = &depthAttach;
+#else
 		VkRenderingInfo ri{};
 		ri.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
 		ri.renderArea           = {{0, 0}, ext};
@@ -742,6 +848,7 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 		ri.colorAttachmentCount = 1;
 		ri.pColorAttachments    = &colorAttach;
 		ri.pDepthAttachment     = &depthAttach;
+#endif
 
 		vkCmdBeginRendering(cmd, &ri);
 
@@ -756,7 +863,12 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 		scissor.extent = ext;
 		vkCmdSetScissor(cmd, 0, 1, &scissor);
 
+#ifdef TNX_GPU_PICKING
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+						  (bDoPick && vp->PickTarget.IsValid()) ? *PickPipeline : *Pipeline);
+#else
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, *Pipeline);
+#endif
 
 		VkBuffer indexBuf = Meshes.GetIndexBufferHandle();
 		vkCmdBindIndexBuffer(cmd, indexBuf, 0, VK_INDEX_TYPE_UINT32);
@@ -767,6 +879,50 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 
 		vkCmdEndRendering(cmd);
 	}
+
+#ifdef TNX_GPU_PICKING
+	// Copy clicked pixel from pick attachment to readback buffer
+	if (bDoPick && vp->PickTarget.IsValid())
+	{
+		int32_t px = (pickX >= 0 && pickX < static_cast<int32_t>(ext.width))  ? pickX : 0;
+		int32_t py = (pickY >= 0 && pickY < static_cast<int32_t>(ext.height)) ? pickY : 0;
+
+		VkImageMemoryBarrier2 pickToTransfer{};
+		pickToTransfer.sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+		pickToTransfer.srcStageMask     = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+		pickToTransfer.srcAccessMask    = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+		pickToTransfer.dstStageMask     = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+		pickToTransfer.dstAccessMask    = VK_ACCESS_2_TRANSFER_READ_BIT;
+		pickToTransfer.oldLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		pickToTransfer.newLayout        = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+		pickToTransfer.image            = static_cast<VkImage>(vp->PickTarget.Image);
+		pickToTransfer.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+		VkDependencyInfo pickDep{};
+		pickDep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+		pickDep.imageMemoryBarrierCount = 1;
+		pickDep.pImageMemoryBarriers    = &pickToTransfer;
+		vkCmdPipelineBarrier2(cmd, &pickDep);
+
+		VkBufferImageCopy2 copyRegion{};
+		copyRegion.sType            = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2;
+		copyRegion.bufferOffset     = 0;
+		copyRegion.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+		copyRegion.imageOffset      = {px, py, 0};
+		copyRegion.imageExtent      = {1, 1, 1};
+
+		VkCopyImageToBufferInfo2 copyInfo{};
+		copyInfo.sType          = VK_STRUCTURE_TYPE_COPY_IMAGE_TO_BUFFER_INFO_2;
+		copyInfo.srcImage       = static_cast<VkImage>(vp->PickTarget.Image);
+		copyInfo.srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+		copyInfo.dstBuffer      = static_cast<VkBuffer>(frame.PickReadbackBuffer.Buffer);
+		copyInfo.regionCount    = 1;
+		copyInfo.pRegions       = &copyRegion;
+
+		vkCmdCopyImageToBuffer2(cmd, &copyInfo);
+		PickReadbackFrame = CurrentFrame;
+	}
+#endif
 
 	// Barrier: offscreen color → SHADER_READ_ONLY for ImGui sampling
 	{

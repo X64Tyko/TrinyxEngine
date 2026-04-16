@@ -354,8 +354,9 @@ void EditorContext::ConsumePick()
 	if (!EnginePtr || !EnginePtr->Render) return;
 
 #ifndef TNX_GPU_PICKING_FAST
-	// On-demand mode: request a pick when the user clicks in the viewport
-	if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetIO().WantCaptureMouse
+	// On-demand mode: request a pick when the user clicks inside the 3D viewport panel.
+	// WantCaptureMouse is always true over ImGui::Image(), so we use ViewportPanelHovered instead.
+	if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ViewportPanelHovered
 		&& !ImGuizmo::IsOver())
 	{
 		ImVec2 mousePos = ImGui::GetMousePos();
@@ -366,8 +367,10 @@ void EditorContext::ConsumePick()
 		SDL_GetWindowSizeInPixels(EnginePtr->GetWindow(), &physicalW, nullptr);
 		const float dpiScale = (logicalW > 0) ? static_cast<float>(physicalW) / static_cast<float>(logicalW) : 1.0f;
 
-		int32_t pickX = static_cast<int32_t>(mousePos.x * dpiScale);
-		int32_t pickY = static_cast<int32_t>(mousePos.y * dpiScale);
+		// Convert from global window coords to viewport-panel-relative coords,
+		// then DPI-scale to match the offscreen pick target resolution.
+		int32_t pickX = static_cast<int32_t>((mousePos.x - ViewportPanelPos.x) * dpiScale);
+		int32_t pickY = static_cast<int32_t>((mousePos.y - ViewportPanelPos.y) * dpiScale);
 
 		EnginePtr->Render->RequestPick(pickX, pickY);
 	}
@@ -381,7 +384,7 @@ void EditorContext::ConsumePick()
 	{
 		// Only clear on explicit click (not passive mouse movement in FAST mode).
 		// In FAST mode the result updates every frame — only act on left-click.
-		if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetIO().WantCaptureMouse
+		if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ViewportPanelHovered
 			&& !ImGuizmo::IsOver())
 		{
 			State.ClearSelection();
@@ -391,7 +394,7 @@ void EditorContext::ConsumePick()
 
 	// Only select on left-click, not passive hover
 	if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left)) return;
-	if (ImGui::GetIO().WantCaptureMouse) return;
+	if (!ViewportPanelHovered) return;
 	if (ImGuizmo::IsOver()) return;
 
 	// Resolve cache index → entity record via O(1) registry lookup
