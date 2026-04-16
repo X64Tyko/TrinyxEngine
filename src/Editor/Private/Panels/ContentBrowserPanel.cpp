@@ -85,10 +85,9 @@ void ContentBrowserPanel::Draw(EditorState& state)
 		{
 			if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID))
 			{
-				std::string meshName = std::filesystem::path(entry.Path).stem().string();
-				uint32_t meshSlot    = state.MeshMgrPtr->FindSlotByName(meshName);
+				uint32_t meshSlot = state.MeshMgrPtr->FindSlotByID(entry.ID);
 				ImGui::SetDragDropPayload("MESH_SLOT", &meshSlot, sizeof(meshSlot));
-				ImGui::Text("Mesh: %s", entry.Name.empty() ? meshName.c_str() : entry.Name.c_str());
+				ImGui::Text("Mesh: %s", entry.Name.c_str());
 				ImGui::EndDragDropSource();
 			}
 		}
@@ -113,8 +112,7 @@ void ContentBrowserPanel::Draw(EditorState& state)
 		// MeshID column — show slot index for mesh assets
 		if (entry.Type == AssetType::StaticMesh && state.MeshMgrPtr)
 		{
-			std::string meshName = std::filesystem::path(entry.Path).stem().string();
-			uint32_t meshSlot    = state.MeshMgrPtr->FindSlotByName(meshName);
+			uint32_t meshSlot = state.MeshMgrPtr->FindSlotByID(entry.ID);
 			if (meshSlot != UINT32_MAX) ImGui::Text("%u", meshSlot);
 			else ImGui::TextDisabled("--");
 		}

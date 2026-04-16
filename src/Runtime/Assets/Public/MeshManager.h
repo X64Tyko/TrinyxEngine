@@ -1,13 +1,31 @@
 #pragma once
 #include <cstdint>
 #include <string>
-#include <unordered_map>
 
+#include "AssetRegistry.h"
 #include "AssetTypes.h"
 #include "GpuFrameData.h"
 #include "VulkanMemory.h"
 
 struct MeshAsset;
+
+// -----------------------------------------------------------------------
+// BuiltinMesh — fixed AssetIDs for engine built-in meshes.
+//
+// UUID range [0x100, 0x1FF] is reserved for engine builtins. These IDs
+// are stable across sessions; no manifest entry is required.
+// -----------------------------------------------------------------------
+namespace BuiltinMesh
+{
+	inline AssetID CubeID()
+	{
+		return AssetID::Create(0x0000000000000100LL, AssetType::StaticMesh);
+	}
+	inline AssetID CapsuleID()
+	{
+		return AssetID::Create(0x0000000000000200LL, AssetType::StaticMesh);
+	}
+}
 
 // -----------------------------------------------------------------------
 // MeshManager — GPU mega-buffer management for all mesh geometry.
@@ -20,6 +38,8 @@ struct MeshAsset;
 // A GPU-side MeshTable buffer (GpuMeshInfo[MAX_MESH_SLOTS]) is maintained
 // in sync with CPU slots for the build_draws compute pass.
 //
+// AssetRegistry is the authority for name/ID lookup. MeshManager holds
+// only the GPU geometry slots and a minimal slot→AssetID reverse map.
 // Slot 0 is always the built-in cube mesh.
 // -----------------------------------------------------------------------
 
@@ -41,7 +61,8 @@ public:
 
 	bool Initialize(VulkanMemory* vkMem);
 
-	/// Register a MeshAsset — copies vertex/index data into the mega-buffers.
+	/// Register a MeshAsset — copies vertex/index data into the mega-buffers,
+	/// then registers name/ID into AssetRegistry (Data = slot index).
 	/// Returns the slot ID, or UINT32_MAX on failure.
 	uint32_t RegisterMesh(const MeshAsset& asset, const std::string& name = {}, AssetID id = {});
 
@@ -57,21 +78,31 @@ public:
 	const MeshSlot& GetSlot(uint32_t id) const { return Slots[id]; }
 	uint32_t GetMeshCount() const { return MeshCount; }
 
-	/// Find a mesh slot by name. Returns UINT32_MAX if not found.
+	/// Find a mesh slot by display name. Returns UINT32_MAX if not registered.
 	uint32_t FindSlotByName(const std::string& name) const
 	{
-		for (uint32_t i = 0; i < MeshCount; ++i) if (SlotNames[i] == name) return i;
-		return UINT32_MAX;
+		const AssetEntry* e = AssetRegistry::Get().FindByName(name);
+		if (!e || !e->Data) return UINT32_MAX;
+		return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(e->Data));
 	}
 
-	/// Find a mesh slot by AssetID. Returns UINT32_MAX if not found.
+	/// Find a mesh slot by AssetID. Returns UINT32_MAX if not registered.
 	uint32_t FindSlotByID(AssetID id) const
 	{
-		auto it = IDToSlot.find(id.GetUUID());
-		return it != IDToSlot.end() ? it->second : UINT32_MAX;
+		const AssetEntry* e = AssetRegistry::Get().Find(id);
+		if (!e || !e->Data) return UINT32_MAX;
+		return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(e->Data));
 	}
 
-	const std::string& GetSlotName(uint32_t id) const { return SlotNames[id]; }
+	/// Get the display name for a slot via AssetRegistry.
+	const std::string& GetSlotName(uint32_t slot) const
+	{
+		static const std::string empty;
+		if (slot >= MeshCount) return empty;
+		const AssetEntry* e = AssetRegistry::Get().Find(SlotIDs[slot]);
+		return e ? e->Name : empty;
+	}
+
 	AssetID GetSlotID(uint32_t slot) const { return SlotIDs[slot]; }
 
 private:
@@ -83,7 +114,5 @@ private:
 	uint32_t NextIndexOffset  = 0; // in indices  (not bytes)
 	uint32_t MeshCount        = 0;
 	MeshSlot Slots[MAX_MESH_SLOTS]{};
-	std::string SlotNames[MAX_MESH_SLOTS];
-	AssetID SlotIDs[MAX_MESH_SLOTS]{};
-	std::unordered_map<int64_t, uint32_t> IDToSlot; // keyed by GetUUID() bits
+	AssetID  SlotIDs[MAX_MESH_SLOTS]{}; // slot → AssetID reverse map for GetSlotName/GetSlotID
 };

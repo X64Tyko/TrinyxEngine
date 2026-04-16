@@ -1,4 +1,5 @@
 #include "MeshManager.h"
+#include "AssetRegistry.h"
 #include "MeshAsset.h"
 #include "VertexFormat.h"
 #include "Logger.h"
@@ -163,9 +164,7 @@ uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& na
 
 	// Fill slot
 	uint32_t slotID   = MeshCount++;
-	SlotNames[slotID] = name;
 	SlotIDs[slotID]   = id;
-	if (id.IsValid()) IDToSlot[id.GetUUID()] = slotID;
 	MeshSlot& slot    = Slots[slotID];
 	slot.FirstIndex   = NextIndexOffset;
 	slot.IndexCount   = static_cast<uint32_t>(asset.Indices.size());
@@ -182,6 +181,19 @@ uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& na
 
 	NextVertexOffset += static_cast<uint32_t>(asset.Vertices.size());
 	NextIndexOffset  += static_cast<uint32_t>(asset.Indices.size());
+
+	// Register into AssetRegistry as the name/ID authority.
+	// Data stores the slot index so FindSlotByName/FindSlotByID can resolve without
+	// maintaining a parallel map here.
+	if (id.IsValid())
+	{
+		AssetRegistry::Get().Register(id, name, {}, AssetType::StaticMesh);
+		if (AssetEntry* entry = AssetRegistry::Get().FindMutable(id))
+		{
+			entry->Data  = reinterpret_cast<void*>(static_cast<uintptr_t>(slotID));
+			entry->State = RuntimeFlags::Loaded;
+		}
+	}
 
 	LOG_ENG_INFO_F("[MeshManager] Registered mesh slot %u (%zu verts, %zu indices)",
 				   slotID, asset.Vertices.size(), asset.Indices.size());
@@ -206,7 +218,7 @@ uint32_t MeshManager::RegisterBuiltinCube()
 	cube.AABBMax[1] = 0.5f;
 	cube.AABBMax[2] = 0.5f;
 
-	return RegisterMesh(cube, "Cube");
+	return RegisterMesh(cube, "Cube", BuiltinMesh::CubeID());
 }
 
 // -----------------------------------------------------------------------
@@ -341,5 +353,5 @@ uint32_t MeshManager::RegisterBuiltinCapsule(float radius, float halfHeight, uin
 	capsule.AABBMax[1] = halfHeight + radius;
 	capsule.AABBMax[2] = radius;
 
-	return RegisterMesh(capsule, "Capsule");
+	return RegisterMesh(capsule, "Capsule", BuiltinMesh::CapsuleID());
 }
