@@ -125,7 +125,8 @@ endif ()
 # -----------------------------------------------------------------------------
 # 3. GLOBAL PATHS
 # -----------------------------------------------------------------------------
-set(SDL3_PATH  "${CMAKE_SOURCE_DIR}/libs/SDL3")
+set(SDL3_PATH "${CMAKE_SOURCE_DIR}/libs/SDL3")
+set(SDL3_SRC_PATH "${CMAKE_SOURCE_DIR}/libs/SDL3-src")
 set(TRACY_PATH "${CMAKE_SOURCE_DIR}/libs/tracy")
 set(VOLK_PATH  "${CMAKE_SOURCE_DIR}/libs/volk")
 set(VMA_PATH   "${CMAKE_SOURCE_DIR}/libs/vma")
@@ -300,6 +301,24 @@ else ()
     else ()
         target_compile_options(Jolt PRIVATE -w)
     endif ()
+endif ()
+
+# -----------------------------------------------------------------------------
+# 6.5. SDL3 (Linux: build from submodule; Windows: bundled pre-built)
+# -----------------------------------------------------------------------------
+if (UNIX)
+    set(SDL_SHARED ON CACHE BOOL "" FORCE)
+    set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+    set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+    set(SDL3_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+    set(SDL_WERROR OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${SDL3_SRC_PATH}" SDL3-build EXCLUDE_FROM_ALL)
+    # SDL3's libm sources fail our global -Werror — suppress like we do for Jolt
+    foreach (_sdl3_target SDL3-shared SDL_uclibc)
+        if (TARGET ${_sdl3_target})
+            target_compile_options(${_sdl3_target} PRIVATE -w)
+        endif ()
+    endforeach ()
 endif ()
 
 # -----------------------------------------------------------------------------

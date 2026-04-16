@@ -137,7 +137,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 
 # B. SDL3 - Platform specific
 if(WIN32)
-    # Windows: Use bundled SDL3
+    # Windows: Use bundled pre-built binaries (libs/SDL3)
     target_include_directories(${PROJECT_NAME} PUBLIC
         "${SDL3_PATH}/include"
     )
@@ -145,8 +145,7 @@ if(WIN32)
         "${SDL3_PATH}/lib/x64/SDL3.lib"
     )
 elseif(UNIX)
-    # Linux: Use system SDL3
-    find_package(SDL3 REQUIRED CONFIG)
+    # Linux: SDL3 built from source in root CMakeLists (section 6.5)
     target_link_libraries(${PROJECT_NAME} PUBLIC SDL3::SDL3)
 endif()
 
