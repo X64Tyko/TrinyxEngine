@@ -454,8 +454,15 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	}
 
 	// ── Binary friend operators (return value, no dirty marking) ──
+	//
+	// GCC 13 bug workaround: friend function templates defined inside class templates are not
+	// differentiated by GCC 13 when constraints reference outer-class dependent types, even when
+	// those types differ across instantiations. Adding a non-deduced tag parameter of type
+	// FieldProxy* (which is FieldProxy<FieldType,WIDTH>* via the injected-class-name) gives each
+	// instantiation a syntactically distinct first parameter type, forcing GCC 13 to see them as
+	// separate templates. Tag_ always defaults to nullptr; callers use normal infix syntax (a * b).
 
-	template <ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
+	template <FieldProxy* Tag_ = nullptr, ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
 	FORCE_INLINE friend decltype(auto) operator*(L&& LHS, R&& RHS)
 	{
 		if constexpr (WIDTH == FieldWidth::Scalar)
@@ -486,7 +493,7 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		}
 	}
 
-	template <ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
+	template <FieldProxy* Tag_ = nullptr, ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
 	FORCE_INLINE friend decltype(auto) operator+(L&& LHS, R&& RHS)
 	{
 		if constexpr (WIDTH == FieldWidth::Scalar)
@@ -517,7 +524,7 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		}
 	}
 
-	template <ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
+	template <FieldProxy* Tag_ = nullptr, ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
 	FORCE_INLINE friend decltype(auto) operator-(L&& LHS, R&& RHS)
 	{
 		if constexpr (WIDTH == FieldWidth::Scalar)
@@ -548,7 +555,7 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		}
 	}
 
-	template <ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
+	template <FieldProxy* Tag_ = nullptr, ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
 	FORCE_INLINE friend decltype(auto) operator/(L&& LHS, R&& RHS)
 	{
 		if constexpr (WIDTH == FieldWidth::Scalar)
