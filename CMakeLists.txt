@@ -219,6 +219,7 @@ if(MSVC)
     # AVX2 instruction set
     if(ENABLE_AVX2)
         add_compile_options(/arch:AVX2)
+        add_compile_definitions(TNX_HAS_AVX2)
         message(STATUS "AVX2 instructions enabled")
     endif()
 
@@ -258,6 +259,7 @@ else()
     # AVX2 instruction set
     if(ENABLE_AVX2)
         add_compile_options(-march=native)
+        add_compile_definitions(TNX_HAS_AVX2)
         message(STATUS "Native architecture instructions enabled")
     endif()
 endif()
@@ -312,6 +314,9 @@ if (UNIX)
     set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
     set(SDL3_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
     set(SDL_WERROR OFF CACHE BOOL "" FORCE)
+    # Headless CI runners have no X11/Wayland — skip the display check.
+    # SDL timers, events, and audio still work; only windowing is omitted.
+    set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
     add_subdirectory("${SDL3_SRC_PATH}" SDL3-build EXCLUDE_FROM_ALL)
     # SDL3's libm sources fail our global -Werror — suppress like we do for Jolt
     foreach (_sdl3_target SDL3-shared SDL_uclibc)

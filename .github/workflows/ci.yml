@@ -21,7 +21,9 @@ on:
 #
 # Editor is excluded — mutually exclusive with TNX_HEADLESS.
 # PIE net model is excluded — requires editor.
-# ENABLE_AVX2 is OFF on CI runners (not guaranteed).
+# AVX2 is enabled — GitHub hosted runners (ubuntu-24.04, windows-latest) support it.
+# USE_AVX2=OFF prevents Jolt from propagating PUBLIC /arch:AVX2 flags to consumers;
+# ENABLE_AVX2=ON adds it directly, which already covers all targets.
 # ---------------------------------------------------------------------------
 
 jobs:
@@ -170,7 +172,8 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DTNX_HEADLESS=ON \
-            -DENABLE_AVX2=OFF \
+            -DENABLE_AVX2=ON \
+            -DUSE_AVX2=OFF \
             ${{ matrix.cmake_extra }}
 
       - name: Configure (Windows)
@@ -183,7 +186,8 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=sccache `
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
             -DTNX_HEADLESS=ON `
-            -DENABLE_AVX2=OFF `
+            -DENABLE_AVX2=ON `
+            -DUSE_AVX2=OFF `
             ${{ matrix.cmake_extra }}
 
       # -----------------------------------------------------------------------

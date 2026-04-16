@@ -11,7 +11,7 @@ TEST(FieldProxy_WideMaskStore)
 {
 	(void)Engine;
 
-#ifndef __AVX2__
+#ifndef TNX_HAS_AVX2
 	SKIP_TEST("AVX2 not available in this build (ENABLE_AVX2=OFF)");
 #else
 	alignas(32) float    data[8]  = {0, 0, 0, 0, 0, 0, 0, 0};
