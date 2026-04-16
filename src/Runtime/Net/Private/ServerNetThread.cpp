@@ -372,10 +372,19 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 
 		case NetMessageType::SoulRPC:
 		{
+			LOG_ENG_INFO("Received Soul RPC");
+
 			// All Soul-layer RPCs arrive here. The header identifies the MethodID
 			// and ParamSize; FlowManager routes to the correct Soul handler.
 			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
 			if (!ci) break;
+
+			if (msg.Payload.size() >= sizeof(RPCHeader))
+			{
+				const auto* rpcHdrPeek = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
+				LOG_ENG_INFO_F("[ServerNet] SoulRPC received: ownerID=%u methodID=%u repState=%d",
+							   ci->OwnerID, rpcHdrPeek->MethodID, static_cast<int>(ci->RepState));
+			}
 
 			if (msg.Payload.size() < sizeof(RPCHeader))
 			{

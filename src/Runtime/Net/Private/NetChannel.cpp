@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL_timer.h>
 
+#include "Logger.h"
 #include "NetConnectionManager.h"
 
 PacketHeader NetChannel::MakeHeader(NetMessageType type, uint16_t payloadSize, uint32_t frameNumber) const
@@ -35,5 +36,9 @@ bool NetChannel::SendPong(const PacketHeader& pingHeader)
 bool NetChannel::SendInternal(const PacketHeader& hdr, const uint8_t* payload, uint32_t /*size*/, bool reliable)
 {
 	if (!CI || !Mgr) return false;
-	return Mgr->Send(CI->Handle, hdr, payload, reliable);
+	const bool ok = Mgr->Send(CI->Handle, hdr, payload, reliable);
+	if (!ok) [[unlikely]]
+		LOG_ENG_WARN_F("[NetChannel] Send failed: handle=%u type=%u ownerID=%u reliable=%d",
+					   CI->Handle, hdr.Type, CI->OwnerID, static_cast<int>(reliable));
+	return ok;
 }

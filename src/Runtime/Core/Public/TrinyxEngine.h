@@ -6,6 +6,7 @@
 #include "EngineConfig.h"
 #include "Events.h"
 #include "FlowManager.h"
+#include "TrinyxJobs.h"
 #ifdef TNX_ENABLE_NETWORK
 #include "GNSContext.h"
 #if defined(TNX_NET_MODEL_PIE)
@@ -99,8 +100,10 @@ public:
 	void ResetRegistry() const;
 	void ConfirmLocalRecycles() const;
 
-	/// Spawn entities from any thread via the default world's SpawnSync.
-	void Spawn(std::function<void(Registry*)> action);
+	/// Spawn entities from any thread into the default world (blocks until Logic thread executes).
+	/// Lambda must satisfy ValidJobLambda: trivially copyable, ≤48 bytes, accepts (uint32_t).
+	template <TrinyxJobs::ValidJobLambda LAMBDA>
+	void Spawn(LAMBDA lambda) { if (DefaultWorld) DefaultWorld->SpawnAndWait(lambda); }
 
 	// Renderer access (needed by EditorContext)
 	RendererType* GetRenderer() const { return Render.get(); }

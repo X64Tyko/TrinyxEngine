@@ -33,14 +33,25 @@ public:
 	void HandleMessage(const ReceivedMessage& msg);
 
 private:
+	struct DeferredEntitySpawn
+	{
+		uint8_t OwnerID;
+		std::vector<uint8_t> Payload;
+	};
+
 	struct DeferredConstructSpawn
 	{
 		uint8_t OwnerID;
 		std::vector<uint8_t> Payload;
 	};
 
-	/// Attempt to spawn one deferred payload. Returns true if done (success or permanent failure).
+	/// Flush deferred entity spawns.
+	void FlushDeferredEntitySpawns();
+
+	/// Attempt to spawn one deferred construct payload. Returns true if done (success or permanent failure).
 	bool TrySpawnDeferred(const DeferredConstructSpawn& entry);
 
+	// EntitySpawns are deferred so HandleMessage never blocks; TickReplication drains them first.
+	std::vector<DeferredEntitySpawn> DeferredEntitySpawns;
 	std::vector<DeferredConstructSpawn> DeferredConstructSpawns;
 };

@@ -149,6 +149,12 @@ public:
 	/// Also called on the client for its own ownerID after PlayerBeginConfirm.
 	void OnClientLoaded(uint8_t ownerID);
 
+	/// Called by ClientNetThread at HandshakeAccept — the earliest point the
+	/// client knows its OwnerID. Creates the local player's Soul with Owner role
+	/// so all subsequent LOG_NET_* calls show [OWNER] instead of [NULL].
+	/// Idempotent: does nothing if the Soul already exists.
+	void OnLocalOwnerConnected(uint8_t ownerID);
+
 	/// Called by ServerNetThread when a client disconnects.
 	/// Calls GameMode::OnPlayerLeft, destroys the Soul.
 	void OnClientDisconnected(uint8_t ownerID);

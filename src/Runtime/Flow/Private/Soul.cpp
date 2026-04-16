@@ -5,17 +5,8 @@
 #include "ReflectionRegistry.h"
 #include "World.h"
 
-// ---------------------------------------------------------------------------
 // Soul.cpp — engine-reserved SoulRPC implementations + dispatch.
-//
-// Engine-reserved MethodIDs [0, 127] are claimed here via the TNX_IMPL_*
-// registrars that run at static init time. Because Soul.cpp is linked before
-// any game TU, these IDs are assigned first in practice. Deterministic baking
-// will enforce the ordering correctly when it lands.
-//
-// Game-defined RPCs live in the user's Soul subclass .cpp files and claim
-// IDs from the user band [128+].
-// ---------------------------------------------------------------------------
+// Engine-reserved MethodIDs [0, 127] are claimed here via TNX_IMPL_* registrars at static init time.
 
 // ---------------------------------------------------------------------------
 // Input routing
@@ -75,6 +66,9 @@ TNX_IMPL_SERVER(Soul, PlayerBegin, PlayerBeginRequestPayload)
 		LOG_NET_WARN(this, "[Soul] PlayerBegin: no ConnectionInfo in ctx");
 		return;
 	}
+
+	LOG_NET_INFO_F(this, "[Soul] PlayerBegin handler: ownerID=%u repState=%d",
+				   OwnerID, static_cast<int>(ctx.CI->RepState));
 
 	if (ctx.CI->RepState != ClientRepState::Loaded)
 	{

@@ -386,7 +386,8 @@ bool VulkanContext::CreateLogicalDevice()
 					.features.setSamplerAnisotropy(true)
 					.setMultiDrawIndirect(true)
 					.setDrawIndirectFirstInstance(true)
-					.setShaderInt64(true);
+					.setShaderInt64(true)
+					.setIndependentBlend(true); // pick pipeline uses different write masks per attachment
 
 		featureChain.get<vk::PhysicalDeviceVulkan11Features>()
 					.setShaderDrawParameters(true);

@@ -257,15 +257,13 @@ void FlowManager::LoadLevel(const char* levelPath, bool bBackground)
 
 	ActiveLevelPath = levelPath;
 
-	// Spawn entities from the scene file via the World's SpawnSync handshake.
-	// bBackground: entities are Alive-only — data valid, not ticking/rendering.
-	// The Alive→Active sweep fires later (e.g. on ServerReady for clients).
-	std::string path = ActiveLevelPath;
-	ActiveWorld->Spawn([path, bBackground](Registry* reg)
+	Registry* reg        = ActiveWorld->GetRegistry();
+	const char* pathCStr = ActiveLevelPath.c_str();
+	ActiveWorld->SpawnAndWait([reg, pathCStr, bBackground](uint32_t)
 	{
-		size_t count = EntityBuilder::SpawnFromFile(reg, path.c_str(), bBackground);
+		size_t count = EntityBuilder::SpawnFromFile(reg, pathCStr, bBackground);
 		LOG_NET_INFO_F(nullptr, "[FlowManager] LoadLevel: spawned %zu entities from %s%s",
-					   count, path.c_str(), bBackground ? " (Alive-only)" : "");
+					   count, pathCStr, bBackground ? " (Alive-only)" : "");
 	});
 
 	LOG_NET_INFO_F(nullptr, "[FlowManager] Level loaded: %s", levelPath);
@@ -496,6 +494,16 @@ void FlowManager::OnClientLoaded(uint8_t ownerID)
 	if (ActiveMode) ActiveMode->OnPlayerJoined(*Souls[ownerID]);
 }
 
+void FlowManager::OnLocalOwnerConnected(uint8_t ownerID)
+{
+	if (Souls[ownerID]) return; // Idempotent
+
+	Souls[ownerID]          = std::make_unique<Soul>(ownerID);
+	Souls[ownerID]->FlowMgr = this;
+	Souls[ownerID]->SetRole(SoulRole::Owner);
+	Souls[ownerID]->OnJoined();
+}
+
 void FlowManager::OnClientDisconnected(uint8_t ownerID)
 {
 	if (!Souls[ownerID]) return;
@@ -563,5 +571,6 @@ void FlowManager::SendPlayerBeginRequest(NetChannel channel, uint32_t frameNumbe
 
 	// Fire the PlayerBegin SoulRPC — thunk packs RPCHeader + payload and sends
 	// as NetMessageType::SoulRPC, replacing the old direct PlayerBeginRequest send.
-	Souls[ownerID]->PlayerBegin(req);
+	if (!Souls[ownerID]->PlayerBegin(req)) [[unlikely]]
+	LOG_NET_WARN_F(Souls[ownerID].get(), "[FlowMgr] PlayerBeginRequest send failed (GNS rejected) — ownerID=%u", ownerID);
 }

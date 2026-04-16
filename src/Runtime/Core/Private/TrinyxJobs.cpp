@@ -15,10 +15,20 @@ namespace TrinyxJobs
 {
 	// ---- Internal state --------------------------------------------------
 
-	static constexpr uint32_t QueueCount = static_cast<uint32_t>(Queue::COUNT);
+	static constexpr uint32_t QueueCount     = static_cast<uint32_t>(Queue::COUNT);
+	static constexpr uint32_t MaxWorldQueues = 16;
 
-	// One ring buffer per queue
+	// One ring buffer per global queue
 	static TrinyxRingBuffer<Job> s_Queues[QueueCount];
+
+	// Per-world queue pool — only the owning LogicThread drains these
+	struct WorldQueueSlot
+	{
+		TrinyxRingBuffer<Job> Ring;
+		std::atomic<bool> Active{false};
+	};
+
+	static WorldQueueSlot s_WorldQueues[MaxWorldQueues];
 
 	// Worker threads
 	static std::vector<std::thread> s_Workers;
@@ -234,5 +244,61 @@ namespace TrinyxJobs
 	uint32_t GetCurrentThreadIndex()
 	{
 		return t_ThreadIndex;
+	}
+
+	// ---- World queue API -------------------------------------------------
+
+	WorldQueueHandle CreateWorldQueue(size_t capacity)
+	{
+		for (uint32_t i = 0; i < MaxWorldQueues; ++i)
+		{
+			bool expected = false;
+			if (s_WorldQueues[i].Active.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+			{
+				if (!s_WorldQueues[i].Ring.Initialize(capacity))
+				{
+					s_WorldQueues[i].Active.store(false, std::memory_order_release);
+					LOG_ENG_ERROR("[Jobs] WorldQueue ring allocation failed");
+					return InvalidWorldQueue;
+				}
+				LOG_ENG_INFO_F("[Jobs] WorldQueue %u created (%zu slots)", i, capacity);
+				return i;
+			}
+		}
+		LOG_ENG_ERROR("[Jobs] WorldQueue pool exhausted — increase MaxWorldQueues");
+		return InvalidWorldQueue;
+	}
+
+	void DestroyWorldQueue(WorldQueueHandle handle)
+	{
+		assert(handle < MaxWorldQueues && "Invalid WorldQueueHandle");
+		assert(s_WorldQueues[handle].Active.load(std::memory_order_acquire) && "WorldQueue not active");
+		s_WorldQueues[handle].Ring.Shutdown();
+		s_WorldQueues[handle].Active.store(false, std::memory_order_release);
+		LOG_ENG_INFO_F("[Jobs] WorldQueue %u destroyed", handle);
+	}
+
+	void DrainWorldQueue(WorldQueueHandle handle)
+	{
+		assert(handle < MaxWorldQueues && "Invalid WorldQueueHandle");
+		Job job;
+		while (s_WorldQueues[handle].Ring.TryPop(job))
+		{
+			job.EntryPoint(job.Payload, t_ThreadIndex);
+			if (job.Counter)
+			{
+				job.Counter->fetch_sub(1, std::memory_order_release);
+				job.Counter->notify_one();
+			}
+		}
+	}
+
+	void SubmitWorldJob(const Job& job, WorldQueueHandle handle)
+	{
+		assert(handle < MaxWorldQueues && "Invalid WorldQueueHandle");
+		assert(s_WorldQueues[handle].Active.load(std::memory_order_acquire) && "WorldQueue not active");
+
+		[[maybe_unused]] bool pushed = s_WorldQueues[handle].Ring.TryPush(job);
+		assert(pushed && "WorldQueue full — increase CreateWorldQueue capacity");
 	}
 }

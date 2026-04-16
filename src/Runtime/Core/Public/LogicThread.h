@@ -5,13 +5,13 @@
 
 #include "ConstructBatch.h"
 #include "Registry.h"
+#include "TrinyxJobs.h"
 #include "Types.h"
 
 // Forward declarations
 class ConstructRegistry;
 class Registry;
 class JoltPhysics;
-class SpawnSync;
 struct EngineConfig;
 struct InputBuffer;
 struct FramePacket;
@@ -31,7 +31,7 @@ public:
 
 	void Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
 					InputBuffer* simInput, InputBuffer* vizInput,
-					SpawnSync* spawner, const std::atomic<bool>* jobsInitialized,
+					TrinyxJobs::WorldQueueHandle worldQueue, const std::atomic<bool>* jobsInitialized,
 					int windowWidth, int windowHeight);
 	void Start();
 	void Stop();
@@ -124,7 +124,7 @@ private:
 	class ComponentCacheBase* TemporalCache = nullptr;
 	ConstructRegistry* ConstructsPtr        = nullptr;
 	CameraConstruct* ActiveCamera           = nullptr;
-	SpawnSync* SpawnerPtr                   = nullptr;
+	TrinyxJobs::WorldQueueHandle WQHandle   = TrinyxJobs::InvalidWorldQueue;
 	const std::atomic<bool>* JobsInitPtr    = nullptr;
 
 	// Input

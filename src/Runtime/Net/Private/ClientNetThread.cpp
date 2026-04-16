@@ -103,8 +103,9 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 				ci->RepState = ClientRepState::Synchronizing;
 
 				{
-					World* w2  = WorldMap[msg.Header.SenderID];
-					Soul* soul = (w2 && w2->GetFlowManager()) ? w2->GetFlowManager()->GetSoul(msg.Header.SenderID) : nullptr;
+					World* origWorld = WorldMap[msg.Header.SenderID];
+					if (origWorld && origWorld->GetFlowManager()) origWorld->GetFlowManager()->OnLocalOwnerConnected(msg.Header.SenderID);
+					Soul* soul = (origWorld && origWorld->GetFlowManager()) ? origWorld->GetFlowManager()->GetSoul(msg.Header.SenderID) : nullptr;
 					LOG_NET_INFO_F(soul, "[ClientNet] HandshakeAccept received — OwnerID=%u serverFrame=%u",
 								   msg.Header.SenderID, ci->ServerFrameAtHandshake);
 				}
@@ -127,13 +128,24 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 											  : static_cast<uint32_t>(Config->FixedUpdateHz);
 				const float stepMs = 1000.0f / static_cast<float>(tickRate);
 				ci->InputLead      = static_cast<uint32_t>(ci->RTT_ms * 0.5f / stepMs) + 2u;
-				ci->RepState       = ClientRepState::Loading;
 
+				// Guard: ClockSync (unreliable) can arrive after TravelNotify (reliable).
+				if (ci->RepState == ClientRepState::Synchronizing)
 				{
-					World* w2  = WorldMap[ci->OwnerID];
-					Soul* soul = (w2 && w2->GetFlowManager()) ? w2->GetFlowManager()->GetSoul(ci->OwnerID) : nullptr;
+					ci->RepState     = ClientRepState::Loading;
+					World* origWorld = WorldMap[ci->OwnerID];
+					Soul* soul       = (origWorld && origWorld->GetFlowManager()) ? origWorld->GetFlowManager()->GetSoul(ci->OwnerID) : nullptr;
 					LOG_NET_INFO_F(soul, "[ClientNet] ClockSync complete — InputLead=%u RTT=%.1fms → Loading",
 								   ci->InputLead, ci->RTT_ms);
+				}
+				else
+				{
+					World* origWorld = WorldMap[ci->OwnerID];
+					Soul* soul       = (origWorld && origWorld->GetFlowManager()) ? origWorld->GetFlowManager()->GetSoul(ci->OwnerID) : nullptr;
+					LOG_NET_WARN_F(soul,
+								   "[ClientNet] ClockSync arrived late (RepState=%d, already past Synchronizing) — "
+								   "InputLead=%u updated, state unchanged",
+								   static_cast<int>(ci->RepState), ci->InputLead);
 				}
 				break;
 			}
@@ -197,12 +209,17 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 						ci->RepState = ClientRepState::Loaded;
 
 						if (flow) flow->SendPlayerBeginRequest(NetChannel(ci, ConnectionMgr), msg.Header.FrameNumber, ci->Predictions);
+						ci->PlayerBeginSentAt = SDL_GetTicks();
 
-						// The Alive→Active sweep is deferred to FlowManager's Sentinel tick so it runs
-						// AFTER the level load Spawn() (posted via TravelNotify) completes. Posting the
-						// event here (rather than calling Spawn directly) prevents a SpawnSync race where
-						// the sweep wins the mutex before level entities exist.
-						LOG_NET_INFO(soul, "[ClientNet] FlowEvent::ServerReady → Loaded, sweep deferred to FlowManager");
+						LOG_NET_INFO(soul, "[ClientNet] FlowEvent::ServerReady → Loaded");
+					}
+					else if (ev->EventID == static_cast<uint8_t>(FlowEventID::ServerReady))
+					{
+						LOG_NET_WARN_F(soul,
+									   "[ClientNet] FlowEvent::ServerReady in unexpected RepState=%d "
+									   "(expected LevelLoaded=%d) -- player begin skipped",
+									   static_cast<int>(ci->RepState),
+									   static_cast<int>(ClientRepState::LevelLoaded));
 					}
 
 					if (flow) flow->PostNetEvent(ev->EventID);
@@ -218,21 +235,17 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 					break;
 				}
 
-				const auto* spawn     = reinterpret_cast<const EntitySpawnPayload*>(msg.Payload.data());
 				ConnectionInfo* ci    = ConnectionMgr->FindConnection(msg.Connection);
 				const uint8_t ownerID = ci ? ci->OwnerID : 0;
-				World* clientWorld    = WorldMap[ownerID];
-				if (!clientWorld)
+				if (!WorldMap[ownerID])
 				{
 					LOG_ENG_WARN_F("[ClientNet] EntitySpawn but no client world for OwnerID %u", ownerID);
 					break;
 				}
 
-				const EntitySpawnPayload spawnData = *spawn;
-				clientWorld->Spawn([spawnData](Registry* reg)
-				{
-					ReplicationSystem::HandleEntitySpawn(reg, spawnData);
-				});
+				// Defer to TickReplication — never block the fast-path message loop.
+				DeferredEntitySpawn deferred{ownerID, msg.Payload};
+				DeferredEntitySpawns.push_back(std::move(deferred));
 				break;
 			}
 
@@ -278,10 +291,11 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 				const auto* entries = reinterpret_cast<const StateCorrectionEntry*>(msg.Payload.data());
 				std::vector<StateCorrectionEntry> corrections(entries, entries + entryCount);
 
-				clientWorld->Spawn([corrections](Registry* reg)
+				Registry* corrReg                    = clientWorld->GetRegistry();
+				const StateCorrectionEntry* corrData = corrections.data();
+				clientWorld->PostAndWait([corrReg, corrData, entryCount](uint32_t)
 				{
-					ReplicationSystem::HandleStateCorrections(
-						reg, corrections.data(), static_cast<uint32_t>(corrections.size()));
+					ReplicationSystem::HandleStateCorrections(corrReg, corrData, entryCount);
 				});
 				break;
 			}
@@ -295,6 +309,13 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 				// Inbound server→client SoulRPC. Route to client-side Soul via FlowManager.
 				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
 				if (!ci) break;
+
+				if (msg.Payload.size() >= sizeof(RPCHeader))
+				{
+					const auto* rpcHdrPeek = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
+					LOG_ENG_INFO_F("[ClientNet] SoulRPC received: ownerID=%u methodID=%u repState=%d",
+								   ci->OwnerID, rpcHdrPeek->MethodID, static_cast<int>(ci->RepState));
+				}
 
 				if (msg.Payload.size() < sizeof(RPCHeader))
 				{
@@ -377,17 +398,76 @@ bool ClientNetThread::TrySpawnDeferred(const DeferredConstructSpawn& entry)
 	Registry* entityReg           = clientWorld->GetRegistry();
 	std::vector<uint8_t> payload  = entry.Payload;
 
-	bool done = false;
-	clientWorld->Spawn([constructs, entityReg, clientWorld, payload, &done](Registry*)
+	bool done                  = false;
+	const uint8_t* payloadData = payload.data();
+	const size_t payloadSize   = payload.size();
+	bool* pDone                = &done;
+	clientWorld->SpawnAndWait([constructs, entityReg, clientWorld, payloadData, payloadSize, pDone](uint32_t)
 	{
-		done = ReplicationSystem::HandleConstructSpawn(
-			constructs, entityReg, clientWorld, payload.data(), payload.size());
+		*pDone = ReplicationSystem::HandleConstructSpawn(
+			constructs, entityReg, clientWorld, payloadData, payloadSize);
 	});
 	return done;
 }
 
+void ClientNetThread::FlushDeferredEntitySpawns()
+{
+	for (auto it = DeferredEntitySpawns.begin(); it != DeferredEntitySpawns.end();)
+	{
+		World* clientWorld = WorldMap[it->OwnerID];
+		if (!clientWorld)
+		{
+			it = DeferredEntitySpawns.erase(it);
+			continue;
+		}
+
+		if (it->Payload.size() < sizeof(EntitySpawnPayload))
+		{
+			LOG_ENG_WARN_F("[ClientNet] Deferred EntitySpawn payload too small (%zu)", it->Payload.size());
+			it = DeferredEntitySpawns.erase(it);
+			continue;
+		}
+
+		EntitySpawnPayload spawnData = *reinterpret_cast<const EntitySpawnPayload*>(it->Payload.data());
+		Registry* spawnReg           = clientWorld->GetRegistry();
+		clientWorld->SpawnAndWait([spawnReg, &spawnData](uint32_t)
+		{
+			ReplicationSystem::HandleEntitySpawn(spawnReg, spawnData);
+		});
+		it = DeferredEntitySpawns.erase(it);
+	}
+}
+
 void ClientNetThread::TickReplication()
 {
+	// Retry PlayerBeginRequest for connections stuck in Loaded state.
+	constexpr uint64_t RetryIntervalMs = 150;
+	const uint64_t now                 = SDL_GetTicks();
+
+	for (auto& ci : ConnectionMgr->GetConnections())
+	{
+		if (!ci.bClientInitiated || !ci.bConnected) continue;
+		if (ci.RepState != ClientRepState::Loaded) continue;
+		if (ci.PlayerBeginSentAt == 0) continue;
+		if (now - ci.PlayerBeginSentAt < RetryIntervalMs) continue;
+
+		World* world      = WorldMap[ci.OwnerID];
+		FlowManager* flow = world ? world->GetFlowManager() : nullptr;
+		if (!flow) continue;
+
+		LOG_ENG_WARN_F("[ClientNet] PlayerBeginRequest retry (ownerID=%u, %.0fms since last send)",
+					   ci.OwnerID, static_cast<float>(now - ci.PlayerBeginSentAt));
+
+		ConnectionInfo* mci = ConnectionMgr->FindConnection(ci.Handle);
+		if (!mci) continue;
+
+		flow->SendPlayerBeginRequest(NetChannel(mci, ConnectionMgr), 0, mci->Predictions);
+		mci->PlayerBeginSentAt = now;
+	}
+
+	// EntitySpawns must land before ConstructSpawns reference them.
+	FlushDeferredEntitySpawns();
+
 	if (DeferredConstructSpawns.empty()) return;
 
 	auto it = DeferredConstructSpawns.begin();
@@ -423,11 +503,8 @@ void ClientNetThread::TickInputSend()
 										? world->GetLogicThread()->GetLastCompletedFrame()
 										: 0;
 
-		// Translate local frame to server-relative frame. The server's frame counter has been
-		// running since startup; ours starts when our World was created. Without this offset
-		// the server stalls because our frame IDs fall far behind the server's FrameNumber.
 		const uint32_t frameOffset = ci->ServerFrameAtHandshake - ci->LocalFrameAtHandshake;
-		const uint32_t frame       = localFrame + frameOffset;
+		const uint32_t frame       = localFrame + frameOffset + ci->InputLead;
 
 		const uint32_t fixedHz     = (Config->FixedUpdateHz == EngineConfig::Unset) ? 512 : Config->FixedUpdateHz;
 		const uint32_t frameTimeUS = 1'000'000u / fixedHz;

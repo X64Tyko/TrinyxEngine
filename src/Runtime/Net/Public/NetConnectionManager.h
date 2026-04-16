@@ -111,6 +111,10 @@ struct ConnectionInfo
 
 	// Client-side only — tracks in-flight spawn predictions awaiting Confirm/Reject.
 	PredictionLedger Predictions;
+
+	// Client-side: SDL_GetTicks() ms at which the last PlayerBeginRequest was sent.
+	// Used by TickReplication to detect stalls and trigger retransmission.
+	uint64_t PlayerBeginSentAt = 0;
 };
 
 // ---------------------------------------------------------------------------

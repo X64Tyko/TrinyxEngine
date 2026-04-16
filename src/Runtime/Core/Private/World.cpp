@@ -7,6 +7,8 @@
 
 World::World() = default;
 
+bool World::IsLogicRunning() const { return Logic && Logic->IsRunning(); }
+
 World::~World()
 {
 	// If not already shut down, clean up gracefully.
@@ -39,9 +41,15 @@ bool World::Initialize(const EngineConfig& config, ConstructRegistry* constructR
 	RegistryPtr->SetPhysics(Physics.get());
 
 	// --- Logic thread (created but not started) ---
-	Logic = std::make_unique<LogicThread>();
+	Logic    = std::make_unique<LogicThread>();
+	WQHandle = TrinyxJobs::CreateWorldQueue();
+	if (WQHandle == TrinyxJobs::InvalidWorldQueue)
+	{
+		LOG_ENG_ERROR("[World] Failed to create WorldQueue");
+		return false;
+	}
 	Logic->Initialize(RegistryPtr.get(), &Config, Physics.get(),
-					  &SimInput, &VizInput, &Spawner, &bJobsInitialized,
+					  &SimInput, &VizInput, WQHandle, &bJobsInitialized,
 					  windowWidth, windowHeight);
 	Logic->SetConstructRegistry(Constructs);
 
@@ -76,6 +84,12 @@ void World::Shutdown()
 	Logic.reset();
 	Physics.reset();
 	RegistryPtr.reset();
+
+	if (WQHandle != TrinyxJobs::InvalidWorldQueue)
+	{
+		TrinyxJobs::DestroyWorldQueue(WQHandle);
+		WQHandle = TrinyxJobs::InvalidWorldQueue;
+	}
 
 	Constructs = nullptr;
 	LOG_ENG_INFO("[World] Shut down");

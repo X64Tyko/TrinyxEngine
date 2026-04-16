@@ -77,8 +77,6 @@ public:
 			}
 		}
 
-		// ServerReady: level load (TravelNotify = 0) always precedes this (ServerReady = 1) in
-		// FlowManager::Tick(), so level entities are guaranteed Alive before we sweep them Active.
 		if (eventID == static_cast<uint8_t>(FlowEventID::ServerReady))
 		{
 			World* world = Flow->GetWorld();
@@ -88,7 +86,8 @@ public:
 				return;
 			}
 			FlowManager* flow = Flow;
-			world->Spawn([flow](Registry* reg)
+			Registry* reg     = world->GetRegistry();
+			world->PostAndWait([flow, reg](uint32_t)
 			{
 				ComponentCacheBase* cache  = reg->GetTemporalCache();
 				const uint32_t frame       = cache->GetActiveWriteFrame();

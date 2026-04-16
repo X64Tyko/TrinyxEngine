@@ -113,12 +113,14 @@ void EditorContext::LoadScene(const std::string& path, bool bReset)
 	auto meta = EntityBuilder::ParseSceneMeta(root);
 
 	// Spawn entities via handshake
-	EnginePtr->Spawn([&root, bReset](Registry* reg)
+	Registry* spawnReg = EnginePtr->GetDefaultWorld() ? EnginePtr->GetDefaultWorld()->GetRegistry() : nullptr;
+	JsonValue* rootPtr = &root;
+	EnginePtr->Spawn([spawnReg, rootPtr, bReset](uint32_t)
 	{
-		if (bReset) reg->ResetRegistry();
+		if (bReset) spawnReg->ResetRegistry();
 		// Detect format: prefab vs scene
-		if (root.Find("entities")) EntityBuilder::SpawnScene(reg, root);
-		else EntityBuilder::SpawnEntity(reg, root);
+		if (rootPtr->Find("entities")) EntityBuilder::SpawnScene(spawnReg, *rootPtr);
+		else EntityBuilder::SpawnEntity(spawnReg, *rootPtr);
 	});
 
 	State.CurrentScenePath  = path;
@@ -994,13 +996,15 @@ void EditorContext::HandleDroppedFile(const std::string& path)
 
 void EditorContext::SpawnPrefab(const std::string& prefabPath)
 {
-	EnginePtr->Spawn([prefabPath](Registry* reg)
+	Registry* prefabReg    = EnginePtr->GetDefaultWorld() ? EnginePtr->GetDefaultWorld()->GetRegistry() : nullptr;
+	const char* prefabCStr = prefabPath.c_str();
+	EnginePtr->Spawn([prefabReg, prefabCStr](uint32_t)
 	{
-		size_t count = EntityBuilder::SpawnFromFile(reg, prefabPath.c_str());
+		size_t count = EntityBuilder::SpawnFromFile(prefabReg, prefabCStr);
 		if (count > 0)
-			LOG_ENG_INFO_F("[Editor] Spawned %zu entities from prefab: %s", count, prefabPath.c_str());
+			LOG_ENG_INFO_F("[Editor] Spawned %zu entities from prefab: %s", count, prefabCStr);
 		else
-			LOG_ENG_ERROR_F("[Editor] Failed to spawn prefab: %s", prefabPath.c_str());
+			LOG_ENG_ERROR_F("[Editor] Failed to spawn prefab: %s", prefabCStr);
 	});
 
 	State.bSceneDirty = true;
@@ -1016,16 +1020,17 @@ void EditorContext::DeleteSelectedEntity()
 
 	State.ClearSelection();
 
-	EnginePtr->Spawn([chunk, localIndex](Registry* reg)
+	Registry* deleteReg = EnginePtr->GetDefaultWorld() ? EnginePtr->GetDefaultWorld()->GetRegistry() : nullptr;
+	EnginePtr->Spawn([deleteReg, chunk, localIndex](uint32_t)
 	{
 		EntityCacheHandle cacheIdx = chunk->Header.CacheIndexStart + localIndex;
-		GlobalEntityHandle gHandle = reg->FindEntityByLocation(cacheIdx);
+		GlobalEntityHandle gHandle = deleteReg->FindEntityByLocation(cacheIdx);
 		if (gHandle.GetIndex() == 0)
 		{
 			LOG_ENG_WARN("[Editor] Could not find entity to delete");
 			return;
 		}
-		reg->DestroyByGlobalHandle(gHandle);
+		deleteReg->DestroyByGlobalHandle(gHandle);
 		LOG_ENG_INFO_F("[Editor] Deleted entity (cache index %u)", cacheIdx);
 	});
 
@@ -1097,8 +1102,10 @@ void EditorContext::RestoreSnapshot()
 {
 	if (!bHasSnapshot) return;
 
-	EnginePtr->Spawn([this](Registry* reg)
+	Registry* snapReg = EnginePtr->GetDefaultWorld() ? EnginePtr->GetDefaultWorld()->GetRegistry() : nullptr;
+	EnginePtr->Spawn([this, snapReg](uint32_t)
 	{
+		Registry* reg = snapReg;
 		if (!reg) return;
 
 		// Reset all Jolt bodies — Play may have created bodies that don't exist in the snapshot.
@@ -1280,6 +1287,12 @@ void EditorContext::StartPIE()
 		PIEClients.back().Flow->RewireConfig(&PIEClients.back().Config);
 	}
 
+	// Start all logic threads now — before networking — so the Logic Thread is
+	// already spinning when the handshake pump runs. This matches real gameplay
+	// where the world exists before any network layer touches it.
+	ServerFlow->StartWorld();
+	for (auto& c : PIEClients) c.Flow->StartWorld();
+
 	// Set up loopback networking (server + client in same process)
 	static constexpr uint16_t PIEPort = 27015;
 
@@ -1328,8 +1341,6 @@ void EditorContext::StartPIE()
 
 	// Wire the server world pointer before clients connect so that ConnectionHandshake
 	// processing (EnsurePlayerInputSlot) finds a valid ServerWorld.
-	// WirePlayerInputInjector stays below — it requires the LogicThread to be initialized,
-	// but SetServerWorld just stores the pointer and is safe to call early.
 	net->SetServerWorld(ServerFlow->GetWorld());
 
 	// Connect each client via loopback and discover server-side handles
@@ -1414,8 +1425,6 @@ void EditorContext::StartPIE()
 		}
 	}
 
-	// Wire player input injector (requires LogicThread initialized via CreateWorld; called
-	// here before StartWorld so the lambda is ready before the first fixed tick fires).
 	net->GetServer().WirePlayerInputInjector(ServerFlow->GetWorld());
 
 	Replicator = std::make_unique<ReplicationSystem>();
@@ -1426,14 +1435,12 @@ void EditorContext::StartPIE()
 	// Start the shared net thread (polls connections at NetworkUpdateHz)
 	if (!net->IsRunning()) net->Start();
 
-	// Notify game code BEFORE starting logic threads — spawns run on the
-	//    fast path (LogicId not set yet) with no thread contention.
 	if (EnginePtr->OnPIEStarted.IsBound())
-	{
 		EnginePtr->OnPIEStarted(ServerFlow->GetWorld(), connMgr);
-	}
 
-	// 8. Load scene default state/mode into flow managers
+	LOG_ENG_INFO("[PIE] Worlds started");
+
+	// Load scene default state/mode into flow managers (worlds + net already live)
 	if (!State.SceneDefaultMode.empty())
 	{
 		ServerFlow->SetGameMode(State.SceneDefaultMode.c_str());
@@ -1442,13 +1449,6 @@ void EditorContext::StartPIE()
 	{
 		ServerFlow->LoadDefaultState(State.SceneDefaultState.c_str());
 		for (auto& c : PIEClients) c.Flow->LoadDefaultState(State.SceneDefaultState.c_str());
-	}
-
-	// 9. Start logic threads via FlowManagers
-	ServerFlow->StartWorld();
-	for (auto& c : PIEClients)
-	{
-		c.Flow->StartWorld();
 	}
 
 	// 9. Default input to first client world until a viewport panel gets focus

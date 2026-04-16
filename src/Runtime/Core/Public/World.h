@@ -6,7 +6,7 @@
 
 #include "EngineConfig.h"
 #include "Input.h"
-#include "SpawnSync.h"
+#include "TrinyxJobs.h"
 
 class Registry;
 class LogicThread;
@@ -18,7 +18,7 @@ class FlowManager;
 // ---------------------------------------------------------------------------
 // World — A self-contained simulation instance.
 //
-// Owns: Registry, JoltPhysics, LogicThread, InputBuffers, SpawnSync.
+// Owns: Registry, JoltPhysics, LogicThread, InputBuffers, WorldQueue.
 // Does NOT own: VulkanContext, VulkanMemory, SDL_Window, MeshManager, TrinyxJobs.
 //
 // In Standalone mode, the engine creates exactly one World.
@@ -53,15 +53,29 @@ public:
 	/// Shut down and destroy all owned subsystems.
 	void Shutdown();
 
-	// --- Spawn ---
-
-	/// Spawn entities from any thread via the SpawnSync handshake.
-	void Spawn(std::function<void(Registry*)> action)
+	template <TrinyxJobs::ValidJobLambda LAMBDA>
+	void SpawnAndWait(LAMBDA lambda)
 	{
-		Spawner.Spawn(std::move(action), RegistryPtr.get());
+		// Execute inline if the LogicThread isn't draining yet — avoids deadlock during startup
+		// (LogicThread spins on JobsInitialized before it will drain the world queue).
+		if (!IsLogicRunning() || !bJobsInitialized.load(std::memory_order_acquire))
+		{
+			lambda(0);
+			return;
+		}
+		TrinyxJobs::SpawnAndWait(lambda, WQHandle);
 	}
 
-	SpawnSync& GetSpawner() { return Spawner; }
+	template <TrinyxJobs::ValidJobLambda LAMBDA>
+	void PostAndWait(LAMBDA lambda) { SpawnAndWait(lambda); }
+
+	template <TrinyxJobs::ValidJobLambda LAMBDA>
+	void Spawn(LAMBDA lambda, TrinyxJobs::JobCounter* counter) { TrinyxJobs::Spawn(lambda, counter, WQHandle); }
+
+	template <TrinyxJobs::ValidJobLambda LAMBDA>
+	void Post(LAMBDA lambda) { TrinyxJobs::Post(lambda, WQHandle); }
+
+	TrinyxJobs::WorldQueueHandle GetWorldQueue() const { return WQHandle; }
 
 	// --- Accessors ---
 
@@ -132,6 +146,8 @@ public:
 	void ConfirmLocalRecycles() const;
 
 private:
+	bool IsLogicRunning() const;
+
 	EngineConfig Config;
 
 	std::unique_ptr<Registry> RegistryPtr;
@@ -143,8 +159,8 @@ private:
 	InputBuffer NetInput;
 	std::vector<std::unique_ptr<InputBuffer>> PlayerSimInputs; // per-player sim input, grown on EnsurePlayerInputSlot
 	std::vector<std::unique_ptr<InputBuffer>> PlayerVizInputs; // per-player viz input, grown on EnsurePlayerInputSlot
-	InputBuffer* InputTargets[3] = {&SimInput, &VizInput, &NetInput};
-	SpawnSync Spawner;
+	InputBuffer* InputTargets[3]          = {&SimInput, &VizInput, &NetInput};
+	TrinyxJobs::WorldQueueHandle WQHandle = TrinyxJobs::InvalidWorldQueue;
 
 	ConstructRegistry* Constructs = nullptr; // Non-owning — FlowManager owns the registry
 	ReplicationSystem* Replicator = nullptr; // Non-owning — TrinyxEngine or EditorContext owns it

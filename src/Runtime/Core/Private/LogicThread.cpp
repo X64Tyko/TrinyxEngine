@@ -11,7 +11,6 @@
 #include <cmath>
 
 #include "CameraConstruct.h"
-#include "SpawnSync.h"
 #include "ThreadPinning.h"
 #include "JoltPhysics.h"
 
@@ -23,7 +22,7 @@
 
 void LogicThread::Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
 							 InputBuffer* simInput, InputBuffer* vizInput,
-							 SpawnSync* spawner, const std::atomic<bool>* jobsInitialized,
+							 TrinyxJobs::WorldQueueHandle worldQueue, const std::atomic<bool>* jobsInitialized,
 							 int windowWidth, int windowHeight)
 {
 	RegistryPtr    = registry;
@@ -31,7 +30,7 @@ void LogicThread::Initialize(Registry* registry, const EngineConfig* config, Jol
 	PhysicsPtr     = physics;
 	SimInput       = simInput;
 	VizInput       = vizInput;
-	SpawnerPtr     = spawner;
+	WQHandle       = worldQueue;
 	JobsInitPtr    = jobsInitialized;
 	TemporalCache  = registry->GetTemporalCache();
 	WindowWidth    = windowWidth;
@@ -88,16 +87,11 @@ void LogicThread::ThreadMain()
 	{
 	}
 
-	// Stamp our thread ID so SpawnSync knows who the Logic thread is
-	SpawnerPtr->SetLogicThreadId(std::this_thread::get_id());
-
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
 		TNX_ZONE_NC("Logic Frame", TNX_COLOR_LOGIC);
 
-		// Sync point for deferred spawns — if any thread is waiting to
-		// spawn entities, freeze here and let it write to the current frame.
-		SpawnerPtr->SyncPoint();
+		TrinyxJobs::DrainWorldQueue(WQHandle);
 		RegistryPtr->ProcessDeferredDestructions();
 		if (ConstructsPtr) ConstructsPtr->ProcessDeferredDestructions();
 

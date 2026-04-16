@@ -49,6 +49,10 @@ public:
 			SpawnPosX = Body.Transform.PosX.Value();
 			SpawnPosY = Body.Transform.PosY.Value();
 			SpawnPosZ = Body.Transform.PosZ.Value();
+			// InitialFlush sends entities with Alive-only; the Alive→Active sweep may have
+			// already run by the time this entity's EntitySpawn arrives (deferred queue race).
+			// Ensure Active so the predicate pass renders this entity regardless.
+			Body.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive | TemporalFlagBits::Replicated);
 		}
 		else
 		{

@@ -246,11 +246,6 @@ void TrinyxEngine::ConfirmLocalRecycles() const
 	if (DefaultWorld) DefaultWorld->ConfirmLocalRecycles();
 }
 
-void TrinyxEngine::Spawn(std::function<void(Registry*)> action)
-{
-	if (DefaultWorld) DefaultWorld->Spawn(std::move(action));
-}
-
 #ifdef TNX_ENABLE_NETWORK
 bool TrinyxEngine::EnsureNetworking()
 {
@@ -501,9 +496,11 @@ void TrinyxEngine::CalculateFPS()
 
 	if (FpsTimer >= 1.0) [[unlikely]]
 	{
-		LOG_ENG_DEBUG_F("Main FPS: %d | Frame: %.2fms",
-						static_cast<int>(FrameCount / FpsTimer),
-					(FpsTimer / FrameCount) * 1000.0);
+#if defined(TNX_DETAILED_METRICS)
+		LOG_ENG_INFO_F("Main FPS: %d | Frame: %.2fms",
+					   static_cast<int>(FrameCount / FpsTimer),
+					   (FpsTimer / FrameCount) * 1000.0);
+#endif
 		FrameCount = 0;
 		FpsTimer   = 0.0;
 	}

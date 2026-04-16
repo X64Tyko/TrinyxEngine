@@ -69,11 +69,11 @@ using SoulRPCHandler = void(*)(Soul*, const RPCContext&, const uint8_t*);
 //   Second overload: CLIENT HANDLER.
 // ---------------------------------------------------------------------------
 #define TNX_SERVER(Name, TParams)                          \
-	void Name(const TParams& params);                      \
+	bool Name(const TParams& params);                      \
 	void Name(const RPCContext& ctx, const TParams& params)
 
 #define TNX_CLIENT(Name, TParams)                          \
-	void Name(const TParams& params);                      \
+	bool Name(const TParams& params);                      \
 	void Name(const RPCContext& ctx, const TParams& params)
 
 // ---------------------------------------------------------------------------
@@ -89,13 +89,13 @@ using SoulRPCHandler = void(*)(Soul*, const RPCContext&, const uint8_t*);
 // by TNX_REGISTER_SCHEMA and TNX_REGISTER_ENTITY. It runs before main().
 // ---------------------------------------------------------------------------
 #define TNX_IMPL_SERVER(Class, Name, TParams)                                          \
-	void Class::Name(const TParams& params)                                            \
+	bool Class::Name(const TParams& params)                                            \
 	{                                                                                  \
 		static_assert(std::is_trivially_copyable_v<TParams>,                           \
 			#TParams " must be trivially copyable — it is a wire format");             \
 		RPCHeader hdr{ RPCMethodID<TParams>(),                                         \
 		               static_cast<uint16_t>(sizeof(TParams)) };                       \
-		GetNetChannel().SendRPC(hdr, params);                                          \
+		return GetNetChannel().SendRPC(hdr, params);                                   \
 	}                                                                                  \
 	static bool _##Class##_##Name##_srpc_registered = []() -> bool {                  \
 		static_assert(std::is_trivially_copyable_v<TParams>,                           \
@@ -112,13 +112,13 @@ using SoulRPCHandler = void(*)(Soul*, const RPCContext&, const uint8_t*);
 	void Class::Name(const RPCContext& ctx, const TParams& params)
 
 #define TNX_IMPL_CLIENT(Class, Name, TParams)                                          \
-	void Class::Name(const TParams& params)                                            \
+	bool Class::Name(const TParams& params)                                            \
 	{                                                                                  \
 		static_assert(std::is_trivially_copyable_v<TParams>,                           \
 			#TParams " must be trivially copyable — it is a wire format");             \
 		RPCHeader hdr{ RPCMethodID<TParams>(),                                         \
 		               static_cast<uint16_t>(sizeof(TParams)) };                       \
-		GetNetChannel().SendRPC(hdr, params);                                          \
+		return GetNetChannel().SendRPC(hdr, params);                                   \
 	}                                                                                  \
 	static bool _##Class##_##Name##_crpc_registered = []() -> bool {                  \
 		static_assert(std::is_trivially_copyable_v<TParams>,                           \
