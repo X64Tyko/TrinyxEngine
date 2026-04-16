@@ -43,13 +43,32 @@ option(TNX_ENABLE_NETWORK "Enable networking (GameNetworkingSockets + Protobuf).
 # TNX_NET_MODEL selects the networking role baked into the build.
 #   PIE    — Editor in-process: one ServerNetThread + N ClientNetThread, ticked by PIENetThread.
 #            Automatically selected when TNX_ENABLE_EDITOR is ON.
-#   Server — Dedicated server: ServerNetThread only.
+#   Server — Dedicated server: ServerNetThread only. Implies TNX_HEADLESS (no window, no GPU).
 #   Client — Standalone client: ClientNetThread only.
 set(TNX_NET_MODEL "Client" CACHE STRING "Networking role: PIE | Server | Client")
 set_property(CACHE TNX_NET_MODEL PROPERTY STRINGS "PIE" "Server" "Client")
 option(TNX_TESTING "Enable test harnesses (rollback determinism test, etc.). Debug/profiling tool." OFF)
 option(TNX_GPU_PICKING "Enable GPU-based entity picking (click-to-select). Requires editor." OFF)
 option(TNX_GPU_PICKING_FAST "Enable fast GPU picking mode (picks every frame at mouse cursor). Requires TNX_GPU_PICKING." OFF)
+option(TNX_HEADLESS "Headless build: no window, no GPU/Vulkan. Implied by TNX_NET_MODEL=Server. Also used standalone for CI/CD." OFF)
+
+# Dedicated server implies headless — a server never needs a window or GPU.
+if (TNX_NET_MODEL STREQUAL "Server" AND NOT TNX_HEADLESS)
+    message(STATUS "Server model detected — forcing TNX_HEADLESS=ON")
+    set(TNX_HEADLESS ON CACHE BOOL "" FORCE)
+endif ()
+
+if (TNX_HEADLESS)
+    add_compile_definitions(TNX_HEADLESS)
+    message(STATUS "Headless mode: ENABLED (no window, no GPU)")
+    # Headless and editor are mutually exclusive.
+    if (TNX_ENABLE_EDITOR)
+        message(WARNING "TNX_HEADLESS and TNX_ENABLE_EDITOR are mutually exclusive — disabling editor")
+        set(TNX_ENABLE_EDITOR OFF CACHE BOOL "" FORCE)
+    endif ()
+else ()
+    message(STATUS "Headless mode: DISABLED")
+endif ()
 
 if (TNX_ENABLE_EDITOR)
     add_compile_definitions(TNX_ENABLE_EDITOR)

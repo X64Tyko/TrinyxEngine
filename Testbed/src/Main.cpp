@@ -635,8 +635,9 @@ RUNTIME_TEST(Spawn_JoltPyramid)
 		JoltMotion::Static
 	});
 
-	Engine.Spawn([](Registry* reg)
+	Engine.Spawn([](uint32_t)
 	{
+		Registry* reg = TrinyxEngine::Get().GetRegistry();
 		WriteCubeSetups(reg, setups, gPyramidIds);
 	});
 
@@ -684,8 +685,9 @@ RUNTIME_TEST(Spawn_SuperCubeGrid)
 		});
 	}
 
-	Engine.Spawn([](Registry* reg)
+	Engine.Spawn([](uint32_t)
 	{
+		Registry* reg = TrinyxEngine::Get().GetRegistry();
 		WriteSuperCubeSetups(reg, setups, gSuperCubeIds);
 	});
 
@@ -697,8 +699,9 @@ RUNTIME_TEST(Spawn_SuperCubeGrid)
 	std::thread([idsPtr]()
 	{
 		SDL_Delay(30000);
-		TrinyxEngine::Get().Spawn([idsPtr](Registry* reg)
+		TrinyxEngine::Get().Spawn([idsPtr](uint32_t)
 		{
+			Registry* reg = TrinyxEngine::Get().GetRegistry();
 			for (EntityHandle id : *idsPtr) reg->Destroy(id);
 			LOG_ENG_ALWAYS_F("[RuntimeTest] SuperCube Grid: destroyed %zu entities after 30s",
 							 idsPtr->size());
@@ -739,8 +742,9 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 		});
 	}
 
-	Engine.Spawn([](Registry* reg)
+	Engine.Spawn([](uint32_t)
 	{
+		Registry* reg = TrinyxEngine::Get().GetRegistry();
 		WriteProjectileSetups(reg, setups, gProjectileIds);
 	});
 
@@ -752,8 +756,9 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 	std::thread([idsPtr]()
 	{
 		SDL_Delay(30000);
-		TrinyxEngine::Get().Spawn([idsPtr](Registry* reg)
+		TrinyxEngine::Get().Spawn([idsPtr](uint32_t)
 		{
+			Registry* reg = TrinyxEngine::Get().GetRegistry();
 			for (EntityHandle id : *idsPtr) reg->Destroy(id);
 			LOG_ENG_ALWAYS_F("[RuntimeTest] Projectile Burst: destroyed %zu entities after 30s",
 							 idsPtr->size());

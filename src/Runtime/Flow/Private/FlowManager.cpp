@@ -481,7 +481,7 @@ void FlowManager::OnClientLoaded(uint8_t ownerID)
 {
 	if (Souls[ownerID]) return; // Already present — guard against double-create
 
-	Souls[ownerID] = std::make_unique<Soul>(ownerID);
+	Souls[ownerID]          = std::make_unique<Soul>(ownerID);
 	Souls[ownerID]->FlowMgr = this;
 	// ownerID=0 is the listen-server's own local player — drives via keyboard AND
 	// is the simulation authority. ownerID>0 are remote clients — authority only.
@@ -516,6 +516,7 @@ void FlowManager::OnClientDisconnected(uint8_t ownerID)
 	Souls[ownerID].reset();
 }
 
+#ifdef TNX_ENABLE_NETWORK
 std::optional<PlayerBeginResult> FlowManager::HandlePlayerBeginRequest(Soul* soul, const PlayerBeginRequestPayload& req)
 {
 	if (!soul)
@@ -527,8 +528,7 @@ std::optional<PlayerBeginResult> FlowManager::HandlePlayerBeginRequest(Soul* sou
 	// Delegate entirely to GameMode — all game-layer spawn logic lives there.
 	// GameMode returns a PlayerBeginResult; no Soul fields used as a data relay.
 	PlayerBeginResult result;
-	if (ActiveMode)
-		result = ActiveMode->OnPlayerBeginRequest(*soul, req);
+	if (ActiveMode) result = ActiveMode->OnPlayerBeginRequest(*soul, req);
 	else
 	{
 		// No GameMode: accept unconditionally, echo client hint.
@@ -545,13 +545,13 @@ std::optional<PlayerBeginResult> FlowManager::HandlePlayerBeginRequest(Soul* sou
 
 void FlowManager::SendPlayerBeginRequest(NetChannel channel, uint32_t frameNumber, PredictionLedger& ledger)
 {
-	const uint8_t ownerID = channel.OwnerID();
+	const uint8_t ownerID           = channel.OwnerID();
 	constexpr uint32_t PredictionID = 1; // Single in-flight entry today
 
 	// Create the client-side Soul on first call.
 	if (!Souls[ownerID])
 	{
-		Souls[ownerID] = std::make_unique<Soul>(ownerID);
+		Souls[ownerID]          = std::make_unique<Soul>(ownerID);
 		Souls[ownerID]->FlowMgr = this;
 		Souls[ownerID]->SetRole(SoulRole::Owner); // owning client: predicts locally
 		Souls[ownerID]->OnJoined();
@@ -559,7 +559,7 @@ void FlowManager::SendPlayerBeginRequest(NetChannel channel, uint32_t frameNumbe
 	Souls[ownerID]->Channel = channel;
 
 	PlayerBeginRequestPayload req{};
-	req.PrefabID     = 0;    // 0 = server picks via GameMode::GetCharacterPrefab
+	req.PrefabID     = 0; // 0 = server picks via GameMode::GetCharacterPrefab
 	req.PredictionID = PredictionID;
 	req.PosX         = 0.0f;
 	req.PosY         = 5.0f;
@@ -574,3 +574,4 @@ void FlowManager::SendPlayerBeginRequest(NetChannel channel, uint32_t frameNumbe
 	if (!Souls[ownerID]->PlayerBegin(req)) [[unlikely]]
 	LOG_NET_WARN_F(Souls[ownerID].get(), "[FlowMgr] PlayerBeginRequest send failed (GNS rejected) — ownerID=%u", ownerID);
 }
+#endif // TNX_ENABLE_NETWORK

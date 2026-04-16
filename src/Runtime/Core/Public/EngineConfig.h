@@ -34,6 +34,14 @@ struct EngineConfig
 	// Set via CLI args (--server, --client, --listen) or programmatically.
 	EngineMode Mode = EngineMode::Standalone;
 
+	// Headless mode: no window, no renderer, no GPU. Set via --headless CLI arg,
+	// TNX_HEADLESS compile-time define, or implied by TNX_NET_MODEL=Server.
+	bool Headless = false;
+
+	// Exit the main loop after this many sentinel frames. 0 = run indefinitely.
+	// Useful for CI: --max-frames 60 runs one second of logic then exits cleanly.
+	int MaxFrames = 0;
+
 	// Variadic Update, let the Logic thread run uncapped or limit its updates, cannot be lower than Fixed update if capped.
 	int TargetFPS = Unset;
 

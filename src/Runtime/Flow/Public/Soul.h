@@ -3,9 +3,11 @@
 
 #include "Input.h"
 #include "Logger.h"
+#include "RegistryTypes.h"
+#ifdef TNX_ENABLE_NETWORK
 #include "NetChannel.h"
 #include "RPC.h"
-#include "RegistryTypes.h"
+#endif
 
 class FlowManager;
 class Soul;
@@ -137,12 +139,14 @@ public:
 	// The channel is refreshed from ctx before the handler runs so that any
 	// reply thunk called inside the handler routes correctly.
 	// -------------------------------------------------------------------------
+#ifdef TNX_ENABLE_NETWORK
 	void DispatchServerRPC(const RPCContext& ctx, const RPCHeader& hdr, const uint8_t* params);
 	void DispatchClientRPC(const RPCContext& ctx, const RPCHeader& hdr, const uint8_t* params);
 
 	// Returns the channel used by TNX_IMPL_SERVER / TNX_IMPL_CLIENT thunks to send.
 	// Refreshed internally on every RPC dispatch — not accessible externally.
 	NetChannel& GetNetChannel() { return Channel; }
+#endif
 
 	FlowManager* GetFlowManager() { return FlowMgr; }
 
@@ -152,9 +156,11 @@ public:
 	// Server calls PlayerBeginConfirm/Reject(params) → sends back to client.
 	// Implemented in Soul.cpp; game code never touches these directly.
 	// -------------------------------------------------------------------------
+#ifdef TNX_ENABLE_NETWORK
 	TNX_SERVER(PlayerBegin, PlayerBeginRequestPayload);
 	TNX_CLIENT(PlayerBeginConfirm, PlayerBeginConfirmPayload);
 	TNX_CLIENT(PlayerBeginReject, PlayerBeginRejectPayload);
+#endif
 
 private:
 	friend class FlowManager;
@@ -164,8 +170,10 @@ private:
 	SoulRole Role                    = SoulRole::Authority;
 	ConstructRef ConfirmedBodyHandle = {}; // Valid once ClaimBody() is called
 
+#ifdef TNX_ENABLE_NETWORK
 	// Set by FlowManager at creation and refreshed on every RPC dispatch.
 	NetChannel Channel   = {};
+#endif
 	FlowManager* FlowMgr = nullptr;
 };
 

@@ -2,8 +2,10 @@
 
 #include <iostream>
 #include <SDL3/SDL.h>
+#ifndef TNX_HEADLESS
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL_vulkan.h>
+#endif
 
 #include "AssetRegistry.h"
 #include "EngineConfig.h"
@@ -16,10 +18,12 @@
 #include "ThreadPinning.h"
 #include "TrinyxJobs.h"
 #include "World.h"
+#ifndef TNX_HEADLESS
 #if TNX_ENABLE_EDITOR
 #include "EditorRenderer.h"
 #else
 #include "GameplayRenderer.h"
+#endif
 #endif
 #include "JoltPhysics.h"
 #if defined(TNX_ENABLE_NETWORK) && !TNX_ENABLE_EDITOR
@@ -47,8 +51,16 @@ void TrinyxEngine::ParseCommandLine(int argc, char* argv[])
 {
 	for (int i = 1; i < argc; ++i)
 	{
+		if (strcmp(argv[i], "--headless") == 0)
+		{
+			Config.Headless = true;
+		}
+		else if (strcmp(argv[i], "--max-frames") == 0 && i + 1 < argc)
+		{
+			Config.MaxFrames = atoi(argv[++i]);
+		}
 #ifdef TNX_ENABLE_NETWORK
-		if (strcmp(argv[i], "--server") == 0)
+		else if (strcmp(argv[i], "--server") == 0)
 		{
 			Config.Mode = EngineMode::Server;
 		}
@@ -67,7 +79,7 @@ void TrinyxEngine::ParseCommandLine(int argc, char* argv[])
 			Config.NetPort = static_cast<uint16_t>(atoi(argv[++i]));
 		}
 #else
-		(void)argv[i]; // suppress unused warning when networking is disabled
+		else { (void)argv[i]; } // suppress unused warning when networking is disabled
 #endif
 	}
 }
@@ -76,57 +88,76 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 {
 	TNX_ZONE_N("Engine_Init");
 
+#ifdef TNX_HEADLESS
+	Config.Headless = true;
+	(void)title; (void)width; (void)height; // unused in headless builds
+#endif
+
 	Logger::Get().Init("TrinyxEngine.log", LogLevel::Debug);
 	LOG_ENG_INFO("TrinyxEngine initialization started");
 	TrinyxThreading::Initialize();
 	TrinyxThreading::PinCurrentThread(TrinyxThreading::GetIdealCore(CoreAffinity::Input));
 
-	// ---- Windows timer resolution ----------------------------------------
-	SDL_SetHint(SDL_HINT_TIMER_RESOLUTION, "1");
-
 	// ---- SDL init --------------------------------------------------------
-	if (!SDL_WasInit(SDL_INIT_VIDEO))
+	if (Config.Headless)
 	{
-		if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS))
+		// Headless: initialize SDL timer/core only — no video, no window, no GPU.
+		SDL_Init(0);
+	}
+	else
+	{
+		// ---- Windows timer resolution ------------------------------------
+		SDL_SetHint(SDL_HINT_TIMER_RESOLUTION, "1");
+
+		if (!SDL_WasInit(SDL_INIT_VIDEO))
 		{
-			std::cerr << "SDL_Init failed: " << SDL_GetError() << std::endl;
+			if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS))
+			{
+				std::cerr << "SDL_Init failed: " << SDL_GetError() << std::endl;
+				return false;
+			}
+		}
+
+#ifndef TNX_HEADLESS
+		EngineWindow = SDL_CreateWindow(title, width, height,
+										SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+		if (!EngineWindow)
+		{
+			std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << std::endl;
 			return false;
 		}
-	}
 
-	EngineWindow = SDL_CreateWindow(title, width, height,
-									SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
-	if (!EngineWindow)
-	{
-		std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << std::endl;
-		return false;
-	}
-
-	// ---- Vulkan init -----------------------------------------------------
+		// ---- Vulkan init -------------------------------------------------
 #if defined(NDEBUG)
-	[[maybe_unused]] constexpr bool enableValidation = false;
+		[[maybe_unused]] constexpr bool enableValidation = false;
 #else
-	[[maybe_unused]] constexpr bool enableValidation = true;
+		[[maybe_unused]] constexpr bool enableValidation = true;
 #endif
 
-	if (!VkCtx.Initialize(EngineWindow, enableValidation))
-	{
-		std::cerr << "VulkanContext::Initialize failed" << std::endl;
-		SDL_DestroyWindow(EngineWindow);
-		EngineWindow = nullptr;
-		return false;
-	}
+		if (!VkCtx.Initialize(EngineWindow, enableValidation))
+		{
+			std::cerr << "VulkanContext::Initialize failed" << std::endl;
+			SDL_DestroyWindow(EngineWindow);
+			EngineWindow = nullptr;
+			return false;
+		}
 
-	if (!VkMem.Initialize(VkCtx))
-	{
-		std::cerr << "VulkanMemory::Initialize failed" << std::endl;
-		VkCtx.Shutdown();
-		SDL_DestroyWindow(EngineWindow);
-		EngineWindow = nullptr;
-		return false;
+		if (!VkMem.Initialize(VkCtx))
+		{
+			std::cerr << "VulkanMemory::Initialize failed" << std::endl;
+			VkCtx.Shutdown();
+			SDL_DestroyWindow(EngineWindow);
+			EngineWindow = nullptr;
+			return false;
+		}
+#endif // !TNX_HEADLESS
 	}
 
 	// ---- Config ----------------------------------------------------------
+	// Preserve CLI-set flags that must survive the INI load.
+	const bool headlessCLI = Config.Headless;
+	const int maxFramesCLI = Config.MaxFrames;
+
 	GameConfig = EngineConfig::LoadProjectConfig(projectDir);
 	snprintf(GameConfig.ProjectDir, sizeof(GameConfig.ProjectDir), "%s",
 			 (projectDir && projectDir[0] != '\0') ? projectDir : "");
@@ -138,6 +169,10 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	Config = GameConfig;
 #endif
 	snprintf(Config.ProjectDir, sizeof(Config.ProjectDir), "%s", GameConfig.ProjectDir);
+
+	// Re-apply CLI flags that must not be overridden by INI files.
+	Config.Headless  = headlessCLI;
+	Config.MaxFrames = maxFramesCLI;
 
 	// Apply per-channel log levels from config (Unset → Info for Engine, Debug for Game).
 	{
@@ -215,6 +250,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	}
 #endif
 
+#ifndef TNX_HEADLESS
 	Pacer.Initialize(GpuDevice);
 
 	// ---- Renderer --------------------------------------------------------
@@ -226,6 +262,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	DefaultWorld->GetLogicThread()->SetSimPaused(true); // Editor starts paused
 	Render->SetEngine(this);
 #endif
+#endif // !TNX_HEADLESS
 
 	LOG_ENG_INFO("TrinyxEngine initialization complete");
 	return true;
@@ -275,9 +312,15 @@ bool TrinyxEngine::EnsureNetworking()
 void TrinyxEngine::StartThreadsAndJobs()
 {
 	Flow->StartWorld();
-	Render->Start();
+#ifndef TNX_HEADLESS
+	if (Render) Render->Start();
+#endif
 
-	while (!DefaultWorld->GetLogicThread()->IsRunning() || !Render->IsRunning())
+	while (!DefaultWorld->GetLogicThread()->IsRunning()
+#ifndef TNX_HEADLESS
+		|| (Render && !Render->IsRunning())
+#endif
+	)
 	{
 		// Spin while we wait so that we don't initialize workers before our Primary threads
 	}
@@ -306,6 +349,8 @@ void TrinyxEngine::RunMainLoop()
 	const uint64_t perfFrequency = SDL_GetPerformanceFrequency();
 	LastFrameCounter             = SDL_GetPerformanceCounter();
 
+	uint64_t sentinelFrameCount = 0;
+
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
 		TNX_ZONE_N("Main_Frame");
@@ -317,7 +362,7 @@ void TrinyxEngine::RunMainLoop()
 #if defined(TNX_NET_MODEL_SERVER) && defined(TNX_ENABLE_NETWORK)
 		// Dedicated server: main thread is the network poller — no SDL events.
 		if (Net) Net->Tick();
-#else
+#elif !defined(TNX_HEADLESS)
 		PumpEvents();
 #endif
 
@@ -329,9 +374,18 @@ void TrinyxEngine::RunMainLoop()
 			LOG_ENG_ERROR("[Sentinel] Logic thread stopped unexpectedly — shutting down");
 			bIsRunning.store(false, std::memory_order_release);
 		}
+#ifndef TNX_HEADLESS
 		if (Render && !Render->IsRunning())
 		{
 			LOG_ENG_ERROR("[Sentinel] Render thread stopped unexpectedly — shutting down");
+			bIsRunning.store(false, std::memory_order_release);
+		}
+#endif
+
+		// MaxFrames: clean exit after N frames (used by CI for smoke tests).
+		if (Config.MaxFrames > 0 && ++sentinelFrameCount >= static_cast<uint64_t>(Config.MaxFrames))
+		{
+			LOG_ENG_INFO("[Sentinel] Reached MaxFrames limit — exiting");
 			bIsRunning.store(false, std::memory_order_release);
 		}
 
@@ -348,12 +402,16 @@ void TrinyxEngine::Shutdown()
 
 	// Stop threads — FlowManager owns World lifecycle
 	Flow->StopWorld();
+#ifndef TNX_HEADLESS
 	if (Render) Render->Stop();
+#endif
 #ifdef TNX_ENABLE_NETWORK
 	if (Net) Net->Stop();
 #endif
 	Flow->JoinWorld();
+#ifndef TNX_HEADLESS
 	if (Render) Render->Join();
+#endif
 #ifdef TNX_ENABLE_NETWORK
 	if (Net) Net->Join();
 	Net.reset();
@@ -363,14 +421,17 @@ void TrinyxEngine::Shutdown()
 	// Shut down the job system after coordinator threads have exited
 	TrinyxJobs::Shutdown();
 
+#ifndef TNX_HEADLESS
 	// Destroy thread objects BEFORE Vulkan teardown.
 	// RenderThread owns GPU resources that call vmaDestroy* in their destructors.
 	Render.reset();
+#endif
 
 	// FlowManager owns the World — destroy it (and all Constructs) here.
 	DefaultWorld = nullptr;
 	Flow.reset();
 
+#ifndef TNX_HEADLESS
 	// Tear down Vulkan
 	VkMem.Shutdown();
 	VkCtx.Shutdown();
@@ -380,11 +441,13 @@ void TrinyxEngine::Shutdown()
 		SDL_DestroyWindow(EngineWindow);
 		EngineWindow = nullptr;
 	}
+#endif
 
 	SDL_Quit();
 	Logger::Get().Shutdown();
 }
 
+#ifndef TNX_HEADLESS
 void TrinyxEngine::PumpEvents()
 {
 	TNX_ZONE_N("Input_Poll");
@@ -479,6 +542,7 @@ void TrinyxEngine::PumpEvents()
 		}
 	}
 }
+#endif // !TNX_HEADLESS
 
 /*
 void TrinyxEngine::ServiceRenderThread() { ... }

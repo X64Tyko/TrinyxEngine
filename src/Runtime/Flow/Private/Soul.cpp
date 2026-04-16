@@ -1,12 +1,13 @@
 #include "Soul.h"
 
 #include "FlowManager.h"
+#include "World.h"
+#ifdef TNX_ENABLE_NETWORK
 #include "NetConnectionManager.h"
 #include "ReflectionRegistry.h"
-#include "World.h"
+#endif
 
 // Soul.cpp — engine-reserved SoulRPC implementations + dispatch.
-// Engine-reserved MethodIDs [0, 127] are claimed here via TNX_IMPL_* registrars at static init time.
 
 // ---------------------------------------------------------------------------
 // Input routing
@@ -16,7 +17,7 @@ InputBuffer* Soul::GetSimInput(World* world) const
 {
 	if (!world) return nullptr;
 	// Owner flag: local keyboard always wins (handles Owner-only and Owner|Authority).
-	if (HasRole(SoulRole::Owner))     return world->GetSimInput();
+	if (HasRole(SoulRole::Owner)) return world->GetSimInput();
 	if (HasRole(SoulRole::Authority)) return world->GetPlayerSimInput(OwnerID);
 	return nullptr; // Echo
 }
@@ -24,11 +25,12 @@ InputBuffer* Soul::GetSimInput(World* world) const
 InputBuffer* Soul::GetVizInput(World* world) const
 {
 	if (!world) return nullptr;
-	if (HasRole(SoulRole::Owner))     return world->GetVizInput();
+	if (HasRole(SoulRole::Owner)) return world->GetVizInput();
 	if (HasRole(SoulRole::Authority)) return world->GetPlayerVizInput(OwnerID);
 	return nullptr; // Echo
 }
 
+#ifdef TNX_ENABLE_NETWORK
 // ---------------------------------------------------------------------------
 // DispatchServerRPC / DispatchClientRPC
 // ---------------------------------------------------------------------------
@@ -80,8 +82,8 @@ TNX_IMPL_SERVER(Soul, PlayerBegin, PlayerBeginRequestPayload)
 	}
 
 	const auto result = FlowMgr
-		? FlowMgr->HandlePlayerBeginRequest(this, params)
-		: std::nullopt;
+							? FlowMgr->HandlePlayerBeginRequest(this, params)
+							: std::nullopt;
 
 	if (result.has_value())
 	{
@@ -92,7 +94,7 @@ TNX_IMPL_SERVER(Soul, PlayerBegin, PlayerBeginRequestPayload)
 		confirm.PosX         = result->PosX;
 		confirm.PosY         = result->PosY;
 		confirm.PosZ         = result->PosZ;
-		ctx.CI->RepState = ClientRepState::Playing;
+		ctx.CI->RepState     = ClientRepState::Playing;
 		PlayerBeginConfirm(confirm);
 		LOG_NET_INFO_F(this, "[Soul] PlayerBeginConfirm sent (ownerID=%u, pos=%.1f,%.1f,%.1f)",
 					   OwnerID, confirm.PosX, confirm.PosY, confirm.PosZ);
@@ -150,12 +152,12 @@ TNX_IMPL_CLIENT(Soul, PlayerBeginConfirm, PlayerBeginConfirmPayload)
 // ---------------------------------------------------------------------------
 TNX_IMPL_CLIENT(Soul, PlayerBeginReject, PlayerBeginRejectPayload)
 {
-	if (ctx.CI)
-		ctx.CI->Predictions.Clear(params.PredictionID);
+	if (ctx.CI) ctx.CI->Predictions.Clear(params.PredictionID);
 
-	if (FlowMgr)
-		FlowMgr->PostNetEvent(static_cast<uint8_t>(FlowEventID::PlayerBeginReject));
+	if (FlowMgr) FlowMgr->PostNetEvent(static_cast<uint8_t>(FlowEventID::PlayerBeginReject));
 
 	LOG_NET_WARN_F(this, "[Soul] PlayerBeginReject received (PredictionID=%u, reason=%u)",
 				   params.PredictionID, params.Reason);
 }
+
+#endif // TNX_ENABLE_NETWORK

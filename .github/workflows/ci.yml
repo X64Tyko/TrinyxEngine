@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-test:
+    name: Headless Build & Test (Ubuntu)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ libsdl3-dev
+
+      - name: Configure (headless, no network, no Tracy)
+        run: |
+          cmake -B cmake-build-ci \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DTNX_HEADLESS=ON \
+            -DTNX_ENABLE_NETWORK=OFF \
+            -DENABLE_TRACY=OFF \
+            -DENABLE_AVX2=OFF
+
+      - name: Build
+        run: cmake --build cmake-build-ci --target Testbed --parallel
+
+      - name: Test (60 headless frames)
+        run: ./cmake-build-ci/Testbed/Testbed --headless --max-frames 60

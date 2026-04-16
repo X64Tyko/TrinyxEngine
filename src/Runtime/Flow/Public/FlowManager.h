@@ -16,7 +16,9 @@
 
 class FlowState;
 class GameMode;
+#ifdef TNX_ENABLE_NETWORK
 class NetChannel;
+#endif
 class World;
 class TrinyxEngine;
 struct EngineConfig;
@@ -184,46 +186,39 @@ public:
 
 	GameMode* GetGameMode() const { return ActiveMode.get(); }
 
+#ifdef TNX_ENABLE_NETWORK
 	/// Called from ServerNetThread when a PlayerBeginRequest arrives for ownerID.
 	/// Delegates to GameMode::OnPlayerBeginRequest for all game decisions.
 	/// Returns the PlayerBeginResult on accept, nullopt on reject.
-	/// ServerNetThread reads the result to build PlayerBeginConfirmPayload — no Soul fields used as relay.
 	std::optional<PlayerBeginResult> HandlePlayerBeginRequest(Soul* soul, const PlayerBeginRequestPayload& req);
 
 	/// Called from ClientNetThread after the Alive→Active sweep on ServerReady.
 	/// Creates the client-side Soul for ownerID (derived from channel) if absent,
 	/// sets its channel + FlowMgr, then fires the PlayerBegin RPC to the server.
-	/// ClientNetThread owns no game decisions — all payload details live here.
 	void SendPlayerBeginRequest(NetChannel channel, uint32_t frameNumber, PredictionLedger& ledger);
+#endif
 
 	// ----- RPC dispatch (called from ServerNetThread / ClientNetThread) -----
-	// Note: callers look up Soul* via GetSoul(ownerID) then call soul->DispatchServerRPC/DispatchClientRPC directly.
 
 	/// Called from any thread (e.g., NetThread) when a net flow event arrives.
 	/// The active FlowState's OnNetEvent hook is dispatched on the next Tick.
-	/// eventID is a FlowEventID enum value cast to uint8_t.
 	void PostNetEvent(uint8_t eventID);
 
-	/// Called from NetThread when a TravelNotify arrives. Caches the level path
-	/// (readable by FlowState via GetPendingTravelPath) then posts the FlowEvent.
+	/// Called from NetThread when a TravelNotify arrives.
 	void PostTravelNotify(const char* levelPath);
 
-	/// Called from NetThread when a PlayerBeginConfirm arrives. Caches the payload
-	/// (readable by FlowState via GetPendingPlayerBeginConfirm) then posts the FlowEvent.
+	/// Called from NetThread when a PlayerBeginConfirm arrives.
 	void PostPlayerBeginConfirm(const PlayerBeginConfirmPayload& payload);
 
-	/// Payload from the last PlayerBeginConfirm. FlowState reads this in
-	/// OnNetEvent(FlowEventID::PlayerBeginConfirm) to wire the Body and teleport.
+	/// Payload from the last PlayerBeginConfirm.
 	PlayerBeginConfirmPayload GetPendingPlayerBeginConfirm() const { return PendingPlayerBeginConfirm; }
 
-	/// Path sent in the last TravelNotify. FlowState reads this in OnNetEvent
-	/// to know which level to load. Empty if no TravelNotify has arrived yet.
+	/// Path sent in the last TravelNotify.
 	const std::string& GetPendingTravelPath() const { return PendingTravelPath; }
 
 	// ----- Tick (called by Sentinel each frame) -----
 
 	void Tick(float dt);
-
 	// ----- Accessors -----
 
 	FlowState* GetActiveState() const;
