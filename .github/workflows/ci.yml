@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main, Dev-Main ]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 # ---------------------------------------------------------------------------
 # Matrix: 2 platforms × 8 build configurations = 16 jobs
 #
