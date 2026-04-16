@@ -37,7 +37,7 @@ struct alignas(64) TemporalFrameHeader
 	// Frame identification
 	uint32_t FrameNumber;
 
-	// Camera/View data (replaces FramePacket)
+	// Camera/View data
 	Matrix4 ViewMatrix;
 	Matrix4 ProjectionMatrix;
 	Vector3 CameraPosition;
@@ -111,7 +111,7 @@ public:
 
 	// Allocate field array for a chunk across all frames, returns absolute pointer to frame 0 data.
 	// Archetype calls this for each temporal field when allocating a new chunk.
-	void* AllocateFieldArray(Archetype* owner, struct Chunk* chunk, ComponentTypeID compType,
+	void* AllocateFieldArray(Archetype* owner, struct Chunk* chunk, CacheSlotID cacheSlot,
 							 size_t fieldIndex, const char* fieldName, size_t entityCount, size_t fieldSize, SystemID EntitySystemID);
 
 	// Since we're allocating one field at a time and we need them in line we have to advance the allocator manually for now.
@@ -129,7 +129,7 @@ public:
 
 	// Get component field data from specific frame.
 	// Also returns how many entities are allocated/valid for this field so render can clamp scans safely.
-	void* GetFieldData(TemporalFrameHeader* header, ComponentTypeID compType, size_t fieldIndex) const;
+	void* GetFieldData(TemporalFrameHeader* header, CacheSlotID cacheSlot, size_t fieldIndex) const;
 
 	uint32_t GetTotalFrameCount() const { return static_cast<uint32_t>(TemporalFrameCount); }
 	CacheTier GetTier() const { return Tier_; }
@@ -146,8 +146,8 @@ public:
 	}
 
 	// Returns a reference to the allocator offset for the given partition.
-	// Physics grows right from 0 (Arena 1); Dual grows left from MaxPhysics (Arena 1);
-	// Render grows right from MaxPhysics (Arena 2); Logic grows left from MaxCached (Arena 2).
+	// Render grows right from 0 (Arena 1); Dual grows left from MaxRenderable (Arena 1);
+	// Phys grows right from MaxRenderable (Arena 2); Logic grows left from MaxCached (Arena 2).
 	size_t GetSystemAllocatorIndex(SystemID sysID, size_t size) const;
 
 	size_t AdvanceSystemAllocatorIndex(SystemID sysID, size_t size);
@@ -210,15 +210,15 @@ protected:
 	// Per-partition allocation cursors (entity counts, not bytes).
 	// Converted to byte offsets at allocation time by multiplying by fieldSize.
 	size_t RenderOffset = 0; // Arena 1, grows right from 0
-	size_t DualOffset   = 0; // Arena 1, grows left  from MaxPhysics
-	size_t PhysOffset   = 0; // Arena 2, grows right from MaxPhysics
+	size_t DualOffset   = 0; // Arena 1, grows left  from MaxRenderable
+	size_t PhysOffset   = 0; // Arena 2, grows right from MaxRenderable
 	size_t LogicOffset  = 0; // Arena 2, grows left  from MaxCached
 
 private:
 	// Pre-computed field allocation zones (field-major ordering across all archetypes)
 	struct FieldAllocationInfo
 	{
-		ComponentTypeID CompType = 0;
+		ComponentTypeID CompType = 0; // Component type ID (for diagnostics); table is indexed by CacheSlotID
 		size_t FieldIndex        = 0;
 		const char* FieldName    = nullptr;
 

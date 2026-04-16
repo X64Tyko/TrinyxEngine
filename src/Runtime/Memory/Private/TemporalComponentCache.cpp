@@ -180,23 +180,23 @@ bool ComponentCacheBase::LockFrameForWrite(uint32_t WriteFrame)
 }
 
 void* ComponentCacheBase::AllocateFieldArray(Archetype* owner, Chunk* chunk,
-											 ComponentTypeID compType, size_t fieldIndex,
+											 CacheSlotID cacheSlot, size_t fieldIndex,
 											 const char* fieldName, size_t entityCount, size_t fieldSize, SystemID EntitySystemID)
 {
 	// Direct O(1) lookup into flat table
-	if (compType >= MAX_COMPONENTS || fieldIndex >= MAX_TEMPORAL_FIELDS_PER_COMPONENT)
+	if (cacheSlot >= MAX_COMPONENTS || fieldIndex >= MAX_TEMPORAL_FIELDS_PER_COMPONENT)
 	{
-		LOG_ENG_ERROR_F("ComponentCacheBase: Invalid component type %u or field index %zu", compType, fieldIndex);
+		LOG_ENG_ERROR_F("ComponentCacheBase: Invalid cache slot %u or field index %zu", cacheSlot, fieldIndex);
 		return nullptr;
 	}
 
-	const size_t tableIndex   = static_cast<size_t>(compType) * MAX_TEMPORAL_FIELDS_PER_COMPONENT + fieldIndex;
+	const size_t tableIndex   = static_cast<size_t>(cacheSlot) * MAX_TEMPORAL_FIELDS_PER_COMPONENT + fieldIndex;
 	FieldAllocationInfo& info = FieldAllocations[tableIndex];
 
 	if (!info.bValid)
 	{
 		LOG_ENG_ERROR_F("ComponentCacheBase: Field %s (component %u, field %zu) not initialized",
-						fieldName, compType, fieldIndex);
+						fieldName, cacheSlot, fieldIndex);
 		return nullptr;
 	}
 
@@ -211,7 +211,7 @@ void* ComponentCacheBase::AllocateFieldArray(Archetype* owner, Chunk* chunk,
 			// resize?
 		}
 		LOG_ENG_ERROR_F("ComponentCacheBase: Out of space for field %s (component %u, field %zu)",
-						fieldName, compType, fieldIndex);
+						fieldName, cacheSlot, fieldIndex);
 		return nullptr;
 	}
 
@@ -257,14 +257,14 @@ void ComponentCacheBase::ClearFrameData()
 	}
 }
 
-void* ComponentCacheBase::GetFieldData(TemporalFrameHeader* header, ComponentTypeID compType,
+void* ComponentCacheBase::GetFieldData(TemporalFrameHeader* header, CacheSlotID cacheSlot,
 									   size_t fieldIndex) const
 {
 	if (!header) return nullptr;
 
-	if (compType >= MAX_COMPONENTS || fieldIndex >= MAX_TEMPORAL_FIELDS_PER_COMPONENT) return nullptr;
+	if (cacheSlot >= MAX_COMPONENTS || fieldIndex >= MAX_TEMPORAL_FIELDS_PER_COMPONENT) return nullptr;
 
-	const size_t tableIndex         = static_cast<size_t>(compType) * MAX_TEMPORAL_FIELDS_PER_COMPONENT + fieldIndex;
+	const size_t tableIndex         = static_cast<size_t>(cacheSlot) * MAX_TEMPORAL_FIELDS_PER_COMPONENT + fieldIndex;
 	const FieldAllocationInfo& info = FieldAllocations[tableIndex];
 
 	if (!info.bValid) return nullptr;

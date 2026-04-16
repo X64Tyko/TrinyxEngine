@@ -52,8 +52,8 @@ namespace TrinyxJobs
 	/// Returns true if work was found. Used by workers and WaitForCounter.
 	static bool StealAndExecute(const std::vector<uint8_t>& queues)
 	{
-		// Priority order: Physics > Render > General
-		// This ensures physics work (the tightest budget) drains fastest.
+		// Priority order: Logic > Render > Physics > General
+		// This ensures the tightest-budget work (512Hz logic) drains first.
 		Job job;
 		for (auto& queueID : queues)
 		{
@@ -74,7 +74,7 @@ namespace TrinyxJobs
 	/// Worker thread entry point.
 	static void WorkerMain(uint32_t workerIndex, Queue affinity)
 	{
-		// create queue inices for worker affinity
+		// create queue indices for worker affinity
 		std::vector<uint8_t> queues;
 		for (uint8_t id = 0; id < QueueCount; ++id)
 		{
@@ -210,7 +210,7 @@ namespace TrinyxJobs
 
 	void WaitForCounter(JobCounter* counter, Queue affinity)
 	{
-		// create queue inices for worker affinity
+		// create queue indices for worker affinity
 		std::vector<uint8_t> queues;
 		for (uint8_t id = 0; id < QueueCount; ++id)
 		{

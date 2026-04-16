@@ -66,7 +66,7 @@ struct SIMDTraits<float, WIDTH>
 		else { _mm256_storeu_ps(ptr, val); }
 	}
 
-	// Non-temporal store (bypasses cache, for write-only temporal data)
+	// Wide: non-temporal store (bypasses cache). WideMask: masked blendv+storeu — no masked non-temporal intrinsic exists.
 	static FORCE_INLINE void stream(float* ptr, [[maybe_unused]] __m256i mask, VecType val)
 	{
 		if constexpr (WIDTH == FieldWidth::WideMask)
@@ -108,7 +108,7 @@ struct SIMDTraits<int32_t, WIDTH>
 		else { _mm256_storeu_si256((__m256i*)ptr, val); }
 	}
 
-	// Non-temporal store (bypasses cache, for write-only temporal data)
+	// Wide: non-temporal store (bypasses cache). WideMask: masked blendv+storeu — no masked non-temporal intrinsic exists.
 	static FORCE_INLINE void stream(int32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
 	{
 		if constexpr (WIDTH == FieldWidth::WideMask)
@@ -162,7 +162,7 @@ struct SIMDTraits<uint32_t, WIDTH>
 		else { _mm256_storeu_si256((__m256i*)ptr, val); }
 	}
 
-	// Non-temporal store (bypasses cache, for write-only temporal data)
+	// Wide: non-temporal store (bypasses cache). WideMask: masked blendv+storeu — no masked non-temporal intrinsic exists.
 	static FORCE_INLINE void stream(uint32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
 	{
 		if constexpr (WIDTH == FieldWidth::WideMask)

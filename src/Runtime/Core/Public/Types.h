@@ -160,6 +160,11 @@ struct Matrix4
 // Component type ID - numeric identifier for each component type (0-255)
 using ComponentTypeID = uint32_t;
 
+// Per-cache slot index — which slot a component occupies within its associated ComponentCacheBase.
+// Distinct from ComponentTypeID: MetaFlags may be slot 0 in the Temporal cache but a different
+// component could be slot 0 in the Volatile cache. Same underlying width as StaticTemporalIndex().
+using CacheSlotID = uint8_t;
+
 // Component Signature definition as a bitset - tracks which components are present
 static constexpr size_t MAX_COMPONENTS                    = 256;
 static constexpr size_t MAX_TEMPORAL_FIELDS_PER_COMPONENT = 64;                                                 // Max decomposed temporal fields per component

@@ -55,7 +55,8 @@ public:
 		});
 	}
 
-	// Attach does the same
+	// Attach binds to an existing entity rather than creating a new one.
+	// bOwnsEntity is false — the entity outlives this view.
 	template <typename TConstruct>
 	void Attach(TConstruct* owner, EntityHandle existing)
 	{

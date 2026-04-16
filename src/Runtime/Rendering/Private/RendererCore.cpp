@@ -1313,17 +1313,17 @@ void RendererCore<Derived>::WriteToFrameSlab()
 	TemporalFrameHeader* temporalHdr = temporalCache->GetFrameHeader(LastTemporalFrame);
 	TemporalFrameHeader* volatileHdr = volatileCache->GetFrameHeader(LastVolatileFrame);
 
-	const ComponentTypeID transformSlot = CTransform<>::StaticTemporalIndex();
-	const ComponentTypeID scaleSlot     = CScale<>::StaticTemporalIndex();
-	const ComponentTypeID colorSlot     = CColor<>::StaticTemporalIndex();
-	const ComponentTypeID flagsSlot     = CacheSlotMeta<>::StaticTemporalIndex();
-	const ComponentTypeID meshRefSlot   = CMeshRef<>::StaticTemporalIndex();
+	const CacheSlotID transformSlot = CTransform<>::StaticTemporalIndex();
+	const CacheSlotID scaleSlot     = CScale<>::StaticTemporalIndex();
+	const CacheSlotID colorSlot     = CColor<>::StaticTemporalIndex();
+	const CacheSlotID flagsSlot     = CacheSlotMeta<>::StaticTemporalIndex();
+	const CacheSlotID meshRefSlot   = CMeshRef<>::StaticTemporalIndex();
 
 	struct FieldDescription
 	{
 		ComponentCacheBase* cache;
 		TemporalFrameHeader* hdr;
-		ComponentTypeID slot;
+		CacheSlotID slot;
 		size_t fi;
 		uint32_t sem;
 	};

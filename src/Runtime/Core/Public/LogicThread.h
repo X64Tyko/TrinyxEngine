@@ -14,14 +14,13 @@ class Registry;
 class JoltPhysics;
 struct EngineConfig;
 struct InputBuffer;
-struct FramePacket;
 
 /**
  * LogicThread: The Brain
  *
- * Runs simulation at FixedUpdateHz with accumulator/substepping
- * Produces FramePackets for Render thread consumption via triple-buffer mailbox
- * Owns the mailbox setup
+ * Runs simulation at FixedUpdateHz with accumulator/substepping.
+ * Publishes completed simulation state into the SoA slab (TemporalFrameHeader + field arrays).
+ * Render thread reads the last completed slab frame independently via PropagateFrame.
  */
 class LogicThread
 {
