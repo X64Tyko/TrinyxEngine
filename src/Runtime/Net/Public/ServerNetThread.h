@@ -52,12 +52,14 @@ public:
 	void HandleMessage(const ReceivedMessage& msg);
 	void TickReplication();
 
-private:
-	void OnClientDisconnectedCB(uint8_t ownerID);
-
 	/// Creates a PlayerInputLog for ownerID, sized to match the temporal slab.
 	/// Called from the ConnectionHandshake handler when an ownerID is assigned.
+	/// Exposed publicly so tests and editor tooling can wire a player log manually
+	/// when bypassing the full handshake flow (e.g. via direct AssignOwnerID).
 	void CreateInputLog(uint8_t ownerID);
+
+private:
+	void OnClientDisconnectedCB(uint8_t ownerID);
 
 	ReplicationSystem* Replicator = nullptr;
 	World* ServerWorld            = nullptr;

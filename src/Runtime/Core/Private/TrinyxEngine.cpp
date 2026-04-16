@@ -214,7 +214,8 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 			Net->InitChildren();
 			// Server world wired below, after FlowManager::CreateWorld().
 #elif defined(TNX_NET_MODEL_SERVER)
-			Net->SetFlowManager(Flow.get());
+	// ServerNetThread resolves FlowManager via ServerWorld->GetFlowManager().
+	// SetServerWorld() is called below after CreateWorld().
 #endif
 		}
 	}
@@ -303,7 +304,7 @@ bool TrinyxEngine::EnsureNetworking()
 	Net->InitChildren();
 	if (DefaultWorld) Net->SetServerWorld(DefaultWorld);
 #elif defined(TNX_NET_MODEL_SERVER)
-	Net->SetFlowManager(Flow.get());
+// ServerNetThread resolves FlowManager via ServerWorld->GetFlowManager().
 #endif
 	return true;
 }

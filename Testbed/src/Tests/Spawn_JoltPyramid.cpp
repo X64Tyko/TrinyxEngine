@@ -12,8 +12,9 @@
 //            transform pull-back, GPU predicate/scatter with Active flags.
 // Persistent — entities stay alive for the duration of the session.
 //
-// Pyramid height is reduced when TNX_ENABLE_ROLLBACK is ON so the rollback
-// determinism test completes in a reasonable time.
+// Non-rollback builds use the full height to exercise Jolt and the batch spawn
+// path meaningfully. Rollback builds use a reduced height so the rollback
+// determinism test re-simulates fewer entities and finishes in a reasonable time.
 RUNTIME_TEST(Spawn_JoltPyramid)
 {
 	std::mt19937 gen(std::random_device{}());
@@ -23,9 +24,9 @@ RUNTIME_TEST(Spawn_JoltPyramid)
 	constexpr float cHalfBoxSize   = 1.0f;
 	constexpr float cBoxSeparation = 0.5f;
 #ifdef TNX_ENABLE_ROLLBACK
-	constexpr int cPyramidHeight = 5;
+	constexpr int cPyramidHeight = 3; // reduced — rollback determinism test re-simulates these
 #else
-	constexpr int cPyramidHeight = 0;
+	constexpr int cPyramidHeight = 5;
 #endif
 	constexpr float xOffset = 0.0f;
 	constexpr float yOffset = -30.0f;
@@ -56,11 +57,15 @@ RUNTIME_TEST(Spawn_JoltPyramid)
 	// Static floor
 	setups.push_back({ xOffset, yOffset - 1.0f, zOffset, 50.0f, 1.0f, 50.0f, 0.0f, 0.3f, 0.3f, 0.3f, JoltMotion::Static });
 
+	const uint32_t spawnCount = static_cast<uint32_t>(setups.size());
+
 	Engine.Spawn([](uint32_t)
 	{
 		Registry* reg = TrinyxEngine::Get().GetRegistry();
 		WriteCubeSetups(reg, setups, gPyramidIds);
 	});
+
+	ASSERT_EQ(static_cast<uint32_t>(gPyramidIds.size()), spawnCount);
 
 	LOG_ENG_ALWAYS_F("[Spawn_JoltPyramid] %d-tier, %d dynamic + 1 floor = %zu entities (persistent)",
 		cPyramidHeight, static_cast<int>(setups.size()) - 1, setups.size());

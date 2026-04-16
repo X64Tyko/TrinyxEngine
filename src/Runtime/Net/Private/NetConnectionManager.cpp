@@ -303,6 +303,9 @@ void NetConnectionManager::AssignOwnerID(HSteamNetConnection conn, uint8_t owner
 	if (ci)
 	{
 		ci->OwnerID = ownerID;
+#if defined(TNX_TESTING) || defined(TNX_ENABLE_EDITOR)
+		if (ci->bClientInitiated) LocalOwnerID.store(ownerID, std::memory_order_release);
+#endif
 		LOG_ENG_INFO_F("[NetConnectionManager] Assigned OwnerID %u to connection %u", ownerID, conn);
 	}
 }

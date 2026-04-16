@@ -6,12 +6,10 @@
 
 #include <random>
 #include <cmath>
-#include <thread>
-#include <SDL3/SDL_timer.h>
 
 // Spawns a large grid of SuperCube (non-physics, color-animating) entities.
 // Exercises: high entity count, ScalarUpdate color animation, no Jolt overhead.
-// Self-destructs after 30 seconds.
+// Entities persist until a subsequent test or engine shutdown clears them.
 RUNTIME_TEST(Spawn_SuperCubeGrid)
 {
 	std::mt19937 gen(std::random_device{}());
@@ -45,25 +43,17 @@ RUNTIME_TEST(Spawn_SuperCubeGrid)
 		});
 	}
 
+	Registry* reg         = Engine.GetRegistry();
+	const uint32_t before = reg->GetTotalEntityCount();
+
 	Engine.Spawn([](uint32_t)
 	{
-		Registry* reg = TrinyxEngine::Get().GetRegistry();
-		WriteSuperCubeSetups(reg, setups, gSuperCubeIds);
+		Registry* r = TrinyxEngine::Get().GetRegistry();
+		WriteSuperCubeSetups(r, setups, gSuperCubeIds);
 	});
 
-	LOG_ENG_ALWAYS_F("[Spawn_SuperCubeGrid] %d entities in %dx%d grid (30s lifetime)",
-		Count, gridSide, gridSide);
+	ASSERT_EQ(reg->GetTotalEntityCount() - before, static_cast<uint32_t>(Count));
 
-	// Self-destruct after 30 seconds
-	std::thread([]()
-	{
-		SDL_Delay(30000);
-		TrinyxEngine::Get().Spawn([](uint32_t)
-		{
-			Registry* reg = TrinyxEngine::Get().GetRegistry();
-			for (EntityHandle id : gSuperCubeIds) reg->Destroy(id);
-			LOG_ENG_ALWAYS_F("[Spawn_SuperCubeGrid] Destroyed %zu entities after 30s", gSuperCubeIds.size());
-			gSuperCubeIds.clear();
-		});
-	}).detach();
+	LOG_ENG_ALWAYS_F("[Spawn_SuperCubeGrid] %d entities in %dx%d grid (persistent until shutdown)",
+					 Count, gridSide, gridSide);
 }

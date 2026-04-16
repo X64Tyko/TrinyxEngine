@@ -63,6 +63,11 @@ public:
 
 	void Tick();
 
+	/// Run one inline message-processing iteration: RunCallbacks + PollIncoming + HandleMessage.
+	/// Use this instead of Start()/ThreadMain when the caller drives the loop (inline mode,
+	/// editor tick, dedicated server without a thread budget for a net thread).
+	void PollAndDispatch();
+
 	NetConnectionManager* GetConnectionManager() { return ConnectionMgr; }
 	const NetConnectionManager* GetConnectionManager() const { return ConnectionMgr; }
 
@@ -245,6 +250,16 @@ void NetThreadBase<Derived>::Tick()
 
 	TickClockSync(nowSec);
 	TickFPS(nowSec);
+}
+
+template <typename Derived>
+void NetThreadBase<Derived>::PollAndDispatch()
+{
+	ConnectionMgr->RunCallbacks();
+
+	std::vector<ReceivedMessage> messages;
+	ConnectionMgr->PollIncoming(messages);
+	for (const auto& msg : messages) Self().HandleMessage(msg);
 }
 
 template <typename Derived>

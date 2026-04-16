@@ -55,6 +55,11 @@ public:
 		(void)engine;
 	}
 
+	/// Called after Run() returns. Override to propagate post-start failure counts
+	/// (e.g. runtime test failures) into the process exit code.
+	/// TNX_IMPLEMENT_GAME returns this value directly.
+	int GetExitCode() const { return 0; }
+
 	const char* GetWindowTitle() const { return "Trinyx Game"; }
 	int GetWindowWidth() const { return 1920; }
 	int GetWindowHeight() const { return 1080; }
@@ -84,13 +89,18 @@ protected:
 		engine.ParseCommandLine(argc, argv);                                             \
 		GameClass game;                                                                  \
 		game.PreInitialize(argc, argv);                                                  \
+		int exitCode = 1;                                                                \
 		if (engine.Initialize(game.GetWindowTitle(),                                     \
 		                      game.GetWindowWidth(),                                     \
 		                      game.GetWindowHeight(),                                    \
 		                      TNX_PROJECT_DIR))                                           \
 		{                                                                                \
 			if (game.PostInitialize(engine))                                             \
+			{                                                                            \
 				engine.Run(game);                                                        \
+				exitCode = game.GetExitCode();                                           \
+			}                                                                            \
+			else { exitCode = 1; }                                                       \
 		}                                                                                \
-		return 0;                                                                        \
+		return exitCode;                                                                 \
 	}

@@ -43,18 +43,25 @@ public:
 		ReplicationSystem* repl     = world->GetReplicationSystem();
 		const uint16_t     typeHash = ReflectionRegistry::ConstructTypeHashFromName("PlayerConstruct");
 
+		// Spawn lambda must be trivially copyable (ValidJobLambda contract) and
+		// synchronous (SpawnAndWait) so bodyRef is populated before ClaimBody.
+		// Capture raw pointers + values instead of [&] to satisfy the constraint.
 		ConstructRef bodyRef{};
-		world->Spawn([&](uint32_t)
+		ConstructRef* bodyRefPtr = &bodyRef;
+		Soul* soulPtr            = &soul;
+		float posX               = result.PosX, posY = result.PosY, posZ = result.PosZ;
+
+		world->SpawnAndWait([world, repl, soulPtr, typeHash, posX, posY, posZ, bodyRefPtr](uint32_t)
 		{
-			ConstructRegistry* reg    = world->GetConstructRegistry();
-			PlayerConstruct*   player = reg->Create<PlayerConstruct>(world, [&](PlayerConstruct* p)
+			ConstructRegistry* reg  = world->GetConstructRegistry();
+			PlayerConstruct* player = reg->Create<PlayerConstruct>(world, [soulPtr, posX, posY, posZ](PlayerConstruct* p)
 			{
-				p->SpawnPosX = result.PosX;
-				p->SpawnPosY = result.PosY;
-				p->SpawnPosZ = result.PosZ;
-				p->SetOwnerSoul(&soul);
+				p->SpawnPosX = posX;
+				p->SpawnPosY = posY;
+				p->SpawnPosZ = posZ;
+				p->SetOwnerSoul(soulPtr);
 			});
-			bodyRef = repl->RegisterConstruct(reg, player, soul.GetOwnerID(), typeHash, 0);
+			*bodyRefPtr = repl->RegisterConstruct(reg, player, soulPtr->GetOwnerID(), typeHash, 0);
 		});
 
 		soul.ClaimBody(bodyRef);
@@ -115,12 +122,15 @@ public:
 
 	void PostStart(TrinyxEngine& engine)
 	{
-		RuntimeTestRegistry::Instance().RunFiltered(engine, SelectedTests);
+		RuntimeFailures = RuntimeTestRegistry::Instance().RunFiltered(engine, SelectedTests);
 	}
+
+	int GetExitCode() const { return RuntimeFailures > 0 ? 1 : 0; }
 
 private:
 	std::vector<std::string> SelectedTests;
 	bool ListTestsAndExit = false;
+	int RuntimeFailures   = 0;
 };
 
 TNX_IMPLEMENT_GAME(TestbedGame)

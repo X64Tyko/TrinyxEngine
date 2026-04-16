@@ -191,11 +191,6 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 	{
 		case NetMessageType::InputFrame:
 			{
-				if (!ServerWorld)
-				{
-					LOG_ENG_WARN("[ServerNet] InputFrame received but ServerWorld is null — dropped");
-				break;
-			}
 			if (msg.Payload.size() < sizeof(InputFramePayload))
 			{
 				LOG_ENG_WARN_F("[ServerNet] InputFrame payload too small (%zu)", msg.Payload.size());

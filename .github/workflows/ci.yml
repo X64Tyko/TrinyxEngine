@@ -2,14 +2,237 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, Dev-Main ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, Dev-Main ]
+
+# ---------------------------------------------------------------------------
+# Matrix: 2 platforms × 8 build configurations = 16 jobs
+#
+# Each config tests a distinct feature combination:
+#   minimal                  — baseline, no optional systems
+#   rollback                 — temporal ring buffer + Jolt deterministic mode
+#   network-client           — GNS client stack, BCrypt/OpenSSL backend
+#   network-client-rollback  — GNS client + rollback (full competitive client)
+#   network-server           — dedicated server model (forces TNX_HEADLESS)
+#   network-server-rollback  — dedicated server + rollback
+#   align64                  — 64-byte field array alignment (different memory layout)
+#   tracy                    — Tracy profiler compiled in (level 1, minimal overhead)
+#
+# Editor is excluded — mutually exclusive with TNX_HEADLESS.
+# PIE net model is excluded — requires editor.
+# ENABLE_AVX2 is OFF on CI runners (not guaranteed).
+# ---------------------------------------------------------------------------
 
 jobs:
   build-and-test:
-    name: Headless Build & Test (Ubuntu)
+    name: "${{ matrix.os_name }} | ${{ matrix.config }}"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-24.04, windows-latest ]
+        config: [ minimal, rollback, network-client, network-client-rollback, network-server, network-server-rollback, align64, tracy ]
+
+        include:
+          # --- OS display names ---
+          - os: ubuntu-24.04
+            os_name: Linux
+          - os: windows-latest
+            os_name: Windows
+
+          # --- Per-config cmake flags and metadata ---
+          - config: minimal
+            cmake_extra: >-
+              -DTNX_ENABLE_ROLLBACK=OFF
+              -DTNX_ENABLE_NETWORK=OFF
+              -DENABLE_TRACY=OFF
+              -DTNX_ALIGN_64=OFF
+            needs_openssl: false
+
+          - config: rollback
+            cmake_extra: >-
+              -DTNX_ENABLE_ROLLBACK=ON
+              -DTNX_ENABLE_NETWORK=OFF
+              -DENABLE_TRACY=OFF
+              -DTNX_ALIGN_64=OFF
+            needs_openssl: false
+
+          - config: network-client
+            cmake_extra: >-
+              -DTNX_ENABLE_ROLLBACK=OFF
+              -DTNX_ENABLE_NETWORK=ON
+              -DTNX_NET_MODEL=Client
+              -DENABLE_TRACY=OFF
+              -DTNX_ALIGN_64=OFF
+            needs_openssl: true
+
+          - config: network-client-rollback
+            cmake_extra: >-
+              -DTNX_ENABLE_ROLLBACK=ON
+              -DTNX_ENABLE_NETWORK=ON
+              -DTNX_NET_MODEL=Client
+              -DENABLE_TRACY=OFF
+              -DTNX_ALIGN_64=OFF
+            needs_openssl: true
+
+          - config: network-server
+            cmake_extra: >-
+              -DTNX_ENABLE_ROLLBACK=OFF
+              -DTNX_ENABLE_NETWORK=ON
+              -DTNX_NET_MODEL=Server
+              -DENABLE_TRACY=OFF
+              -DTNX_ALIGN_64=OFF
+            needs_openssl: true
+
+          - config: network-server-rollback
+            cmake_extra: >-
+              -DTNX_ENABLE_ROLLBACK=ON
+              -DTNX_ENABLE_NETWORK=ON
+              -DTNX_NET_MODEL=Server
+              -DENABLE_TRACY=OFF
+              -DTNX_ALIGN_64=OFF
+            needs_openssl: true
+
+          - config: align64
+            cmake_extra: >-
+              -DTNX_ENABLE_ROLLBACK=OFF
+              -DTNX_ENABLE_NETWORK=OFF
+              -DENABLE_TRACY=OFF
+              -DTNX_ALIGN_64=ON
+            needs_openssl: false
+
+          - config: tracy
+            cmake_extra: >-
+              -DTNX_ENABLE_ROLLBACK=OFF
+              -DTNX_ENABLE_NETWORK=OFF
+              -DENABLE_TRACY=ON
+              -DTRACY_PROFILE_LEVEL=1
+              -DTNX_ALIGN_64=OFF
+            needs_openssl: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # -----------------------------------------------------------------------
+      # Linux dependencies
+      # SDL3 is vendored (libs/SDL3) — no system package needed.
+      # OpenSSL is only needed for network configs on Linux; Windows uses BCrypt.
+      # -----------------------------------------------------------------------
+      - name: Install Linux base dependencies
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ ccache
+
+      - name: Install Linux OpenSSL (network configs)
+        if: matrix.os == 'ubuntu-24.04' && matrix.needs_openssl == true
+        run: sudo apt-get install -y libssl-dev
+
+      # -----------------------------------------------------------------------
+      # Windows: Visual Studio 17 2022 is pre-installed on windows-latest.
+      # BCrypt (Windows SDK) replaces OpenSSL for GNS — no extra install needed.
+      # sccache provides build caching on Windows.
+      # -----------------------------------------------------------------------
+      - name: Install sccache (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      # -----------------------------------------------------------------------
+      # Build caching — ccache (Linux) / sccache (Windows)
+      # Cache key: OS + config + compiler version + all CMakeLists hashes.
+      # Invalidates if any cmake file changes, restores otherwise.
+      # -----------------------------------------------------------------------
+      - name: Cache ccache (Linux)
+        if: matrix.os == 'ubuntu-24.04'
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ matrix.os }}-${{ matrix.config }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+          restore-keys: |
+            ccache-${{ matrix.os }}-${{ matrix.config }}-
+            ccache-${{ matrix.os }}-
+
+      # -----------------------------------------------------------------------
+      # Configure
+      # -----------------------------------------------------------------------
+      - name: Configure (Linux)
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          cmake -B cmake-build-ci \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DTNX_HEADLESS=ON \
+            -DENABLE_AVX2=OFF \
+            ${{ matrix.cmake_extra }}
+
+      - name: Configure (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          cmake -B cmake-build-ci `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
+            -DTNX_HEADLESS=ON `
+            -DENABLE_AVX2=OFF `
+            ${{ matrix.cmake_extra }}
+
+      # -----------------------------------------------------------------------
+      # Build
+      # -----------------------------------------------------------------------
+      - name: Build
+        run: cmake --build cmake-build-ci --target Testbed --config Release --parallel
+
+      # -----------------------------------------------------------------------
+      # Test
+      # -----------------------------------------------------------------------
+      - name: Test (Linux)
+        if: matrix.os == 'ubuntu-24.04'
+        run: ./cmake-build-ci/Testbed/Testbed --headless --max-frames 120
+
+      - name: Test (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: .\cmake-build-ci\Testbed\Release\Testbed.exe --headless --max-frames 120
+
+      # -----------------------------------------------------------------------
+      # Upload logs on failure — makes remote debugging possible.
+      # -----------------------------------------------------------------------
+      - name: Upload build artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-${{ matrix.os_name }}-${{ matrix.config }}
+          path: |
+            cmake-build-ci/**/*.log
+            cmake-build-ci/CMakeFiles/CMakeOutput.log
+            cmake-build-ci/CMakeFiles/CMakeError.log
+          retention-days: 7
+  
+  # ---------------------------------------------------------------------------
+  # Two-process loopback test — Linux only.
+  #
+  # Builds server and client Testbed binaries separately, then runs them on the
+  # same runner. Server listens on 127.0.0.1:27020; client connects, exchanges
+  # Ping/Pong, disconnects. Both processes must exit 0.
+  #
+  # ccache is shared between both builds — the second build reuses all objects
+  # whose compilation is identical (common engine, Jolt, GNS); only files that
+  # differ due to TNX_NET_MODEL_* preprocessor flags are recompiled.
+  # ---------------------------------------------------------------------------
+  network-loopback:
+    name: "Linux | network-loopback (two-process)"
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -20,20 +243,84 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ libsdl3-dev
+          sudo apt-get install -y cmake ninja-build g++ ccache libssl-dev
 
-      - name: Configure (headless, no network, no Tracy)
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-loopback-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+          restore-keys: |
+            ccache-loopback-
+            ccache-ubuntu-24.04-network-server-
+
+      # --- Build server binary ---
+      - name: Configure (server)
         run: |
-          cmake -B cmake-build-ci \
+          cmake -B cmake-build-ci-server \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DTNX_HEADLESS=ON \
-            -DTNX_ENABLE_NETWORK=OFF \
+            -DENABLE_AVX2=OFF \
+            -DTNX_ENABLE_ROLLBACK=OFF \
+            -DTNX_ENABLE_NETWORK=ON \
+            -DTNX_NET_MODEL=Server \
             -DENABLE_TRACY=OFF \
-            -DENABLE_AVX2=OFF
+            -DTNX_ALIGN_64=OFF
 
-      - name: Build
-        run: cmake --build cmake-build-ci --target Testbed --parallel
+      - name: Build (server)
+        run: cmake --build cmake-build-ci-server --target Testbed --config Release --parallel
 
-      - name: Test (60 headless frames)
-        run: ./cmake-build-ci/Testbed/Testbed --headless --max-frames 60
+      # --- Build client binary ---
+      - name: Configure (client)
+        run: |
+          cmake -B cmake-build-ci-client \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DTNX_HEADLESS=ON \
+            -DENABLE_AVX2=OFF \
+            -DTNX_ENABLE_ROLLBACK=OFF \
+            -DTNX_ENABLE_NETWORK=ON \
+            -DTNX_NET_MODEL=Client \
+            -DENABLE_TRACY=OFF \
+            -DTNX_ALIGN_64=OFF
+
+      - name: Build (client)
+        run: cmake --build cmake-build-ci-client --target Testbed --config Release --parallel
+
+      # --- Run two-process loopback ---
+      - name: Run loopback test
+        run: |
+          # Start server in background — blocks in PostInitialize waiting for client
+          TNX_LOOPBACK_SERVER=1 ./cmake-build-ci-server/Testbed/Testbed \
+            --headless --max-frames 2 --test Net_Loopback_Server &
+          SERVER_PID=$!
+
+          # Give the server process time to bind the socket before client connects
+          sleep 1
+
+          # Run client — blocks in PostInitialize until Ping/Pong exchange completes
+          TNX_LOOPBACK_CLIENT=1 ./cmake-build-ci-client/Testbed/Testbed \
+            --headless --max-frames 2 --test Net_Loopback_Client
+          CLIENT_EXIT=$?
+
+          # Wait for server to finish (it detects client disconnect and exits cleanly)
+          wait $SERVER_PID
+          SERVER_EXIT=$?
+
+          echo "Client exit: $CLIENT_EXIT  Server exit: $SERVER_EXIT"
+          [ $CLIENT_EXIT -eq 0 ] && [ $SERVER_EXIT -eq 0 ]
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-loopback
+          path: |
+            cmake-build-ci-server/**/*.log
+            cmake-build-ci-client/**/*.log
+          retention-days: 7

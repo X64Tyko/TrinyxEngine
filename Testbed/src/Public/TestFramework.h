@@ -231,16 +231,18 @@ namespace tnx::Testing
 // ---------------------------------------------------------------------------
 
 // Pre-engine-loop test. Receives const TrinyxEngine& Engine.
+// Engine is [[maybe_unused]] so pure unit tests (bitset, math, config) don't trigger -Wunused-parameter.
 #define TEST(TestName) \
-    static void TestName##_Impl(const TrinyxEngine& Engine); \
+    static void TestName##_Impl([[maybe_unused]] const TrinyxEngine& Engine); \
     static tnx::Testing::TestRegistrar TestName##_registrar(#TestName, TestName##_Impl); \
-    static void TestName##_Impl(const TrinyxEngine& Engine)
+    static void TestName##_Impl([[maybe_unused]] const TrinyxEngine& Engine)
 
 // Runtime test. Receives TrinyxEngine& Engine. Runs after threads + jobs are active.
+// Engine is [[maybe_unused]] so tests that only verify non-engine state don't trigger -Wunused-parameter.
 #define RUNTIME_TEST(TestName) \
-    static void TestName##_Impl(TrinyxEngine& Engine); \
+    static void TestName##_Impl([[maybe_unused]] TrinyxEngine& Engine); \
     static tnx::Testing::RuntimeTestRegistrar TestName##_runtime_registrar(#TestName, TestName##_Impl); \
-    static void TestName##_Impl(TrinyxEngine& Engine)
+    static void TestName##_Impl([[maybe_unused]] TrinyxEngine& Engine)
 
 // Throw to signal intentional skip (not a failure).
 // Usage: SKIP_TEST("Needs TNX_ENABLE_NETWORK")

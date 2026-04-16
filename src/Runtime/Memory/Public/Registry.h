@@ -280,10 +280,11 @@ std::vector<EntityHandle> Registry::Create(size_t count)
 template <typename T>
 bool Registry::HasComponent(EntityHandle lHandle)
 {
-	constexpr ComponentTypeID typeID = T::StaticTypeID();
+	const ComponentTypeID typeID = T::StaticTypeID(); // StaticTypeID() is runtime-const, not constexpr
 	const ClassID classType          = lHandle.GetTypeID();
 	auto& mr                         = ReflectionRegistry::Get();
-	return (mr.ClassToArchetype[classType] & typeID) == typeID;
+	// typeID is 1-based; BuildSignature stores components at bit (typeID-1).
+	return mr.ClassToArchetype[classType].test(typeID - 1);
 }
 
 template <typename... Components>

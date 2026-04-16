@@ -1,5 +1,7 @@
 # TrinyxEngine
 
+[![CI](https://github.com/X64Tyko/StrigidEngine/actions/workflows/ci.yml/badge.svg)](https://github.com/X64Tyko/StrigidEngine/actions/workflows/ci.yml)
+
 **A high-performance, data-oriented game engine for R&D and experimentation**
 
 ---

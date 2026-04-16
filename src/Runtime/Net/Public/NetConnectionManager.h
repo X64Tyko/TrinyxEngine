@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <vector>
 #include <algorithm>
@@ -220,6 +221,14 @@ public:
 	/// Generate and Assign a NetOwnerID to a connection. Called during handshake.
 	void GenerateNetID(HSteamNetConnection conn);
 
+#if defined(TNX_TESTING) || defined(TNX_ENABLE_EDITOR)
+	/// The OwnerID assigned to this process's own client-initiated connection.
+	/// Set atomically in AssignOwnerID when the connection is client-initiated.
+	/// Safe to poll from any thread — 0 means not yet assigned.
+	/// Available in testing and editor builds only.
+	uint8_t GetLocalOwnerID() const { return LocalOwnerID.load(std::memory_order_acquire); }
+#endif
+
 	/// Fired when a server-side connection is fully confirmed (GNS handshake complete).
 	/// Fires on the NetThread during RunCallbacks(). Safe to call World::Spawn() from here.
 	OnClientConnectedEvent OnClientConnected;
@@ -243,6 +252,12 @@ private:
 	HSteamNetPollGroup PollGroup     = 0;
 
 	std::vector<ConnectionInfo> Connections;
+
+	/// Atomically updated when AssignOwnerID is called on a client-initiated connection.
+	/// Readable from any thread — used by tests and the editor to observe handshake completion.
+#if defined(TNX_TESTING) || defined(TNX_ENABLE_EDITOR)
+	std::atomic<uint8_t> LocalOwnerID{0};
+#endif
 
 	/// Singleton pointer for static callback routing.
 	/// Only one NetConnectionManager should exist per process.

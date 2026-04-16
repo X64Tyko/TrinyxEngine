@@ -13,7 +13,7 @@
 //            alpha fade, AVX2 wide-path throughput.
 // Self-destructs after 30 seconds.
 //
-// Count is set to 0 by default — change to stress-test the projectile path.
+// Count is intentionally small so CI is fast. Increase to stress-test.
 RUNTIME_TEST(Spawn_ProjectileBurst)
 {
 	std::mt19937 gen(std::random_device{}());
@@ -21,7 +21,7 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 	std::uniform_real_distribution<float> speedDist(30.0f, 80.0f);
 	std::uniform_real_distribution<float> colorDist(0.4f, 1.0f);
 
-	constexpr int   Count    = 0; // increase to stress-test
+	constexpr int Count     = 100; // increase to stress-test
 	constexpr float OriginY  = 20.0f;
 	constexpr float OriginZ  = -50.0f;
 
@@ -39,27 +39,29 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 		});
 	}
 
+	Registry* reg         = Engine.GetRegistry();
+	const uint32_t before = reg->GetTotalEntityCount();
+
 	Engine.Spawn([](uint32_t)
 	{
-		Registry* reg = TrinyxEngine::Get().GetRegistry();
-		WriteProjectileSetups(reg, setups, gProjectileIds);
+		Registry* r = TrinyxEngine::Get().GetRegistry();
+		WriteProjectileSetups(r, setups, gProjectileIds);
 	});
+
+	ASSERT_EQ(reg->GetTotalEntityCount() - before, static_cast<uint32_t>(Count));
 
 	LOG_ENG_ALWAYS_F("[Spawn_ProjectileBurst] %d projectiles from origin (0, %.0f, %.0f) (30s lifetime)",
 		Count, OriginY, OriginZ);
 
-	if (Count > 0)
+	std::thread([]()
 	{
-		std::thread([]()
+		SDL_Delay(30000);
+		TrinyxEngine::Get().Spawn([](uint32_t)
 		{
-			SDL_Delay(30000);
-			TrinyxEngine::Get().Spawn([](uint32_t)
-			{
-				Registry* reg = TrinyxEngine::Get().GetRegistry();
-				for (EntityHandle id : gProjectileIds) reg->Destroy(id);
-				LOG_ENG_ALWAYS_F("[Spawn_ProjectileBurst] Destroyed %zu entities after 30s", gProjectileIds.size());
-				gProjectileIds.clear();
-			});
-		}).detach();
-	}
+			Registry* r = TrinyxEngine::Get().GetRegistry();
+			for (EntityHandle id : gProjectileIds) r->Destroy(id);
+			LOG_ENG_ALWAYS_F("[Spawn_ProjectileBurst] Destroyed %zu entities after 30s", gProjectileIds.size());
+			gProjectileIds.clear();
+		});
+	}).detach();
 }
