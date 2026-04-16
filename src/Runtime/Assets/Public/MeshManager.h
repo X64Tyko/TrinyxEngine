@@ -12,18 +12,19 @@ struct MeshAsset;
 // -----------------------------------------------------------------------
 // BuiltinMesh — fixed AssetIDs for engine built-in meshes.
 //
-// UUID range [0x100, 0x1FF] is reserved for engine builtins. These IDs
-// are stable across sessions; no manifest entry is required.
+// AssetDatabase generates UUIDs as (counter << 8) where counter is uint32_t,
+// so all AssetDatabase UUIDs fit in bits [39:8]. Builtins use bits [47:40]
+// (values >= 2^40) to guarantee zero collision with any imported asset.
 // -----------------------------------------------------------------------
 namespace BuiltinMesh
 {
 	inline AssetID CubeID()
 	{
-		return AssetID::Create(0x0000000000000100LL, AssetType::StaticMesh);
+		return AssetID::Create(0x0000010000000000LL, AssetType::StaticMesh);
 	}
 	inline AssetID CapsuleID()
 	{
-		return AssetID::Create(0x0000000000000200LL, AssetType::StaticMesh);
+		return AssetID::Create(0x0000020000000000LL, AssetType::StaticMesh);
 	}
 }
 
@@ -82,7 +83,7 @@ public:
 	uint32_t FindSlotByName(const std::string& name) const
 	{
 		const AssetEntry* e = AssetRegistry::Get().FindByName(name);
-		if (!e || !e->Data) return UINT32_MAX;
+		if (!e || e->Type != AssetType::StaticMesh) return UINT32_MAX;
 		return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(e->Data));
 	}
 
@@ -90,7 +91,7 @@ public:
 	uint32_t FindSlotByID(AssetID id) const
 	{
 		const AssetEntry* e = AssetRegistry::Get().Find(id);
-		if (!e || !e->Data) return UINT32_MAX;
+		if (!e || e->Type != AssetType::StaticMesh) return UINT32_MAX;
 		return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(e->Data));
 	}
 
