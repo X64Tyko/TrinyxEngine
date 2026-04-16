@@ -30,7 +30,14 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # Project directory for INI config discovery (source dir, not build dir)
 target_compile_definitions(${PROJECT_NAME} PRIVATE
         TNX_PROJECT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+        TNX_TESTING   # Testbed always builds with test/observer APIs enabled
 )
+
+# Propagate TNX_TESTING to the engine library so that guarded APIs in Trinyx
+# .cpp files (e.g. LocalOwnerID in NetConnectionManager) are compiled in.
+# PRIVATE here is correct — it applies only to the Trinyx library's own TUs
+# when Testbed is included in the build (each build dir is independent).
+target_compile_definitions(Trinyx PRIVATE TNX_TESTING)
 
 # Testbed-specific includes (for TestEntity.h and similar)
 target_include_directories(${PROJECT_NAME} PRIVATE

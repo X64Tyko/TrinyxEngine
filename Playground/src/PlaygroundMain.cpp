@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 // Playground — network playtest application.
 // Scene loading is handled by the flow system: EngineConfig::DefaultState
-// names a GameState, and the state's OnEnter loads the level.
+// names a FlowState, and the state's OnEnter loads the level.
 // ---------------------------------------------------------------------------
 class PlaygroundGame : public GameManager<PlaygroundGame>
 {

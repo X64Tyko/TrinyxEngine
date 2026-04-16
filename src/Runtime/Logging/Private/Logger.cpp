@@ -11,7 +11,7 @@ void Logger::Init(const std::string& logFilePath, LogLevel inMinLevel)
 		return;
 	}
 
-	MinLevel = inMinLevel;
+	for (auto& ml : MinLevel) ml = inMinLevel;
 
 	// Open log file in append mode
 	LogFile.open(logFilePath, std::ios::out | std::ios::app);
@@ -56,10 +56,12 @@ void Logger::Shutdown()
 	bInitialized = false;
 }
 
-void Logger::Log(LogLevel level, const char* file, int line, const std::string& message)
+void Logger::Log(LogLevel level, LogChannel channel, const char* file, int line, const std::string& message)
 {
-	// Filter by minimum level
-	if (level < MinLevel)
+	// Filter by per-channel minimum level
+	const uint8_t ch         = static_cast<uint8_t>(channel);
+	const LogLevel threshold = (ch < static_cast<uint8_t>(LogChannel::Count)) ? MinLevel[ch] : MinLevel[0];
+	if (level != LogLevel::Always && level < threshold)
 	{
 		return;
 	}
@@ -88,6 +90,7 @@ void Logger::Log(LogLevel level, const char* file, int line, const std::string& 
 	// Ring buffer for editor panel
 	LogEntry& entry = LogRing[LogHead % LogRingSize];
 	entry.Level     = level;
+	entry.Channel   = channel;
 	snprintf(entry.Message, sizeof(entry.Message), "%s", message.c_str());
 	LogHead++;
 }

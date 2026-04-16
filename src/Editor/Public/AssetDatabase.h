@@ -50,7 +50,7 @@ struct AssetSidecar
 
 struct AssetDatabaseEntry
 {
-	int64_t UUID = 0;
+	AssetID ID;
 	std::string Name; // human-readable display name (default = filename stem)
 	std::string Path; // relative to content root
 	AssetType Type       = AssetType::Invalid;
@@ -87,14 +87,14 @@ public:
 	// Get all entries for UI display.
 	const std::vector<AssetDatabaseEntry>& GetEntries() const { return Entries; }
 
-	// Lookup by UUID.
-	const AssetDatabaseEntry* FindByUUID(int64_t uuid) const;
+	// Lookup by AssetID.
+	const AssetDatabaseEntry* FindByID(AssetID id) const;
 
 	// Lookup by relative path.
 	const AssetDatabaseEntry* FindByPath(const std::string& relativePath) const;
 
 	// Rename an asset's display name. Updates database and runtime registry.
-	bool Rename(int64_t uuid, const std::string& newName);
+	bool Rename(AssetID id, const std::string& newName);
 
 private:
 	// Generate a sequential UUID for the given asset type (counter-based, dev builds).

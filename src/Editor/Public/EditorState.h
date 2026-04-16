@@ -65,7 +65,7 @@ struct EditorState
 	bool bSceneDirty             = false; // True if scene has been modified since last save
 
 	// --- Scene flow metadata (saved in .tnxscene, used by PIE) ---
-	std::string SceneDefaultState; // Name of the GameState to load on PIE start
+	std::string SceneDefaultState; // Name of the FlowState to load on PIE start
 	std::string SceneDefaultMode;  // Name of the GameMode to activate on PIE start
 
 	// --- Engine access (for Spawn handshake, scene load, etc.) ---

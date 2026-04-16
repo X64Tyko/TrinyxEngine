@@ -3,12 +3,18 @@
 #include "Archetype.h"
 #include "CacheSlotMeta.h"
 #include "CColor.h"
+#include "Construct.h"
+#include "ConstructRegistry.h"
+#include "FlowManager.h"
 #include "Logger.h"
+#include "LogicThread.h"
 #include "CMeshRef.h"
 #include "NetConnectionManager.h"
 #include "NetTypes.h"
+#include "ReflectionRegistry.h"
 #include "Registry.h"
 #include "CScale.h"
+#include "Soul.h"
 #include "TemporalComponentCache.h"
 #include "CTransform.h"
 #include "World.h"
@@ -19,20 +25,187 @@ void ReplicationSystem::Initialize(World* serverWorld)
 {
 	ServerWorld = serverWorld;
 	Replicated.clear();
-	LOG_INFO("[Replication] Initialized");
+	LOG_ENG_INFO("[Replication] Initialized");
 }
 
 // ---------------------------------------------------------------------------
 // Tick — called from NetThread at NetworkUpdateHz
 // ---------------------------------------------------------------------------
 
-void ReplicationSystem::Tick(NetConnectionManager* connMgr, uint32_t frameNumber)
+void ReplicationSystem::Tick(NetConnectionManager* connMgr)
 {
 	if (!ServerWorld || !connMgr) return;
 	if (connMgr->GetConnectionCount() == 0) return;
 
+	const uint32_t frameNumber = ServerWorld->GetLogicThread()
+									 ? ServerWorld->GetLogicThread()->GetLastCompletedFrame()
+									 : 0;
+
 	SendSpawns(connMgr, frameNumber);
+	SendConstructSpawns(connMgr, frameNumber);
 	SendStateCorrections(connMgr, frameNumber);
+}
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// SendConstructSpawns — send pre-built ConstructSpawn payloads to all Loaded+ clients.
+// Payloads were fully assembled (EntityNetHandles resolved) at RegisterConstruct time.
+// ---------------------------------------------------------------------------
+
+void ReplicationSystem::SendConstructSpawns(NetConnectionManager* connMgr, uint32_t frameNumber)
+{
+	if (PendingConstructSpawns.empty()) return;
+
+	auto& connections = connMgr->GetConnections();
+
+	bool anyReady = false;
+	for (const auto& ci : connections)
+	{
+		if (ci.bConnected && ci.bServerSide && ci.OwnerID > 0 &&
+			ci.RepState >= ClientRepState::Loaded)
+		{
+			anyReady = true;
+			break;
+		}
+	}
+	if (!anyReady) return;
+
+	for (const std::vector<uint8_t>& buf : PendingConstructSpawns)
+	{
+		if (buf.size() < sizeof(ConstructSpawnPayload)) continue;
+
+		const auto* payload = reinterpret_cast<const ConstructSpawnPayload*>(buf.data());
+
+		PacketHeader header{};
+		header.Type        = static_cast<uint8_t>(NetMessageType::ConstructSpawn);
+		header.Flags       = PacketFlag::DefaultFlags;
+		header.PayloadSize = static_cast<uint16_t>(buf.size());
+		header.FrameNumber = frameNumber;
+		header.SenderID    = 0;
+
+		for (const auto& ci : connections)
+		{
+			if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
+			if (ci.RepState < ClientRepState::Loaded) continue;
+			connMgr->Send(ci.Handle, header, buf.data(), /*reliable=*/true);
+			{
+				Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
+								 ? ServerWorld->GetFlowManager()->GetSoul(ci.OwnerID)
+								 : nullptr;
+				LOG_NET_INFO_F(soul, "[Replication] ConstructSpawn → ownerID=%u viewCount=%u",
+							   ci.OwnerID, payload->ViewCount);
+			}
+		}
+	}
+
+	PendingConstructSpawns.clear();
+}
+
+// ---------------------------------------------------------------------------
+// HandleConstructSpawn — client-side: create a Construct from a received message.
+// Returns false if any required entity view is not yet in the client registry.
+// The caller should defer the raw payload bytes and retry next tick.
+// ---------------------------------------------------------------------------
+
+bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* entityReg,
+											 World* clientWorld, const uint8_t* data, size_t len)
+{
+	if (len < sizeof(ConstructSpawnPayload))
+	{
+		LOG_NET_WARN(nullptr, "[Replication] HandleConstructSpawn: payload too small");
+		return true; // Malformed — don't retry
+	}
+
+	const auto* header             = reinterpret_cast<const ConstructSpawnPayload*>(data);
+	const uint32_t* viewNetHandles = reinterpret_cast<const uint32_t*>(data + sizeof(ConstructSpawnPayload));
+
+	ConstructNetHandle netHandle{};
+	netHandle.Value = header->Handle;
+
+	ConstructNetManifest manifest{};
+	manifest.Value = header->Manifest;
+
+	const uint16_t typeHash = static_cast<uint16_t>(manifest.PrefabIndex);
+	const uint8_t ownerID   = netHandle.GetOwnerID();
+	const uint8_t viewCount = header->ViewCount;
+
+	// Hoist soul lookup so all early-return log paths can show the role tag.
+	FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr;
+	Soul* soul        = flow ? flow->GetSoul(ownerID) : nullptr;
+
+	// Resolve EntityNetHandles → local EntityHandles.
+	// If any handle is unresolved, the EntitySpawn hasn't been processed yet — defer.
+	constexpr uint8_t MaxViews = 8;
+	EntityHandle resolvedHandles[MaxViews];
+	uint8_t resolvedCount = 0;
+
+	for (uint8_t i = 0; i < viewCount && i < MaxViews; ++i)
+	{
+		EntityNetHandle enh{};
+		enh.Value = viewNetHandles[i];
+
+		GlobalEntityHandle gH = entityReg->GlobalEntityRegistry.NetToRecord.get(enh.GetHandleIndex());
+		if (gH.GetIndex() == 0)
+		{
+			LOG_NET_DEBUG_F(soul, "[Replication] HandleConstructSpawn: EntityNetHandle %u not yet available — deferring", enh.Value);
+			return false;
+		}
+
+		EntityRecord* entRec = entityReg->GlobalEntityRegistry.Records[gH.GetIndex()];
+		if (!entRec || !entRec->IsValid())
+		{
+			LOG_NET_DEBUG_F(soul, "[Replication] HandleConstructSpawn: EntityNetHandle %u record invalid — deferring", enh.Value);
+			return false;
+		}
+
+		resolvedHandles[resolvedCount] = entityReg->MakeEntityHandle(gH, entRec->Arch->ArchClassID);
+		resolvedCount++;
+	}
+
+	// Find the client factory for this Construct type
+	const ReflectionRegistry::ConstructClientFactory factory =
+		ReflectionRegistry::Get().FindConstructClientFactory(typeHash);
+
+	if (!factory)
+	{
+		LOG_NET_WARN_F(soul, "[Replication] HandleConstructSpawn: no factory for typeHash=%u", typeHash);
+		return true; // Bad type — don't retry
+	}
+
+	// If no Soul exists for this ownerID, lazily create an Echo Soul so the
+	// Construct can be claimed and input-gated correctly (e.g., server-owned
+	// constructs received on the client have ownerID=0 and no prior Soul).
+	if (!soul && flow)
+		soul = flow->EnsureEchoSoul(ownerID);
+
+	// Create the client-side Construct via the replication path
+	void* raw = factory(reg, clientWorld, resolvedHandles, resolvedCount, soul);
+	if (!raw)
+	{
+		LOG_NET_WARN(soul, "[Replication] HandleConstructSpawn: factory returned null");
+		return true;
+	}
+
+	// Wire ConstructRecord using the server-assigned net handle from the payload.
+	ConstructNetHandle serverHandle{};
+	serverHandle.Value = header->Handle;
+
+	ConstructNetManifest wireManifest{};
+	wireManifest.PrefabIndex = typeHash;
+
+	ConstructRef ref = reg->WireNetRef(raw, serverHandle, wireManifest, typeHash);
+
+	// Deliver to the owning Soul
+	if (soul)
+	{
+		soul->ClaimBody(ref);
+		LOG_NET_INFO_F(soul, "[Replication] HandleConstructSpawn: ClaimBody → Soul ownerID=%u role=%u", ownerID, static_cast<uint8_t>(soul->GetRole()));
+	}
+	else
+	{
+		LOG_NET_WARN_F(soul, "[Replication] HandleConstructSpawn: no Soul and no FlowManager for ownerID=%u", ownerID);
+	}
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -44,7 +217,7 @@ void ReplicationSystem::RegisterEntity(Registry* reg, EntityHandle localHandle, 
 	GlobalEntityHandle gHandle = reg->GlobalEntityRegistry.LookupGlobalHandle(localHandle);
 	if (gHandle.GetIndex() == 0)
 	{
-		LOG_WARN("[Replication] RegisterEntity: invalid handle");
+		LOG_ENG_WARN("[Replication] RegisterEntity: invalid handle");
 		return;
 	}
 	AssignNetHandle(reg, gHandle, ownerID);
@@ -113,68 +286,119 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 	if (!flags || !posX) return; // No entities allocated
 
 	const uint32_t maxEntities = temporalCache->GetMaxCachedEntityCount();
-
-	// Grow replicated tracker if needed
 	if (Replicated.size() < maxEntities) Replicated.resize(maxEntities, false);
 
-	int spawnCount = 0;
-
-	for (uint32_t i = 0; i < maxEntities; ++i)
+	// Helper: build and send one EntitySpawn for entity at index i.
+	auto SendOneSpawn = [&](uint32_t i, HSteamNetConnection handle, bool bAliveOnly)
 	{
-		// Skip inactive or already-replicated entities
-		if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Active)) || !(flags[i] & static_cast<int32_t>(TemporalFlagBits::Replicated))) continue;
-		if (Replicated[i]) continue;
-
-		// Look up the GlobalEntityHandle for this cache index
 		GlobalEntityHandle gHandle = reg->GlobalEntityRegistry.LookupGlobalHandle(static_cast<EntityCacheHandle>(i));
 		EntityRecord* record       = reg->GlobalEntityRegistry.Records[gHandle.GetIndex()];
-		if (!record || !record->IsValid()) continue;
+		if (!record || !record->IsValid()) return;
 
-		// Use pre-assigned NetHandle (from RegisterEntity) or assign a new server-owned one
 		EntityNetHandle netHandle = record->NetworkID;
 		if (netHandle.NetIndex == 0) netHandle = AssignNetHandle(reg, gHandle);
 
-		// Build spawn payload
-		EntitySpawnPayload payload{};
-		payload.NetHandle = netHandle.Value;
+		EntitySpawnPayload spawnMsg{};
+		spawnMsg.NetHandle = netHandle.Value;
+
 		EntityNetManifest manifest{};
 		manifest.ClassType = record->Arch ? record->Arch->ArchClassID : 0;
-		payload.Manifest   = manifest.Value;
+		spawnMsg.Manifest  = manifest.Value;
 
-		payload.PosX  = posX ? posX[i] : 0.0f;
-		payload.PosY  = posY ? posY[i] : 0.0f;
-		payload.PosZ  = posZ ? posZ[i] : 0.0f;
-		payload.RotQx = rotQx ? rotQx[i] : 0.0f;
-		payload.RotQy = rotQy ? rotQy[i] : 0.0f;
-		payload.RotQz = rotQz ? rotQz[i] : 0.0f;
-		payload.RotQw = rotQw ? rotQw[i] : 1.0f;
+		// SpawnFlags: TemporalFlagBits in high 16 bits, generation in low 16 bits.
+		// Receiver writes GetFlags() directly to CacheSlotMeta — no translation needed.
+		const uint32_t flagBits = bAliveOnly
+									  ? static_cast<uint32_t>(TemporalFlagBits::Alive)
+									  : static_cast<uint32_t>(TemporalFlagBits::Active | TemporalFlagBits::Alive);
+		spawnMsg.SpawnFlags = EntitySpawnPayload::Pack(flagBits, record->GetGeneration());
 
-		payload.ScaleX = scX ? scX[i] : 1.0f;
-		payload.ScaleY = scY ? scY[i] : 1.0f;
-		payload.ScaleZ = scZ ? scZ[i] : 1.0f;
+		spawnMsg.PosX  = posX ? posX[i] : 0.0f;
+		spawnMsg.PosY  = posY ? posY[i] : 0.0f;
+		spawnMsg.PosZ  = posZ ? posZ[i] : 0.0f;
+		spawnMsg.RotQx = rotQx ? rotQx[i] : 0.0f;
+		spawnMsg.RotQy = rotQy ? rotQy[i] : 0.0f;
+		spawnMsg.RotQz = rotQz ? rotQz[i] : 0.0f;
+		spawnMsg.RotQw = rotQw ? rotQw[i] : 1.0f;
 
-		payload.ColorR = colR ? colR[i] : 1.0f;
-		payload.ColorG = colG ? colG[i] : 1.0f;
-		payload.ColorB = colB ? colB[i] : 1.0f;
-		payload.ColorA = colA ? colA[i] : 1.0f;
+		spawnMsg.ScaleX = scX ? scX[i] : 1.0f;
+		spawnMsg.ScaleY = scY ? scY[i] : 1.0f;
+		spawnMsg.ScaleZ = scZ ? scZ[i] : 1.0f;
 
-		payload.MeshID = meshID ? meshID[i] : 0;
+		spawnMsg.ColorR = colR ? colR[i] : 1.0f;
+		spawnMsg.ColorG = colG ? colG[i] : 1.0f;
+		spawnMsg.ColorB = colB ? colB[i] : 1.0f;
+		spawnMsg.ColorA = colA ? colA[i] : 1.0f;
 
-		// Send reliable to all connected clients
-		PacketHeader header{};
-		header.Type        = static_cast<uint8_t>(NetMessageType::EntitySpawn);
-		header.Flags       = PacketFlag::DefaultFlags;
-		header.PayloadSize = sizeof(EntitySpawnPayload);
-		header.FrameNumber = frameNumber;
-		header.SenderID    = 0; // Server
+		spawnMsg.MeshID = meshID ? meshID[i] : 0;
 
-		for (const auto& ci : connMgr->GetConnections())
+		PacketHeader spawnHeader{};
+		spawnHeader.Type        = static_cast<uint8_t>(NetMessageType::EntitySpawn);
+		spawnHeader.Flags       = PacketFlag::DefaultFlags;
+		spawnHeader.PayloadSize = sizeof(EntitySpawnPayload);
+		spawnHeader.FrameNumber = frameNumber;
+		spawnHeader.SenderID    = 0;
+		connMgr->Send(handle, spawnHeader, reinterpret_cast<const uint8_t*>(&spawnMsg), true);
+	};
+
+	// --- Pass 1: Initial flush for newly LevelLoaded connections ---
+	// Send all active+replicated entities with Alive-only flag.
+	// After flushing, send ServerReady and advance RepState → Loaded.
+	auto& connections = connMgr->GetConnections();
+	for (auto& ci : connections)
+	{
+		if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
+		if (ci.RepState != ClientRepState::LevelLoaded || ci.bInitialSpawnFlushed) continue;
+
+		int flushCount = 0;
+		for (uint32_t i = 0; i < maxEntities; ++i)
 		{
-			if (ci.bConnected && ci.OwnerID > 0 && ci.bServerSide) // Only send on server-accepted handles
-			{
-				connMgr->Send(ci.Handle, header,
-							  reinterpret_cast<const uint8_t*>(&payload), true);
-			}
+			if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Alive))) continue;
+			if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Replicated))) continue;
+			SendOneSpawn(i, ci.Handle, /*bAliveOnly=*/true);
+			flushCount++;
+		}
+
+		ci.bInitialSpawnFlushed = true;
+
+		// Send ServerReady — client will sweep Alive→Active then send PlayerBeginRequest.
+		FlowEventPayload serverReadyMsg{};
+		serverReadyMsg.EventID = static_cast<uint8_t>(FlowEventID::ServerReady);
+
+		PacketHeader serverReadyHeader{};
+		serverReadyHeader.Type        = static_cast<uint8_t>(NetMessageType::FlowEvent);
+		serverReadyHeader.Flags       = PacketFlag::DefaultFlags;
+		serverReadyHeader.SequenceNum = ci.NextSeqOut++;
+		serverReadyHeader.SenderID    = 0;
+		serverReadyHeader.FrameNumber = frameNumber;
+		serverReadyHeader.PayloadSize = sizeof(FlowEventPayload);
+		connMgr->Send(ci.Handle, serverReadyHeader, reinterpret_cast<const uint8_t*>(&serverReadyMsg), true);
+
+		ci.RepState = ClientRepState::Loaded;
+		{
+			Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
+							 ? ServerWorld->GetFlowManager()->GetSoul(ci.OwnerID)
+							 : nullptr;
+			LOG_NET_INFO_F(soul, "[Replication] Initial flush: %d entities → ownerID=%u, ServerReady sent → Loaded",
+						   flushCount, ci.OwnerID);
+		}
+	}
+
+	// --- Pass 2: Incremental spawns for fully loaded connections ---
+	// Send entities not yet in the global Replicated set to all Loaded+ connections.
+	int spawnCount = 0;
+	for (uint32_t i = 0; i < maxEntities; ++i)
+	{
+		if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Alive))) continue;
+		if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Replicated))) continue;
+		if (Replicated[i]) continue;
+
+		for (const auto& ci : connections)
+		{
+			if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
+			if (ci.RepState < ClientRepState::Loaded) continue; // Not ready yet
+			if (!ci.bInitialSpawnFlushed) continue;
+
+			SendOneSpawn(i, ci.Handle, /*bAliveOnly=*/false);
 		}
 
 		Replicated[i] = true;
@@ -182,7 +406,7 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 	}
 
 	if (spawnCount > 0)
-		LOG_DEBUG_F("[Replication] Sent %d EntitySpawn messages", spawnCount);
+		LOG_NET_DEBUG_F(nullptr, "[Replication] Sent %d incremental EntitySpawn(s)", spawnCount);
 }
 
 // ---------------------------------------------------------------------------
@@ -253,7 +477,7 @@ void ReplicationSystem::SendStateCorrections(NetConnectionManager* connMgr, uint
 
 	for (const auto& ci : connMgr->GetConnections())
 	{
-		if (ci.bConnected && ci.OwnerID > 0)
+		if (ci.bConnected && ci.bServerSide && ci.OwnerID > 0)
 		{
 			connMgr->Send(ci.Handle, header,
 						  reinterpret_cast<const uint8_t*>(batch.data()), false);
@@ -280,7 +504,7 @@ void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayloa
 	reg->CreateInternal(classType, {&gHandle, 1});
 	if (gHandle.GetIndex() == 0)
 	{
-		LOG_WARN_F("[Replication] Failed to create entity ClassID %u", classType);
+		LOG_ENG_WARN_F("[Replication] Failed to create entity ClassID %u", classType);
 		return;
 	}
 
@@ -291,90 +515,100 @@ void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayloa
 	EntityRecord* record = reg->GlobalEntityRegistry.Records[gHandle.GetIndex()];
 	if (!record || !record->IsValid())
 	{
-		LOG_WARN("[Replication] Entity created but record invalid");
+		LOG_ENG_WARN("[Replication] Entity created but record invalid");
 		return;
 	}
 	record->NetworkID = receivedNetHandle;
 
-	// Write field data into the newly created entity's archetype slot
+	// Write field data into the newly created entity's archetype slot.
+	// Newly spawned entities must be initialized in BOTH frames so that FieldProxy
+	// reads (which target the read frame) see correct data immediately — without
+	// waiting for the next PropagateFrame.  State corrections run at 30 Hz so a
+	// one-frame gap would cause JoltCharacter to be placed at the origin.
 	Archetype* arch   = record->Arch;
 	Chunk* chunk      = record->TargetChunk;
 	uint32_t localIdx = record->LocalIndex;
 
-	void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
-	arch->BuildFieldArrayTable(chunk, fieldArrayTable,
-							   reg->GetTemporalCache()->GetActiveWriteFrame(),
-							   reg->GetVolatileCache()->GetActiveWriteFrame());
-
-	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
+	auto WriteFields = [&](uint32_t temporalFrame, uint32_t volatileFrame)
 	{
-		void* fieldBase = fieldArrayTable[fdesc.fieldSlotIndex];
-		if (!fieldBase) continue;
+		void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+		arch->BuildFieldArrayTable(chunk, fieldArrayTable, temporalFrame, volatileFrame);
 
-		auto* floatArr = static_cast<float*>(fieldBase);
-		auto* intArr   = static_cast<int32_t*>(fieldBase);
-		auto* uintArr  = static_cast<uint32_t*>(fieldBase);
-
-		ComponentTypeID compID = fdesc.componentID;
-
-		if (compID == CacheSlotMeta<>::StaticTypeID())
+		for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 		{
-			if (fdesc.componentSlotIndex == 0) intArr[localIdx] = static_cast<int32_t>(TemporalFlagBits::Active);
-		}
-		else if (compID == CTransform<>::StaticTypeID())
-		{
-			switch (fdesc.componentSlotIndex)
+			void* fieldBase = fieldArrayTable[fdesc.fieldSlotIndex];
+			if (!fieldBase) continue;
+
+			auto* floatArr = static_cast<float*>(fieldBase);
+			auto* intArr   = static_cast<int32_t*>(fieldBase);
+			auto* uintArr  = static_cast<uint32_t*>(fieldBase);
+
+			ComponentTypeID compID = fdesc.componentID;
+
+			if (compID == CacheSlotMeta<>::StaticTypeID())
 			{
-				case 0: floatArr[localIdx] = payload.PosX;
-					break;
-				case 1: floatArr[localIdx] = payload.PosY;
-					break;
-				case 2: floatArr[localIdx] = payload.PosZ;
-					break;
-				case 3: floatArr[localIdx] = payload.RotQx;
-					break;
-				case 4: floatArr[localIdx] = payload.RotQy;
-					break;
-				case 5: floatArr[localIdx] = payload.RotQz;
-					break;
-				case 6: floatArr[localIdx] = payload.RotQw;
-					break;
-				default: break;
+				if (fdesc.componentSlotIndex == 0) intArr[localIdx] = EntitySpawnPayload::GetFlags(payload.SpawnFlags);
+			}
+			else if (compID == CTransform<>::StaticTypeID())
+			{
+				switch (fdesc.componentSlotIndex)
+				{
+					case 0: floatArr[localIdx] = payload.PosX;
+						break;
+					case 1: floatArr[localIdx] = payload.PosY;
+						break;
+					case 2: floatArr[localIdx] = payload.PosZ;
+						break;
+					case 3: floatArr[localIdx] = payload.RotQx;
+						break;
+					case 4: floatArr[localIdx] = payload.RotQy;
+						break;
+					case 5: floatArr[localIdx] = payload.RotQz;
+						break;
+					case 6: floatArr[localIdx] = payload.RotQw;
+						break;
+					default: break;
+				}
+			}
+			else if (compID == CScale<>::StaticTypeID())
+			{
+				switch (fdesc.componentSlotIndex)
+				{
+					case 0: floatArr[localIdx] = payload.ScaleX;
+						break;
+					case 1: floatArr[localIdx] = payload.ScaleY;
+						break;
+					case 2: floatArr[localIdx] = payload.ScaleZ;
+						break;
+					default: break;
+				}
+			}
+			else if (compID == CColor<>::StaticTypeID())
+			{
+				switch (fdesc.componentSlotIndex)
+				{
+					case 0: floatArr[localIdx] = payload.ColorR;
+						break;
+					case 1: floatArr[localIdx] = payload.ColorG;
+						break;
+					case 2: floatArr[localIdx] = payload.ColorB;
+						break;
+					case 3: floatArr[localIdx] = payload.ColorA;
+						break;
+					default: break;
+				}
+			}
+			else if (compID == CMeshRef<>::StaticTypeID())
+			{
+				if (fdesc.componentSlotIndex == 0) uintArr[localIdx] = payload.MeshID;
 			}
 		}
-		else if (compID == CScale<>::StaticTypeID())
-		{
-			switch (fdesc.componentSlotIndex)
-			{
-				case 0: floatArr[localIdx] = payload.ScaleX;
-					break;
-				case 1: floatArr[localIdx] = payload.ScaleY;
-					break;
-				case 2: floatArr[localIdx] = payload.ScaleZ;
-					break;
-				default: break;
-			}
-		}
-		else if (compID == CColor<>::StaticTypeID())
-		{
-			switch (fdesc.componentSlotIndex)
-			{
-				case 0: floatArr[localIdx] = payload.ColorR;
-					break;
-				case 1: floatArr[localIdx] = payload.ColorG;
-					break;
-				case 2: floatArr[localIdx] = payload.ColorB;
-					break;
-				case 3: floatArr[localIdx] = payload.ColorA;
-					break;
-				default: break;
-			}
-		}
-		else if (compID == CMeshRef<>::StaticTypeID())
-		{
-			if (fdesc.componentSlotIndex == 0) uintArr[localIdx] = payload.MeshID;
-		}
-	}
+	};
+
+	WriteFields(reg->GetTemporalCache()->GetActiveWriteFrame(),
+				reg->GetVolatileCache()->GetActiveWriteFrame());
+	WriteFields(reg->GetTemporalCache()->GetActiveReadFrame(),
+				reg->GetVolatileCache()->GetActiveReadFrame());
 }
 
 // ---------------------------------------------------------------------------

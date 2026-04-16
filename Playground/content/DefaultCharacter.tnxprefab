@@ -1,0 +1,8 @@
+{
+	"name": "DefaultCharacter",
+	"prefabType": "Construct",
+	"constructType": "PlayerConstruct",
+	"defaults": {
+		"MeshRef": "Don_char"
+	}
+}

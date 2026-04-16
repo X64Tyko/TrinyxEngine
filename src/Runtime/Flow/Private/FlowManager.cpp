@@ -2,8 +2,10 @@
 
 #include "EntityBuilder.h"
 #include "GameMode.h"
-#include "GameState.h"
+#include "FlowState.h"
 #include "Logger.h"
+#include "NetChannel.h"
+#include "NetTypes.h"
 #include "ReflectionRegistry.h"
 #include "World.h"
 
@@ -16,7 +18,7 @@ FlowManager::~FlowManager()
 	// Exit and destroy all states top-down
 	for (int32_t i = static_cast<int32_t>(StateStackCount) - 1; i >= 0; --i)
 	{
-		if (StateStack[i]) StateStack[i]->OnExit(*this);
+		if (StateStack[i]) StateStack[i]->OnExit();
 		StateStack[i].reset();
 	}
 	StateStackCount = 0;
@@ -39,7 +41,7 @@ FlowManager::~FlowManager()
 // ---------------------------------------------------------------------------
 
 void FlowManager::Initialize(TrinyxEngine* engine, const EngineConfig* config,
-							  int windowWidth, int windowHeight)
+							 int windowWidth, int windowHeight)
 {
 	Engine       = engine;
 	Config       = config;
@@ -55,7 +57,7 @@ void FlowManager::RegisterState(const char* name, StateFactory factory)
 {
 	if (RegisteredStateCount >= MaxRegisteredStates)
 	{
-		LOG_ERROR("[FlowManager] Max registered states exceeded");
+		LOG_ENG_ERROR("[FlowManager] Max registered states exceeded");
 		return;
 	}
 	RegisteredStates[RegisteredStateCount++] = {name, std::move(factory)};
@@ -65,7 +67,7 @@ void FlowManager::RegisterMode(const char* name, ModeFactory factory)
 {
 	if (RegisteredModeCount >= MaxRegisteredModes)
 	{
-		LOG_ERROR("[FlowManager] Max registered modes exceeded");
+		LOG_ENG_ERROR("[FlowManager] Max registered modes exceeded");
 		return;
 	}
 	RegisteredModes[RegisteredModeCount++] = {name, std::move(factory)};
@@ -79,25 +81,25 @@ void FlowManager::LoadDefaultState(const char* stateName)
 {
 	if (StateStackCount > 0)
 	{
-		LOG_ERROR("[FlowManager] LoadDefaultState called with existing states");
+		LOG_ENG_ERROR("[FlowManager] LoadDefaultState called with existing states");
 		return;
 	}
 
 	auto factory = FindStateFactory(stateName);
 	if (!factory)
 	{
-		LOG_ERROR_F("[FlowManager] Unknown state: %s", stateName);
+		LOG_ENG_ERROR_F("[FlowManager] Unknown state: %s", stateName);
 		return;
 	}
 
 	auto newState = factory();
 	EnforceRequirements(nullptr, newState.get());
 
-	StateStack[0] = std::move(newState);
+	StateStack[0]   = std::move(newState);
 	StateStackCount = 1;
 	StateStack[0]->OnEnter(*this, ActiveWorld.get());
 
-	LOG_INFO_F("[FlowManager] Default state loaded: %s", stateName);
+	LOG_ENG_INFO_F("[FlowManager] Default state loaded: %s", stateName);
 }
 
 void FlowManager::TransitionTo(const char* stateName)
@@ -105,19 +107,19 @@ void FlowManager::TransitionTo(const char* stateName)
 	auto factory = FindStateFactory(stateName);
 	if (!factory)
 	{
-		LOG_ERROR_F("[FlowManager] Unknown state: %s", stateName);
+		LOG_ENG_ERROR_F("[FlowManager] Unknown state: %s", stateName);
 		return;
 	}
 
 	auto newState = factory();
 
 	// Get current top state for requirement comparison
-	GameState* currentState = GetActiveState();
+	FlowState* currentState = GetActiveState();
 
 	// Exit all states top-down
 	for (int32_t i = static_cast<int32_t>(StateStackCount) - 1; i >= 0; --i)
 	{
-		if (StateStack[i]) StateStack[i]->OnExit(*this);
+		if (StateStack[i]) StateStack[i]->OnExit();
 		StateStack[i].reset();
 	}
 	StateStackCount = 0;
@@ -126,25 +128,25 @@ void FlowManager::TransitionTo(const char* stateName)
 	EnforceRequirements(currentState, newState.get());
 
 	// Push the new state as the sole entry
-	StateStack[0] = std::move(newState);
+	StateStack[0]   = std::move(newState);
 	StateStackCount = 1;
 	StateStack[0]->OnEnter(*this, ActiveWorld.get());
 
-	LOG_INFO_F("[FlowManager] Transitioned to: %s", stateName);
+	LOG_ENG_INFO_F("[FlowManager] Transitioned to: %s", stateName);
 }
 
 void FlowManager::PushState(const char* stateName)
 {
 	if (StateStackCount >= MaxStateStack)
 	{
-		LOG_ERROR("[FlowManager] State stack overflow");
+		LOG_ENG_ERROR("[FlowManager] State stack overflow");
 		return;
 	}
 
 	auto factory = FindStateFactory(stateName);
 	if (!factory)
 	{
-		LOG_ERROR_F("[FlowManager] Unknown state: %s", stateName);
+		LOG_ENG_ERROR_F("[FlowManager] Unknown state: %s", stateName);
 		return;
 	}
 
@@ -157,24 +159,24 @@ void FlowManager::PushState(const char* stateName)
 	StateStackCount++;
 	StateStack[StateStackCount - 1]->OnEnter(*this, ActiveWorld.get());
 
-	LOG_INFO_F("[FlowManager] Pushed overlay: %s", stateName);
+	LOG_ENG_INFO_F("[FlowManager] Pushed overlay: %s", stateName);
 }
 
 void FlowManager::PopState()
 {
 	if (StateStackCount <= 1)
 	{
-		LOG_ERROR("[FlowManager] Cannot pop the base state");
+		LOG_ENG_ERROR("[FlowManager] Cannot pop the base state");
 		return;
 	}
 
 	auto& top = StateStack[StateStackCount - 1];
-	if (top) top->OnExit(*this);
+	if (top) top->OnExit();
 	top.reset();
 	StateStackCount--;
 
-	LOG_INFO_F("[FlowManager] Popped overlay, active: %s",
-			   GetActiveState() ? GetActiveState()->GetName() : "none");
+	LOG_ENG_INFO_F("[FlowManager] Popped overlay, active: %s",
+				   GetActiveState() ? GetActiveState()->GetName() : "none");
 }
 
 // ---------------------------------------------------------------------------
@@ -185,19 +187,20 @@ World* FlowManager::CreateWorld()
 {
 	if (ActiveWorld)
 	{
-		LOG_ERROR("[FlowManager] CreateWorld called with existing World — destroy first");
+		LOG_ENG_ERROR("[FlowManager] CreateWorld called with existing World — destroy first");
 		return ActiveWorld.get();
 	}
 
 	ActiveWorld = std::make_unique<World>();
 	if (!ActiveWorld->Initialize(*Config, &ConstructReg, WindowWidth, WindowHeight))
 	{
-		LOG_ERROR("[FlowManager] World::Initialize failed");
+		LOG_ENG_ERROR("[FlowManager] World::Initialize failed");
 		ActiveWorld.reset();
 		return nullptr;
 	}
 
-	LOG_INFO("[FlowManager] World created");
+	ActiveWorld->SetFlowManager(this);
+	LOG_ENG_INFO("[FlowManager] World created");
 	return ActiveWorld.get();
 }
 
@@ -217,9 +220,10 @@ void FlowManager::DestroyWorld()
 	ConstructReg.DestroyByLifetime(ConstructLifetime::Session);
 
 	ActiveWorld->Shutdown();
+	ActiveWorld->SetFlowManager(nullptr);
 	ActiveWorld.reset();
 
-	LOG_INFO("[FlowManager] World destroyed");
+	LOG_ENG_INFO("[FlowManager] World destroyed");
 }
 
 void FlowManager::StartWorld()
@@ -237,31 +241,59 @@ void FlowManager::JoinWorld()
 	if (ActiveWorld) ActiveWorld->Join();
 }
 
-void FlowManager::LoadLevel(const char* levelPath)
+void FlowManager::LoadLevel(const char* levelPath, bool bBackground)
 {
 	if (!ActiveWorld)
 	{
-		LOG_ERROR("[FlowManager] LoadLevel called with no active World");
+		LOG_ENG_ERROR("[FlowManager] LoadLevel called with no active World");
 		return;
 	}
 
 	if (!levelPath || levelPath[0] == '\0')
 	{
-		LOG_ERROR("[FlowManager] LoadLevel called with empty path");
+		LOG_ENG_ERROR("[FlowManager] LoadLevel called with empty path");
 		return;
 	}
 
 	ActiveLevelPath = levelPath;
 
-	// Spawn entities from the scene file via the World's SpawnSync handshake.
-	std::string path = ActiveLevelPath;
-	ActiveWorld->Spawn([path](Registry* reg)
+	Registry* reg        = ActiveWorld->GetRegistry();
+	const char* pathCStr = ActiveLevelPath.c_str();
+	ActiveWorld->SpawnAndWait([reg, pathCStr, bBackground](uint32_t)
 	{
-		size_t count = EntityBuilder::SpawnFromFile(reg, path.c_str());
-		LOG_INFO_F("[FlowManager] LoadLevel: spawned %zu entities from %s", count, path.c_str());
+		size_t count = EntityBuilder::SpawnFromFile(reg, pathCStr, bBackground);
+		LOG_NET_INFO_F(nullptr, "[FlowManager] LoadLevel: spawned %zu entities from %s%s",
+					   count, pathCStr, bBackground ? " (Alive-only)" : "");
 	});
 
-	LOG_INFO_F("[FlowManager] Level loaded: %s", levelPath);
+	LOG_NET_INFO_F(nullptr, "[FlowManager] Level loaded: %s", levelPath);
+}
+
+void FlowManager::LoadLevel(const AssetID& id, bool bBackground)
+{
+	std::string path = AssetRegistry::Get().ResolvePath(id);
+	if (path.empty())
+	{
+		LOG_ENG_ERROR("[FlowManager] LoadLevel(AssetID): asset not found or no content root set");
+		return;
+	}
+	LoadLevel(path.c_str(), bBackground);
+}
+
+void FlowManager::LoadLevelByName(const char* name, bool bBackground)
+{
+	if (!name || name[0] == '\0')
+	{
+		LOG_ENG_ERROR("[FlowManager] LoadLevelByName: empty name");
+		return;
+	}
+	std::string path = AssetRegistry::Get().ResolvePathByName(name);
+	if (path.empty())
+	{
+		LOG_ENG_ERROR_F("[FlowManager] LoadLevelByName: '%s' not found in AssetRegistry", name);
+		return;
+	}
+	LoadLevel(path.c_str(), bBackground);
 }
 
 void FlowManager::UnloadLevel()
@@ -273,7 +305,7 @@ void FlowManager::UnloadLevel()
 	// which doesn't exist yet. For now, entities persist until World destruction.
 
 	ActiveLevelPath.clear();
-	LOG_INFO("[FlowManager] Level unloaded");
+	LOG_ENG_INFO("[FlowManager] Level unloaded");
 }
 
 // ---------------------------------------------------------------------------
@@ -294,7 +326,7 @@ void FlowManager::SetGameMode(const char* modeName)
 	auto factory = FindModeFactory(modeName);
 	if (!factory)
 	{
-		LOG_ERROR_F("[FlowManager] Unknown mode: %s", modeName);
+		LOG_ENG_ERROR_F("[FlowManager] Unknown mode: %s", modeName);
 		return;
 	}
 
@@ -304,17 +336,68 @@ void FlowManager::SetGameMode(const char* modeName)
 		ActiveMode->Initialize(ActiveWorld.get());
 	}
 
-	LOG_INFO_F("[FlowManager] GameMode set: %s", modeName);
+	LOG_ENG_INFO_F("[FlowManager] GameMode set: %s", modeName);
 }
 
 // ---------------------------------------------------------------------------
 // Tick
 // ---------------------------------------------------------------------------
 
+void FlowManager::PostNetEvent(uint8_t eventID)
+{
+	PendingNetEvents.fetch_or(1u << eventID, std::memory_order_release);
+}
+
+std::string FlowManager::GetActiveLevelLocalPath() const
+{
+	if (ActiveLevelPath.empty()) return {};
+	if (Config && Config->ProjectDir[0] != '\0')
+	{
+		std::string prefix = std::string(Config->ProjectDir) + "/content/";
+		if (ActiveLevelPath.rfind(prefix, 0) == 0) return ActiveLevelPath.substr(prefix.size());
+	}
+	return ActiveLevelPath; // Fallback: return as-is (non-standard path)
+}
+
+void FlowManager::PostTravelNotify(const char* levelPath)
+{
+	// Store the path (written from NetThread, read from Sentinel in OnNetEvent).
+	// This is a benign data race under the sequenced-happens-before guarantee:
+	// PostNetEvent's release fence ensures the path write is visible before the
+	// event bit, and Sentinel reads after the acquire in Tick().
+	PendingTravelPath = levelPath ? levelPath : "";
+	PostNetEvent(static_cast<uint8_t>(FlowEventID::TravelNotify));
+}
+
+void FlowManager::PostPlayerBeginConfirm(const PlayerBeginConfirmPayload& payload)
+{
+	// Same sequenced-happens-before contract as PostTravelNotify.
+	// Write before the event bit so Sentinel sees the payload atomically.
+	PendingPlayerBeginConfirm = payload;
+	PostNetEvent(static_cast<uint8_t>(FlowEventID::PlayerBeginConfirm));
+}
+
 void FlowManager::Tick(float dt)
 {
+	// Drain net events posted by NetThread — dispatch to active state on Sentinel.
+	const uint32_t events = PendingNetEvents.exchange(0, std::memory_order_acquire);
+	if (events)
+	{
+		if (FlowState* active = GetActiveState())
+		{
+			uint32_t bits = events;
+			while (bits)
+			{
+				const uint32_t bit = bits & (~bits + 1); // isolate lowest set bit
+				const uint8_t id   = static_cast<uint8_t>(TNX_CTZ32(bit));
+				active->OnNetEvent(id);
+				bits &= bits - 1;
+			}
+		}
+	}
+
 	// Tick the active (top) state
-	if (GameState* active = GetActiveState())
+	if (FlowState* active = GetActiveState())
 	{
 		active->Tick(dt);
 	}
@@ -324,7 +407,7 @@ void FlowManager::Tick(float dt)
 // Accessors
 // ---------------------------------------------------------------------------
 
-GameState* FlowManager::GetActiveState() const
+FlowState* FlowManager::GetActiveState() const
 {
 	if (StateStackCount == 0) return nullptr;
 	return StateStack[StateStackCount - 1].get();
@@ -349,8 +432,7 @@ FlowManager::StateFactory FlowManager::FindStateFactory(const char* name) const
 	// Check local overrides first (manual RegisterState calls)
 	for (uint32_t i = 0; i < RegisteredStateCount; ++i)
 	{
-		if (strcmp(RegisteredStates[i].Name, name) == 0)
-			return RegisteredStates[i].Factory;
+		if (strcmp(RegisteredStates[i].Name, name) == 0) return RegisteredStates[i].Factory;
 	}
 
 	// Fall back to ReflectionRegistry (populated by TNX_REGISTER_STATE macros)
@@ -362,18 +444,17 @@ FlowManager::ModeFactory FlowManager::FindModeFactory(const char* name) const
 	// Check local overrides first (manual RegisterMode calls)
 	for (uint32_t i = 0; i < RegisteredModeCount; ++i)
 	{
-		if (strcmp(RegisteredModes[i].Name, name) == 0)
-			return RegisteredModes[i].Factory;
+		if (strcmp(RegisteredModes[i].Name, name) == 0) return RegisteredModes[i].Factory;
 	}
 
 	// Fall back to ReflectionRegistry (populated by TNX_REGISTER_MODE macros)
 	return ReflectionRegistry::Get().FindModeFactory(name);
 }
 
-void FlowManager::EnforceRequirements(GameState* currentState, GameState* nextState)
+void FlowManager::EnforceRequirements(FlowState* currentState, FlowState* nextState)
 {
 	const StateRequirements current = currentState ? currentState->GetRequirements() : StateRequirements{};
-	const StateRequirements next    = nextState    ? nextState->GetRequirements()    : StateRequirements{};
+	const StateRequirements next    = nextState ? nextState->GetRequirements() : StateRequirements{};
 
 	// Tear down subsystems the new state doesn't need
 	if (current.NeedsWorld && !next.NeedsWorld)
@@ -392,3 +473,105 @@ void FlowManager::EnforceRequirements(GameState* currentState, GameState* nextSt
 	// TODO: NetSession creation when next.NeedsNetSession && !NetSession
 }
 
+// ---------------------------------------------------------------------------
+// Soul lifecycle
+// ---------------------------------------------------------------------------
+
+void FlowManager::OnClientLoaded(uint8_t ownerID)
+{
+	if (Souls[ownerID]) return; // Already present — guard against double-create
+
+	Souls[ownerID]          = std::make_unique<Soul>(ownerID);
+	Souls[ownerID]->FlowMgr = this;
+	// ownerID=0 is the listen-server's own local player — drives via keyboard AND
+	// is the simulation authority. ownerID>0 are remote clients — authority only.
+	Souls[ownerID]->SetRole(SoulRole::Authority);
+	if (ownerID == 0) Souls[ownerID]->AddRole(SoulRole::Owner);
+	Souls[ownerID]->OnJoined();
+
+	LOG_NET_INFO_F(Souls[ownerID].get(), "[FlowMgr] OnClientLoaded: ownerID=%u joined", ownerID);
+
+	if (ActiveMode) ActiveMode->OnPlayerJoined(*Souls[ownerID]);
+}
+
+void FlowManager::OnLocalOwnerConnected(uint8_t ownerID)
+{
+	if (Souls[ownerID]) return; // Idempotent
+
+	Souls[ownerID]          = std::make_unique<Soul>(ownerID);
+	Souls[ownerID]->FlowMgr = this;
+	Souls[ownerID]->SetRole(SoulRole::Owner);
+	Souls[ownerID]->OnJoined();
+}
+
+void FlowManager::OnClientDisconnected(uint8_t ownerID)
+{
+	if (!Souls[ownerID]) return;
+
+	LOG_NET_INFO_F(Souls[ownerID].get(), "[FlowMgr] OnClientDisconnected: ownerID=%u left", ownerID);
+
+	if (ActiveMode) ActiveMode->OnPlayerLeft(*Souls[ownerID]);
+
+	Souls[ownerID]->OnLeft();
+	Souls[ownerID].reset();
+}
+
+#ifdef TNX_ENABLE_NETWORK
+std::optional<PlayerBeginResult> FlowManager::HandlePlayerBeginRequest(Soul* soul, const PlayerBeginRequestPayload& req)
+{
+	if (!soul)
+	{
+		LOG_NET_WARN(nullptr, "[FlowMgr] HandlePlayerBeginRequest: null Soul");
+		return std::nullopt;
+	}
+
+	// Delegate entirely to GameMode — all game-layer spawn logic lives there.
+	// GameMode returns a PlayerBeginResult; no Soul fields used as a data relay.
+	PlayerBeginResult result;
+	if (ActiveMode) result = ActiveMode->OnPlayerBeginRequest(*soul, req);
+	else
+	{
+		// No GameMode: accept unconditionally, echo client hint.
+		result.Accepted = true;
+		result.PosX     = req.PosX;
+		result.PosY     = req.PosY;
+		result.PosZ     = req.PosZ;
+		soul->ClaimBody({});
+	}
+
+	if (!result.Accepted) return std::nullopt;
+	return result;
+}
+
+void FlowManager::SendPlayerBeginRequest(NetChannel channel, uint32_t frameNumber, PredictionLedger& ledger)
+{
+	const uint8_t ownerID           = channel.OwnerID();
+	constexpr uint32_t PredictionID = 1; // Single in-flight entry today
+
+	// Create the client-side Soul on first call.
+	if (!Souls[ownerID])
+	{
+		Souls[ownerID]          = std::make_unique<Soul>(ownerID);
+		Souls[ownerID]->FlowMgr = this;
+		Souls[ownerID]->SetRole(SoulRole::Owner); // owning client: predicts locally
+		Souls[ownerID]->OnJoined();
+	}
+	Souls[ownerID]->Channel = channel;
+
+	PlayerBeginRequestPayload req{};
+	req.PrefabID     = 0; // 0 = server picks via GameMode::GetCharacterPrefab
+	req.PredictionID = PredictionID;
+	req.PosX         = 0.0f;
+	req.PosY         = 5.0f;
+	req.PosZ         = 0.0f;
+
+	LOG_NET_INFO_F(Souls[ownerID].get(), "[FlowMgr] SendPlayerBeginRequest: ownerID=%u frame=%u", ownerID, frameNumber);
+
+	ledger.Set(PredictionID, frameNumber, {}, req.PrefabID);
+
+	// Fire the PlayerBegin SoulRPC — thunk packs RPCHeader + payload and sends
+	// as NetMessageType::SoulRPC, replacing the old direct PlayerBeginRequest send.
+	if (!Souls[ownerID]->PlayerBegin(req)) [[unlikely]]
+	LOG_NET_WARN_F(Souls[ownerID].get(), "[FlowMgr] PlayerBeginRequest send failed (GNS rejected) — ownerID=%u", ownerID);
+}
+#endif // TNX_ENABLE_NETWORK

@@ -36,6 +36,9 @@ struct WorldViewport
 	VulkanImage DepthTarget;                       // D32_SFLOAT
 	VkDescriptorSet ImGuiTexture = VK_NULL_HANDLE; // For ImGui::Image()
 
+	// ── Per-viewport sampler (for ImGui::Image compositing) ─────────────
+	VkSampler ImGuiSampler = VK_NULL_HANDLE;
+
 	// ── Per-viewport GpuFrameData (written by CPU, read by GPU via BDA) ─
 	// One buffer per FrameSync slot — prevents the CPU from overwriting
 	// slot N's GpuData while the GPU is still executing slot N-1 (which

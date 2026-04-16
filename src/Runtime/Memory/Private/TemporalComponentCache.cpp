@@ -17,8 +17,8 @@ ComponentCacheBase::ComponentCacheBase()
 
 ComponentCacheBase::~ComponentCacheBase()
 {
-	LOG_INFO_F("Destroying %s Component Slab with %zu bytes",
-			   Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal", TotalSlabSize);
+	LOG_ENG_INFO_F("Destroying %s Component Slab with %zu bytes",
+				   Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal", TotalSlabSize);
 
 #ifdef _MSC_VER
 	_aligned_free(SlabPtr);
@@ -135,8 +135,8 @@ void ComponentCacheBase::InitializeInternal(const EngineConfig* Config, uint32_t
 
 	if (SlabPtr == nullptr)
 	{
-		LOG_ERROR_F("Failed to allocate memory for %s ComponentCache slab: %zu bytes",
-					Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal", TotalSlabSize);
+		LOG_ENG_ERROR_F("Failed to allocate memory for %s ComponentCache slab: %zu bytes",
+						Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal", TotalSlabSize);
 		return;
 	}
 
@@ -162,8 +162,8 @@ void ComponentCacheBase::InitializeInternal(const EngineConfig* Config, uint32_t
 		currentFramePtr += frameStride;
 	}
 
-	LOG_INFO_F("Initialized %s ComponentCache: %zu fields, %zu frames × %zu bytes = %zu total bytes",
-			   Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal",
+	LOG_ENG_INFO_F("Initialized %s ComponentCache: %zu fields, %zu frames × %zu bytes = %zu total bytes",
+				   Tier_ == CacheTier::Volatile ? "Volatile" : "Temporal",
 			   ValidFields.size(), TemporalFrameCount, frameStride, TotalSlabSize);
 }
 
@@ -180,23 +180,23 @@ bool ComponentCacheBase::LockFrameForWrite(uint32_t WriteFrame)
 }
 
 void* ComponentCacheBase::AllocateFieldArray(Archetype* owner, Chunk* chunk,
-											 ComponentTypeID compType, size_t fieldIndex,
+											 CacheSlotID cacheSlot, size_t fieldIndex,
 											 const char* fieldName, size_t entityCount, size_t fieldSize, SystemID EntitySystemID)
 {
 	// Direct O(1) lookup into flat table
-	if (compType >= MAX_COMPONENTS || fieldIndex >= MAX_TEMPORAL_FIELDS_PER_COMPONENT)
+	if (cacheSlot >= MAX_COMPONENTS || fieldIndex >= MAX_TEMPORAL_FIELDS_PER_COMPONENT)
 	{
-		LOG_ERROR_F("ComponentCacheBase: Invalid component type %u or field index %zu", compType, fieldIndex);
+		LOG_ENG_ERROR_F("ComponentCacheBase: Invalid cache slot %u or field index %zu", cacheSlot, fieldIndex);
 		return nullptr;
 	}
 
-	const size_t tableIndex   = static_cast<size_t>(compType) * MAX_TEMPORAL_FIELDS_PER_COMPONENT + fieldIndex;
+	const size_t tableIndex   = static_cast<size_t>(cacheSlot) * MAX_TEMPORAL_FIELDS_PER_COMPONENT + fieldIndex;
 	FieldAllocationInfo& info = FieldAllocations[tableIndex];
 
 	if (!info.bValid)
 	{
-		LOG_ERROR_F("ComponentCacheBase: Field %s (component %u, field %zu) not initialized",
-					fieldName, compType, fieldIndex);
+		LOG_ENG_ERROR_F("ComponentCacheBase: Field %s (component %u, field %zu) not initialized",
+						fieldName, cacheSlot, fieldIndex);
 		return nullptr;
 	}
 
@@ -210,8 +210,8 @@ void* ComponentCacheBase::AllocateFieldArray(Archetype* owner, Chunk* chunk,
 		{
 			// resize?
 		}
-		LOG_ERROR_F("ComponentCacheBase: Out of space for field %s (component %u, field %zu)",
-					fieldName, compType, fieldIndex);
+		LOG_ENG_ERROR_F("ComponentCacheBase: Out of space for field %s (component %u, field %zu)",
+						fieldName, cacheSlot, fieldIndex);
 		return nullptr;
 	}
 
@@ -257,14 +257,14 @@ void ComponentCacheBase::ClearFrameData()
 	}
 }
 
-void* ComponentCacheBase::GetFieldData(TemporalFrameHeader* header, ComponentTypeID compType,
+void* ComponentCacheBase::GetFieldData(TemporalFrameHeader* header, CacheSlotID cacheSlot,
 									   size_t fieldIndex) const
 {
 	if (!header) return nullptr;
 
-	if (compType >= MAX_COMPONENTS || fieldIndex >= MAX_TEMPORAL_FIELDS_PER_COMPONENT) return nullptr;
+	if (cacheSlot >= MAX_COMPONENTS || fieldIndex >= MAX_TEMPORAL_FIELDS_PER_COMPONENT) return nullptr;
 
-	const size_t tableIndex         = static_cast<size_t>(compType) * MAX_TEMPORAL_FIELDS_PER_COMPONENT + fieldIndex;
+	const size_t tableIndex         = static_cast<size_t>(cacheSlot) * MAX_TEMPORAL_FIELDS_PER_COMPONENT + fieldIndex;
 	const FieldAllocationInfo& info = FieldAllocations[tableIndex];
 
 	if (!info.bValid) return nullptr;

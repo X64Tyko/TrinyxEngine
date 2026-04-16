@@ -13,8 +13,19 @@
 #include "Signature.h"
 #include "Types.h"
 
-class GameState;
+class FlowState;
 class GameMode;
+class ConstructRegistry;
+class World;
+class Soul;
+union EntityHandle;
+
+// Forward declarations for RPC dispatch table.
+// Full definitions live in RPC.h / NetTypes.h — included by ReflectionRegistry.cpp.
+class  Soul;
+struct RPCContext;
+struct RPCHeader;
+using  SoulRPCHandler = void(*)(Soul*, const RPCContext&, const uint8_t*);
 
 // ---------------------------------------------------------------------------
 // ReflectionRegistry — Single source of truth for all type metadata.
@@ -23,7 +34,7 @@ class GameMode;
 // function pointers) and ComponentFieldRegistry (field decomposition,
 // component metadata, tier/slot queries) into one singleton.
 //
-// Also holds GameState/GameMode factory registrations so FlowManager
+// Also holds FlowState/GameMode factory registrations so FlowManager
 // and the editor can discover them without manual registration calls.
 //
 // Populated at static init time by registration macros (TNX_REGISTER_ENTITY,
@@ -62,9 +73,9 @@ public:
 	std::unordered_map<std::string, ClassID>         NameToClassID;
 	std::unordered_map<std::string, ComponentTypeID> NameToComponentID;
 
-	// ===== GameState / GameMode factories =====
+	// ===== FlowState / GameMode factories =====
 
-	using StateFactory = std::function<std::unique_ptr<GameState>()>;
+	using StateFactory = std::function<std::unique_ptr<FlowState>()>;
 	using ModeFactory  = std::function<std::unique_ptr<GameMode>()>;
 
 	struct StateEntry
@@ -157,7 +168,7 @@ public:
 
 	void SetCacheSlotIndex(ComponentTypeID typeID, uint8_t slot);
 
-	// ===== GameState / GameMode registration =====
+	// ===== FlowState / GameMode registration =====
 
 	void RegisterState(const char* name, StateFactory factory);
 	void RegisterMode(const char* name, ModeFactory factory);
@@ -167,11 +178,87 @@ public:
 	[[nodiscard]] StateFactory FindStateByUUID(int64_t uuid) const;
 	[[nodiscard]] ModeFactory FindModeByUUID(int64_t uuid) const;
 
+	// ===== ModeMixin registration =====
+	//
+	// Engine-defined mixins (WithSpawnManagement, WithTeamAssignment, etc.) declare
+	// a compile-time BaseTypeID constant and self-register via RegisterMixin.
+	// User-defined mixins use TNX_REGISTER_MODEMIX which assigns the next ID from
+	// the 128–255 user band via a static counter. IDs are asserted unique at startup.
+	//
+	// BaseTypeID is the first message type ID claimed by the mixin. Each mixin
+	// claims a contiguous band of 4 IDs (BaseTypeID .. BaseTypeID+3).
+
+	static constexpr uint8_t MixinUserBandStart = 128;
+	static constexpr uint8_t MixinUserBandEnd   = 255;
+
+	struct MixinEntry
+	{
+		const char* Name;
+		int64_t UUID;
+		uint8_t BaseTypeID; // First of 4 contiguous message type IDs
+		bool IsUserDefined;
+	};
+
+	std::vector<MixinEntry> RegisteredMixins;
+	std::unordered_map<uint8_t, size_t> MixinIDIndex; // BaseTypeID → RegisteredMixins index
+
+	void RegisterMixin(const char* name, uint8_t baseTypeID, bool isUserDefined);
+
+	[[nodiscard]] const MixinEntry* FindMixin(const char* name) const;
+	[[nodiscard]] const MixinEntry* FindMixinByID(uint8_t baseTypeID) const;
+
+	// ===== SoulRPC dispatch table =====
+	//
+	// RegisterServerRPC / RegisterClientRPC are called at static init time by the
+	// TNX_IMPL_SERVER / TNX_IMPL_CLIENT registrar lambdas in each Soul .cpp file.
+	// DispatchServerRPC / DispatchClientRPC are called by FlowManager when a
+	// NetMessageType::SoulRPC packet arrives on the server or client respectively.
+	//
+	// Tables are flat vectors indexed by MethodID for O(1) dispatch.
+	// Read-only after engine init (all registration happens at static init).
+
+	struct RPCEntry
+	{
+		uint16_t       ParamSize = 0;
+		SoulRPCHandler Handler   = nullptr;
+	};
+
+	void RegisterServerRPC(uint16_t methodID, uint16_t paramSize, SoulRPCHandler handler);
+	void RegisterClientRPC(uint16_t methodID, uint16_t paramSize, SoulRPCHandler handler);
+
+	// Returns false if MethodID is out of range, ParamSize mismatches, or no handler registered.
+	bool DispatchServerRPC(Soul* soul, const RPCContext& ctx, const RPCHeader& hdr, const uint8_t* params) const;
+	bool DispatchClientRPC(Soul* soul, const RPCContext& ctx, const RPCHeader& hdr, const uint8_t* params) const;
+
 	/// Compute a deterministic UUID from a type + name (FNV-1a hash).
 	static int64_t UUIDFromName(const char* name);
 
+	/// Compute a 16-bit type hash from a Construct type name.
+	/// Used as ConstructNetManifest::PrefabIndex to identify the type on the client.
+	static uint16_t ConstructTypeHashFromName(const char* name);
+
 	/// Publish code-registered types (states, modes, entities) into AssetRegistry.
 	void PublishToAssetRegistry() const;
+
+	// ===== Replicated Construct factory table =====
+	//
+	// TNX_REGISTER_CONSTRUCT(T) populates this table at static init time.
+	// HandleConstructSpawn calls FindConstructClientFactory(typeHash) to get the
+	// client-side factory for the type identified by ConstructNetManifest::PrefabIndex.
+
+	using ConstructClientFactory = void*(*)(ConstructRegistry*, World*, EntityHandle*, uint8_t viewCount, Soul* ownerSoul);
+
+	struct ConstructEntry
+	{
+		const char* Name;
+		uint16_t TypeHash;
+		ConstructClientFactory ClientFactory;
+	};
+
+	void RegisterConstruct(const char* name, uint16_t typeHash, ConstructClientFactory factory);
+	[[nodiscard]] ConstructClientFactory FindConstructClientFactory(uint16_t typeHash) const;
+
+	std::vector<ConstructEntry> RegisteredConstructs;
 
 	// ===== Bake / Snapshot / Diff (Step 5-6, stubs for now) =====
 
@@ -179,4 +266,8 @@ public:
 
 private:
 	ReflectionRegistry() = default;
+
+	// RPC dispatch tables — flat vectors indexed by MethodID for O(1) lookup.
+	std::vector<RPCEntry> ServerRPCTable;
+	std::vector<RPCEntry> ClientRPCTable;
 };

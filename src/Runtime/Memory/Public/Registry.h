@@ -280,10 +280,11 @@ std::vector<EntityHandle> Registry::Create(size_t count)
 template <typename T>
 bool Registry::HasComponent(EntityHandle lHandle)
 {
-	constexpr ComponentTypeID typeID = T::StaticTypeID();
+	const ComponentTypeID typeID = T::StaticTypeID(); // StaticTypeID() is runtime-const, not constexpr
 	const ClassID classType          = lHandle.GetTypeID();
 	auto& mr                         = ReflectionRegistry::Get();
-	return (mr.ClassToArchetype[classType] & typeID) == typeID;
+	// typeID is 1-based; BuildSignature stores components at bit (typeID-1).
+	return mr.ClassToArchetype[classType].test(typeID - 1);
 }
 
 template <typename... Components>
@@ -339,14 +340,14 @@ inline void Registry::InvokeScalarUpdate(SimFloat dt)
 #ifdef TNX_ENABLE_ROLLBACK
 	if (!HistorySlab.TryLockFrameForWrite(hisWrite))
 	{
-		LOG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
+		LOG_ENG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
 		return;
 	}
 #endif
 	uint32_t volWrite = 0;
 	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
 	{
-		LOG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
+		LOG_ENG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
 #ifdef TNX_ENABLE_ROLLBACK
 		HistorySlab.UnlockFrameWrite();
 #endif
@@ -396,14 +397,14 @@ inline void Registry::InvokePrePhys(SimFloat dt)
 #ifdef TNX_ENABLE_ROLLBACK
 	if (!HistorySlab.TryLockFrameForWrite(hisWrite))
 	{
-		LOG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
+		LOG_ENG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
 		return;
 	}
 #endif
 	uint32_t volWrite = 0;
 	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
 	{
-		LOG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
+		LOG_ENG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
 #ifdef TNX_ENABLE_ROLLBACK
 		HistorySlab.UnlockFrameWrite();
 #endif
@@ -454,14 +455,14 @@ inline void Registry::InvokePostPhys(SimFloat dt)
 #ifdef TNX_ENABLE_ROLLBACK
 	if (!HistorySlab.TryLockFrameForWrite(hisWrite))
 	{
-		LOG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
+		LOG_ENG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
 		return;
 	}
 #endif
 	uint32_t volWrite = 0;
 	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
 	{
-		LOG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
+		LOG_ENG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
 #ifdef TNX_ENABLE_ROLLBACK
 		HistorySlab.UnlockFrameWrite();
 #endif

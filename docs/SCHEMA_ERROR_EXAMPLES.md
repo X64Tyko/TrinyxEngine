@@ -10,11 +10,11 @@ This document shows the improved error messages for common schema reflection mis
 ```cpp
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct MyEntity : EntityView<MyEntity, WIDTH> {
-    Transform<WIDTH> transform;
+    CTransform<WIDTH> Transform;
 
-    FORCE_INLINE void PrePhysics(double dt) { /* ... */ }
+    FORCE_INLINE void PrePhysics(SimFloat dt) { /* ... */ }
 
-    TNX_REGISTER_SCHEMA(MyEntity, EntityView, transform)
+    TNX_REGISTER_SCHEMA(MyEntity, EntityView, Transform)
 };
 
 // MISSING: TNX_REGISTER_ENTITY(MyEntity);
@@ -40,11 +40,11 @@ EntityID id = Registry::Create<MyEntity>();  // Runtime error!
 ```cpp
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct BadEntity : EntityView<BadEntity, WIDTH> {
-    Transform<WIDTH> transform;
+    CTransform<WIDTH> Transform;
 
-    FORCE_INLINE void PrePhysics(double dt) { /* ... */ }
+    FORCE_INLINE void PrePhysics(SimFloat dt) { /* ... */ }
 
-    // MISSING: TNX_REGISTER_SCHEMA(BadEntity, EntityView, transform)
+    // MISSING: TNX_REGISTER_SCHEMA(BadEntity, EntityView, Transform)
 };
 
 TNX_REGISTER_ENTITY(BadEntity);  // Compile error!
@@ -71,11 +71,11 @@ Add TNX_REGISTER_SCHEMA to your entity class:
 ```cpp
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct VirtualEntity : EntityView<VirtualEntity, WIDTH> {
-    Transform<WIDTH> transform;
+    CTransform<WIDTH> Transform;
 
-    virtual void PrePhysics(double dt) { /* ... */ }  // WRONG: virtual!
+    virtual void PrePhysics(SimFloat dt) { /* ... */ }  // WRONG: virtual!
 
-    TNX_REGISTER_SCHEMA(VirtualEntity, EntityView, transform)
+    TNX_REGISTER_SCHEMA(VirtualEntity, EntityView, Transform)
 };
 
 TNX_REGISTER_ENTITY(VirtualEntity);  // Compile error!
@@ -126,9 +126,9 @@ Components CANNOT have:
 All component fields must be FieldProxy<T, WIDTH>:
 
     template <FieldWidth WIDTH = FieldWidth::Scalar>
-    struct Transform {
-        FieldProxy<float, WIDTH> PositionX, PositionY, PositionZ;
-        TNX_TEMPORAL_FIELDS(Transform, SystemGroup::None, PositionX, PositionY, PositionZ)
+    struct CMyTransform {
+        FieldProxy<float, WIDTH> PosX, PosY, PosZ;
+        TNX_TEMPORAL_FIELDS(CMyTransform, SystemGroup::None, PosX, PosY, PosZ)
     };
 
 ================================================================
@@ -142,26 +142,26 @@ All component fields must be FieldProxy<T, WIDTH>:
 ```cpp
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct BaseCube : EntityView<BaseCube, WIDTH> {
-    Transform<WIDTH> transform;
+    CTransform<WIDTH> Transform;
 
-    FORCE_INLINE void PrePhysics(double dt) {
-        transform.RotationY += static_cast<float>(dt);
+    FORCE_INLINE void PrePhysics(SimFloat dt) {
+        Transform.RotationQw += static_cast<float>(dt);  // simplified example
     }
 
     // WRONG: Using TNX_REGISTER_SCHEMA instead of TNX_REGISTER_SUPER_SCHEMA!
-    TNX_REGISTER_SCHEMA(BaseCube, EntityView, transform)
+    TNX_REGISTER_SCHEMA(BaseCube, EntityView, Transform)
 };
 
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct SuperCube : BaseCube<SuperCube, WIDTH> {
-    Velocity<WIDTH> velocity;
+    CVelocity<WIDTH> Velocity;
 
-    FORCE_INLINE void PrePhysics(double dt) {
+    FORCE_INLINE void PrePhysics(SimFloat dt) {
         BaseCube<SuperCube, WIDTH>::PrePhysics(dt);
-        this->transform.PositionX += velocity.VelocityX * static_cast<float>(dt);
+        Transform.PosX += Velocity.VelX * static_cast<float>(dt);
     }
 
-    TNX_REGISTER_SCHEMA(SuperCube, BaseCube, velocity)
+    TNX_REGISTER_SCHEMA(SuperCube, BaseCube, Velocity)
 };
 TNX_REGISTER_ENTITY(SuperCube);
 ```
@@ -184,16 +184,16 @@ incorrect schema generation for derived types.
 ```cpp
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct GoodEntity : EntityView<GoodEntity, WIDTH> {
-    Transform<WIDTH> transform;
-    Velocity<WIDTH>  velocity;
-    ColorData<WIDTH> color;
+    CTransform<WIDTH> Transform;
+    CVelocity<WIDTH>  Velocity;
+    CColor<WIDTH>     Color;
 
     // Lifecycle methods (not virtual, FORCE_INLINE)
-    FORCE_INLINE void PrePhysics(double dt) {
-        transform.PositionX += velocity.VelocityX * static_cast<float>(dt);
+    FORCE_INLINE void PrePhysics(SimFloat dt) {
+        Transform.PosX += Velocity.VelX * static_cast<float>(dt);
     }
 
-    TNX_REGISTER_SCHEMA(GoodEntity, EntityView, transform, velocity, color)
+    TNX_REGISTER_SCHEMA(GoodEntity, EntityView, Transform, Velocity, Color)
 };
 TNX_REGISTER_ENTITY(GoodEntity)
 ```
@@ -227,15 +227,15 @@ TNX_REGISTER_COMPONENT(ColdComponent)
 ```cpp
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct BadEntity : EntityView<BadEntity, WIDTH> {
-    Transform<WIDTH> transform;
+    CTransform<WIDTH> Transform;
 
     // WRONG: Virtual function
-    virtual void PrePhysics(double dt) { }
+    virtual void PrePhysics(SimFloat dt) { }
 
     // WRONG: Complex member (not FieldProxy)
     std::vector<int> data;
 
-    TNX_REGISTER_SCHEMA(BadEntity, EntityView, transform)
+    TNX_REGISTER_SCHEMA(BadEntity, EntityView, Transform)
 };
 ```
 

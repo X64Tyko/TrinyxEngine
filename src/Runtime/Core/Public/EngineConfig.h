@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include <algorithm>
 
-#include "NetTypes.h" // EngineMode
+#include "Types.h" // EngineMode, SimFloat
 
 struct EngineConfig
 {
@@ -34,6 +34,14 @@ struct EngineConfig
 	// Set via CLI args (--server, --client, --listen) or programmatically.
 	EngineMode Mode = EngineMode::Standalone;
 
+	// Headless mode: no window, no renderer, no GPU. Set via --headless CLI arg,
+	// TNX_HEADLESS compile-time define, or implied by TNX_NET_MODEL=Server.
+	bool Headless = false;
+
+	// Exit the main loop after this many sentinel frames. 0 = run indefinitely.
+	// Useful for CI: --max-frames 60 runs one second of logic then exits cleanly.
+	int MaxFrames = 0;
+
 	// Variadic Update, let the Logic thread run uncapped or limit its updates, cannot be lower than Fixed update if capped.
 	int TargetFPS = Unset;
 
@@ -47,9 +55,33 @@ struct EngineConfig
 	// This is your "Tick Rate". Lower = Less Bandwidth, Higher = More Precision.
 	int NetworkUpdateHz = Unset;
 
+	// Number of RTT probe pings sent during the Synchronizing phase before
+	// computing InputLead. Higher = more accurate estimate; lower = faster load.
+	// Default: 8. Range: 1-255.
+	int ClockSyncProbes = Unset;
+
 	// Input (and window management)
 	// This controls how fast your main thread goes, higher = better input latency
 	int InputPollHz = Unset;
+
+	// Rate at which the client sends InputFrame packets to the server.
+	// Decoupled from NetworkUpdateHz (state corrections) — higher = lower input latency on server.
+	// At 512Hz sim / 128Hz input = 4 sim frames per packet.
+	// TODO(lockstep): when InputDelayFrames > 0, ensure InputNetHz >= FixedUpdateHz / InputDelayFrames
+	int InputNetHz = Unset;
+
+	// Artificial input delay in sim frames for lockstep/deterministic play.
+	// 0 = disabled (default). Brain reads input for (currentFrame - InputDelayFrames).
+	// TODO(lockstep): when > 0, extend InputBuffer ring depth to InputDelayFrames + 1 slots.
+	// TODO(lockstep): gate Brain::AdvanceFrame on receipt of all peer inputs for (currentFrame - InputDelayFrames).
+	int InputDelayFrames = 0;
+
+	// Server: how many sim frames the server is allowed to predict ahead of a client's
+	// last received input before stalling the sim for that client.
+	// Needs to cover one delivery batch + RTT headroom + startup timing offset.
+	// At 512Hz sim / 128Hz input = 4 frames/batch; 64 covers ~125ms of jitter/offset.
+	// Set to 0 for strict lockstep.
+	int MaxClientInputLead = 64;
 
 	// Arena 1 capacity (Render + Dual partitions). Determines the slab boundary
 	// between Arena 1 and Arena 2. Must be <= MAX_CACHED_ENTITIES.
@@ -83,6 +115,11 @@ struct EngineConfig
 	uint16_t NetPort     = 27015;
 	char NetAddress[128] = "127.0.0.1";
 
+	// Log channel min levels. Unset → engine defaults (Info for Engine, Debug for Game).
+	// Set via EngineLogLevel / GameLogLevel in *.ini.  Values map to LogLevel: 0=Trace … 4=Error.
+	int EngineLogLevel = Unset;
+	int GameLogLevel   = Unset;
+
 	// --- Helpers ---
 	// These resolve Unset to compiled defaults for safe use.
 	double GetTargetFrameTime() const
@@ -108,5 +145,15 @@ struct EngineConfig
 	{
 		int hz = (NetworkUpdateHz == Unset) ? 30 : NetworkUpdateHz;
 		return (hz > 0) ? 1.0 / hz : 0.0;
+	}
+
+	int GetInputNetHz() const
+	{
+		return (InputNetHz == Unset) ? 128 : InputNetHz;
+	}
+
+	double GetInputNetStepTime() const
+	{
+		return 1.0 / GetInputNetHz();
 	}
 };

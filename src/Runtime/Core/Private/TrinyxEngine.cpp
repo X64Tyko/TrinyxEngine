@@ -2,9 +2,12 @@
 
 #include <iostream>
 #include <SDL3/SDL.h>
+#ifndef TNX_HEADLESS
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL_vulkan.h>
+#endif
 
+#include "AssetRegistry.h"
 #include "EngineConfig.h"
 #include "FlowManager.h"
 #include "ReflectionRegistry.h"
@@ -15,17 +18,23 @@
 #include "ThreadPinning.h"
 #include "TrinyxJobs.h"
 #include "World.h"
+#ifndef TNX_HEADLESS
 #if TNX_ENABLE_EDITOR
 #include "EditorRenderer.h"
 #else
 #include "GameplayRenderer.h"
 #endif
+#endif
 #include "JoltPhysics.h"
+#if defined(TNX_ENABLE_NETWORK) && !TNX_ENABLE_EDITOR
+#include "ReplicationSystem.h"
+#endif
 
 // Define global component/class counters (declared in Types.h / SchemaReflector.h)
 namespace Internal
 {
 	uint32_t g_GlobalComponentCounter(1);
+	uint8_t g_GlobalMixinCounter(128); // user mixin IDs start after engine band (0-127)
 	std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> g_TemporalComponentCounter = []()
 	{
 		std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> a;
@@ -42,7 +51,16 @@ void TrinyxEngine::ParseCommandLine(int argc, char* argv[])
 {
 	for (int i = 1; i < argc; ++i)
 	{
-		if (strcmp(argv[i], "--server") == 0)
+		if (strcmp(argv[i], "--headless") == 0)
+		{
+			Config.Headless = true;
+		}
+		else if (strcmp(argv[i], "--max-frames") == 0 && i + 1 < argc)
+		{
+			Config.MaxFrames = atoi(argv[++i]);
+		}
+#ifdef TNX_ENABLE_NETWORK
+		else if (strcmp(argv[i], "--server") == 0)
 		{
 			Config.Mode = EngineMode::Server;
 		}
@@ -60,6 +78,9 @@ void TrinyxEngine::ParseCommandLine(int argc, char* argv[])
 		{
 			Config.NetPort = static_cast<uint16_t>(atoi(argv[++i]));
 		}
+#else
+		else { (void)argv[i]; } // suppress unused warning when networking is disabled
+#endif
 	}
 }
 
@@ -67,55 +88,76 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 {
 	TNX_ZONE_N("Engine_Init");
 
-	Logger::Get().Init("TrinyxEngine.log", LogLevel::Debug);
-	LOG_INFO("TrinyxEngine initialization started");
+#ifdef TNX_HEADLESS
+	Config.Headless = true;
+	(void)title; (void)width; (void)height; // unused in headless builds
+#endif
 
+	Logger::Get().Init("TrinyxEngine.log", LogLevel::Debug);
+	LOG_ENG_INFO("TrinyxEngine initialization started");
 	TrinyxThreading::Initialize();
 	TrinyxThreading::PinCurrentThread(TrinyxThreading::GetIdealCore(CoreAffinity::Input));
 
 	// ---- SDL init --------------------------------------------------------
-	if (!SDL_WasInit(SDL_INIT_VIDEO))
+	if (Config.Headless)
 	{
-		if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS))
+		// Headless: initialize SDL timer/core only — no video, no window, no GPU.
+		SDL_Init(0);
+	}
+	else
+	{
+		// ---- Windows timer resolution ------------------------------------
+		SDL_SetHint(SDL_HINT_TIMER_RESOLUTION, "1");
+
+		if (!SDL_WasInit(SDL_INIT_VIDEO))
 		{
-			std::cerr << "SDL_Init failed: " << SDL_GetError() << std::endl;
+			if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS))
+			{
+				std::cerr << "SDL_Init failed: " << SDL_GetError() << std::endl;
+				return false;
+			}
+		}
+
+#ifndef TNX_HEADLESS
+		EngineWindow = SDL_CreateWindow(title, width, height,
+										SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+		if (!EngineWindow)
+		{
+			std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << std::endl;
 			return false;
 		}
-	}
 
-	EngineWindow = SDL_CreateWindow(title, width, height,
-									SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
-	if (!EngineWindow)
-	{
-		std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << std::endl;
-		return false;
-	}
-
-	// ---- Vulkan init -----------------------------------------------------
+		// ---- Vulkan init -------------------------------------------------
 #if defined(NDEBUG)
-	[[maybe_unused]] constexpr bool enableValidation = false;
+		[[maybe_unused]] constexpr bool enableValidation = false;
 #else
-	[[maybe_unused]] constexpr bool enableValidation = true;
+		[[maybe_unused]] constexpr bool enableValidation = true;
 #endif
 
-	if (!VkCtx.Initialize(EngineWindow, enableValidation))
-	{
-		std::cerr << "VulkanContext::Initialize failed" << std::endl;
-		SDL_DestroyWindow(EngineWindow);
-		EngineWindow = nullptr;
-		return false;
-	}
+		if (!VkCtx.Initialize(EngineWindow, enableValidation))
+		{
+			std::cerr << "VulkanContext::Initialize failed" << std::endl;
+			SDL_DestroyWindow(EngineWindow);
+			EngineWindow = nullptr;
+			return false;
+		}
 
-	if (!VkMem.Initialize(VkCtx))
-	{
-		std::cerr << "VulkanMemory::Initialize failed" << std::endl;
-		VkCtx.Shutdown();
-		SDL_DestroyWindow(EngineWindow);
-		EngineWindow = nullptr;
-		return false;
+		if (!VkMem.Initialize(VkCtx))
+		{
+			std::cerr << "VulkanMemory::Initialize failed" << std::endl;
+			VkCtx.Shutdown();
+			SDL_DestroyWindow(EngineWindow);
+			EngineWindow = nullptr;
+			return false;
+		}
+#endif // !TNX_HEADLESS
 	}
 
 	// ---- Config ----------------------------------------------------------
+	// Preserve CLI-set flags that must survive the INI load.
+	const bool headlessCLI = Config.Headless;
+	const int maxFramesCLI = Config.MaxFrames;
+
 	GameConfig = EngineConfig::LoadProjectConfig(projectDir);
 	snprintf(GameConfig.ProjectDir, sizeof(GameConfig.ProjectDir), "%s",
 			 (projectDir && projectDir[0] != '\0') ? projectDir : "");
@@ -128,27 +170,56 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 #endif
 	snprintf(Config.ProjectDir, sizeof(Config.ProjectDir), "%s", GameConfig.ProjectDir);
 
+	// Re-apply CLI flags that must not be overridden by INI files.
+	Config.Headless  = headlessCLI;
+	Config.MaxFrames = maxFramesCLI;
+
+	// Apply per-channel log levels from config (Unset → Info for Engine, Debug for Game).
+	{
+		const LogLevel engineLevel = (Config.EngineLogLevel >= 0)
+										 ? static_cast<LogLevel>(Config.EngineLogLevel)
+										 : LogLevel::Info;
+		const LogLevel gameLevel = (Config.GameLogLevel >= 0)
+									   ? static_cast<LogLevel>(Config.GameLogLevel)
+									   : LogLevel::Debug;
+		Logger::Get().SetMinLevel(LogChannel::Engine, engineLevel);
+		Logger::Get().SetMinLevel(LogChannel::Game, gameLevel);
+	}
+
 	// Publish all static-init registered types (states, modes, entity types)
 	// to the AssetRegistry so they're resolvable by name at runtime.
 	ReflectionRegistry::Get().PublishToAssetRegistry();
+
+	// Set the content root so all AssetRegistry paths resolve to absolute paths.
+	if (Config.ProjectDir[0] != '\0')
+		AssetRegistry::Get().SetContentRoot(std::string(Config.ProjectDir) + "/content");
 
 	Flow = std::make_unique<FlowManager>();
 	Flow->Initialize(this, &Config, width, height);
 
 	// ---- GNS + NetThread -------------------------------------------------
+#ifdef TNX_ENABLE_NETWORK
 	if (Config.Mode != EngineMode::Standalone)
 	{
 		if (!GNS.Initialize())
 		{
-			LOG_ERROR("GNSContext::Initialize failed — falling back to Standalone");
+			LOG_ENG_ERROR("GNSContext::Initialize failed — falling back to Standalone");
 			Config.Mode = EngineMode::Standalone;
 		}
 		else
 		{
-			Net = std::make_unique<NetThread>();
+			Net = std::make_unique<NetThreadType>();
 			Net->Initialize(&GNS, &Config);
+#if defined(TNX_NET_MODEL_PIE)
+			Net->InitChildren();
+			// Server world wired below, after FlowManager::CreateWorld().
+#elif defined(TNX_NET_MODEL_SERVER)
+	// ServerNetThread resolves FlowManager via ServerWorld->GetFlowManager().
+	// SetServerWorld() is called below after CreateWorld().
+#endif
 		}
 	}
+#endif
 
 	// ---- World (owned by FlowManager) ------------------------------------
 	if (!Flow->CreateWorld())
@@ -157,6 +228,30 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 		return false;
 	}
 	DefaultWorld = Flow->GetWorld();
+
+#if defined(TNX_ENABLE_NETWORK) && !TNX_ENABLE_EDITOR
+	// Create ReplicationSystem for all server-role modes (including Standalone — Tick
+	// does nothing with zero connections, but RegisterConstruct works correctly).
+	if (Config.Mode != EngineMode::Client)
+	{
+		Replicator = std::make_unique<ReplicationSystem>();
+		Replicator->Initialize(DefaultWorld);
+		DefaultWorld->SetReplicationSystem(Replicator.get());
+#if defined(TNX_NET_MODEL_PIE) || defined(TNX_NET_MODEL_SERVER)
+	if (Net) Net->SetReplicationSystem(Replicator.get());
+#endif
+#if defined(TNX_NET_MODEL_PIE)
+	if (Net) Net->SetServerWorld(DefaultWorld);
+#elif defined(TNX_NET_MODEL_SERVER)
+	// Wire the per-player input injector into the server world's LogicThread.
+	// PIE wires this in EditorContext after SetServerWorld() is called per-session.
+	if (Net) Net->SetServerWorld(DefaultWorld);
+	if (Net) Net->WirePlayerInputInjector(DefaultWorld);
+#endif
+	}
+#endif
+
+#ifndef TNX_HEADLESS
 	Pacer.Initialize(GpuDevice);
 
 	// ---- Renderer --------------------------------------------------------
@@ -168,8 +263,9 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	DefaultWorld->GetLogicThread()->SetSimPaused(true); // Editor starts paused
 	Render->SetEngine(this);
 #endif
+#endif // !TNX_HEADLESS
 
-	LOG_INFO("TrinyxEngine initialization complete");
+	LOG_ENG_INFO("TrinyxEngine initialization complete");
 	return true;
 }
 
@@ -188,45 +284,57 @@ void TrinyxEngine::ConfirmLocalRecycles() const
 	if (DefaultWorld) DefaultWorld->ConfirmLocalRecycles();
 }
 
-void TrinyxEngine::Spawn(std::function<void(Registry*)> action)
-{
-	if (DefaultWorld) DefaultWorld->Spawn(std::move(action));
-}
-
+#ifdef TNX_ENABLE_NETWORK
 bool TrinyxEngine::EnsureNetworking()
 {
-	if (Net) return true; // Already initialized
+	if (Net) return true;
 
 	if (!GNS.IsInitialized())
 	{
 		if (!GNS.Initialize())
 		{
-			LOG_ERROR("[Engine] EnsureNetworking: GNS init failed");
+			LOG_ENG_ERROR("[Engine] EnsureNetworking: GNS init failed");
 			return false;
 		}
 	}
 
-	Net = std::make_unique<NetThread>();
+	Net = std::make_unique<NetThreadType>();
 	Net->Initialize(&GNS, &Config);
+#if defined(TNX_NET_MODEL_PIE)
+	Net->InitChildren();
+	if (DefaultWorld) Net->SetServerWorld(DefaultWorld);
+#elif defined(TNX_NET_MODEL_SERVER)
+// ServerNetThread resolves FlowManager via ServerWorld->GetFlowManager().
+#endif
 	return true;
 }
+#endif
 
 void TrinyxEngine::StartThreadsAndJobs()
 {
 	Flow->StartWorld();
-	Render->Start();
+#ifndef TNX_HEADLESS
+	if (Render) Render->Start();
+#endif
 
-	while (!DefaultWorld->GetLogicThread()->IsRunning() || !Render->IsRunning())
+	while (!DefaultWorld->GetLogicThread()->IsRunning()
+#ifndef TNX_HEADLESS
+		|| (Render && !Render->IsRunning())
+#endif
+	)
 	{
 		// Spin while we wait so that we don't initialize workers before our Primary threads
 	}
 
-	// Start NetThread in threaded mode for Client/ListenServer.
-	// Server mode uses inline Tick() from the main loop — no extra thread.
-	if (Net && Config.Mode != EngineMode::Server)
-	{
-		Net->Start();
-	}
+	// Server model uses inline Tick() from the main loop — no extra thread.
+	// Client and PIE models spin a dedicated net thread.
+#ifdef TNX_ENABLE_NETWORK
+#if defined(TNX_NET_MODEL_SERVER)
+	// Inline — no Start(); main loop calls Net->Tick()
+#else
+	if (Net) Net->Start();
+#endif
+#endif
 
 	bool JobsInitialized = TrinyxJobs::Initialize(&Config);
 	bJobsInitialized.store(JobsInitialized, std::memory_order_release);
@@ -242,6 +350,8 @@ void TrinyxEngine::RunMainLoop()
 	const uint64_t perfFrequency = SDL_GetPerformanceFrequency();
 	LastFrameCounter             = SDL_GetPerformanceCounter();
 
+	uint64_t sentinelFrameCount = 0;
+
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
 		TNX_ZONE_N("Main_Frame");
@@ -250,30 +360,33 @@ void TrinyxEngine::RunMainLoop()
 		const float dt            = static_cast<float>(static_cast<double>(frameStart - LastFrameCounter) / static_cast<double>(perfFrequency));
 		LastFrameCounter          = frameStart;
 
-#if defined(TNX_DEDICATED_SERVER)
-		// Dedicated server: main thread is the network poller.
-		// No window, no SDL events, no renderer.
+#if defined(TNX_NET_MODEL_SERVER) && defined(TNX_ENABLE_NETWORK)
+		// Dedicated server: main thread is the network poller — no SDL events.
 		if (Net) Net->Tick();
-#elif TNX_ENABLE_EDITOR
-		// Editor: runtime mode for PIE (server + N clients in one process).
-		if (Config.Mode == EngineMode::Server && Net) Net->Tick();
-		else PumpEvents();
-#else
-		// Shipping client/standalone: always pump SDL events.
+#elif !defined(TNX_HEADLESS)
 		PumpEvents();
 #endif
 
-		// Tick the flow state machine — drives GameState::Tick() on the active state
+		// Tick the flow state machine — drives FlowState::Tick() on the active state
 		Flow->Tick(dt);
 
 		if (DefaultWorld->GetLogicThread() && !DefaultWorld->GetLogicThread()->IsRunning())
 		{
-			LOG_ERROR("[Sentinel] Logic thread stopped unexpectedly — shutting down");
+			LOG_ENG_ERROR("[Sentinel] Logic thread stopped unexpectedly — shutting down");
 			bIsRunning.store(false, std::memory_order_release);
 		}
+#ifndef TNX_HEADLESS
 		if (Render && !Render->IsRunning())
 		{
-			LOG_ERROR("[Sentinel] Render thread stopped unexpectedly — shutting down");
+			LOG_ENG_ERROR("[Sentinel] Render thread stopped unexpectedly — shutting down");
+			bIsRunning.store(false, std::memory_order_release);
+		}
+#endif
+
+		// MaxFrames: clean exit after N frames (used by CI for smoke tests).
+		if (Config.MaxFrames > 0 && ++sentinelFrameCount >= static_cast<uint64_t>(Config.MaxFrames))
+		{
+			LOG_ENG_INFO("[Sentinel] Reached MaxFrames limit — exiting");
 			bIsRunning.store(false, std::memory_order_release);
 		}
 
@@ -286,31 +399,40 @@ void TrinyxEngine::RunMainLoop()
 
 void TrinyxEngine::Shutdown()
 {
-	LOG_INFO("TrinyxEngine shutting down");
+	LOG_ENG_INFO("TrinyxEngine shutting down");
 
 	// Stop threads — FlowManager owns World lifecycle
 	Flow->StopWorld();
+#ifndef TNX_HEADLESS
 	if (Render) Render->Stop();
+#endif
+#ifdef TNX_ENABLE_NETWORK
 	if (Net) Net->Stop();
+#endif
 	Flow->JoinWorld();
+#ifndef TNX_HEADLESS
 	if (Render) Render->Join();
+#endif
+#ifdef TNX_ENABLE_NETWORK
 	if (Net) Net->Join();
+	Net.reset();
+	GNS.Shutdown();
+#endif
 
 	// Shut down the job system after coordinator threads have exited
 	TrinyxJobs::Shutdown();
 
+#ifndef TNX_HEADLESS
 	// Destroy thread objects BEFORE Vulkan teardown.
 	// RenderThread owns GPU resources that call vmaDestroy* in their destructors.
 	Render.reset();
+#endif
 
 	// FlowManager owns the World — destroy it (and all Constructs) here.
 	DefaultWorld = nullptr;
 	Flow.reset();
 
-	// Tear down networking
-	Net.reset();
-	GNS.Shutdown();
-
+#ifndef TNX_HEADLESS
 	// Tear down Vulkan
 	VkMem.Shutdown();
 	VkCtx.Shutdown();
@@ -320,18 +442,19 @@ void TrinyxEngine::Shutdown()
 		SDL_DestroyWindow(EngineWindow);
 		EngineWindow = nullptr;
 	}
+#endif
 
 	SDL_Quit();
 	Logger::Get().Shutdown();
 }
 
+#ifndef TNX_HEADLESS
 void TrinyxEngine::PumpEvents()
 {
 	TNX_ZONE_N("Input_Poll");
 
-	World* targetWorld    = InputTargetWorld ? InputTargetWorld : DefaultWorld;
-	InputBuffer* SimInput = targetWorld->GetSimInput();
-	InputBuffer* VizInput = targetWorld->GetVizInput();
+	World* targetWorld = InputTargetWorld ? InputTargetWorld : DefaultWorld;
+	auto inputTargets  = targetWorld->GetInputTargets();
 #ifdef TNX_ENABLE_ROLLBACK
 	LogicThread* Logic = targetWorld->GetLogicThread();
 #endif
@@ -378,8 +501,7 @@ void TrinyxEngine::PumpEvents()
 #endif
 				if (!e.key.repeat)
 				{
-					SimInput->PushKey(e.key.scancode, true);
-					VizInput->PushKey(e.key.scancode, true);
+					for (auto* buf : inputTargets) buf->PushKey(e.key.scancode, true);
 				}
 				break;
 
@@ -387,16 +509,14 @@ void TrinyxEngine::PumpEvents()
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				SimInput->PushKey(e.key.scancode, false);
-				VizInput->PushKey(e.key.scancode, false);
+				for (auto* buf : inputTargets) buf->PushKey(e.key.scancode, false);
 				break;
 
 			case SDL_EVENT_MOUSE_MOTION:
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				SimInput->AddMouseDelta(e.motion.xrel, e.motion.yrel);
-				VizInput->AddMouseDelta(e.motion.xrel, e.motion.yrel);
+				for (auto* buf : inputTargets) buf->AddMouseDelta(e.motion.xrel, e.motion.yrel);
 				break;
 
 			case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -405,16 +525,14 @@ void TrinyxEngine::PumpEvents()
 #else
 				if (!engineOwnsInput) break;
 #endif
-				SimInput->PushMouseButton(e.button.button, true);
-				VizInput->PushMouseButton(e.button.button, true);
+				for (auto* buf : inputTargets) buf->PushMouseButton(e.button.button, true);
 				break;
 
 			case SDL_EVENT_MOUSE_BUTTON_UP:
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				SimInput->PushMouseButton(e.button.button, false);
-				VizInput->PushMouseButton(e.button.button, false);
+				for (auto* buf : inputTargets) buf->PushMouseButton(e.button.button, false);
 				break;
 
 			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
@@ -425,6 +543,7 @@ void TrinyxEngine::PumpEvents()
 		}
 	}
 }
+#endif // !TNX_HEADLESS
 
 /*
 void TrinyxEngine::ServiceRenderThread() { ... }
@@ -442,9 +561,11 @@ void TrinyxEngine::CalculateFPS()
 
 	if (FpsTimer >= 1.0) [[unlikely]]
 	{
-		LOG_DEBUG_F("Main FPS: %d | Frame: %.2fms",
-					static_cast<int>(FrameCount / FpsTimer),
-					(FpsTimer / FrameCount) * 1000.0);
+#if defined(TNX_DETAILED_METRICS)
+		LOG_ENG_INFO_F("Main FPS: %d | Frame: %.2fms",
+					   static_cast<int>(FrameCount / FpsTimer),
+					   (FpsTimer / FrameCount) * 1000.0);
+#endif
 		FrameCount = 0;
 		FpsTimer   = 0.0;
 	}

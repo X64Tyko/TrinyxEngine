@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CTransform.h"
+#include "CVelocity.h"
 #include "CScale.h"
 #include "CColor.h"
 #include "EntityView.h"

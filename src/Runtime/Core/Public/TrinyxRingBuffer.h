@@ -80,6 +80,34 @@ public:
 		return true;
 	}
 
+	/// Non-blocking move-enqueue. Returns false if the queue is full.
+	bool TryPush(T&& item)
+	{
+		Cell* cell;
+		size_t pos = EnqueuePos.load(std::memory_order_relaxed);
+		for (;;)
+		{
+			cell       = &Cells[pos & Mask];
+			size_t seq = cell->Sequence.load(std::memory_order_acquire);
+			auto diff  = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos);
+			if (diff == 0)
+			{
+				if (EnqueuePos.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) break;
+			}
+			else if (diff < 0)
+			{
+				return false; // full
+			}
+			else
+			{
+				pos = EnqueuePos.load(std::memory_order_relaxed); // retry
+			}
+		}
+		cell->Data = std::move(item);
+		cell->Sequence.store(pos + 1, std::memory_order_release);
+		return true;
+	}
+
 	/// Non-blocking dequeue. Returns false if the queue is empty.
 	bool TryPop(T& item)
 	{

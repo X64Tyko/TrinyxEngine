@@ -7,7 +7,7 @@ Organized by implementation phase. Read in order — each phase builds directly 
 
 ## Engine Context
 
-The renderer lives on the **Encoder thread** (VulkRender). It owns all GPU resources,
+The renderer lives on the **Encoder thread** (`RendererCore<Derived>` / `GameplayRenderer`). It owns all GPU resources,
 submits command buffers, and drives the present loop. Key design constraints:
 
 - **Vulkan 1.3 core only** — dynamic rendering, sync2, BDA all in core; no extension toggles needed.
@@ -47,7 +47,7 @@ there is already correct and you don't need to redo it.
 ### Frame loop reference
 **[vkguide.dev — New Rendering Loop (Ch 2)](https://vkguide.dev/docs/new_chapter_2/vulkan_new_rendering/)**
 The "new" vkguide is written from scratch for 1.3 (unlike the original which retrofitted
-extensions). Chapter 2 sets up the exact same frame loop as `VulkRender::ThreadMain` will.
+extensions). Chapter 2 sets up the exact same frame loop as `RendererCore::ThreadMain` will.
 Good for verifying semaphore / fence lifecycle is correct.
 
 ### Sync2 and dynamic rendering deep dive
@@ -64,7 +64,7 @@ and what dynamic rendering removes.
 ## Phase 2 — Memory, Staging, and ReBAR
 
 **Goal**: Upload vertex/index buffers. Understand when to use staging vs. direct write.
-Wire up the existing `VulkanMemory::AllocateBuffer` patterns correctly from VulkRender.
+Wire up the existing `VulkanMemory::AllocateBuffer` patterns correctly from `RendererCore`.
 
 ### The definitive ReBAR article
 **[Vulkan Memory Types on PC — Adam Sawicki](https://asawicki.info/news_1740_vulkan_memory_types_on_pc_and_how_to_use_them)**
@@ -113,7 +113,7 @@ draw counts at runtime. A chapter 7 targeting Vulkan 1.3 is actively being writt
 
 **[Dev.to — Advanced Vulkan: Frame Graph and Memory Management](https://dev.to/p3ngu1nzz/advanced-vulkan-rendering-building-a-modern-frame-graph-and-memory-management-15kn)**
 Covers structuring a render thread that owns its VRAM budget and submits explicit passes.
-Matches the Encoder thread model — useful when VulkRender grows a proper pass graph.
+Matches the Encoder thread model — useful when `RendererCore` grows a proper pass graph.
 
 ### BDA reference
 **[Vulkan Docs — Buffer Device Address Sample](https://docs.vulkan.org/samples/latest/samples/extensions/buffer_device_address/README.html)**
@@ -208,7 +208,7 @@ To link the runtime API from any target:
 target_link_libraries(TrinyxEngine PRIVATE Slang::Compiler)
 ```
 `Slang::Compiler` is defined in the root `CMakeLists.txt`. Nothing currently links it;
-add it when VulkRender or a `ShaderCompiler` subsystem is ready to use it.
+add it when `RendererCore` or a `ShaderCompiler` subsystem is ready to use it.
 
 ---
 

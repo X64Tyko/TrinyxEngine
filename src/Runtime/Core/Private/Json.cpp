@@ -159,7 +159,7 @@ namespace
 
 	bool ParseError(ParseCtx& C, const char* Msg)
 	{
-		LOG_ERROR_F("[JSON] Parse error at position %zu: %s", C.Pos, Msg);
+		LOG_ENG_ERROR_F("[JSON] Parse error at position %zu: %s", C.Pos, Msg);
 		return false;
 	}
 

@@ -1,7 +1,12 @@
 #pragma once
+#include "NetTypes.h"
+#include "WithLobby.h"
+#include "WithSpawnManagement.h"
+#include "WithTeamAssignment.h"
 
 class World;
 class Soul;
+struct PlayerBeginRequestPayload;
 
 // ---------------------------------------------------------------------------
 // GameMode — Server-authoritative rules runtime for a World.
@@ -10,7 +15,7 @@ class Soul;
 // scoring, round transitions, player slot management. It exists only
 // while a World is active and is destroyed with it.
 //
-// One GameMode per World. The active GameState decides which GameMode
+// One GameMode per World. The active FlowState decides which GameMode
 // to create (or none — a menu state has no GameMode).
 //
 // GameMode is intentionally NOT a Construct itself. User subclasses that
@@ -35,7 +40,7 @@ class Soul;
 class GameMode
 {
 public:
-	virtual ~GameMode() = default;
+	virtual ~GameMode();
 
 	/// Called after the GameMode is created and the World is ready.
 	virtual void Initialize(World* world) { OwnerWorld = world; }
@@ -46,6 +51,13 @@ public:
 
 	/// Called when a Soul disconnects or leaves.
 	virtual void OnPlayerLeft(Soul& soul) { (void)soul; }
+
+	/// Called when the server receives a PlayerBeginRequest from a client.
+	/// Pick a spawn point, create a Body, call soul.ClaimBody(result.Body).
+	/// Return PlayerBeginResult::Accepted = true to confirm, false to reject.
+	/// The engine sends Confirm/Reject based on the returned result — do not
+	/// send wire packets from this method.
+	virtual PlayerBeginResult OnPlayerBeginRequest(Soul& soul, const PlayerBeginRequestPayload& req);
 
 	/// Called when the World is about to be destroyed (cleanup before teardown).
 	virtual void OnWorldTeardown()

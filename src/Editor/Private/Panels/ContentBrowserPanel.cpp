@@ -121,7 +121,7 @@ void ContentBrowserPanel::Draw(EditorState& state)
 		else ImGui::TextDisabled("--");
 
 		ImGui::NextColumn();
-		ImGui::Text("%012llX", static_cast<unsigned long long>(entry.UUID >> 8));
+		ImGui::Text("%012llX", static_cast<unsigned long long>(entry.ID.GetUUID() >> 8));
 		ImGui::NextColumn();
 	}
 

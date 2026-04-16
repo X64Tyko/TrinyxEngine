@@ -6,28 +6,47 @@
 #include "EngineConfig.h"
 #include "Events.h"
 #include "FlowManager.h"
+#include "TrinyxJobs.h"
+#include "World.h"
+#ifdef TNX_ENABLE_NETWORK
 #include "GNSContext.h"
-#include "NetThread.h"
+#if defined(TNX_NET_MODEL_PIE)
+#include "PIENetThread.h"
+using NetThreadType = PIENetThread;
+#elif defined(TNX_NET_MODEL_SERVER)
+#include "ServerNetThread.h"
+using NetThreadType = ServerNetThread;
+#else
+#include "ClientNetThread.h"
+using NetThreadType = ClientNetThread;
+#endif
+#endif
+#ifndef TNX_HEADLESS
 #include "VulkanContext.h"
 #include "VulkanMemory.h"
 #include "../../Rendering/Private/FramePacer.h"
+#endif
 
 class RenderThread;
 // Forward declarations
 class Registry;
 class LogicThread;
 class JoltPhysics;
+#ifdef TNX_ENABLE_NETWORK
 class NetConnectionManager;
 class ReplicationSystem;
-class World;
+#endif
 
 // Compile-time renderer selection: EditorRenderer (ImGui overlay) or GameplayRenderer (no-op overlay).
+// In headless mode there is no renderer — Render stays nullptr.
+#ifndef TNX_HEADLESS
 #if TNX_ENABLE_EDITOR
 class EditorRenderer;
 using RendererType = EditorRenderer;
 #else
 class GameplayRenderer;
 using RendererType = GameplayRenderer;
+#endif
 #endif
 
 /**
@@ -86,16 +105,21 @@ public:
 	void ResetRegistry() const;
 	void ConfirmLocalRecycles() const;
 
-	/// Spawn entities from any thread via the default world's SpawnSync.
-	void Spawn(std::function<void(Registry*)> action);
+	/// Spawn entities from any thread into the default world (blocks until Logic thread executes).
+	/// Lambda must satisfy ValidJobLambda: trivially copyable, ≤48 bytes, accepts (uint32_t).
+	template <TrinyxJobs::ValidJobLambda LAMBDA>
+	void Spawn(LAMBDA lambda) { if (DefaultWorld) DefaultWorld->SpawnAndWait(lambda); }
 
 	// Renderer access (needed by EditorContext)
+#ifndef TNX_HEADLESS
 	RendererType* GetRenderer() const { return Render.get(); }
 	SDL_Window* GetWindow() const { return EngineWindow; }
+#endif
 
+#ifdef TNX_ENABLE_NETWORK
 	// Networking
 	GNSContext* GetGNSContext() const { return const_cast<GNSContext*>(&GNS); }
-	NetThread* GetNetThread() const { return Net.get(); }
+	NetThreadType* GetNetThread() const { return Net.get(); }
 
 	/// Lazy-init GNS + NetThread if not already active.
 	/// Used by editor PIE to enable networking from Standalone mode.
@@ -105,6 +129,8 @@ public:
 	// EditorContext fires them during StartPIE/StopPIE and Play/Stop.
 	Callback<void, World*, NetConnectionManager*> OnPIEStarted;
 	Callback<void, NetConnectionManager*> OnPIEStopped;
+#endif
+
 	Callback<void, World*> OnPlayStarted; // Fired when Play (Local) is clicked
 	Callback<void> OnPlayStopped;         // Fired when Stop (Local) is clicked
 
@@ -120,24 +146,42 @@ private:
 	// Sentinel Tasks (Main Thread)
 	void StartThreadsAndJobs();
 	void RunMainLoop();
+#ifndef TNX_HEADLESS
 	void PumpEvents(); // Handle OS events
+#endif
 	void WaitForTiming(uint64_t frameStart, uint64_t perfFrequency);
 
 	// FPS tracking
 	void CalculateFPS();
 
+#ifndef TNX_HEADLESS
 	// --- Window ---
 	SDL_Window* EngineWindow = nullptr;
-	SDL_GPUDevice* GpuDevice;
+	SDL_GPUDevice* GpuDevice = nullptr;
 	FramePacer Pacer;
+#endif
 
+#ifdef TNX_ENABLE_NETWORK
 	// --- Networking ---
 	GNSContext GNS;
-	std::unique_ptr<NetThread> Net;
+	std::unique_ptr<NetThreadType> Net;
+#if !TNX_ENABLE_EDITOR
+	// ReplicationSystem is owned by the engine for non-editor builds.
+	// The editor creates its own per-PIE-session instance in EditorContext.
+	std::unique_ptr<ReplicationSystem> Replicator;
+#endif
+#endif
 
+#ifndef TNX_HEADLESS
 	// --- Vulkan (owned here, shared across worlds) ---
 	VulkanContext VkCtx;
 	VulkanMemory VkMem;
+#endif
+
+	// --- Renderer (shared, reads from active world) ---
+#ifndef TNX_HEADLESS
+	std::unique_ptr<RendererType> Render;
+#endif
 
 	// --- Config ---
 	EngineConfig Config;     // Active config (editor config when TNX_ENABLE_EDITOR, else game config)
@@ -145,9 +189,6 @@ private:
 
 	// --- World (owned by FlowManager, cached here for fast access) ---
 	World* DefaultWorld = nullptr;
-
-	// --- Renderer (shared, reads from active world) ---
-	std::unique_ptr<RendererType> Render;
 
 	// --- Lifecycle ---
 	std::atomic<bool> bIsRunning{false};
@@ -170,10 +211,14 @@ void TrinyxEngine::Run(GameClass& game)
 	// Auto-load the default flow state if configured.
 	// World already exists (created in Initialize), so EnforceRequirements is a no-op
 	// for NeedsWorld states. The state's OnEnter drives level loading and mode activation.
+	// In editor builds the EditorContext drives flow/level loading — skip the auto-load
+	// here to prevent a double load into the editor DefaultWorld.
+#if !TNX_ENABLE_EDITOR
 	if (Config.DefaultState[0] != '\0')
 	{
 		Flow->LoadDefaultState(Config.DefaultState);
 	}
+#endif
 
 	RunMainLoop();
 	Shutdown();

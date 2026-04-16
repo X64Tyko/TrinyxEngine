@@ -15,10 +15,20 @@ namespace TrinyxJobs
 {
 	// ---- Internal state --------------------------------------------------
 
-	static constexpr uint32_t QueueCount = static_cast<uint32_t>(Queue::COUNT);
+	static constexpr uint32_t QueueCount     = static_cast<uint32_t>(Queue::COUNT);
+	static constexpr uint32_t MaxWorldQueues = 16;
 
-	// One ring buffer per queue
+	// One ring buffer per global queue
 	static TrinyxRingBuffer<Job> s_Queues[QueueCount];
+
+	// Per-world queue pool — only the owning LogicThread drains these
+	struct WorldQueueSlot
+	{
+		TrinyxRingBuffer<Job> Ring;
+		std::atomic<bool> Active{false};
+	};
+
+	static WorldQueueSlot s_WorldQueues[MaxWorldQueues];
 
 	// Worker threads
 	static std::vector<std::thread> s_Workers;
@@ -42,8 +52,8 @@ namespace TrinyxJobs
 	/// Returns true if work was found. Used by workers and WaitForCounter.
 	static bool StealAndExecute(const std::vector<uint8_t>& queues)
 	{
-		// Priority order: Physics > Render > General
-		// This ensures physics work (the tightest budget) drains fastest.
+		// Priority order: Logic > Render > Physics > General
+		// This ensures the tightest-budget work (512Hz logic) drains first.
 		Job job;
 		for (auto& queueID : queues)
 		{
@@ -64,7 +74,7 @@ namespace TrinyxJobs
 	/// Worker thread entry point.
 	static void WorkerMain(uint32_t workerIndex, Queue affinity)
 	{
-		// create queue inices for worker affinity
+		// create queue indices for worker affinity
 		std::vector<uint8_t> queues;
 		for (uint8_t id = 0; id < QueueCount; ++id)
 		{
@@ -119,19 +129,22 @@ namespace TrinyxJobs
 		{
 			if (!s_Queues[q].Initialize(queueCapacity))
 			{
-				LOG_ERROR("[Jobs] Failed to allocate queue");
+				LOG_ENG_ERROR("[Jobs] Failed to allocate queue");
 				return false;
 			}
 		}
 
 		s_WakeSignal.store(0, std::memory_order_relaxed);
 
-		// Spawn workers — count determined by ThreadPinning topology scan
+		// Spawn workers — count determined by ThreadPinning topology scan.
+		// On constrained environments (CI VMs with ≤ ReservedCores logical cores),
+		// clamp to 1 worker rather than failing — all threads share cores anyway,
+		// and the Brain/Encoder coordinator model means workers still add throughput.
 		s_WorkerCount = TrinyxThreading::GetWorkerThreadCapacity();
 		if (s_WorkerCount == 0)
 		{
-			LOG_ERROR("[Jobs] No cores available for workers");
-			return false;
+			s_WorkerCount = 1;
+			LOG_ENG_INFO("[Jobs] Core count ≤ reserved threshold — running with 1 oversubscribed worker");
 		}
 
 		s_Running.store(true, std::memory_order_release);
@@ -145,8 +158,8 @@ namespace TrinyxJobs
 			TrinyxThreading::PinThread(s_Workers.back());
 		}
 
-		LOG_INFO_F("[Jobs] Initialized: %u workers, %zu-slot queues (Phys/Rend/Genl)",
-				   s_WorkerCount, queueCapacity);
+		LOG_ENG_INFO_F("[Jobs] Initialized: %u workers, %zu-slot queues (Phys/Rend/Genl)",
+					   s_WorkerCount, queueCapacity);
 		return true;
 	}
 
@@ -169,7 +182,7 @@ namespace TrinyxJobs
 
 		for (uint32_t q = 0; q < QueueCount; ++q) s_Queues[q].Shutdown();
 
-		LOG_INFO("[Jobs] Shutdown complete");
+		LOG_ENG_INFO("[Jobs] Shutdown complete");
 	}
 
 	void SubmitJob(const Job& job, Queue queue)
@@ -184,7 +197,7 @@ namespace TrinyxJobs
 		if (!pushed && queue != Queue::General)
 		{
 			pushed = s_Queues[std::countr_zero(static_cast<uint8_t>(Queue::General))].TryPush(job);
-			LOG_ERROR("[Jobs] Queue full");
+			LOG_ENG_ERROR("[Jobs] Queue full");
 		}
 
 		assert(pushed && "Job queues full — increase JobCacheSize in config");
@@ -197,7 +210,7 @@ namespace TrinyxJobs
 
 	void WaitForCounter(JobCounter* counter, Queue affinity)
 	{
-		// create queue inices for worker affinity
+		// create queue indices for worker affinity
 		std::vector<uint8_t> queues;
 		for (uint8_t id = 0; id < QueueCount; ++id)
 		{
@@ -234,5 +247,61 @@ namespace TrinyxJobs
 	uint32_t GetCurrentThreadIndex()
 	{
 		return t_ThreadIndex;
+	}
+
+	// ---- World queue API -------------------------------------------------
+
+	WorldQueueHandle CreateWorldQueue(size_t capacity)
+	{
+		for (uint32_t i = 0; i < MaxWorldQueues; ++i)
+		{
+			bool expected = false;
+			if (s_WorldQueues[i].Active.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+			{
+				if (!s_WorldQueues[i].Ring.Initialize(capacity))
+				{
+					s_WorldQueues[i].Active.store(false, std::memory_order_release);
+					LOG_ENG_ERROR("[Jobs] WorldQueue ring allocation failed");
+					return InvalidWorldQueue;
+				}
+				LOG_ENG_INFO_F("[Jobs] WorldQueue %u created (%zu slots)", i, capacity);
+				return i;
+			}
+		}
+		LOG_ENG_ERROR("[Jobs] WorldQueue pool exhausted — increase MaxWorldQueues");
+		return InvalidWorldQueue;
+	}
+
+	void DestroyWorldQueue(WorldQueueHandle handle)
+	{
+		assert(handle < MaxWorldQueues && "Invalid WorldQueueHandle");
+		assert(s_WorldQueues[handle].Active.load(std::memory_order_acquire) && "WorldQueue not active");
+		s_WorldQueues[handle].Ring.Shutdown();
+		s_WorldQueues[handle].Active.store(false, std::memory_order_release);
+		LOG_ENG_INFO_F("[Jobs] WorldQueue %u destroyed", handle);
+	}
+
+	void DrainWorldQueue(WorldQueueHandle handle)
+	{
+		assert(handle < MaxWorldQueues && "Invalid WorldQueueHandle");
+		Job job;
+		while (s_WorldQueues[handle].Ring.TryPop(job))
+		{
+			job.EntryPoint(job.Payload, t_ThreadIndex);
+			if (job.Counter)
+			{
+				job.Counter->fetch_sub(1, std::memory_order_release);
+				job.Counter->notify_one();
+			}
+		}
+	}
+
+	void SubmitWorldJob(const Job& job, WorldQueueHandle handle)
+	{
+		assert(handle < MaxWorldQueues && "Invalid WorldQueueHandle");
+		assert(s_WorldQueues[handle].Active.load(std::memory_order_acquire) && "WorldQueue not active");
+
+		[[maybe_unused]] bool pushed = s_WorldQueues[handle].Ring.TryPush(job);
+		assert(pushed && "WorldQueue full — increase CreateWorldQueue capacity");
 	}
 }

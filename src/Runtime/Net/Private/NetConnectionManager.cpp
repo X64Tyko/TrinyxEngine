@@ -1,11 +1,13 @@
 #include "NetConnectionManager.h"
 
 #include <SDL3/SDL_timer.h>
+#include <cassert>
 
 #include "GNSContext.h"
 
 #include <steam/isteamnetworkingsockets.h>
 #include <steam/isteamnetworkingutils.h>
+#include <steam/steamnetworkingtypes.h>
 
 #include "Logger.h"
 
@@ -49,10 +51,10 @@ void NetConnectionManager::Initialize(GNSContext* gns)
 	PollGroup = Sockets->CreatePollGroup();
 	if (PollGroup == 0)
 	{
-		LOG_ERROR("[NetConnectionManager] Failed to create poll group");
+		LOG_ENG_ERROR("[NetConnectionManager] Failed to create poll group");
 	}
 
-	LOG_INFO("[NetConnectionManager] Initialized");
+	LOG_ENG_INFO("[NetConnectionManager] Initialized");
 }
 
 void NetConnectionManager::Shutdown()
@@ -78,7 +80,7 @@ void NetConnectionManager::Shutdown()
 	if (s_Instance == this) s_Instance = nullptr;
 
 	Sockets = nullptr;
-	LOG_INFO("[NetConnectionManager] Shutdown");
+	LOG_ENG_INFO("[NetConnectionManager] Shutdown");
 }
 
 // ---------------------------------------------------------------------------
@@ -100,11 +102,11 @@ bool NetConnectionManager::Listen(uint16_t port)
 	ListenSocket = Sockets->CreateListenSocketIP(addr, 1, &opt);
 	if (ListenSocket == 0)
 	{
-		LOG_ERROR_F("[NetConnectionManager] Failed to listen on port %u", port);
+		LOG_ENG_ERROR_F("[NetConnectionManager] Failed to listen on port %u", port);
 		return false;
 	}
 
-	LOG_INFO_F("[NetConnectionManager] Listening on port %u", port);
+	LOG_ENG_INFO_F("[NetConnectionManager] Listening on port %u", port);
 	return true;
 }
 
@@ -114,7 +116,7 @@ void NetConnectionManager::StopListening()
 	{
 		Sockets->CloseListenSocket(ListenSocket);
 		ListenSocket = 0;
-		LOG_INFO("[NetConnectionManager] Stopped listening");
+		LOG_ENG_INFO("[NetConnectionManager] Stopped listening");
 	}
 }
 
@@ -124,7 +126,7 @@ void NetConnectionManager::AcceptConnection(HSteamNetConnection conn)
 
 	if (Sockets->AcceptConnection(conn) != GNS::ResultOK)
 	{
-		LOG_ERROR_F("[NetConnectionManager] Failed to accept connection %u", conn);
+		LOG_ENG_ERROR_F("[NetConnectionManager] Failed to accept connection %u", conn);
 		Sockets->CloseConnection(conn, 0, "AcceptFailed", false);
 		return;
 	}
@@ -137,7 +139,7 @@ void NetConnectionManager::AcceptConnection(HSteamNetConnection conn)
 
 	AddConnection(conn);
 	if (ConnectionInfo* ci = FindConnection(conn)) ci->bServerSide = true;
-	LOG_INFO_F("[NetConnectionManager] Accepted connection %u (server-side)", conn);
+	LOG_ENG_INFO_F("[NetConnectionManager] Accepted connection %u (server-side)", conn);
 }
 
 // ---------------------------------------------------------------------------
@@ -152,7 +154,7 @@ HSteamNetConnection NetConnectionManager::Connect(const char* address, uint16_t 
 	addr.Clear();
 	if (!addr.ParseString(address))
 	{
-		LOG_ERROR_F("[NetConnectionManager] Failed to parse address: %s", address);
+		LOG_ENG_ERROR_F("[NetConnectionManager] Failed to parse address: %s", address);
 		return 0;
 	}
 	addr.m_port = port;
@@ -164,7 +166,7 @@ HSteamNetConnection NetConnectionManager::Connect(const char* address, uint16_t 
 	HSteamNetConnection conn = Sockets->ConnectByIPAddress(addr, 1, &opt);
 	if (conn == 0)
 	{
-		LOG_ERROR_F("[NetConnectionManager] Failed to connect to %s:%u", address, port);
+		LOG_ENG_ERROR_F("[NetConnectionManager] Failed to connect to %s:%u", address, port);
 		return 0;
 	}
 
@@ -175,7 +177,8 @@ HSteamNetConnection NetConnectionManager::Connect(const char* address, uint16_t 
 	}
 
 	AddConnection(conn);
-	LOG_INFO_F("[NetConnectionManager] Connecting to %s:%u (handle %u)", address, port, conn);
+	if (ConnectionInfo* ci = FindConnection(conn)) ci->bClientInitiated = true;
+	LOG_ENG_INFO_F("[NetConnectionManager] Connecting to %s:%u (handle %u)", address, port, conn);
 	return conn;
 }
 
@@ -248,6 +251,11 @@ int NetConnectionManager::PollIncoming(std::vector<ReceivedMessage>& outMessages
 bool NetConnectionManager::Send(HSteamNetConnection conn, const PacketHeader& header,
 								const uint8_t* payload, bool reliable)
 {
+	// Payload pointer must be present when PayloadSize > 0 — a mismatch means
+	// the caller stamped the wrong size or forgot to pass the buffer.
+	assert((header.PayloadSize == 0 || payload != nullptr || header.PayloadSize >= 65535) &&
+		   "Send: non-zero PayloadSize but null payload pointer");
+
 	uint8_t buf[sizeof(PacketHeader) + 65535]; // Stack buffer — PayloadSize is uint16
 	uint32_t totalSize = PacketHeader::Serialize(buf, header, payload);
 	return SendRaw(conn, buf, totalSize, reliable);
@@ -257,6 +265,10 @@ bool NetConnectionManager::SendRaw(HSteamNetConnection conn, const uint8_t* data
 								   uint32_t size, bool reliable)
 {
 	if (!Sockets) return false;
+
+	// GNS hard limit — exceeding this silently drops the message.
+	assert(size <= static_cast<uint32_t>(k_cbMaxSteamNetworkingSocketsMessageSizeSend) &&
+		   "SendRaw: message exceeds GNS maximum send size (512 KB)");
 
 	int flags = reliable ? GNS::SendReliable : GNS::SendUnreliable;
 
@@ -291,7 +303,10 @@ void NetConnectionManager::AssignOwnerID(HSteamNetConnection conn, uint8_t owner
 	if (ci)
 	{
 		ci->OwnerID = ownerID;
-		LOG_INFO_F("[NetConnectionManager] Assigned OwnerID %u to connection %u", ownerID, conn);
+#if defined(TNX_TESTING) || defined(TNX_ENABLE_EDITOR)
+		if (ci->bClientInitiated) LocalOwnerID.store(ownerID, std::memory_order_release);
+#endif
+		LOG_ENG_INFO_F("[NetConnectionManager] Assigned OwnerID %u to connection %u", ownerID, conn);
 	}
 }
 
@@ -302,7 +317,7 @@ void NetConnectionManager::GenerateNetID(HSteamNetConnection conn)
 	if (ci)
 	{
 		ci->OwnerID = static_cast<uint8_t>(netID++);
-		LOG_INFO_F("[NetConnectionManager] Generated OwnerID %u for connection %u", ci->OwnerID, conn);
+		LOG_ENG_INFO_F("[NetConnectionManager] Generated OwnerID %u for connection %u", ci->OwnerID, conn);
 	}
 }
 
@@ -323,7 +338,9 @@ void NetConnectionManager::RemoveConnection(HSteamNetConnection conn)
 	{
 		if (it->Handle == conn)
 		{
+			const uint8_t ownerID = it->OwnerID;
 			Connections.erase(it);
+			OnClientDisconnected(ownerID);
 			return;
 		}
 	}
@@ -348,7 +365,7 @@ void NetConnectionManager::OnConnectionStatusChanged(SteamNetConnectionStatusCha
 				// Connecting state but have m_hListenSocket == 0.
 				if (info->m_info.m_hListenSocket != 0)
 				{
-					LOG_INFO_F("[NetConnectionManager] Incoming connection %u", info->m_hConn);
+					LOG_ENG_INFO_F("[NetConnectionManager] Incoming connection %u", info->m_hConn);
 					mgr->AcceptConnection(info->m_hConn);
 				}
 				break;
@@ -360,7 +377,7 @@ void NetConnectionManager::OnConnectionStatusChanged(SteamNetConnectionStatusCha
 				if (ci)
 				{
 					ci->bConnected = true;
-					LOG_INFO_F("[NetConnectionManager] Connection %u established", info->m_hConn);
+					LOG_ENG_INFO_F("[NetConnectionManager] Connection %u established", info->m_hConn);
 
 					if (ci->bServerSide)
 					{
@@ -386,8 +403,8 @@ void NetConnectionManager::OnConnectionStatusChanged(SteamNetConnectionStatusCha
 		case GNS::ClosedByPeer:
 		case GNS::ProblemDetectedLocally:
 			{
-				LOG_INFO_F("[NetConnectionManager] Connection %u closed: %s",
-						   info->m_hConn, info->m_info.m_szEndDebug);
+				LOG_ENG_INFO_F("[NetConnectionManager] Connection %u closed: %s",
+							   info->m_hConn, info->m_info.m_szEndDebug);
 				mgr->Sockets->CloseConnection(info->m_hConn, 0, nullptr, false);
 				mgr->RemoveConnection(info->m_hConn);
 				break;

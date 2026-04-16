@@ -124,7 +124,7 @@ public:
 	{
 		uint8_t fieldSlotIndex;         // Index into Chunk::Header::FieldPtrs[]
 		uint8_t componentSlotIndex;     // Field index within its component (0, 1, 2...)
-		uint8_t temporalComponentIndex; // Cache slot index in the temporal/volatile slab
+		CacheSlotID temporalComponentIndex; // Cache slot index in the temporal/volatile slab
 		ComponentTypeID componentID;    // Component type this field belongs to
 		CacheTier tier;                 // Which cache tier (Temporal, Volatile, None)
 		FieldValueType valueType = FieldValueType::Unknown;

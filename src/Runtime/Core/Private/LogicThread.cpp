@@ -1,6 +1,5 @@
 ﻿#include "LogicThread.h"
 #include "ConstructRegistry.h"
-#include "FramePacket.h"
 #include "Registry.h"
 #include "EngineConfig.h"
 #include "Input.h"
@@ -11,7 +10,6 @@
 #include <cmath>
 
 #include "CameraConstruct.h"
-#include "SpawnSync.h"
 #include "ThreadPinning.h"
 #include "JoltPhysics.h"
 
@@ -23,7 +21,7 @@
 
 void LogicThread::Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
 							 InputBuffer* simInput, InputBuffer* vizInput,
-							 SpawnSync* spawner, const std::atomic<bool>* jobsInitialized,
+							 TrinyxJobs::WorldQueueHandle worldQueue, const std::atomic<bool>* jobsInitialized,
 							 int windowWidth, int windowHeight)
 {
 	RegistryPtr    = registry;
@@ -31,7 +29,7 @@ void LogicThread::Initialize(Registry* registry, const EngineConfig* config, Jol
 	PhysicsPtr     = physics;
 	SimInput       = simInput;
 	VizInput       = vizInput;
-	SpawnerPtr     = spawner;
+	WQHandle       = worldQueue;
 	JobsInitPtr    = jobsInitialized;
 	TemporalCache  = registry->GetTemporalCache();
 	WindowWidth    = windowWidth;
@@ -40,7 +38,7 @@ void LogicThread::Initialize(Registry* registry, const EngineConfig* config, Jol
 
 	LastCompletedFrame.store(0, std::memory_order_release);
 
-	LOG_INFO("[LogicThread] Initialized");
+	LOG_ENG_INFO("[LogicThread] Initialized");
 }
 
 void LogicThread::Start()
@@ -48,13 +46,13 @@ void LogicThread::Start()
 	bIsRunning.store(true, std::memory_order_release);
 	Thread = std::thread(&LogicThread::ThreadMain, this);
 	TrinyxThreading::PinThread(Thread);
-	LOG_INFO("[LogicThread] Started");
+	LOG_ENG_INFO("[LogicThread] Started");
 }
 
 void LogicThread::Stop()
 {
 	bIsRunning.store(false, std::memory_order_release);
-	LOG_INFO("[LogicThread] Stop requested");
+	LOG_ENG_INFO("[LogicThread] Stop requested");
 }
 
 void LogicThread::Join()
@@ -62,7 +60,7 @@ void LogicThread::Join()
 	if (Thread.joinable())
 	{
 		Thread.join();
-		LOG_INFO("[LogicThread] Joined");
+		LOG_ENG_INFO("[LogicThread] Joined");
 	}
 }
 
@@ -88,16 +86,11 @@ void LogicThread::ThreadMain()
 	{
 	}
 
-	// Stamp our thread ID so SpawnSync knows who the Logic thread is
-	SpawnerPtr->SetLogicThreadId(std::this_thread::get_id());
-
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
 		TNX_ZONE_NC("Logic Frame", TNX_COLOR_LOGIC);
 
-		// Sync point for deferred spawns — if any thread is waiting to
-		// spawn entities, freeze here and let it write to the current frame.
-		SpawnerPtr->SyncPoint();
+		TrinyxJobs::DrainWorldQueue(WQHandle);
 		RegistryPtr->ProcessDeferredDestructions();
 		if (ConstructsPtr) ConstructsPtr->ProcessDeferredDestructions();
 
@@ -139,11 +132,21 @@ void LogicThread::ThreadMain()
 			int steps = 0;
 			while (Accumulator.load(std::memory_order_relaxed) <= 0 && steps < MaxPhysSubSteps)
 			{
+				const bool bInputStalled = ProcessSimInput(fixedStepTime);
+				if (bInputStalled)
+				{
+					// A player's input window hasn't arrived yet — hold FrameNumber by returning
+					// the time budget to the accumulator. The outer loop will wait for the next
+					// wall-clock tick and retry. FrameNumber does not advance.
+					Accumulator.store(Accumulator.load(std::memory_order_relaxed) + fixedStepTime,
+									  std::memory_order_relaxed);
+					break;
+				}
+
 				// FPS tracking
 				FpsFixedCount++;
 				FpsFixedTimer += fixedStepTime;
 
-				ProcessSimInput(fixedStepTime);
 #ifdef TNX_ENABLE_ROLLBACK
 				RecordFrameInput();
 #endif
@@ -189,6 +192,19 @@ void LogicThread::ThreadMain()
 					bRollbackTestRequested.store(false, std::memory_order_relaxed);
 					ExecuteRollbackTest();
 				}
+
+				if (bRollbackRequested.load(std::memory_order_acquire))
+				{
+					bRollbackRequested.store(false, std::memory_order_relaxed);
+					if (bRollbackActive)
+					{
+						LOG_ENG_WARN("[Rollback] Rollback requested while one is already active — ignored");
+					}
+					else
+					{
+						ExecuteRollback(PendingRollbackFrame.load(std::memory_order_relaxed));
+					}
+				}
 #endif
 			}
 			TrackFPS();
@@ -211,9 +227,14 @@ void LogicThread::ThreadMain()
 	}
 }
 
-void LogicThread::ProcessSimInput(SimFloat dt)
+bool LogicThread::ProcessSimInput(SimFloat dt)
 {
 	SimInput->Swap();
+
+	// Server-side: pull each connected player's input from the PlayerInputLog for this frame.
+	// Returns true if any player's input window hasn't arrived yet — caller must hold FrameNumber.
+	if (PlayerInputInjector) return PlayerInputInjector(FrameNumber);
+	return false;
 }
 
 void LogicThread::ProcessVizInput(SimFloat dt)
@@ -384,7 +405,7 @@ void LogicThread::PublishCompletedFrame()
 	{
 		double bufferMs = static_cast<double>(VizInput->GetCurrentSwapTime() - VizInput->GetSwapPerfCount())
 			/ static_cast<double>(SDL_GetPerformanceFrequency()) * 1000.0;
-		LOG_DEBUG_F("[Latency] Buffer: %.2fms (input wait in swap buffer)", bufferMs);
+		LOG_ENG_DEBUG_F("[Latency] Buffer: %.2fms (input wait in swap buffer)", bufferMs);
 	}
 #endif
 #endif
@@ -442,7 +463,7 @@ void LogicThread::TrackFPS()
 		float ms  = static_cast<float>((FpsTimer / FpsFrameCount) * 1000.0);
 		LogicFPS.store(fps, std::memory_order_relaxed);
 		LogicFrameMs.store(ms, std::memory_order_relaxed);
-		LOG_DEBUG_F("Logic FPS: %d | Frame: %.2fms", static_cast<int>(fps), static_cast<double>(ms));
+		LOG_ENG_DEBUG_F("Logic FPS: %d | Frame: %.2fms", static_cast<int>(fps), static_cast<double>(ms));
 		FpsFrameCount = 0;
 		FpsTimer      = 0.0;
 	}
@@ -453,7 +474,7 @@ void LogicThread::TrackFPS()
 		float fms  = static_cast<float>((FpsFixedTimer / FpsFixedCount) * 1000.0);
 		FixedFPS.store(ffps, std::memory_order_relaxed);
 		FixedFrameMs.store(fms, std::memory_order_relaxed);
-		LOG_DEBUG_F("Fixed FPS: %d | Frame: %.2fms", static_cast<int>(ffps), static_cast<double>(fms));
+		LOG_ENG_DEBUG_F("Fixed FPS: %d | Frame: %.2fms", static_cast<int>(ffps), static_cast<double>(fms));
 		FpsFixedCount = 0;
 		FpsFixedTimer = 0.0;
 	}
@@ -483,21 +504,88 @@ void LogicThread::InjectFrameInput(uint32_t frameNum)
 	SimInput->ReadCursor           = 0;
 }
 
+void LogicThread::ExecuteRollback(uint32_t targetFrame)
+{
+	TNX_ZONE_N("Rollback");
+
+	bRollbackActive = true;
+
+	const uint32_t T           = FrameNumber - 1;
+	const uint32_t frameCount  = TemporalCache->GetTotalFrameCount();
+	const double fixedStepTime = ConfigPtr->GetFixedStepTime();
+
+	// Align to most recent Jolt flush boundary so physics state is consistent.
+	const uint32_t alignedTarget    = targetFrame - ((targetFrame % PhysicsDivizor + 1) % PhysicsDivizor);
+	const uint32_t totalResimFrames = T - alignedTarget;
+
+	LOG_ENG_INFO_F("[Rollback] Rewind to frame %u (aligned from %u), resim %u frames to frame %u",
+				   alignedTarget, targetFrame, totalResimFrames, T);
+
+	// ── Rewind ─────────────────────────────────────────────────────────────
+	{
+		TNX_ZONE_N("Rollback_Rewind");
+
+		TemporalCache->SetActiveWriteFrame(alignedTarget % frameCount);
+
+		TrinyxJobs::WaitForCounter(PhysicsPtr->GetJoltPhysCounter(), TrinyxJobs::Queue::Logic);
+
+		if (!PhysicsPtr->RestoreSnapshot(alignedTarget))
+		{
+			LOG_ENG_WARN("[Rollback] Snapshot not found, falling back to rebuild-from-slab");
+			PhysicsPtr->ResetAllBodies();
+			PhysicsPtr->FlushPendingBodies(RegistryPtr);
+			// Save a fresh baseline snapshot at the rebuild point.
+			PhysicsPtr->SaveSnapshot(alignedTarget);
+		}
+
+		FrameNumber    = alignedTarget + 1;
+		SimulationTime = FrameNumber * fixedStepTime;
+	}
+
+	LOG_ENG_INFO_F("[Rollback] Jolt restored, starting resim from frame %u", FrameNumber);
+
+	// ── Resimulate ─────────────────────────────────────────────────────────
+	{
+		TNX_ZONE_N("Rollback_Resim");
+
+		for (uint32_t i = 0; i < totalResimFrames; ++i)
+		{
+			InjectFrameInput(FrameNumber);
+			PrePhysics(fixedStepTime);
+			ScalarPrePhysicsBatch.Execute(fixedStepTime);
+
+			if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
+			{
+				PhysicsPtr->Step(static_cast<float>(fixedStepTime * PhysicsDivizor));
+			}
+
+			if (FrameNumber % PhysicsDivizor == PhysicsDivizor - 1) [[unlikely]]
+			{
+				PhysicsPtr->FlushPendingBodies(RegistryPtr);
+				PhysicsPtr->PullActiveTransforms(RegistryPtr);
+				PhysicsPtr->SaveSnapshot(FrameNumber);
+			}
+
+			PostPhysics(fixedStepTime);
+			ScalarPostPhysicsBatch.Execute(fixedStepTime);
+			SimulationTime += fixedStepTime;
+
+			RegistryPtr->PropagateFrame(FrameNumber++);
+		}
+
+		LOG_ENG_INFO_F("[Rollback] Resimulation complete, frame %u", FrameNumber);
+	}
+
+	bRollbackActive = false;
+}
+
 void LogicThread::ExecuteRollbackTest()
 {
 	TNX_ZONE_N("Rollback_Test");
 
-	const uint32_t T              = FrameNumber - 1; // last completed frame
+	const uint32_t T              = FrameNumber - 1;
 	const uint32_t rollbackTarget = T - RollbackFrameCount;
-	const uint32_t frameCount     = TemporalCache->GetTotalFrameCount();
-	const double fixedStepTime    = ConfigPtr->GetFixedStepTime();
-
-	// Align rollback to most recent Flush+Pull boundary (FrameNumber % PhysicsDivizor == PhysicsDivizor-1)
-	const uint32_t alignedTarget    = rollbackTarget - ((rollbackTarget % PhysicsDivizor + 1) % PhysicsDivizor);
-	const uint32_t totalResimFrames = T - alignedTarget;
-
-	LOG_INFO_F("[Rollback] Rewind to frame %u (aligned from %u), resim %u frames to frame %u",
-			   alignedTarget, rollbackTarget, totalResimFrames, T);
+	[[maybe_unused]] const double fixedStepTime = ConfigPtr->GetFixedStepTime();
 
 #ifdef TNX_TESTING
 	// ── Save ground truth (test harness only) ─────────────────────────────
@@ -537,57 +625,8 @@ void LogicThread::ExecuteRollbackTest()
 	const double savedSimTime       = SimulationTime;
 #endif // TNX_TESTING
 
-	// ── Rewind ─────────────────────────────────────────────────────────────
-	{
-		TNX_ZONE_N("Rollback_Rewind");
-
-		TemporalCache->SetActiveWriteFrame(alignedTarget % frameCount);
-
-		TrinyxJobs::WaitForCounter(PhysicsPtr->GetJoltPhysCounter(), TrinyxJobs::Queue::Logic);
-
-		if (!PhysicsPtr->RestoreSnapshot(alignedTarget))
-		{
-			LOG_WARN("[Rollback] Snapshot not found, falling back to rebuild-from-slab");
-			PhysicsPtr->ResetAllBodies();
-			PhysicsPtr->FlushPendingBodies(RegistryPtr);
-		}
-
-		FrameNumber    = alignedTarget + 1;
-		SimulationTime = FrameNumber * fixedStepTime;
-	}
-
-	LOG_INFO_F("[Rollback] Jolt restored, starting resim from frame %u", FrameNumber);
-
-	// ── Resimulate ─────────────────────────────────────────────────────────
-	{
-		TNX_ZONE_N("Rollback_Resim");
-
-		for (uint32_t i = 0; i < totalResimFrames; ++i)
-		{
-			InjectFrameInput(FrameNumber);
-			PrePhysics(fixedStepTime);
-			ScalarPrePhysicsBatch.Execute(fixedStepTime);
-
-			if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
-			{
-				PhysicsPtr->Step(static_cast<float>(fixedStepTime * PhysicsDivizor));
-			}
-
-			if (FrameNumber % PhysicsDivizor == PhysicsDivizor - 1) [[unlikely]]
-			{
-				PhysicsPtr->FlushPendingBodies(RegistryPtr);
-				PhysicsPtr->PullActiveTransforms(RegistryPtr);
-			}
-
-			PostPhysics(fixedStepTime);
-			ScalarPostPhysicsBatch.Execute(fixedStepTime);
-			SimulationTime += fixedStepTime;
-
-			RegistryPtr->PropagateFrame(FrameNumber++);
-		}
-
-		LOG_INFO_F("[Rollback] Resimulation complete, frame %u", FrameNumber);
-	}
+	// ── Rewind + Resimulate ────────────────────────────────────────────────
+	ExecuteRollback(rollbackTarget);
 
 #ifdef TNX_TESTING
 	// ── Compare (test harness only) ────────────────────────────────────────
@@ -601,12 +640,12 @@ void LogicThread::ExecuteRollbackTest()
 		int cmp = std::memcmp(GroundTruthBackup.data(), resimFieldData, fieldDataSize);
 		if (cmp == 0)
 		{
-			LOG_INFO_F("[Rollback] PASSED — byte-perfect determinism (%zu bytes, %u frames resimulated)",
-					   fieldDataSize, totalResimFrames);
+			LOG_ENG_INFO_F("[Rollback] PASSED — byte-perfect determinism (%zu bytes, %u frames resimulated)",
+						   fieldDataSize, RollbackFrameCount);
 		}
 		else
 		{
-			LOG_WARN_F("[Rollback] FAILED — divergence detected (%u frames resimulated)", totalResimFrames);
+			LOG_ENG_WARN_F("[Rollback] FAILED — divergence detected (%u frames resimulated)", RollbackFrameCount);
 
 			auto fieldInfos = TemporalCache->GetValidFieldInfos();
 			for (const auto& info : fieldInfos)
@@ -635,8 +674,8 @@ void LogicThread::ExecuteRollbackTest()
 					size_t divergentBytes = 0;
 					for (size_t b = 0; b < info.CurrentUsed; ++b) divergentBytes += (truthField[b] != resimField[b]);
 
-					LOG_WARN_F("  DIVERGE: %s (comp=%u field=%zu) entity=%zu+%zu "
-							   "divergent=%zu/%zu (%.2f%%)",
+					LOG_ENG_WARN_F("  DIVERGE: %s (comp=%u field=%zu) entity=%zu+%zu "
+								   "divergent=%zu/%zu (%.2f%%)",
 							   info.FieldName, info.CompType, info.FieldIndex,
 							   entityIdx, byteInField,
 							   divergentBytes, info.CurrentUsed,
@@ -653,19 +692,19 @@ void LogicThread::ExecuteRollbackTest()
 
 		if (resimJoltData == savedJoltData)
 		{
-			LOG_INFO_F("[Rollback] Jolt physics: MATCH (%zu bytes)", resimJoltData.size());
+			LOG_ENG_INFO_F("[Rollback] Jolt physics: MATCH (%zu bytes)", resimJoltData.size());
 		}
 		else
 		{
-			LOG_WARN_F("[Rollback] Jolt physics: DIVERGED (truth=%zu bytes, resim=%zu bytes)",
-					   savedJoltData.size(), resimJoltData.size());
+			LOG_ENG_WARN_F("[Rollback] Jolt physics: DIVERGED (truth=%zu bytes, resim=%zu bytes)",
+						   savedJoltData.size(), resimJoltData.size());
 			size_t minLen = std::min(savedJoltData.size(), resimJoltData.size());
 			for (size_t i = 0; i < minLen; ++i)
 			{
 				if (savedJoltData[i] != resimJoltData[i])
 				{
-					LOG_WARN_F("  First Jolt divergence at byte %zu: truth=0x%02x resim=0x%02x",
-							   i, static_cast<uint8_t>(savedJoltData[i]), static_cast<uint8_t>(resimJoltData[i]));
+					LOG_ENG_WARN_F("  First Jolt divergence at byte %zu: truth=0x%02x resim=0x%02x",
+								   i, static_cast<uint8_t>(savedJoltData[i]), static_cast<uint8_t>(resimJoltData[i]));
 					break;
 				}
 			}
@@ -691,7 +730,7 @@ void LogicThread::ExecuteRollbackTest()
 		SimulationTime = savedSimTime;
 	}
 
-	LOG_INFO("[Rollback] State restored, simulation continuing.");
+	LOG_ENG_INFO("[Rollback] State restored, simulation continuing.");
 #endif // TNX_TESTING
 }
 

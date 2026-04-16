@@ -55,9 +55,9 @@ std::string AssetDatabase::NameFromPath(const std::string& path)
 	return fs::path(path).stem().string();
 }
 
-bool AssetDatabase::Rename(int64_t uuid, const std::string& newName)
+bool AssetDatabase::Rename(AssetID id, const std::string& newName)
 {
-	auto it = UUIDIndex.find(uuid);
+	auto it = UUIDIndex.find(id.GetUUID());
 	if (it == UUIDIndex.end()) return false;
 
 	AssetDatabaseEntry& entry = Entries[it->second];
@@ -65,7 +65,7 @@ bool AssetDatabase::Rename(int64_t uuid, const std::string& newName)
 
 	// Update runtime registry
 	AssetRegistry& registry = AssetRegistry::Get();
-	AssetEntry* rtEntry     = registry.FindMutable(AssetID::Create(uuid, entry.Type));
+	AssetEntry* rtEntry     = registry.FindMutable(entry.ID);
 	if (rtEntry) rtEntry->Name = newName;
 
 	return true;
@@ -111,8 +111,11 @@ void AssetDatabase::Initialize(const char* contentRoot)
 	if (!fs::exists(ContentRoot))
 	{
 		fs::create_directories(ContentRoot);
-		LOG_INFO_F("[AssetDB] Created content directory: %s", ContentRoot.c_str());
+		LOG_ENG_INFO_F("[AssetDB] Created content directory: %s", ContentRoot.c_str());
 	}
+
+	// Set content root on the runtime registry so paths resolve to absolute paths.
+	AssetRegistry::Get().SetContentRoot(ContentRoot);
 
 	// Try to load existing database
 	Load();
@@ -126,7 +129,7 @@ void AssetDatabase::Initialize(const char* contentRoot)
 	// Push to runtime registry
 	PublishToRegistry();
 
-	LOG_INFO_F("[AssetDB] Initialized with %zu assets from %s", Entries.size(), ContentRoot.c_str());
+	LOG_ENG_INFO_F("[AssetDB] Initialized with %zu assets from %s", Entries.size(), ContentRoot.c_str());
 }
 
 void AssetDatabase::Reconcile()
@@ -176,7 +179,7 @@ void AssetDatabase::Reconcile()
 					PathIndex.erase(entry.Path);
 					entry.Path         = relPath;
 					PathIndex[relPath] = idx;
-					LOG_INFO_F("[AssetDB] Asset moved: %s -> %s", entry.Path.c_str(), relPath.c_str());
+					LOG_ENG_INFO_F("[AssetDB] Asset moved: %s -> %s", entry.Path.c_str(), relPath.c_str());
 				}
 
 				if (currentHash != sc.ContentHash)
@@ -186,25 +189,25 @@ void AssetDatabase::Reconcile()
 					sc.ContentHash    = currentHash;
 					sc.Flags          |= static_cast<uint8_t>(SidecarFlags::Dirty);
 					AssetSidecar::Write(sidecar.c_str(), sc);
-					LOG_INFO_F("[AssetDB] Asset modified: %s", relPath.c_str());
+					LOG_ENG_INFO_F("[AssetDB] Asset modified: %s", relPath.c_str());
 				}
 			}
 			else
 			{
 				// Sidecar exists but not in database — re-register
 				AssetDatabaseEntry entry;
-				entry.UUID        = sc.UUID;
+				entry.ID          = AssetID::Create(sc.UUID, type);
 				entry.Path        = relPath;
 				entry.Type        = type;
 				entry.ContentHash = sc.ContentHash;
 
 				size_t idx = Entries.size();
 				Entries.push_back(entry);
-				UUIDIndex[entry.UUID] = idx;
-				PathIndex[relPath]    = idx;
+				UUIDIndex[entry.ID.GetUUID()] = idx;
+				PathIndex[relPath]            = idx;
 				seen.push_back(true);
 
-				LOG_INFO_F("[AssetDB] Re-registered: %s", relPath.c_str());
+				LOG_ENG_INFO_F("[AssetDB] Re-registered: %s", relPath.c_str());
 			}
 		}
 		else
@@ -231,7 +234,7 @@ void AssetDatabase::Reconcile()
 
 			// Add to database
 			AssetDatabaseEntry entry;
-			entry.UUID        = uuid;
+			entry.ID          = AssetID::Create(uuid, type);
 			entry.Name        = NameFromPath(relPath);
 			entry.Path        = relPath;
 			entry.Type        = type;
@@ -239,12 +242,12 @@ void AssetDatabase::Reconcile()
 
 			size_t idx = Entries.size();
 			Entries.push_back(entry);
-			UUIDIndex[entry.UUID] = idx;
-			PathIndex[relPath]    = idx;
+			UUIDIndex[entry.ID.GetUUID()] = idx;
+			PathIndex[relPath]            = idx;
 			seen.push_back(true);
 
-			LOG_INFO_F("[AssetDB] New asset imported: %s (UUID: %lld)", relPath.c_str(),
-					   static_cast<long long>(uuid));
+			LOG_ENG_INFO_F("[AssetDB] New asset imported: %s (UUID: %lld)", relPath.c_str(),
+						   static_cast<long long>(uuid));
 		}
 	}
 
@@ -253,7 +256,7 @@ void AssetDatabase::Reconcile()
 	{
 		if (!seen[i])
 		{
-			LOG_WARN_F("[AssetDB] Asset missing from filesystem: %s", Entries[i].Path.c_str());
+			LOG_ENG_WARN_F("[AssetDB] Asset missing from filesystem: %s", Entries[i].Path.c_str());
 		}
 	}
 }
@@ -266,7 +269,7 @@ bool AssetDatabase::Save() const
 	for (auto& entry : Entries)
 	{
 		JsonValue asset      = JsonValue::Object();
-		asset["uuid"]        = JsonValue::Number(static_cast<double>(entry.UUID));
+		asset["uuid"]        = JsonValue::Number(static_cast<double>(entry.ID.GetUUID()));
 		asset["name"]        = JsonValue::String(entry.Name);
 		asset["path"]        = JsonValue::String(entry.Path);
 		asset["type"]        = JsonValue::Number(static_cast<double>(static_cast<uint8_t>(entry.Type)));
@@ -294,7 +297,7 @@ bool AssetDatabase::Save() const
 	std::ofstream file(dbPath, std::ios::trunc);
 	if (!file.is_open())
 	{
-		LOG_ERROR_F("[AssetDB] Failed to write database: %s", dbPath.c_str());
+		LOG_ENG_ERROR_F("[AssetDB] Failed to write database: %s", dbPath.c_str());
 		return false;
 	}
 	file << json;
@@ -335,16 +338,17 @@ bool AssetDatabase::Load()
 
 		if (!uuid || !path) continue;
 
-		entry.UUID        = static_cast<int64_t>(uuid->AsNumber());
+		entry.ID = AssetID::Create(static_cast<int64_t>(uuid->AsNumber()),
+								   type ? static_cast<AssetType>(type->AsInt()) : AssetType::Invalid);
 		entry.Name        = (name && name->IsString()) ? name->AsString() : NameFromPath(path->AsString());
 		entry.Path        = path->AsString();
-		entry.Type        = type ? static_cast<AssetType>(type->AsInt()) : AssetType::Invalid;
+		entry.Type        = entry.ID.GetType();
 		entry.ContentHash = hash ? static_cast<uint64_t>(hash->AsNumber()) : 0;
 
 		size_t idx = Entries.size();
 		Entries.push_back(entry);
-		UUIDIndex[entry.UUID] = idx;
-		PathIndex[entry.Path] = idx;
+		UUIDIndex[entry.ID.GetUUID()] = idx;
+		PathIndex[entry.Path]         = idx;
 	}
 
 	// Load per-type counters
@@ -362,17 +366,17 @@ bool AssetDatabase::Load()
 	for (auto& entry : Entries)
 	{
 		uint8_t typeIdx = static_cast<uint8_t>(entry.Type);
-		uint32_t seq    = static_cast<uint32_t>((entry.UUID >> 8) & 0xFFFFFFFF);
+		uint32_t seq    = static_cast<uint32_t>((entry.ID.GetUUID() >> 8) & 0xFFFFFFFF);
 		if (seq >= NextCounter[typeIdx]) NextCounter[typeIdx] = seq + 1;
 	}
 
-	LOG_INFO_F("[AssetDB] Loaded %zu entries from %s", Entries.size(), dbPath.c_str());
+	LOG_ENG_INFO_F("[AssetDB] Loaded %zu entries from %s", Entries.size(), dbPath.c_str());
 	return true;
 }
 
-const AssetDatabaseEntry* AssetDatabase::FindByUUID(int64_t uuid) const
+const AssetDatabaseEntry* AssetDatabase::FindByID(AssetID id) const
 {
-	auto it = UUIDIndex.find(uuid);
+	auto it = UUIDIndex.find(id.GetUUID());
 	return it != UUIDIndex.end() ? &Entries[it->second] : nullptr;
 }
 
@@ -388,7 +392,7 @@ void AssetDatabase::PublishToRegistry() const
 
 	for (auto& entry : Entries)
 	{
-		AssetID id = AssetID::Create(entry.UUID, entry.Type);
+		AssetID id = entry.ID;
 		registry.Register(id, entry.Name, entry.Path, entry.Type);
 	}
 }

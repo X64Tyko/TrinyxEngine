@@ -32,16 +32,67 @@ option(ENABLE_AVX2 "Enable AVX2 instruction set" ON)
 option(TNX_ALIGN_64 "Use 64-byte alignment for field arrays (zero cache line splits, more memory)" OFF)
 option(TNX_ENABLE_ROLLBACK "Enable N-frame rollback history. Off = TNX_TEMPORAL_FIELDS components use Volatile (5-frame) storage." OFF)
 option(TNX_DETAILED_METRICS "Log per-frame latency breakdown (Buffer/Pipeline/Scanout). Noisy." OFF)
+if (TNX_DETAILED_METRICS)
+    add_compile_definitions(TNX_DETAILED_METRICS)
+    message(STATUS "Detailed metrics: ENABLED (noisy FPS + latency logs)")
+else ()
+    message(STATUS "Detailed metrics: DISABLED")
+endif ()
 option(TNX_ENABLE_EDITOR "Enable editor UI (ImGui integration). Adds editor panels and overlay." OFF)
+option(TNX_ENABLE_NETWORK "Enable networking (GameNetworkingSockets + Protobuf). Required for multiplayer." ON)
+# TNX_NET_MODEL selects the networking role baked into the build.
+#   PIE    — Editor in-process: one ServerNetThread + N ClientNetThread, ticked by PIENetThread.
+#            Automatically selected when TNX_ENABLE_EDITOR is ON.
+#   Server — Dedicated server: ServerNetThread only. Implies TNX_HEADLESS (no window, no GPU).
+#   Client — Standalone client: ClientNetThread only.
+set(TNX_NET_MODEL "Client" CACHE STRING "Networking role: PIE | Server | Client")
+set_property(CACHE TNX_NET_MODEL PROPERTY STRINGS "PIE" "Server" "Client")
 option(TNX_TESTING "Enable test harnesses (rollback determinism test, etc.). Debug/profiling tool." OFF)
 option(TNX_GPU_PICKING "Enable GPU-based entity picking (click-to-select). Requires editor." OFF)
 option(TNX_GPU_PICKING_FAST "Enable fast GPU picking mode (picks every frame at mouse cursor). Requires TNX_GPU_PICKING." OFF)
+option(TNX_HEADLESS "Headless build: no window, no GPU/Vulkan. Implied by TNX_NET_MODEL=Server. Also used standalone for CI/CD." OFF)
+
+# Dedicated server implies headless — a server never needs a window or GPU.
+if (TNX_NET_MODEL STREQUAL "Server" AND NOT TNX_HEADLESS)
+    message(STATUS "Server model detected — forcing TNX_HEADLESS=ON")
+    set(TNX_HEADLESS ON CACHE BOOL "" FORCE)
+endif ()
+
+if (TNX_HEADLESS)
+    add_compile_definitions(TNX_HEADLESS)
+    message(STATUS "Headless mode: ENABLED (no window, no GPU)")
+    # Headless and editor are mutually exclusive.
+    if (TNX_ENABLE_EDITOR)
+        message(WARNING "TNX_HEADLESS and TNX_ENABLE_EDITOR are mutually exclusive — disabling editor")
+        set(TNX_ENABLE_EDITOR OFF CACHE BOOL "" FORCE)
+    endif ()
+else ()
+    message(STATUS "Headless mode: DISABLED")
+endif ()
 
 if (TNX_ENABLE_EDITOR)
     add_compile_definitions(TNX_ENABLE_EDITOR)
     message(STATUS "Editor UI: ENABLED (ImGui)")
+    # Editor always implies PIE networking model
+    set(TNX_NET_MODEL "PIE" CACHE STRING "" FORCE)
 else ()
     message(STATUS "Editor UI: DISABLED")
+endif ()
+
+if (TNX_ENABLE_NETWORK)
+    add_compile_definitions(TNX_ENABLE_NETWORK)
+    if (TNX_NET_MODEL STREQUAL "PIE")
+        add_compile_definitions(TNX_NET_MODEL_PIE)
+        message(STATUS "Networking: ENABLED — PIE model (ServerNetThread + ClientNetThread)")
+    elseif (TNX_NET_MODEL STREQUAL "Server")
+        add_compile_definitions(TNX_NET_MODEL_SERVER)
+        message(STATUS "Networking: ENABLED — Server model (ServerNetThread)")
+    else ()
+        add_compile_definitions(TNX_NET_MODEL_CLIENT)
+        message(STATUS "Networking: ENABLED — Client model (ClientNetThread)")
+    endif ()
+else ()
+    message(STATUS "Networking: DISABLED (standalone builds only)")
 endif ()
 
 if (TNX_ENABLE_ROLLBACK)
@@ -74,7 +125,8 @@ endif ()
 # -----------------------------------------------------------------------------
 # 3. GLOBAL PATHS
 # -----------------------------------------------------------------------------
-set(SDL3_PATH  "${CMAKE_SOURCE_DIR}/libs/SDL3")
+set(SDL3_PATH "${CMAKE_SOURCE_DIR}/libs/SDL3")
+set(SDL3_SRC_PATH "${CMAKE_SOURCE_DIR}/libs/SDL3-src")
 set(TRACY_PATH "${CMAKE_SOURCE_DIR}/libs/tracy")
 set(VOLK_PATH  "${CMAKE_SOURCE_DIR}/libs/volk")
 set(VMA_PATH   "${CMAKE_SOURCE_DIR}/libs/vma")
@@ -167,6 +219,7 @@ if(MSVC)
     # AVX2 instruction set
     if(ENABLE_AVX2)
         add_compile_options(/arch:AVX2)
+        add_compile_definitions(TNX_HAS_AVX2)
         message(STATUS "AVX2 instructions enabled")
     endif()
 
@@ -206,6 +259,7 @@ else()
     # AVX2 instruction set
     if(ENABLE_AVX2)
         add_compile_options(-march=native)
+        add_compile_definitions(TNX_HAS_AVX2)
         message(STATUS "Native architecture instructions enabled")
     endif()
 endif()
@@ -252,8 +306,30 @@ else ()
 endif ()
 
 # -----------------------------------------------------------------------------
+# 6.5. SDL3 (Linux: build from submodule; Windows: bundled pre-built)
+# -----------------------------------------------------------------------------
+if (UNIX)
+    set(SDL_SHARED ON CACHE BOOL "" FORCE)
+    set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+    set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+    set(SDL3_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+    set(SDL_WERROR OFF CACHE BOOL "" FORCE)
+    # Headless CI runners have no X11/Wayland — skip the display check.
+    # SDL timers, events, and audio still work; only windowing is omitted.
+    set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
+    add_subdirectory("${SDL3_SRC_PATH}" SDL3-build EXCLUDE_FROM_ALL)
+    # SDL3's libm sources fail our global -Werror — suppress like we do for Jolt
+    foreach (_sdl3_target SDL3-shared SDL_uclibc)
+        if (TARGET ${_sdl3_target})
+            target_compile_options(${_sdl3_target} PRIVATE -w)
+        endif ()
+    endforeach ()
+endif ()
+
+# -----------------------------------------------------------------------------
 # 7. PROTOBUF (vendored submodule — required by GameNetworkingSockets)
 # -----------------------------------------------------------------------------
+if (TNX_ENABLE_NETWORK)
 set(ABSL_PROPAGATE_CXX_STD         ON  CACHE BOOL "" FORCE)
 set(protobuf_BUILD_TESTS           OFF CACHE BOOL "" FORCE)
 set(protobuf_BUILD_CONFORMANCE     OFF CACHE BOOL "" FORCE)
@@ -361,6 +437,8 @@ if (TARGET GameNetworkingSockets_s)
         target_compile_options(GameNetworkingSockets_s PRIVATE -w)
     endif ()
 endif ()
+
+endif () # TNX_ENABLE_NETWORK
 
 # -----------------------------------------------------------------------------
 # 9. SUBDIRECTORIES (Projects in Solution)

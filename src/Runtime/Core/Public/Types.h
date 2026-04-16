@@ -62,6 +62,16 @@ enum class CacheTier : uint8_t
 	MAX
 };
 
+// Engine mode — determines what subsystems are initialized.
+// Defined here (not in NetTypes.h) so it is available regardless of TNX_ENABLE_NETWORK.
+enum class EngineMode : uint8_t
+{
+	Standalone,   // No networking — default for singleplayer / editor
+	Client,       // Connects to remote server, renders locally
+	Server,       // Headless — no window/Vulkan/renderer
+	ListenServer, // Server + local client in one process (PIE default)
+};
+
 // Identifies the lifetime tier of a Construct — determines what survives
 // level transitions, World resets, and session teardown.
 // FlowManager uses this to enforce destruction/survival on transitions.
@@ -150,6 +160,11 @@ struct Matrix4
 // Component type ID - numeric identifier for each component type (0-255)
 using ComponentTypeID = uint32_t;
 
+// Per-cache slot index — which slot a component occupies within its associated ComponentCacheBase.
+// Distinct from ComponentTypeID: MetaFlags may be slot 0 in the Temporal cache but a different
+// component could be slot 0 in the Volatile cache. Same underlying width as StaticTemporalIndex().
+using CacheSlotID = uint8_t;
+
 // Component Signature definition as a bitset - tracks which components are present
 static constexpr size_t MAX_COMPONENTS                    = 256;
 static constexpr size_t MAX_TEMPORAL_FIELDS_PER_COMPONENT = 64;                                                 // Max decomposed temporal fields per component
@@ -168,6 +183,7 @@ constexpr uint32_t CHUNK_SIZE = 256 * MAX_FIELDS_PER_ARCHETYPE * 4;
 namespace Internal
 {
 	extern uint32_t g_GlobalComponentCounter;
+	extern uint8_t g_GlobalMixinCounter; // user mixin IDs, starts at 128
 
 	extern std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> g_TemporalComponentCounter;
 }

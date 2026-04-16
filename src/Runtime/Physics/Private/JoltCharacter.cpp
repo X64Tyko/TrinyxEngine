@@ -30,17 +30,17 @@ void JoltCharacter::Update(JPH::Vec3 desiredVelocity, JPH::Vec3 gravity, float d
 	if (Character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround
 		&& (current_vertical_velocity.GetY() - ground_velocity.GetY()) < 0.1f)
 	{
-		// On ground: adopt ground velocity (kills gravity accumulation)
+		// On ground: adopt ground velocity. Do NOT add gravity — the floor contact
+		// constraint handles it. Adding gravity here pushes the character into the
+		// floor every step and causes Jolt to resolve it back up, producing Y jitter.
 		new_velocity = ground_velocity;
 	}
 	else
 	{
-		// In air: keep current vertical velocity (gravity keeps accumulating)
-		new_velocity = current_vertical_velocity;
+		// In air: keep current vertical velocity and accumulate gravity.
+		new_velocity  = current_vertical_velocity;
+		new_velocity += gravity * dt;
 	}
-
-	// Apply gravity (accumulate every frame)
-	new_velocity += gravity * dt;
 
 	// Add horizontal player input
 	new_velocity += desiredVelocity;
@@ -65,6 +65,7 @@ void JoltCharacter::Update(JPH::Vec3 desiredVelocity, JPH::Vec3 gravity, float d
 JPH::RVec3 JoltCharacter::GetPosition() const { return Character->GetPosition(); }
 JPH::Quat JoltCharacter::GetRotation() const { return Character->GetRotation(); }
 JPH::Vec3 JoltCharacter::GetLinearVelocity() const { return Character->GetLinearVelocity(); }
+void JoltCharacter::SetPosition(JPH::RVec3 position) { Character->SetPosition(position); }
 
 bool JoltCharacter::IsGrounded() const
 {

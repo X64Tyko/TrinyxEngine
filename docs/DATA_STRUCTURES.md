@@ -282,13 +282,15 @@ One Player, one GameMode, one TurretBase. Constructs own Views into ECS data, ho
 and auto-register ticks via C++20 concept detection.
 
 ```cpp
-class Player : public Construct<Player>, public InstanceView<Player>
+class Player : public Construct<Player>
 {
+    ConstructView<EPlayer> Body;   // CTransform + CVelocity + CScale + CColor + CMeshRef → DUAL
+
 public:
-    void ScalarUpdate()
+    void ScalarUpdate(SimFloat dt)
     {
         // bespoke logic — read/write ECS data through View cursors
-        transform.PosX += inputVelX * dt;
+        Body.Transform.PosX += inputVelX * dt;
     }
 };
 ```
@@ -296,10 +298,11 @@ public:
 Constructs compose via `Owned<T>` value members:
 
 ```cpp
-class Vehicle : public Construct<Vehicle>, public InstanceView<Vehicle>
+class Vehicle : public Construct<Vehicle>
 {
-    Owned<Turret> turret;       // has its own InstanceView, own tick
-    Owned<Wheel>  wheels[4];   // each with PhysView
+    ConstructView<EInstanced> Body;
+    Owned<Turret> Turret;       // has its own ConstructView, own tick
+    Owned<Wheel>  Wheels[4];   // each with their own ConstructView
 };
 ```
 
@@ -310,19 +313,18 @@ class Vehicle : public Construct<Vehicle>, public InstanceView<Vehicle>
 - Tick order: parent before children
 - `static_assert(std::is_base_of_v<Construct<T>, T>)` enforced
 
-### Views — CRTP Lenses into ECS
+### ConstructView<TEntity> — ECS Lens
 
-Views hydrate FieldProxy cursors on initialization and register as defrag listeners:
+`ConstructView<TEntity>` is a single generic template that creates a backing ECS entity of any EntityView
+type, hydrates FieldProxy cursors on initialization, and auto-rehydrates on frame advance or defrag.
+The partition is auto-derived from the entity type's component SystemGroup tags:
 
-| View         | Components                          | Partition |
-|--------------|-------------------------------------|-----------|
-| InstanceView | Transform + PhysBody + SkeletalMesh | DUAL      |
-| PhysView     | Transform + PhysBody                | PHYS      |
-| RenderView   | Transform + SkeletalMesh            | RENDER    |
-| LogicView    | Transform only                      | LOGIC     |
-
-The View type determines which partition the entity lands in — maps directly to the SystemGroup
-auto-derivation from component tags.
+| Entity Type | Components                                          | Partition |
+|-------------|-----------------------------------------------------|-----------|
+| EInstanced  | CTransform + CJoltBody + CScale + CColor + CMeshRef | DUAL      |
+| EPlayer     | CTransform + CVelocity + CScale + CColor + CMeshRef | DUAL      |
+| EPoint      | CTransform only                                     | PHYS      |
+| ESpawnPoint | CTransform + CSpawnInfo                             | PHYS      |
 
 ### ConstructBatch — Type-Erased Tick Dispatch
 
@@ -368,7 +370,10 @@ Designer-authored values (e.g. MaxAmmo) belong in cold components. On load:
 
 ## SimFloat / FloatProxy — Determinism Alias
 
-The determinism mode switch lives in one place. Entity authors never touch it:
+> **Status: Design intent — not yet implemented.** Fixed32 is designed but not yet wired. `SimFloat`
+> currently aliases to `float` directly. The switch to `Fixed32` is a hardening-phase task.
+
+The determinism mode switch is designed to live in one place. Entity authors never touch it:
 
 ```cpp
 // SimFloat.h — the only file that changes between deterministic and float builds

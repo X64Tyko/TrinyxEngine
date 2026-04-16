@@ -57,14 +57,22 @@ struct SIMDTraits<float, WIDTH>
 
 	static FORCE_INLINE void store(float* ptr, [[maybe_unused]] __m256i mask, VecType val)
 	{
-		if constexpr (WIDTH == FieldWidth::WideMask) { _mm256_maskstore_ps(ptr, mask, val); }
+		if constexpr (WIDTH == FieldWidth::WideMask)
+		{
+			// blendv avoids _mm256_maskstore_ps which MSVC can miscompile in load-modify-store
+			// sequences with __restrict pointers — treating the masked store as an unmasked one.
+			_mm256_storeu_ps(ptr, _mm256_blendv_ps(_mm256_loadu_ps(ptr), val, _mm256_castsi256_ps(mask)));
+		}
 		else { _mm256_storeu_ps(ptr, val); }
 	}
 
-	// Non-temporal store (bypasses cache, for write-only temporal data)
+	// Wide: non-temporal store (bypasses cache). WideMask: masked blendv+storeu — no masked non-temporal intrinsic exists.
 	static FORCE_INLINE void stream(float* ptr, [[maybe_unused]] __m256i mask, VecType val)
 	{
-		if constexpr (WIDTH == FieldWidth::WideMask) { _mm256_maskstore_ps(ptr, mask, val); } // No masked stream, fall back
+		if constexpr (WIDTH == FieldWidth::WideMask)
+		{
+			_mm256_storeu_ps(ptr, _mm256_blendv_ps(_mm256_loadu_ps(ptr), val, _mm256_castsi256_ps(mask)));
+		}
 		else { _mm256_stream_ps(ptr, val); }
 	}
 
@@ -93,14 +101,20 @@ struct SIMDTraits<int32_t, WIDTH>
 
 	static FORCE_INLINE void store(int32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
 	{
-		if constexpr (WIDTH == FieldWidth::WideMask) { _mm256_maskstore_epi32(ptr, mask, val); }
+		if constexpr (WIDTH == FieldWidth::WideMask)
+		{
+			_mm256_storeu_si256((__m256i*)ptr, _mm256_blendv_epi8(_mm256_loadu_si256((const __m256i*)ptr), val, mask));
+		}
 		else { _mm256_storeu_si256((__m256i*)ptr, val); }
 	}
 
-	// Non-temporal store (bypasses cache, for write-only temporal data)
+	// Wide: non-temporal store (bypasses cache). WideMask: masked blendv+storeu — no masked non-temporal intrinsic exists.
 	static FORCE_INLINE void stream(int32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
 	{
-		if constexpr (WIDTH == FieldWidth::WideMask) { _mm256_maskstore_epi32(ptr, mask, val); } // No masked stream, fall back
+		if constexpr (WIDTH == FieldWidth::WideMask)
+		{
+			_mm256_storeu_si256((__m256i*)ptr, _mm256_blendv_epi8(_mm256_loadu_si256((const __m256i*)ptr), val, mask));
+		}
 		else { _mm256_stream_si256((__m256i*)ptr, val); }
 	}
 
@@ -141,14 +155,20 @@ struct SIMDTraits<uint32_t, WIDTH>
 
 	static FORCE_INLINE void store(uint32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
 	{
-		if constexpr (WIDTH == FieldWidth::WideMask) { _mm256_maskstore_epi32((int32_t*)ptr, mask, val); }
+		if constexpr (WIDTH == FieldWidth::WideMask)
+		{
+			_mm256_storeu_si256((__m256i*)ptr, _mm256_blendv_epi8(_mm256_loadu_si256((const __m256i*)ptr), val, mask));
+		}
 		else { _mm256_storeu_si256((__m256i*)ptr, val); }
 	}
 
-	// Non-temporal store (bypasses cache, for write-only temporal data)
+	// Wide: non-temporal store (bypasses cache). WideMask: masked blendv+storeu — no masked non-temporal intrinsic exists.
 	static FORCE_INLINE void stream(uint32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
 	{
-		if constexpr (WIDTH == FieldWidth::WideMask) { _mm256_maskstore_epi32((int32_t*)ptr, mask, val); } // No masked stream, fall back
+		if constexpr (WIDTH == FieldWidth::WideMask)
+		{
+			_mm256_storeu_si256((__m256i*)ptr, _mm256_blendv_epi8(_mm256_loadu_si256((const __m256i*)ptr), val, mask));
+		}
 		else { _mm256_stream_si256((__m256i*)ptr, val); }
 	}
 
@@ -434,8 +454,15 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	}
 
 	// ── Binary friend operators (return value, no dirty marking) ──
+	//
+	// GCC 13 bug workaround: friend function templates defined inside class templates are not
+	// differentiated by GCC 13 when constraints reference outer-class dependent types, even when
+	// those types differ across instantiations. Adding a non-deduced tag parameter of type
+	// FieldProxy* (which is FieldProxy<FieldType,WIDTH>* via the injected-class-name) gives each
+	// instantiation a syntactically distinct first parameter type, forcing GCC 13 to see them as
+	// separate templates. Tag_ always defaults to nullptr; callers use normal infix syntax (a * b).
 
-	template <ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
+	template <FieldProxy* Tag_ = nullptr, ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
 	FORCE_INLINE friend decltype(auto) operator*(L&& LHS, R&& RHS)
 	{
 		if constexpr (WIDTH == FieldWidth::Scalar)
@@ -466,7 +493,7 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		}
 	}
 
-	template <ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
+	template <FieldProxy* Tag_ = nullptr, ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
 	FORCE_INLINE friend decltype(auto) operator+(L&& LHS, R&& RHS)
 	{
 		if constexpr (WIDTH == FieldWidth::Scalar)
@@ -497,7 +524,7 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		}
 	}
 
-	template <ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
+	template <FieldProxy* Tag_ = nullptr, ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
 	FORCE_INLINE friend decltype(auto) operator-(L&& LHS, R&& RHS)
 	{
 		if constexpr (WIDTH == FieldWidth::Scalar)
@@ -528,7 +555,7 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		}
 	}
 
-	template <ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
+	template <FieldProxy* Tag_ = nullptr, ProxyType<FieldType, typename Traits::VecType> L, ProxyType<FieldType, typename Traits::VecType> R>
 	FORCE_INLINE friend decltype(auto) operator/(L&& LHS, R&& RHS)
 	{
 		if constexpr (WIDTH == FieldWidth::Scalar)

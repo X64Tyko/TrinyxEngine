@@ -1,26 +1,26 @@
 ﻿#pragma once
 #include <thread>
 #include <atomic>
+#include <functional>
 
 #include "ConstructBatch.h"
 #include "Registry.h"
+#include "TrinyxJobs.h"
 #include "Types.h"
 
 // Forward declarations
 class ConstructRegistry;
 class Registry;
 class JoltPhysics;
-class SpawnSync;
 struct EngineConfig;
 struct InputBuffer;
-struct FramePacket;
 
 /**
  * LogicThread: The Brain
  *
- * Runs simulation at FixedUpdateHz with accumulator/substepping
- * Produces FramePackets for Render thread consumption via triple-buffer mailbox
- * Owns the mailbox setup
+ * Runs simulation at FixedUpdateHz with accumulator/substepping.
+ * Publishes completed simulation state into the SoA slab (TemporalFrameHeader + field arrays).
+ * Render thread reads the last completed slab frame independently via PropagateFrame.
  */
 class LogicThread
 {
@@ -30,7 +30,7 @@ public:
 
 	void Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
 					InputBuffer* simInput, InputBuffer* vizInput,
-					SpawnSync* spawner, const std::atomic<bool>* jobsInitialized,
+					TrinyxJobs::WorldQueueHandle worldQueue, const std::atomic<bool>* jobsInitialized,
 					int windowWidth, int windowHeight);
 	void Start();
 	void Stop();
@@ -38,6 +38,16 @@ public:
 
 	bool IsRunning() const { return bIsRunning.load(std::memory_order_relaxed); }
 	void SetConstructRegistry(ConstructRegistry* cr) { ConstructsPtr = cr; }
+
+	/// Server-side hook: inject per-player input from PlayerInputLog into each player's
+	/// InputBuffer before gameplay logic runs. Called each fixed tick inside ProcessSimInput.
+	/// Wire up after both LogicThread and ServerNetThread are initialized.
+	/// Returns true if the sim should stall (at least one player's input window hasn't arrived).
+	/// Signature: bool(uint32_t frameNumber)
+	void SetPlayerInputInjector(std::function<bool(uint32_t)> injector)
+	{
+		PlayerInputInjector = std::move(injector);
+	}
 
 	// Active camera — when set, ProcessVizInput free-fly is disabled and
 	// PublishCompletedFrame reads position/yaw/pitch from this camera.
@@ -82,14 +92,22 @@ public:
 #ifdef TNX_ENABLE_ROLLBACK
 	// Called from Sentinel thread (PumpEvents) on F5 press.
 	void RequestRollbackTest() { bRollbackTestRequested.store(true, std::memory_order_release); }
+
+	// Called from any thread (e.g. net reconciliation) to trigger a production rollback.
+	// targetFrame is the authoritative frame to rewind to; resim runs to current FrameNumber.
+	void RequestRollback(uint32_t targetFrame)
+	{
+		PendingRollbackFrame.store(targetFrame, std::memory_order_relaxed);
+		bRollbackRequested.store(true, std::memory_order_release);
+	}
 #endif
 
 private:
 	void ThreadMain(); // Thread entry point
 
 	// Lifecycle Methods
-	void ProcessSimInput(SimFloat dt); // Swap input buffer, update camera from WASD + mouse
 	void ProcessVizInput(SimFloat dt); // Swap FizInput buffer, update camera from WASD + mouse
+	bool ProcessSimInput(SimFloat dt); // Swap SimInput, call injector; returns true if input-stalled
 	void ScalarUpdate(SimFloat dt);    // Variable update (runs every frame)
 	void PrePhysics(SimFloat dt);      // Fixed update at FixedUpdateHz
 	void PostPhysics(SimFloat dt);     // Fixed update at FixedUpdateHz
@@ -105,12 +123,16 @@ private:
 	class ComponentCacheBase* TemporalCache = nullptr;
 	ConstructRegistry* ConstructsPtr        = nullptr;
 	CameraConstruct* ActiveCamera           = nullptr;
-	SpawnSync* SpawnerPtr                   = nullptr;
+	TrinyxJobs::WorldQueueHandle WQHandle   = TrinyxJobs::InvalidWorldQueue;
 	const std::atomic<bool>* JobsInitPtr    = nullptr;
 
 	// Input
 	InputBuffer* SimInput = nullptr;
 	InputBuffer* VizInput = nullptr;
+
+	// Server-side: per-player input injection hook (null on clients/standalone)
+	// Returns true if the sim should stall this tick (at least one player is behind).
+	std::function<bool(uint32_t)> PlayerInputInjector;
 
 	// Camera state (FPS-style: yaw around Y, pitch around X)
 	Vector3 CamPos{0.0f, 0.0f, 0.0f};
@@ -152,11 +174,15 @@ private:
 #ifdef TNX_ENABLE_ROLLBACK
 	// --- Rollback ---
 	std::atomic<bool> bRollbackTestRequested{false};
+	std::atomic<bool> bRollbackRequested{false};
+	std::atomic<uint32_t> PendingRollbackFrame{0};
+	bool bRollbackActive{false}; // Logic-thread-only guard: set during ExecuteRollback
 	static constexpr uint32_t RollbackFrameCount = 5;
 
-	void ExecuteRollbackTest();
-	void RecordFrameInput();                  // Copy SimInput into current frame header
-	void InjectFrameInput(uint32_t frameNum); // Restore from frame header into SimInput
+	void ExecuteRollback(uint32_t targetFrame);   // Production rewind+resim — no test scaffolding
+	void ExecuteRollbackTest();                    // Test wrapper: save → ExecuteRollback → compare → restore
+	void RecordFrameInput();                       // Copy SimInput into current frame header
+	void InjectFrameInput(uint32_t frameNum);      // Restore from frame header into SimInput
 
 #ifdef TNX_TESTING
 	// Pre-allocated backup buffers for determinism validation (test harness only)

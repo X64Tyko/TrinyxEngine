@@ -1,15 +1,24 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
+#include "AssetRegistry.h"
 #include "ConstructRegistry.h"
+#include "NetTypes.h"
+#include "RegistryTypes.h"
+#include "Soul.h"
 #include "Types.h"
 
-class GameState;
+class FlowState;
 class GameMode;
+#ifdef TNX_ENABLE_NETWORK
+class NetChannel;
+#endif
 class World;
 class TrinyxEngine;
 struct EngineConfig;
@@ -19,7 +28,7 @@ struct EngineConfig;
 //
 // The FlowManager is owned by TrinyxEngine and drives the application-level
 // state machine. It manages:
-//   - A stack of GameStates (menu, loading, in-game, pause overlay, etc.)
+//   - A stack of FlowStates (menu, loading, in-game, pause overlay, etc.)
 //   - World lifetime (create/destroy based on state requirements)
 //   - GameMode lifetime (one per World, set by the active state)
 //   - ConstructRegistry (lives here so Session-lifetime Constructs survive)
@@ -71,7 +80,7 @@ public:
 
 	// ----- State registration (code-driven, call in PostInitialize) -----
 
-	using StateFactory = std::function<std::unique_ptr<GameState>()>;
+	using StateFactory = std::function<std::unique_ptr<FlowState>()>;
 	using ModeFactory  = std::function<std::unique_ptr<GameMode>()>;
 
 	/// Register a named state factory. Name is used by LoadState/TransitionTo.
@@ -120,10 +129,54 @@ public:
 	void JoinWorld();
 
 	/// Load a level (.tnxscene) into the current World.
-	void LoadLevel(const char* levelName);
+	/// bBackground: entities spawn as Alive-only (not ticking/rendering) until an
+	/// explicit Alive→Active sweep. Used for client loads where the server drives
+	/// activation via ServerReady. File I/O is still synchronous on the Logic thread.
+	void LoadLevel(const char* levelPath, bool bBackground = false);
+
+	/// Load a level by AssetID — resolves path via AssetRegistry.
+	void LoadLevel(const AssetID& id, bool bBackground = false);
+
+	/// Load a level by display name (looks up in AssetRegistry, then loads).
+	/// The name is the stem of the scene file, e.g. "Arena" for Arena.tnxscene.
+	void LoadLevelByName(const char* name, bool bBackground = false);
 
 	/// Unload the current level (despawn all level-scoped entities).
 	void UnloadLevel();
+
+	// ----- Soul lifecycle -----
+
+	/// Called by ServerNetThread when a client's RepState reaches Loaded.
+	/// Creates a Soul for ownerID, calls GameMode::OnPlayerJoined.
+	/// Also called on the client for its own ownerID after PlayerBeginConfirm.
+	void OnClientLoaded(uint8_t ownerID);
+
+	/// Called by ClientNetThread at HandshakeAccept — the earliest point the
+	/// client knows its OwnerID. Creates the local player's Soul with Owner role
+	/// so all subsequent LOG_NET_* calls show [OWNER] instead of [NULL].
+	/// Idempotent: does nothing if the Soul already exists.
+	void OnLocalOwnerConnected(uint8_t ownerID);
+
+	/// Called by ServerNetThread when a client disconnects.
+	/// Calls GameMode::OnPlayerLeft, destroys the Soul.
+	void OnClientDisconnected(uint8_t ownerID);
+
+	/// Returns the Soul for a given ownerID, or nullptr if not present.
+	Soul* GetSoul(uint8_t ownerID) const { return Souls[ownerID].get(); }
+
+	/// Create an Echo Soul for ownerID if none exists. Used by the replication system
+	/// when a Construct arrives from a remote peer whose Soul hasn't been created yet
+	/// (e.g., the server's own player construct received on the client).
+	Soul* EnsureEchoSoul(uint8_t ownerID)
+	{
+		if (!Souls[ownerID])
+		{
+			Souls[ownerID]          = std::make_unique<Soul>(ownerID);
+			Souls[ownerID]->FlowMgr = this;
+			Souls[ownerID]->SetRole(SoulRole::Echo);
+		}
+		return Souls[ownerID].get();
+	}
 
 	// ----- GameMode -----
 
@@ -133,18 +186,55 @@ public:
 
 	GameMode* GetGameMode() const { return ActiveMode.get(); }
 
+#ifdef TNX_ENABLE_NETWORK
+	/// Called from ServerNetThread when a PlayerBeginRequest arrives for ownerID.
+	/// Delegates to GameMode::OnPlayerBeginRequest for all game decisions.
+	/// Returns the PlayerBeginResult on accept, nullopt on reject.
+	std::optional<PlayerBeginResult> HandlePlayerBeginRequest(Soul* soul, const PlayerBeginRequestPayload& req);
+
+	/// Called from ClientNetThread after the Alive→Active sweep on ServerReady.
+	/// Creates the client-side Soul for ownerID (derived from channel) if absent,
+	/// sets its channel + FlowMgr, then fires the PlayerBegin RPC to the server.
+	void SendPlayerBeginRequest(NetChannel channel, uint32_t frameNumber, PredictionLedger& ledger);
+#endif
+
+	// ----- RPC dispatch (called from ServerNetThread / ClientNetThread) -----
+
+	/// Called from any thread (e.g., NetThread) when a net flow event arrives.
+	/// The active FlowState's OnNetEvent hook is dispatched on the next Tick.
+	void PostNetEvent(uint8_t eventID);
+
+	/// Called from NetThread when a TravelNotify arrives.
+	void PostTravelNotify(const char* levelPath);
+
+	/// Called from NetThread when a PlayerBeginConfirm arrives.
+	void PostPlayerBeginConfirm(const PlayerBeginConfirmPayload& payload);
+
+	/// Payload from the last PlayerBeginConfirm.
+	PlayerBeginConfirmPayload GetPendingPlayerBeginConfirm() const { return PendingPlayerBeginConfirm; }
+
+	/// Path sent in the last TravelNotify.
+	const std::string& GetPendingTravelPath() const { return PendingTravelPath; }
+
 	// ----- Tick (called by Sentinel each frame) -----
 
 	void Tick(float dt);
-
 	// ----- Accessors -----
 
-	GameState* GetActiveState() const;
+	FlowState* GetActiveState() const;
 	World* GetWorld() const;
 	bool HasWorld() const;
 	const EngineConfig* GetConfig() const { return Config; }
+	/// Update the stored config pointer after the owning struct has been relocated
+	/// (e.g. after move into a vector). PIE only — do not call in other contexts.
+	void RewireConfig(const EngineConfig* newConfig) { Config = newConfig; }
 	ConstructRegistry* GetConstructRegistry() { return &ConstructReg; }
 	const std::string& GetActiveLevelPath() const { return ActiveLevelPath; }
+
+	/// Returns the content-relative level path (e.g. "Arena.tnxscene") — safe to send over the
+	/// network. Strips the ProjectDir+"/content/" prefix from ActiveLevelPath. Falls back to
+	/// the full path if the prefix doesn't match (e.g. path was set manually).
+	std::string GetActiveLevelLocalPath() const;
 
 private:
 	static constexpr uint32_t MaxStateStack       = 8;
@@ -152,7 +242,7 @@ private:
 	static constexpr uint32_t MaxRegisteredModes  = 16;
 
 	// State stack (index 0 = bottom, StateStackCount-1 = top/active)
-	std::unique_ptr<GameState> StateStack[MaxStateStack];
+	std::unique_ptr<FlowState> StateStack[MaxStateStack];
 	uint32_t StateStackCount = 0;
 
 	// Registered factories
@@ -177,10 +267,15 @@ private:
 	// Construct Registry — lives here so Session-lifetime Constructs survive World reset
 	ConstructRegistry ConstructReg;
 
+	// Souls — one per connected OwnerID (index = OwnerID). Server-side index 0 is unused.
+	std::unique_ptr<Soul> Souls[MaxOwnerIDs];
+
 	// Active subsystems
 	std::unique_ptr<World> ActiveWorld;
 	std::unique_ptr<GameMode> ActiveMode;
-	std::string ActiveLevelPath; // Path of currently loaded level (empty = none)
+	std::string ActiveLevelPath;   // Path of currently loaded level (empty = none)
+	std::string PendingTravelPath; // Level path from last TravelNotify (read by FlowState in OnNetEvent)
+	PlayerBeginConfirmPayload PendingPlayerBeginConfirm{}; // Payload from last PlayerBeginConfirm (read by FlowState in OnNetEvent)
 
 	// Engine back-pointer (for World creation parameters)
 	TrinyxEngine* Engine       = nullptr;
@@ -188,11 +283,15 @@ private:
 	int WindowWidth            = 1920;
 	int WindowHeight           = 1080;
 
+	// Lock-free net event queue — NetThread ORs bits in, Sentinel swaps to zero in Tick.
+	// Bit N = FlowEventID N is pending. Supports up to 32 distinct FlowEventIDs.
+	std::atomic<uint32_t> PendingNetEvents{0};
+
 	// Internal helpers
 	StateFactory FindStateFactory(const char* name) const;
 	ModeFactory FindModeFactory(const char* name) const;
 
 	/// Compare current vs next state requirements and create/destroy
 	/// World and NetSession as needed.
-	void EnforceRequirements(GameState* currentState, GameState* nextState);
+	void EnforceRequirements(FlowState* currentState, FlowState* nextState);
 };

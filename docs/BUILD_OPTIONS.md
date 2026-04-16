@@ -178,7 +178,85 @@ cmake -DTNX_ENABLE_EDITOR=OFF ..
 
 ---
 
-#### TNX_ENABLE_ROLLBACK (default: OFF)
+#### TNX_ENABLE_NETWORK (default: ON)
+
+Enable networking support (GameNetworkingSockets + Protobuf).
+
+```bash
+# Disable network (offline-only build, skips GNS/Protobuf entirely)
+cmake -DTNX_ENABLE_NETWORK=OFF ..
+```
+
+**When to disable:**
+
+- Offline-only builds to skip GNS/Protobuf compilation
+- Headless simulation without multiplayer
+
+---
+
+#### TNX_NET_MODEL (default: Client)
+
+Select the networking role baked into the build. Options: `PIE | Server | Client`.
+
+```bash
+# Play-In-Editor (loopback — server + client in same process, editor only)
+cmake -DTNX_NET_MODEL=PIE ..
+
+# Dedicated server build
+cmake -DTNX_NET_MODEL=Server ..
+
+# Client build (default)
+cmake -DTNX_NET_MODEL=Client ..
+```
+
+**Note:** When `TNX_ENABLE_EDITOR=ON`, `TNX_NET_MODEL` is automatically forced to `PIE`.
+
+---
+
+#### TNX_GPU_PICKING (default: OFF)
+
+Enable GPU-based entity picking (click-to-select in editor). Requires editor.
+
+```bash
+cmake -DTNX_GPU_PICKING=ON ..
+```
+
+**Note:** Automatically enabled when `TNX_ENABLE_EDITOR=ON`. Has no effect without the editor.
+
+---
+
+#### TNX_GPU_PICKING_FAST (default: OFF)
+
+Enable fast GPU picking mode — picks every frame at the mouse cursor position.
+Requires `TNX_GPU_PICKING`.
+
+```bash
+cmake -DTNX_GPU_PICKING_FAST=ON ..
+```
+
+**Note:** Automatically enabled when `TNX_ENABLE_EDITOR=ON`.
+
+---
+
+#### TNX_TESTING (default: OFF)
+
+Enable test harnesses (rollback determinism test, F5 trigger, etc.). Debug/profiling tool.
+
+```bash
+cmake -DTNX_TESTING=ON ..
+```
+
+**What it does:**
+
+- Enables determinism test harness (F5 trigger: backup state, resimulate, compare, restore)
+- Used for validating byte-perfect rollback determinism across ECS and Jolt physics
+
+**When to enable:**
+
+- Validating rollback determinism
+- Debugging simulation reproducibility
+
+---
 Enable N-frame rollback history for deterministic netcode.
 
 ```bash
@@ -251,7 +329,7 @@ cmake -DENABLE_TRACY=ON ..
 
 ---
 
-### TRACY_PROFILE_LEVEL (default: 1)
+### TRACY_PROFILE_LEVEL (default: 3)
 Controls Tracy profiling detail level.
 
 ```bash
@@ -541,21 +619,26 @@ Edit `.vscode/settings.json`:
 ## Quick Reference Card
 
 ### Engine Features
-| Option | Default | Use When |
-|--------|---------|----------|
-| `TNX_ENABLE_EDITOR` | OFF | Content authoring, scene editing |
-| `TNX_ENABLE_ROLLBACK` | OFF | Networked multiplayer with prediction |
-| `TNX_DETAILED_METRICS` | OFF | Debugging frame pacing |
+| Option                 | Default | Use When                                              |
+|------------------------|---------|-------------------------------------------------------|
+| `TNX_ENABLE_EDITOR`    | OFF     | Content authoring, scene editing                      |
+| `TNX_ENABLE_ROLLBACK`  | OFF     | Networked multiplayer with prediction                 |
+| `TNX_ENABLE_NETWORK`   | ON      | Disable for offline-only builds                       |
+| `TNX_NET_MODEL`        | Client  | PIE=editor loopback, Server=dedicated, Client=default |
+| `TNX_DETAILED_METRICS` | OFF     | Debugging frame pacing                                |
+| `TNX_TESTING`          | OFF     | Rollback determinism validation                       |
+| `TNX_GPU_PICKING`      | OFF     | Auto-ON with editor; GPU click-to-select              |
+| `TNX_GPU_PICKING_FAST` | OFF     | Auto-ON with editor; per-frame picking                |
 
 ### Performance & Profiling
-| Option | Default | Use When |
-|--------|---------|----------|
-| `ENABLE_TRACY` | ON | Always (except final release) |
-| `TRACY_PROFILE_LEVEL` | 1 | 1=dev, 2=analysis, 3=deep dive |
-| `GENERATE_ASSEMBLY` | OFF | Checking vectorization |
-| `VECTORIZATION_REPORTS` | OFF | Optimizing loops |
-| `ENABLE_AVX2` | ON | Always (unless old CPU) |
-| `TNX_ALIGN_64` | OFF | Extreme performance tuning |
+| Option                  | Default | Use When                       |
+|-------------------------|---------|--------------------------------|
+| `ENABLE_TRACY`          | ON      | Always (except final release)  |
+| `TRACY_PROFILE_LEVEL`   | 3       | 1=dev, 2=analysis, 3=deep dive |
+| `GENERATE_ASSEMBLY`     | OFF     | Checking vectorization         |
+| `VECTORIZATION_REPORTS` | OFF     | Optimizing loops               |
+| `ENABLE_AVX2`           | ON      | Always (unless old CPU)        |
+| `TNX_ALIGN_64`          | OFF     | Extreme performance tuning     |
 
 **Most common commands:**
 ```bash

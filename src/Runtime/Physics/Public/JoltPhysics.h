@@ -76,6 +76,7 @@ public:
 	JPH::BodyInterface& GetBodyInterface();
 	const JPH::BodyInterface& GetBodyInterfaceNoLock() const;
 	TrinyxJobs::JobCounter* GetJoltPhysCounter() { return &JoltPhysCounter; }
+	uint32_t GetBodyCount() const { return PhysSystem->GetNumBodies(); }
 
 #ifdef TNX_ENABLE_ROLLBACK
 	// --- State snapshot ring buffer ---

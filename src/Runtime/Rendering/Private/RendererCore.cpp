@@ -87,7 +87,7 @@ void RendererCore<Derived>::Initialize(Registry* registry,
 	DirtySnapshot  = new uint64_t[DirtyWordCount]();
 	for (auto& plane : DirtyPlanes) plane = new uint64_t[DirtyWordCount]();
 
-	LOG_INFO("[Renderer] Initialized");
+	LOG_ENG_INFO("[Renderer] Initialized");
 }
 
 template <typename Derived>
@@ -97,54 +97,54 @@ void RendererCore<Derived>::Start()
 
 	if (!CreateDepthImage())
 	{
-		LOG_ERROR("[Renderer] Failed to create depth image");
+		LOG_ENG_ERROR("[Renderer] Failed to create depth image");
 		return;
 	}
 
 	if (!LoadShaders())
 	{
-		LOG_ERROR("[Renderer] Shader load failed; thread exiting");
+		LOG_ENG_ERROR("[Renderer] Shader load failed; thread exiting");
 		return;
 	}
 
 	if (!CreateFrameSync())
 	{
-		LOG_ERROR("[Renderer] Frame sync creation failed; thread exiting");
+		LOG_ENG_ERROR("[Renderer] Frame sync creation failed; thread exiting");
 		return;
 	}
 
 	if (!CreatePipeline())
 	{
-		LOG_ERROR("[Renderer] Pipeline creation failed; thread exiting");
+		LOG_ENG_ERROR("[Renderer] Pipeline creation failed; thread exiting");
 		return;
 	}
 
 	if (!CreateComputePipelines())
 	{
-		LOG_ERROR("[Renderer] Compute pipeline creation failed; thread exiting");
+		LOG_ENG_ERROR("[Renderer] Compute pipeline creation failed; thread exiting");
 		return;
 	}
 
 	if (!CreateMeshBuffers())
 	{
-		LOG_ERROR("[Renderer] Mesh buffer upload failed; thread exiting");
+		LOG_ENG_ERROR("[Renderer] Mesh buffer upload failed; thread exiting");
 		return;
 	}
 
 #ifdef TNX_GPU_PICKING
 	if (!CreatePickImages())
 	{
-		LOG_ERROR("[Renderer] Pick image creation failed; thread exiting");
+		LOG_ENG_ERROR("[Renderer] Pick image creation failed; thread exiting");
 		return;
 	}
 	if (!LoadPickShaders())
 	{
-		LOG_ERROR("[Renderer] Pick shader load failed; thread exiting");
+		LOG_ENG_ERROR("[Renderer] Pick shader load failed; thread exiting");
 		return;
 	}
 	if (!CreatePickPipeline())
 	{
-		LOG_ERROR("[Renderer] Pick pipeline creation failed; thread exiting");
+		LOG_ENG_ERROR("[Renderer] Pick pipeline creation failed; thread exiting");
 		return;
 	}
 #endif
@@ -155,13 +155,13 @@ void RendererCore<Derived>::Start()
 	if (mode && mode->refresh_rate > 0.0f)
 	{
 		DisplayRefreshMs = 1000.0 / static_cast<double>(mode->refresh_rate);
-		LOG_INFO_F("[Renderer] Display refresh: %.1f Hz (%.2f ms scanout offset)",
-				   mode->refresh_rate, DisplayRefreshMs);
+		LOG_ENG_INFO_F("[Renderer] Display refresh: %.1f Hz (%.2f ms scanout offset)",
+					   mode->refresh_rate, DisplayRefreshMs);
 	}
 	else
 	{
 		DisplayRefreshMs = 16.667;
-		LOG_INFO("[Renderer] Could not query refresh rate, assuming 60 Hz");
+		LOG_ENG_INFO("[Renderer] Could not query refresh rate, assuming 60 Hz");
 	}
 #endif
 
@@ -170,14 +170,14 @@ void RendererCore<Derived>::Start()
 	bIsRunning.store(true, std::memory_order_release);
 	Thread = std::thread(&RendererCore::ThreadMain, this);
 	TrinyxThreading::PinThread(Thread);
-	LOG_INFO("[Renderer] Started");
+	LOG_ENG_INFO("[Renderer] Started");
 }
 
 template <typename Derived>
 void RendererCore<Derived>::Stop()
 {
 	bIsRunning.store(false, std::memory_order_release);
-	LOG_INFO("[Renderer] Stop requested");
+	LOG_ENG_INFO("[Renderer] Stop requested");
 }
 
 template <typename Derived>
@@ -186,7 +186,7 @@ void RendererCore<Derived>::Join()
 	if (Thread.joinable())
 	{
 		Thread.join();
-		LOG_INFO("[Renderer] Joined");
+		LOG_ENG_INFO("[Renderer] Joined");
 	}
 
 	if (VkCtx && VkCtx->GetDevice() != VK_NULL_HANDLE)
@@ -217,7 +217,7 @@ void RendererCore<Derived>::Join()
 template <typename Derived>
 void RendererCore<Derived>::ThreadMain()
 {
-	LOG_INFO("[Renderer] Thread running — GPU-driven compute pipeline");
+	LOG_ENG_INFO("[Renderer] Thread running — GPU-driven compute pipeline");
 
 	while (!TrinyxEngine::Get().GetJobsInitialized())
 	{
@@ -246,7 +246,7 @@ void RendererCore<Derived>::ThreadMain()
 		TrackFPS();
 	}
 
-	LOG_INFO("[Renderer] Thread exiting");
+	LOG_ENG_INFO("[Renderer] Thread exiting");
 	bIsRunning.store(false, std::memory_order_release);
 }
 
@@ -266,7 +266,7 @@ int RendererCore<Derived>::RenderFrame()
 		}
 		if (fenceResult != VK_SUCCESS)
 		{
-			LOG_ERROR_F("[Renderer] vkWaitForFences failed: %d", fenceResult);
+			LOG_ENG_ERROR_F("[Renderer] vkWaitForFences failed: %d", fenceResult);
 			return -1;
 		}
 	}
@@ -320,7 +320,7 @@ int RendererCore<Derived>::RenderFrame()
 		}
 		else if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR)
 		{
-			LOG_ERROR_F("[Renderer] vkAcquireNextImageKHR failed: %d", acquireResult);
+			LOG_ENG_ERROR_F("[Renderer] vkAcquireNextImageKHR failed: %d", acquireResult);
 			return -1;
 		}
 	}
@@ -386,7 +386,7 @@ int RendererCore<Derived>::RenderFrame()
 		}
 		else if (presentResult != VK_SUCCESS)
 		{
-			LOG_ERROR_F("[Renderer] vkQueuePresentKHR failed: %d", presentResult);
+			LOG_ENG_ERROR_F("[Renderer] vkQueuePresentKHR failed: %d", presentResult);
 			return -1;
 		}
 	}
@@ -401,7 +401,7 @@ int RendererCore<Derived>::RenderFrame()
 		LatencyAccumMs += totalMs;
 		++LatencySamples;
 #if TNX_DEV_METRICS_DETAILED
-		LOG_DEBUG_F("[Latency] Pipeline: %.2fms | Scanout: %.2fms | Total: %.2fms",
+	LOG_ENG_DEBUG_F("[Latency] Pipeline: %.2fms | Scanout: %.2fms | Total: %.2fms",
 					pipelineMs, DisplayRefreshMs, totalMs);
 #endif
 	}
@@ -446,7 +446,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 	static uint32_t pickDebugFrameCounter = 0;
 	if (++pickDebugFrameCounter >= 60)
 	{
-		//LOG_INFO_F("[Picking] Mouse: (%.1f, %.1f) logical, (%d, %d) physical, DPI scale: %.2f, extent: %ux%u",
+		//LOG_ENG_INFO_F("[Picking] Mouse: (%.1f, %.1f) logical, (%d, %d) physical, DPI scale: %.2f, extent: %ux%u",
 		//		   mx, my, pickX, pickY, dpiScale, ext.width, ext.height);
 		pickDebugFrameCounter = 0;
 	}
@@ -917,7 +917,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 	VkResult result = vkAllocateCommandBuffers(Device, &allocInfo, cmds);
 	if (result != VK_SUCCESS)
 	{
-		LOG_ERROR_F("[Renderer] vkAllocateCommandBuffers failed: %d", result);
+		LOG_ENG_ERROR_F("[Renderer] vkAllocateCommandBuffers failed: %d", result);
 		return false;
 	}
 
@@ -940,7 +940,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 
 		if (!Frames[i].GpuData.IsValid())
 		{
-			LOG_ERROR_F("[Renderer] GpuData allocation failed for frame slot %d", i);
+			LOG_ENG_ERROR_F("[Renderer] GpuData allocation failed for frame slot %d", i);
 			return false;
 		}
 
@@ -950,7 +950,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 													 GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].ScanBuffer.IsValid())
 		{
-			LOG_ERROR_F("[Renderer] ScanBuffer alloc failed (slot %d)", i);
+			LOG_ENG_ERROR_F("[Renderer] ScanBuffer alloc failed (slot %d)", i);
 			return false;
 		}
 
@@ -959,7 +959,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 															   GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].CompactCounterBuffer.IsValid())
 		{
-			LOG_ERROR_F("[Renderer] CompactCounterBuffer alloc failed (slot %d)", i);
+			LOG_ENG_ERROR_F("[Renderer] CompactCounterBuffer alloc failed (slot %d)", i);
 			return false;
 		}
 
@@ -970,7 +970,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 														 GpuMemoryDomain::PersistentMapped, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].DrawArgsBuffer.IsValid())
 		{
-			LOG_ERROR_F("[Renderer] DrawArgsBuffer alloc failed (slot %d)", i);
+			LOG_ENG_ERROR_F("[Renderer] DrawArgsBuffer alloc failed (slot %d)", i);
 			return false;
 		}
 		std::memset(Frames[i].DrawArgsBuffer.MappedPtr, 0, DrawArgsSize);
@@ -986,7 +986,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 														  GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].InstancesBuffer.IsValid())
 		{
-			LOG_ERROR_F("[Renderer] InstancesBuffer alloc failed (slot %d)", i);
+			LOG_ENG_ERROR_F("[Renderer] InstancesBuffer alloc failed (slot %d)", i);
 			return false;
 		}
 
@@ -995,7 +995,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 																  GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].UnsortedInstancesBuffer.IsValid())
 		{
-			LOG_ERROR_F("[Renderer] UnsortedInstancesBuffer alloc failed (slot %d)", i);
+			LOG_ENG_ERROR_F("[Renderer] UnsortedInstancesBuffer alloc failed (slot %d)", i);
 			return false;
 		}
 
@@ -1006,7 +1006,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 															  GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].MeshHistogramBuffer.IsValid())
 		{
-			LOG_ERROR_F("[Renderer] MeshHistogramBuffer alloc failed (slot %d)", i);
+			LOG_ENG_ERROR_F("[Renderer] MeshHistogramBuffer alloc failed (slot %d)", i);
 			return false;
 		}
 
@@ -1015,7 +1015,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 															 GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].MeshWriteIdxBuffer.IsValid())
 		{
-			LOG_ERROR_F("[Renderer] MeshWriteIdxBuffer alloc failed (slot %d)", i);
+			LOG_ENG_ERROR_F("[Renderer] MeshWriteIdxBuffer alloc failed (slot %d)", i);
 			return false;
 		}
 	}
@@ -1032,7 +1032,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 
 		if (!FieldSlabs[i].IsValid())
 		{
-			LOG_ERROR_F("[Renderer] FieldSlab allocation failed for slot %d", i);
+			LOG_ENG_ERROR_F("[Renderer] FieldSlab allocation failed for slot %d", i);
 			return false;
 		}
 	}
@@ -1041,7 +1041,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 	RenderedSems.reserve(imageCount);
 	for (uint32_t i = 0; i < imageCount; ++i) RenderedSems.push_back(raiiDev.createSemaphore(semCI));
 
-	LOG_INFO("[Renderer] Frame sync objects created");
+	LOG_ENG_INFO("[Renderer] Frame sync objects created");
 	return true;
 }
 
@@ -1057,7 +1057,7 @@ bool RendererCore<Derived>::LoadShaders()
 
 	if (vert.empty() || frag.empty())
 	{
-		LOG_ERROR_F("[Renderer] Failed to read SPIR-V from %s", TNX_SHADER_DIR);
+		LOG_ENG_ERROR_F("[Renderer] Failed to read SPIR-V from %s", TNX_SHADER_DIR);
 		return false;
 	}
 
@@ -1078,11 +1078,11 @@ bool RendererCore<Derived>::LoadShaders()
 
 	if (VertShader == VK_NULL_HANDLE || FragShader == VK_NULL_HANDLE)
 	{
-		LOG_ERROR("[Renderer] Failed to create shader modules");
+		LOG_ENG_ERROR("[Renderer] Failed to create shader modules");
 		return false;
 	}
 
-	LOG_INFO("[Renderer] Shaders loaded (vert + frag)");
+	LOG_ENG_INFO("[Renderer] Shaders loaded (vert + frag)");
 	return true;
 }
 
@@ -1148,7 +1148,7 @@ bool RendererCore<Derived>::CreateComputePipelines()
 		auto code = ReadSPIRV(paths[i]);
 		if (code.empty())
 		{
-			LOG_ERROR_F("[Renderer] Failed to read compute SPIR-V: %s", paths[i]);
+			LOG_ENG_ERROR_F("[Renderer] Failed to read compute SPIR-V: %s", paths[i]);
 			return false;
 		}
 
@@ -1160,7 +1160,7 @@ bool RendererCore<Derived>::CreateComputePipelines()
 		VkShaderModule mod = VK_NULL_HANDLE;
 		if (vkCreateShaderModule(Device, &modCI, nullptr, &mod) != VK_SUCCESS)
 		{
-			LOG_ERROR_F("[Renderer] vkCreateShaderModule failed for %s", paths[i]);
+			LOG_ENG_ERROR_F("[Renderer] vkCreateShaderModule failed for %s", paths[i]);
 			return false;
 		}
 
@@ -1180,12 +1180,12 @@ bool RendererCore<Derived>::CreateComputePipelines()
 
 		if (result != VK_SUCCESS)
 		{
-			LOG_ERROR_F("[Renderer] vkCreateComputePipelines failed for %s: %d", paths[i], result);
+			LOG_ENG_ERROR_F("[Renderer] vkCreateComputePipelines failed for %s: %d", paths[i], result);
 			return false;
 		}
 	}
 
-	LOG_INFO("[Renderer] Compute pipelines created (predicate + prefix_sum + scatter + build_draws + sort_instances)");
+	LOG_ENG_INFO("[Renderer] Compute pipelines created (predicate + prefix_sum + scatter + build_draws + sort_instances)");
 	return true;
 }
 
@@ -1194,26 +1194,26 @@ bool RendererCore<Derived>::CreateMeshBuffers()
 {
 	if (!Meshes.Initialize(VkMem))
 	{
-		LOG_ERROR("[Renderer] MeshManager initialization failed");
+		LOG_ENG_ERROR("[Renderer] MeshManager initialization failed");
 		return false;
 	}
 
 	uint32_t cubeSlot = Meshes.RegisterBuiltinCube();
 	if (cubeSlot == UINT32_MAX)
 	{
-		LOG_ERROR("[Renderer] Failed to register built-in cube mesh");
+		LOG_ENG_ERROR("[Renderer] Failed to register built-in cube mesh");
 		return false;
 	}
 
 	uint32_t capsuleSlot = Meshes.RegisterBuiltinCapsule(0.4f, 0.9f, 16);
 	if (capsuleSlot == UINT32_MAX)
 	{
-		LOG_ERROR("[Renderer] Failed to register built-in capsule mesh");
+		LOG_ENG_ERROR("[Renderer] Failed to register built-in capsule mesh");
 		return false;
 	}
 
-	LOG_INFO_F("[Renderer] MeshManager ready — cube at slot %u, capsule at slot %u",
-			   cubeSlot, capsuleSlot);
+	LOG_ENG_INFO_F("[Renderer] MeshManager ready — cube at slot %u, capsule at slot %u",
+				   cubeSlot, capsuleSlot);
 	return true;
 }
 
@@ -1294,14 +1294,14 @@ void RendererCore<Derived>::WriteToFrameSlab()
 
 	if (!volatileCache->TryLockFrameForRead(LastVolatileFrame))
 	{
-		LOG_ERROR("[Renderer] Failed to lock volatile frame for read");
+		LOG_ENG_ERROR("[Renderer] Failed to lock volatile frame for read");
 		return;
 	}
 #ifdef TNX_ENABLE_ROLLBACK
 	if (!temporalCache->TryLockFrameForRead(LastTemporalFrame))
 	{
 		volatileCache->UnlockFrameRead(LastVolatileFrame);
-		LOG_ERROR("[Renderer] Failed to lock temporal frame for read");
+		LOG_ENG_ERROR("[Renderer] Failed to lock temporal frame for read");
 		return;
 	}
 #endif
@@ -1313,17 +1313,17 @@ void RendererCore<Derived>::WriteToFrameSlab()
 	TemporalFrameHeader* temporalHdr = temporalCache->GetFrameHeader(LastTemporalFrame);
 	TemporalFrameHeader* volatileHdr = volatileCache->GetFrameHeader(LastVolatileFrame);
 
-	const ComponentTypeID transformSlot = CTransform<>::StaticTemporalIndex();
-	const ComponentTypeID scaleSlot     = CScale<>::StaticTemporalIndex();
-	const ComponentTypeID colorSlot     = CColor<>::StaticTemporalIndex();
-	const ComponentTypeID flagsSlot     = CacheSlotMeta<>::StaticTemporalIndex();
-	const ComponentTypeID meshRefSlot   = CMeshRef<>::StaticTemporalIndex();
+	const CacheSlotID transformSlot = CTransform<>::StaticTemporalIndex();
+	const CacheSlotID scaleSlot     = CScale<>::StaticTemporalIndex();
+	const CacheSlotID colorSlot     = CColor<>::StaticTemporalIndex();
+	const CacheSlotID flagsSlot     = CacheSlotMeta<>::StaticTemporalIndex();
+	const CacheSlotID meshRefSlot   = CMeshRef<>::StaticTemporalIndex();
 
 	struct FieldDescription
 	{
 		ComponentCacheBase* cache;
 		TemporalFrameHeader* hdr;
-		ComponentTypeID slot;
+		CacheSlotID slot;
 		size_t fi;
 		uint32_t sem;
 	};
@@ -1472,7 +1472,7 @@ bool RendererCore<Derived>::CreatePipeline()
 	VkPipelineLayout rawLayout = VK_NULL_HANDLE;
 	if (vkCreatePipelineLayout(Device, &layoutCI, nullptr, &rawLayout) != VK_SUCCESS)
 	{
-		LOG_ERROR("[Renderer] vkCreatePipelineLayout failed");
+		LOG_ENG_ERROR("[Renderer] vkCreatePipelineLayout failed");
 		return false;
 	}
 	PipelineLayout = vk::raii::PipelineLayout(VkCtx->GetRaiiDevice(), rawLayout);
@@ -1556,12 +1556,12 @@ bool RendererCore<Derived>::CreatePipeline()
 	VkPipeline rawPipeline = VK_NULL_HANDLE;
 	if (vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &rawPipeline) != VK_SUCCESS)
 	{
-		LOG_ERROR("[Renderer] vkCreateGraphicsPipelines failed");
+		LOG_ENG_ERROR("[Renderer] vkCreateGraphicsPipelines failed");
 		return false;
 	}
 	Pipeline = vk::raii::Pipeline(VkCtx->GetRaiiDevice(), rawPipeline);
 
-	LOG_INFO("[Renderer] Graphics pipeline created");
+	LOG_ENG_INFO("[Renderer] Graphics pipeline created");
 	return true;
 }
 
@@ -1627,15 +1627,15 @@ void RendererCore<Derived>::TrackFPS()
 	{
 #if TNX_DEV_METRICS
 		double avgLatencyMs = (LatencySamples > 0) ? (LatencyAccumMs / LatencySamples) : 0.0;
-		LOG_DEBUG_F("Render FPS: %d | Frame: %.2fms | Input→Photon: %.2fms",
-					static_cast<int>(RenderFrameCount / RenderFpsTimer),
+		LOG_ENG_DEBUG_F("Render FPS: %d | Frame: %.2fms | Input→Photon: %.2fms",
+						static_cast<int>(RenderFrameCount / RenderFpsTimer),
 					(RenderFpsTimer / RenderFrameCount) * 1000.0,
 					avgLatencyMs);
 		LatencyAccumMs = 0.0;
 		LatencySamples = 0;
 #else
-		LOG_DEBUG_F("Render FPS: %d | Frame: %.2fms",
-					static_cast<int>(RenderFrameCount / RenderFpsTimer),
+		LOG_ENG_DEBUG_F("Render FPS: %d | Frame: %.2fms",
+						static_cast<int>(RenderFrameCount / RenderFpsTimer),
 					(RenderFpsTimer / RenderFrameCount) * 1000.0);
 #endif
 		RenderFrameCount = 0;
@@ -1684,7 +1684,7 @@ bool RendererCore<Derived>::CreatePickImages()
 			VK_IMAGE_ASPECT_COLOR_BIT);
 		if (!Frames[i].PickAttachment.IsValid())
 		{
-			LOG_ERROR_F("[Renderer] PickAttachment alloc failed (slot %d)", i);
+			LOG_ENG_ERROR_F("[Renderer] PickAttachment alloc failed (slot %d)", i);
 			return false;
 		}
 
@@ -1694,7 +1694,7 @@ bool RendererCore<Derived>::CreatePickImages()
 			GpuMemoryDomain::Staging);
 		if (!Frames[i].PickReadbackBuffer.IsValid())
 		{
-			LOG_ERROR_F("[Renderer] PickReadbackBuffer alloc failed (slot %d)", i);
+			LOG_ENG_ERROR_F("[Renderer] PickReadbackBuffer alloc failed (slot %d)", i);
 			return false;
 		}
 	}
@@ -1711,7 +1711,7 @@ bool RendererCore<Derived>::LoadPickShaders()
 
 	if (vert.empty() || frag.empty() || scatter.empty() || sortInst.empty())
 	{
-		LOG_ERROR("[Renderer] Failed to read pick SPIR-V shaders");
+		LOG_ENG_ERROR("[Renderer] Failed to read pick SPIR-V shaders");
 		return false;
 	}
 
@@ -1731,7 +1731,7 @@ bool RendererCore<Derived>::LoadPickShaders()
 
 	if (PickVertShader == VK_NULL_HANDLE || PickFragShader == VK_NULL_HANDLE)
 	{
-		LOG_ERROR("[Renderer] Failed to create pick shader modules");
+		LOG_ENG_ERROR("[Renderer] Failed to create pick shader modules");
 		return false;
 	}
 
@@ -1739,7 +1739,7 @@ bool RendererCore<Derived>::LoadPickShaders()
 	VkShaderModule scatterMod = createModule(scatter);
 	if (scatterMod == VK_NULL_HANDLE)
 	{
-		LOG_ERROR("[Renderer] Failed to create scatter_pick shader module");
+		LOG_ENG_ERROR("[Renderer] Failed to create scatter_pick shader module");
 		return false;
 	}
 
@@ -1759,7 +1759,7 @@ bool RendererCore<Derived>::LoadPickShaders()
 
 	if (result != VK_SUCCESS)
 	{
-		LOG_ERROR_F("[Renderer] ScatterPickPipeline creation failed: %d", result);
+		LOG_ENG_ERROR_F("[Renderer] ScatterPickPipeline creation failed: %d", result);
 		return false;
 	}
 
@@ -1767,7 +1767,7 @@ bool RendererCore<Derived>::LoadPickShaders()
 	VkShaderModule sortMod = createModule(sortInst);
 	if (sortMod == VK_NULL_HANDLE)
 	{
-		LOG_ERROR("[Renderer] Failed to create sort_instances_pick shader module");
+		LOG_ENG_ERROR("[Renderer] Failed to create sort_instances_pick shader module");
 		return false;
 	}
 
@@ -1778,11 +1778,11 @@ bool RendererCore<Derived>::LoadPickShaders()
 
 	if (result != VK_SUCCESS)
 	{
-		LOG_ERROR_F("[Renderer] SortPickPipeline creation failed: %d", result);
+		LOG_ENG_ERROR_F("[Renderer] SortPickPipeline creation failed: %d", result);
 		return false;
 	}
 
-	LOG_INFO("[Renderer] Pick shaders loaded (vert + frag + scatter_pick + sort_pick)");
+	LOG_ENG_INFO("[Renderer] Pick shaders loaded (vert + frag + scatter_pick + sort_pick)");
 	return true;
 }
 
@@ -1874,12 +1874,12 @@ bool RendererCore<Derived>::CreatePickPipeline()
 	VkResult result        = vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &rawPipeline);
 	if (result != VK_SUCCESS)
 	{
-		LOG_ERROR_F("[Renderer] Pick pipeline creation failed: %d", result);
+		LOG_ENG_ERROR_F("[Renderer] Pick pipeline creation failed: %d", result);
 		return false;
 	}
 
 	PickPipeline = vk::raii::Pipeline(VkCtx->GetRaiiDevice(), rawPipeline);
-	LOG_INFO("[Renderer] Pick graphics pipeline created");
+	LOG_ENG_INFO("[Renderer] Pick graphics pipeline created");
 	return true;
 }
 

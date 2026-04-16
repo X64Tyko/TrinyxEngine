@@ -12,9 +12,11 @@ struct Chunk;
 
 DEFINE_FIXED_MULTICALLBACK(EntityCacheSlotChange, 64, uint32_t, uint32_t)
 
-// Handle ID, maps the owner and an index into a Handle array to easily look up entities.
-// Handles are held in OOP land by Constructs to reference various entities.
-// A handle is functionally identical to a NetID, but it's worth making a distinction when referencing them in code so they aren't confused. A NetworkIndex doesn't necessarily match a Handle Index
+// Local handle — held by OOP code (Constructs, Views) to reference ECS entities.
+// Always local; never crosses the network. Self-validating: embeds the entity's
+// generation at creation time so stale handles are caught without a separate Ref type.
+//
+// Ownership:   not stored here — fetch from EntityRecord.GetOwnerID() if needed.
 union EntityHandle
 {
 protected:
@@ -22,10 +24,10 @@ protected:
 
 	struct
 	{
-		uint64_t NetOwnerID  : NetOwnerID_Bits;  // With this in the NetID we have an entity index and an owner, this means that on the server we have a single array of net entities, each owners local entities live contiguously. 0 is global
-		uint64_t HandleIndex : UniqueIndex_Bits; // Net ID size matches the EntityHandle Index. This could probably be smaller to allow packing some other data specifically for networking as 16M networked entities is a lot.
-		uint64_t ClassType   : TypeKey_Bits;     // Class type so that creation requests can come directly from a handle and allow handle reuse and mutation by the registry.
-		uint64_t reserved    : 8;                // Likely good for flags, like if the existing entity should be destroyed when this handle is recycled or validation
+		uint64_t HandleIndex : UniqueIndex_Bits; // index into LocalToRecord
+		uint64_t ClassType   : TypeKey_Bits;     // entity class — enables handle-driven creation/mutation
+		uint64_t Generation  : Generation_Bits;  // generation at creation — compare against EntityInfo for ABA detection
+		uint64_t reserved    : 8;
 	};
 
 public:
@@ -35,9 +37,9 @@ public:
 	}
 
 	// Read-only public API
-	uint32_t GetOwnerID() const { return NetOwnerID; }
 	uint32_t GetHandleIndex() const { return HandleIndex; }
 	uint32_t GetTypeID() const { return ClassType; }
+	uint16_t GetGeneration() const { return Generation; }
 	bool IsValid() const { return Value != 0; }
 
 private:
@@ -166,10 +168,30 @@ public:
 	}
 
 	// Public validation - read-only check
-	template <typename T>
-	bool IsHandleValid(T handle) const requires (std::same_as<std::remove_cvref_t<T>, EntityHandle> || std::same_as<std::remove_cvref_t<T>, EntityNetHandle> || std::same_as<std::remove_cvref_t<T>, EntityCacheHandle>)
+	bool IsHandleValid(const EntityHandle& handle) const
+	{
+		const GlobalEntityHandle& gHandle = LookupGlobalHandle(handle);
+		return handle.GetGeneration() == Records[gHandle.GetIndex()].EntityInfo.GetGeneration();
+	}
+
+	bool IsHandleValid(const EntityNetHandle& handle) const
 	{
 		const GlobalEntityHandle& gHandle = LookupGlobalHandle(handle);
 		return gHandle.GetGeneration() == Records[gHandle.GetIndex()].EntityInfo.GetGeneration();
+	}
+
+	bool IsHandleValid(EntityCacheHandle handle) const
+	{
+		const GlobalEntityHandle& gHandle = LookupGlobalHandle(handle);
+		return gHandle.GetGeneration() == Records[gHandle.GetIndex()].EntityInfo.GetGeneration();
+	}
+
+	// EntityRef validation — skips GlobalEntityHandle generation, uses the generation
+	// embedded in the ref directly. One fewer map lookup vs IsHandleValid(EntityNetHandle).
+	// Use this for all client→server RPC and net-boundary handle checks.
+	bool IsHandleValid(const EntityRef& ref) const
+	{
+		const GlobalEntityHandle& gHandle = LookupGlobalHandle(ref.Handle);
+		return ref.Generation == Records[gHandle.GetIndex()].EntityInfo.GetGeneration();
 	}
 };

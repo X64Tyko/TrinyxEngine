@@ -1,6 +1,7 @@
 #include "EntityBuilder.h"
 
 #include "Archetype.h"
+#include "AssetRegistry.h"
 #include "FieldMeta.h"
 #include "Logger.h"
 #include "Registry.h"
@@ -10,6 +11,7 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <unordered_set>
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -87,7 +89,7 @@ static void WriteFieldValue(void* dst, size_t fieldSize, FieldValueType valueTyp
 						std::memcpy(dst, &v, 1);
 						break;
 					}
-				default: LOG_WARN_F("[EntityBuilder] Unsupported field size %zu, skipping", fieldSize);
+				default: LOG_ENG_WARN_F("[EntityBuilder] Unsupported field size %zu, skipping", fieldSize);
 					break;
 			}
 			break;
@@ -138,24 +140,29 @@ static const FieldLookup* FindField(
 // EntityBuilder
 // ---------------------------------------------------------------------------
 
-EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJson)
+EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJson, bool bBackground)
 {
 	// Read entity type name
 	const JsonValue* typeVal = entityJson.Find("type");
 	if (!typeVal || !typeVal->IsString())
 	{
-		LOG_ERROR("[EntityBuilder] Entity missing 'type' field");
+		LOG_ENG_ERROR("[EntityBuilder] Entity missing 'type' field");
 		return EntityHandle{};
 	}
 
 	const std::string& typeName = typeVal->AsString();
+
+	// Compute spawn flags once. bBackground = Alive-only (won't tick/render until
+	// an explicit Alive→Active sweep). Active bit is masked in only when not background.
+	const uint32_t activeMask = bBackground ? 0u : static_cast<uint32_t>(TemporalFlagBits::Active);
+	const int32_t spawnFlags  = static_cast<int32_t>(activeMask | static_cast<uint32_t>(TemporalFlagBits::Alive));
 
 	// Resolve type name → ClassID
 	auto& MR        = ReflectionRegistry::Get();
 	ClassID classID = MR.GetEntityByName(typeName);
 	if (classID == 0)
 	{
-		LOG_ERROR_F("[EntityBuilder] Unknown entity type '%s'", typeName.c_str());
+		LOG_ENG_ERROR_F("[EntityBuilder] Unknown entity type '%s'", typeName.c_str());
 		return EntityHandle{};
 	}
 
@@ -163,28 +170,19 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 	EntityHandle id = reg->CreateByClassID(classID);
 	if (!id.IsValid()) return EntityHandle{};
 
-	// Find the archetype for this entity type
-	const auto& archetypes = reg->GetArchetypes();
-	Archetype* arch        = nullptr;
-	for (const auto& [key, a] : archetypes)
-	{
-		if (key.ID == classID)
-		{
-			arch = a;
-			break;
-		}
-	}
+	// Look up the actual slot from the record — don't guess. PushEntities may have
+	// reused a tombstoned slot from an earlier chunk, so "last chunk, tail" is wrong.
+	EntityRecord record = reg->GetRecord(id);
+	if (!record.IsValid()) return id;
 
-	if (!arch || arch->Chunks.empty()) return id;
+	Archetype* arch     = record.Arch;
+	Chunk* chunk        = record.TargetChunk;
+	uint32_t localIndex = record.LocalIndex;
+
+	if (!arch || !chunk) return id;
 
 	// Build field name → array index map for this archetype
 	auto fieldMap = BuildFieldMap(arch);
-
-	// Find which chunk this entity landed in (last chunk, since we just pushed)
-	size_t chunkIdx           = arch->Chunks.size() - 1;
-	Chunk* chunk              = arch->Chunks[chunkIdx];
-	uint32_t chunkEntityCount = arch->GetAllocatedChunkCount(chunkIdx);
-	uint32_t localIndex       = chunkEntityCount - 1; // Just-pushed entity is at the tail
 
 	// Build field array table for the write frame
 	void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
@@ -217,8 +215,8 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 				const FieldLookup* field = FindField(fieldMap, fieldName);
 				if (!field)
 				{
-					LOG_WARN_F("[EntityBuilder] Unknown field '%s.%s' on entity type '%s'",
-							   compName.c_str(), fieldName.c_str(), typeName.c_str());
+					LOG_ENG_WARN_F("[EntityBuilder] Unknown field '%s.%s' on entity type '%s'",
+								   compName.c_str(), fieldName.c_str(), typeName.c_str());
 					continue;
 				}
 
@@ -228,14 +226,13 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 			}
 		}
 
-		// Set the Active flag AFTER JSON fields — existing scenes stored Flags
-		// as float (-0.0 = 0x80000000) which breaks under type-aware deserialization.
-		// A spawned entity is always active; the flag is authoritative here.
+		// Set flags AFTER JSON fields — existing scenes stored Flags as float
+		// (-0.0 = 0x80000000) which breaks under type-aware deserialization.
 		const FieldLookup* flagsField = FindField(fieldMap, "Flags");
 		if (flagsField)
 		{
 			auto* flagsArr       = static_cast<int32_t*>(fieldArrayTable[flagsField->ArrayIndex]);
-			flagsArr[localIndex] = static_cast<int32_t>(TemporalFlagBits::Active);
+			flagsArr[localIndex] = spawnFlags;
 		}
 	};
 
@@ -248,62 +245,159 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 	return id;
 }
 
-size_t EntityBuilder::SpawnScene(Registry* reg, const JsonValue& sceneJson)
+// ---------------------------------------------------------------------------
+// Prefab loading helpers
+// ---------------------------------------------------------------------------
+
+// Thread-local cycle guard — stores absolute paths of prefabs currently being loaded.
+static thread_local std::unordered_set<std::string> ActivePrefabLoads;
+
+// Load and parse an asset JSON file from an absolute path.
+static JsonValue LoadAssetJSON(const std::string& path)
+{
+	std::ifstream file(path);
+	if (!file.is_open())
+	{
+		LOG_ENG_ERROR_F("[EntityBuilder] Failed to open asset '%s'", path.c_str());
+		return JsonValue{};
+	}
+	std::ostringstream ss;
+	ss << file.rdbuf();
+	return JsonParse(ss.str());
+}
+
+// Deep-merge override component fields on top of an entity JSON in place.
+// overrides is a "components" object: { "CTransform": { "PosX": 5.0 }, ... }
+static void MergeComponentOverrides(JsonValue& entityJson, const JsonValue* overrides)
+{
+	if (!overrides || !overrides->IsObject()) return;
+	JsonValue* baseComponents = entityJson.Find("components");
+	if (!baseComponents || !baseComponents->IsObject()) return;
+
+	for (const auto& [compName, compOverride] : overrides->AsObject())
+	{
+		if (!compOverride.IsObject()) continue;
+
+		JsonValue* baseComp = baseComponents->Find(compName);
+		if (!baseComp)
+		{
+			(*baseComponents)[compName] = JsonValue::Object();
+			baseComp                    = baseComponents->Find(compName);
+		}
+
+		for (const auto& [fieldName, fieldVal] : compOverride.AsObject())
+			(*baseComp)[fieldName] = fieldVal;
+	}
+}
+
+// Resolve an AssetID stored as a JSON number to an absolute path via the AssetRegistry.
+static std::string ResolveAssetIDFromJSON(const JsonValue& val)
+{
+	if (!val.IsNumber()) return {};
+	AssetID id;
+	id.Raw = static_cast<int64_t>(val.AsNumber());
+	return AssetRegistry::Get().ResolvePath(id);
+}
+
+// Forward declaration for mutual recursion.
+static size_t SpawnSceneInternal(Registry* reg, const JsonValue& sceneJson, bool bBackground);
+
+// Spawn all entities from a prefab or scene JSON with full recursive prefab support.
+// Returns number of entities spawned. Construct prefabs are skipped (count = 0).
+static size_t SpawnFromAssetJSON(Registry* reg, const std::string& path,
+								 const JsonValue* componentOverrides, bool bBackground)
+{
+	if (ActivePrefabLoads.count(path))
+	{
+		LOG_ENG_ERROR_F("[EntityBuilder] Prefab cycle detected at '%s'", path.c_str());
+		return 0;
+	}
+
+	ActivePrefabLoads.insert(path);
+
+	JsonValue assetJson = LoadAssetJSON(path);
+	size_t count        = 0;
+
+	if (!assetJson.IsNull())
+	{
+		// Skip construct prefabs — they are spawned by the construct factory, not EntityBuilder.
+		const JsonValue* prefabType = assetJson.Find("prefabType");
+		if (prefabType && prefabType->IsString() && prefabType->AsString() == "Construct")
+		{
+			// no-op
+		}
+		else if (assetJson.Find("entities"))
+		{
+			// Scene / entity-group prefab — recurse.
+			count = SpawnSceneInternal(reg, assetJson, bBackground);
+		}
+		else if (assetJson.Find("type"))
+		{
+			// Single entity prefab — apply overrides then spawn.
+			MergeComponentOverrides(assetJson, componentOverrides);
+			EntityHandle id = EntityBuilder::SpawnEntity(reg, assetJson, bBackground);
+			if (id.IsValid()) ++count;
+		}
+		else
+		{
+			LOG_ENG_WARN_F("[EntityBuilder] Unrecognized asset format: '%s'", path.c_str());
+		}
+	}
+
+	ActivePrefabLoads.erase(path);
+	return count;
+}
+
+static size_t SpawnSceneInternal(Registry* reg, const JsonValue& sceneJson, bool bBackground)
 {
 	const JsonValue* entities = sceneJson.Find("entities");
 	if (!entities || !entities->IsArray())
 	{
-		LOG_ERROR("[EntityBuilder] Scene missing 'entities' array");
+		LOG_ENG_ERROR("[EntityBuilder] Scene/group missing 'entities' array");
 		return 0;
 	}
 
 	size_t count = 0;
-	for (const auto& entityJson : entities->AsArray())
+	for (const auto& entry : entities->AsArray())
 	{
-		EntityHandle id = SpawnEntity(reg, entityJson);
-		if (id.IsValid()) ++count;
+		// Prefab reference: { "prefab": <assetID>, "overrides": { "CTransform": { ... } } }
+		const JsonValue* prefabRef = entry.Find("prefab");
+		if (prefabRef && prefabRef->IsNumber())
+		{
+			std::string path = ResolveAssetIDFromJSON(*prefabRef);
+			if (path.empty())
+			{
+				LOG_ENG_WARN_F("[EntityBuilder] Prefab AssetID %lld not found in registry",
+							   static_cast<long long>(static_cast<int64_t>(prefabRef->AsNumber())));
+				continue;
+			}
+			count += SpawnFromAssetJSON(reg, path, entry.Find("overrides"), bBackground);
+		}
+		else
+		{
+			// Inline entity definition.
+			EntityHandle id = EntityBuilder::SpawnEntity(reg, entry, bBackground);
+			if (id.IsValid()) ++count;
+		}
 	}
+	return count;
+}
+
+size_t EntityBuilder::SpawnScene(Registry* reg, const JsonValue& sceneJson, bool bBackground)
+{
+	size_t count = SpawnSceneInternal(reg, sceneJson, bBackground);
 
 	const JsonValue* nameVal = sceneJson.Find("name");
 	const char* sceneName    = (nameVal && nameVal->IsString()) ? nameVal->AsString().c_str() : "unnamed";
-	LOG_INFO_F("[EntityBuilder] Spawned %zu entities from scene '%s'", count, sceneName);
+	LOG_ENG_INFO_F("[EntityBuilder] Spawned %zu entities from scene '%s'", count, sceneName);
 
 	return count;
 }
 
-size_t EntityBuilder::SpawnFromFile(Registry* reg, const char* filePath)
+size_t EntityBuilder::SpawnFromFile(Registry* reg, const char* filePath, bool bBackground)
 {
-	std::ifstream file(filePath);
-	if (!file.is_open())
-	{
-		LOG_ERROR_F("[EntityBuilder] Failed to open file '%s'", filePath);
-		return 0;
-	}
-
-	std::ostringstream ss;
-	ss << file.rdbuf();
-	std::string content = ss.str();
-
-	JsonValue root = JsonParse(content);
-	if (root.IsNull())
-	{
-		LOG_ERROR_F("[EntityBuilder] Failed to parse JSON from '%s'", filePath);
-		return 0;
-	}
-
-	// Detect format: prefab (has "type" at root) vs scene (has "entities" array)
-	if (root.Find("entities"))
-	{
-		return SpawnScene(reg, root);
-	}
-	else if (root.Find("type"))
-	{
-		EntityHandle id = SpawnEntity(reg, root);
-		return id.IsValid() ? 1 : 0;
-	}
-
-	LOG_ERROR_F("[EntityBuilder] Unrecognized JSON format in '%s'", filePath);
-	return 0;
+	// Use the full recursive path so top-level loads also participate in cycle detection.
+	return SpawnFromAssetJSON(reg, filePath, nullptr, bBackground);
 }
 
 // ---------------------------------------------------------------------------
@@ -506,7 +600,7 @@ JsonValue EntityBuilder::SerializeScene(Registry* reg, const char* sceneName,
 	size_t entityCount = entities.GetArray().size();
 	scene["entities"]  = std::move(entities);
 
-	LOG_INFO_F("[EntityBuilder] Serialized %zu entities into scene '%s'", entityCount, sceneName);
+	LOG_ENG_INFO_F("[EntityBuilder] Serialized %zu entities into scene '%s'", entityCount, sceneName);
 	return scene;
 }
 
@@ -519,13 +613,13 @@ bool EntityBuilder::SaveToFile(Registry* reg, const char* sceneName, const char*
 	std::ofstream file(filePath);
 	if (!file.is_open())
 	{
-		LOG_ERROR_F("[EntityBuilder] Failed to open file '%s' for writing", filePath);
+		LOG_ENG_ERROR_F("[EntityBuilder] Failed to open file '%s' for writing", filePath);
 		return false;
 	}
 
 	file << json;
 	file.close();
 
-	LOG_INFO_F("[EntityBuilder] Saved scene to '%s'", filePath);
+	LOG_ENG_INFO_F("[EntityBuilder] Saved scene to '%s'", filePath);
 	return true;
 }

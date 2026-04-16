@@ -138,4 +138,69 @@ namespace TrinyxJobs
 
 	/// Thread-local index of the current worker (0 = coordinator/non-worker).
 	uint32_t GetCurrentThreadIndex();
+
+	// ---- World queues ----------------------------------------------------
+	// Per-world ring buffers drained only by the owning LogicThread.
+	// Use World::Post / World::Spawn / World::SpawnAndWait — not these directly.
+
+	using WorldQueueHandle                              = uint32_t;
+	static constexpr WorldQueueHandle InvalidWorldQueue = ~0u;
+
+	WorldQueueHandle CreateWorldQueue(size_t capacity = 256);
+	void DestroyWorldQueue(WorldQueueHandle handle);
+	void DrainWorldQueue(WorldQueueHandle handle);
+
+	/// Internal — called by Post/Spawn/SpawnAndWait templates.
+	void SubmitWorldJob(const Job& job, WorldQueueHandle handle);
+
+	template <ValidJobLambda LAMBDA>
+	void Post(LAMBDA lambda, WorldQueueHandle handle)
+	{
+		struct Trampoline
+		{
+			static void Invoke(void* payload, uint32_t threadIdx)
+			{
+				auto* fn = reinterpret_cast<LAMBDA*>(payload);
+				(*fn)(threadIdx);
+			}
+		};
+
+		Job job;
+		job.EntryPoint = &Trampoline::Invoke;
+		job.Counter    = nullptr;
+		std::memcpy(job.Payload, &lambda, sizeof(LAMBDA));
+		SubmitWorldJob(job, handle);
+	}
+
+	template <ValidJobLambda LAMBDA>
+	void Spawn(LAMBDA lambda, JobCounter* counter, WorldQueueHandle handle)
+	{
+		struct Trampoline
+		{
+			static void Invoke(void* payload, uint32_t threadIdx)
+			{
+				auto* fn = reinterpret_cast<LAMBDA*>(payload);
+				(*fn)(threadIdx);
+			}
+		};
+
+		Job job;
+		job.EntryPoint = &Trampoline::Invoke;
+		job.Counter    = &counter->Value;
+		std::memcpy(job.Payload, &lambda, sizeof(LAMBDA));
+
+		counter->Value.fetch_add(1, std::memory_order_relaxed);
+		SubmitWorldJob(job, handle);
+	}
+
+	template <ValidJobLambda LAMBDA>
+	void SpawnAndWait(LAMBDA lambda, WorldQueueHandle handle)
+	{
+		JobCounter counter;
+		Spawn(lambda, &counter, handle);
+		while (counter.Value.load(std::memory_order_acquire) > 0)
+		{
+			counter.Value.wait(1, std::memory_order_relaxed);
+		}
+	}
 }

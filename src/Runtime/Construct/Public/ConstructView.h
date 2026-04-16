@@ -42,7 +42,7 @@ public:
 		Handle      = Reg->Create<TEntity<FieldWidth::Scalar>>();
 		bOwnsEntity = true;
 		RehydrateCursors();
-		this->SetFlags(TemporalFlagBits::Active);
+		this->SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive);
 
 		using Self = ConstructView;
 		Reg->BindOnCacheSlotChange<Self, &Self::OnCacheSlotChanged>(Handle, this);
@@ -50,11 +50,13 @@ public:
 		// Auto-register with owning Construct
 		owner->RegisterView({
 			this,
-			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); }
+			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); },
+			[](void* ptr) -> EntityHandle { return static_cast<Self*>(ptr)->GetEntityHandle(); }
 		});
 	}
 
-	// Attach does the same
+	// Attach binds to an existing entity rather than creating a new one.
+	// bOwnsEntity is false — the entity outlives this view.
 	template <typename TConstruct>
 	void Attach(TConstruct* owner, EntityHandle existing)
 	{
@@ -68,7 +70,8 @@ public:
 
 		owner->RegisterView({
 			this,
-			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); }
+			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); },
+			[](void* ptr) -> EntityHandle { return static_cast<Self*>(ptr)->GetEntityHandle(); }
 		});
 	}
 

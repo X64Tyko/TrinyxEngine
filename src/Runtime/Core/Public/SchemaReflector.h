@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <cassert>
 #include <tuple>
 #include <type_traits>
 
@@ -76,7 +77,7 @@ static void RegisterFieldsImpl(std::index_sequence<Is...>)
 	fieldMetas.reserve(sizeof...(Is));
 
 	// Extract field metadata for each member pointer
-	(..., fieldMetas.push_back(ExtractFieldMeta<Derived, Is>(std::get < Is > (fields))));
+	(..., fieldMetas.push_back(ExtractFieldMeta<Derived, Is>(std::get<Is>(fields))));
 
 	// Register with global registry
 	ComponentTypeID typeID = Derived::StaticTypeID();
@@ -150,11 +151,10 @@ static constexpr size_t GetFieldCount()
 template <typename Derived>
 static bool RegisterFieldsStatic()
 {
-	RegisterFieldsImpl<Derived>(std::make_index_sequence < GetFieldCount<Derived>() >
-	{
-	}
-	)
-	;
+	RegisterFieldsImpl<Derived>(std::make_index_sequence<GetFieldCount<Derived>()>
+		{
+		}
+	);
 	return true;
 }
 
@@ -184,7 +184,7 @@ FORCE_INLINE void ForEachField(Func&& func)
 	constexpr auto fields = T::DefineFields();
 	[&]<size_t... Is>(std::index_sequence<Is...>)
 	{
-		(func(std::get < Is > (fields), Is), ...);
+		(func(std::get<Is>(fields), Is), ...);
 	}(std::make_index_sequence<std::tuple_size_v<decltype(fields)>>{});
 }
 
@@ -339,7 +339,7 @@ FORCE_INLINE void ForEachField(Func&& func)
     TNX_REGISTER_FIELDS(ComponentType, __VA_ARGS__)
 
 // ---------------------------------------------------------------------------
-// GameState / GameMode self-registration macros
+// FlowState / GameMode self-registration macros
 // ---------------------------------------------------------------------------
 
 #define TNX_REGISTER_STATE(StateClass) \
@@ -347,7 +347,7 @@ FORCE_INLINE void ForEachField(Func&& func)
         struct _##StateClass##_StateReg { \
             _##StateClass##_StateReg() { \
                 ReflectionRegistry::Get().RegisterState(#StateClass, \
-                    []() -> std::unique_ptr<GameState> { return std::make_unique<StateClass>(); }); \
+                    []() -> std::unique_ptr<FlowState> { return std::make_unique<StateClass>(); }); \
             } \
         }; \
         [[maybe_unused]] TNX_USED_ATTR static _##StateClass##_StateReg _##StateClass##_state_reg; \
@@ -363,3 +363,67 @@ FORCE_INLINE void ForEachField(Func&& func)
         }; \
         [[maybe_unused]] TNX_USED_ATTR static _##ModeClass##_ModeReg _##ModeClass##_mode_reg; \
     }
+
+// ---------------------------------------------------------------------------
+// TNX_REGISTER_MODEMIX — registers a user-defined GameMode mixin with the
+// ReflectionRegistry. Assigns the next available ID from the user band
+// (128–255) via g_GlobalMixinCounter, following the same pattern as
+// component and entity registration.
+//
+// Usage (once per mixin type, in a .cpp file):
+//   TNX_REGISTER_MODEMIX(MyAbilityMixin)
+//
+// Engine mixins (WithSpawnManagement, etc.) have fixed compile-time IDs in
+// the engine band (0–127) and self-register by calling RegisterMixin directly.
+// ---------------------------------------------------------------------------
+
+#define TNX_REGISTER_MODEMIX(MixinClass) \
+    namespace { \
+        struct _##MixinClass##_MixinReg { \
+            _##MixinClass##_MixinReg() { \
+                uint8_t id = Internal::g_GlobalMixinCounter++; \
+                assert(id <= ReflectionRegistry::MixinUserBandEnd && \
+                    "TNX_REGISTER_MODEMIX: user mixin band exhausted (128-255)."); \
+                ReflectionRegistry::Get().RegisterMixin(#MixinClass, id, /*isUserDefined=*/true); \
+            } \
+        }; \
+        [[maybe_unused]] TNX_USED_ATTR static _##MixinClass##_MixinReg _##MixinClass##_mixin_reg; \
+    }
+
+// ---------------------------------------------------------------------------
+// Required by TNX_REGISTER_CONSTRUCT — pulled in here so the macro is self-contained.
+#include "ConstructRegistry.h"
+#include "ReflectionRegistry.h"
+
+// TNX_REGISTER_CONSTRUCT — registers a replicated Construct type so that
+// ReplicationSystem::HandleConstructSpawn can instantiate it on the client.
+//
+// Usage: place inside the class body (in the .h file), same pattern as
+// TNX_REGISTER_SCHEMA. The static inline member is tied to the class itself,
+// so the linker cannot strip it even on MSVC with /OPT:REF.
+//
+//   class PlayerConstruct : public Construct<PlayerConstruct>
+//   {
+//       ...
+//       TNX_REGISTER_CONSTRUCT(PlayerConstruct)
+//   };
+//
+// Requires the class to implement:
+//   void InitializeForReplication(World*, EntityHandle*, uint8_t viewCount)
+// ---------------------------------------------------------------------------
+#define TNX_REGISTER_CONSTRUCT(ConstructClass) \
+private: \
+    struct _ConstructReg { \
+        _ConstructReg() { \
+            ReflectionRegistry::Get().RegisterConstruct( \
+                #ConstructClass, \
+                ReflectionRegistry::ConstructTypeHashFromName(#ConstructClass), \
+                [](ConstructRegistry* reg, World* w, EntityHandle* handles, uint8_t count, Soul* soul) -> void* { \
+                    static_assert(requires(ConstructClass& obj, World* w2, EntityHandle* h, uint8_t n) { \
+                        obj.InitializeForReplication(w2, h, n); \
+                    }, #ConstructClass " must implement InitializeForReplication(World*, EntityHandle*, uint8_t)"); \
+                    return reg->CreateForReplication<ConstructClass>(w, handles, count, soul); \
+                }); \
+        } \
+    }; \
+    [[maybe_unused]] TNX_USED_ATTR static inline _ConstructReg _construct_reg;

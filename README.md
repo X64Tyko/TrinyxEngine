@@ -1,5 +1,8 @@
 # TrinyxEngine
 
+[![CI (main)](https://github.com/X64Tyko/TrinyxEngine/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/X64Tyko/TrinyxEngine/actions/workflows/ci.yml?query=branch%3Amain)
+[![CI (Dev-Main)](https://github.com/X64Tyko/TrinyxEngine/actions/workflows/ci.yml/badge.svg?branch=Dev-Main)](https://github.com/X64Tyko/TrinyxEngine/actions/workflows/ci.yml?query=branch%3ADev-Main)
+
 **A high-performance, data-oriented game engine for R&D and experimentation**
 
 ---
@@ -60,7 +63,7 @@ Sync and Build: [docs/BUILD_OPTIONS.md](docs/BUILD_OPTIONS.md)
 - ✅ Lock-free job system (MPMC ring buffers, futex-based wake, per-chunk dispatch)
 - ✅ Tiered storage (dual-ended arena partition layout, 4 tiers: Cold/Static/Volatile/Temporal)
 - ✅ Jolt Physics v5.5.0 (slab-direct iteration, awake-only pull, 512Hz/64Hz lockstep)
-- ✅ Rollback determinism (ECS + Jolt byte-perfect via snapshot ring buffer)
+- ✅ Rollback substrate (ECS + Jolt byte-perfect snapshot ring buffer — delta compression and rollback netcode pending)
 - ✅ Construct/View OOP layer (Construct<T>, Owned<T>, ConstructView<TEntity>, JoltCharacter)
 - ✅ Editor (bare-bones): scene hierarchy, entity inspection, reflected properties, save/load, PIE
 - ✅ Networking: GNS, entity spawn replication, state corrections, PIE loopback
@@ -109,9 +112,9 @@ cores form the worker pool, giving ~6× effective parallelism for logic and rend
 
 Lock-free MPMC job dispatch with four priority queues:
 
-- **Physics Queue** — PrePhysics/PostPhysics per-chunk jobs (Brain produces, all consume)
+- **Logic Queue** — PrePhysics/PostPhysics per-chunk jobs (Brain produces, all consume)
 - **Render Queue** — GPU upload/compute dispatch (Encoder produces, all consume)
-- **Physics Queue** — Jolt jobs (Worker produces, workers consume)
+- **Physics Queue** — Jolt jobs (workers produce and consume; 25% of workers dedicated by default)
 - **General Queue** — Everything else + overflow from full queues
 
 Workers block via `std::atomic::wait()` (futex on Linux, WaitOnAddress on Windows) when idle —
@@ -137,18 +140,20 @@ loaded automatically via `TNX_PROJECT_DIR` set by CMake.
 
 Entity data lives in one of four storage tiers based on access pattern and rollback requirements:
 
-| Tier | Structure | Frames | Rollback | Use Case |
-|------|-----------|--------|----------|----------|
-| Cold | Archetype chunks (AoS) | 0 | No | Rarely-updated, non-iterable data |
-| Static | Separate read-only array | 0 | No | Geometry, never changes |
-| Volatile | SoA ring buffer | 5 | No | Cosmetic entities, ambient AI, particles |
-| Temporal | SoA ring buffer | max(8, X) | Yes | Networked, simulation-authoritative entities |
+| Tier     | Structure                | Frames            | Rollback | Use Case                                     |
+|----------|--------------------------|-------------------|----------|----------------------------------------------|
+| Cold     | Archetype chunks (AoS)   | 0                 | No       | Rarely-updated, non-iterable data            |
+| Static   | Separate read-only array | 0                 | No       | Geometry, never changes                      |
+| Volatile | SoA ring buffer          | 3 (triple-buffer) | No       | Cosmetic entities, ambient AI, particles     |
+| Temporal | SoA ring buffer          | max(8, X)         | Yes      | Networked, simulation-authoritative entities |
 
 Within each tier, entities are placed into one of two fixed-size **arenas** using a dual-ended allocator:
 
-- **Arena 1 (Physics)** `[0..MaxPhysicsEntities)` — PHYS bucket grows right, DUAL bucket grows left. The physics solver
-  iterates this range exclusively--or will soon...
-- **Arena 2 (Cached)** `[MaxPhysicsEntities..MaxCachedEntities)` — RENDER bucket grows right, LOGIC bucket grows left.
+- **Arena 1 (Renderable)** `[0..MAX_RENDERABLE_ENTITIES)` — RENDER bucket grows right from 0, DUAL bucket grows left
+  from MAX_RENDERABLE. DUAL and PHYS are contiguous at the boundary seam so the physics solver iterates them as one
+  dense pass.
+- **Arena 2 (Cached)** `[MAX_RENDERABLE_ENTITIES..MAX_CACHED_ENTITIES)` — PHYS bucket grows right, LOGIC bucket grows
+  left.
 
 Partition group (Dual/Phys/Render/Logic) is derived automatically from the `SystemGroup` tags on each component. No
 manual annotation required.
@@ -174,31 +179,32 @@ from the logic thread. Dirty-bit-driven partial upload is tracked but not yet wi
 Components decompose into Structure-of-Arrays via `FieldProxy<T, FieldWidth>`:
 
 ```cpp
+// Component — SoA fields declared with TNX_TEMPORAL_FIELDS or TNX_VOLATILE_FIELDS
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct Transform {
-    FieldProxy<float, WIDTH> PositionX, PositionY, PositionZ;
-    FieldProxy<float, WIDTH> RotationX, RotationY, RotationZ;
-    FieldProxy<float, WIDTH> ScaleX,    ScaleY,    ScaleZ;
+struct CVelocity : ComponentView<CVelocity, WIDTH>
+{
+    TNX_TEMPORAL_FIELDS(CVelocity, Physics, vX, vY, vZ)
 
-    TNX_TEMPORAL_FIELDS(Transform, SystemGroup::None,
-        PositionX, PositionY, PositionZ,
-        RotationX, RotationY, RotationZ,
-        ScaleX, ScaleY, ScaleZ)
+    FloatProxy<WIDTH> vX, vY, vZ;
 };
-TNX_REGISTER_COMPONENT(Transform)
+TNX_REGISTER_COMPONENT(CVelocity)
 
+// Entity — composes components; TNX_REGISTER_SCHEMA wires SoA layout
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-struct CubeEntity : EntityView<CubeEntity, WIDTH> {
-    Transform<WIDTH> transform;
-    Velocity<WIDTH>  velocity;
+class EMyEntity : public EntityView<EMyEntity, WIDTH>
+{
+    TNX_REGISTER_SCHEMA(EMyEntity, EntityView, Transform, Vel)
+public:
+    CTransform<WIDTH> Transform;
+    CVelocity<WIDTH>  Vel;
 
-    FORCE_INLINE void PrePhysics(double dt) {
-        transform.PositionX += velocity.VelocityX * static_cast<float>(dt);
+    void PrePhysics(SimFloat dt) {
+        Transform.PosX += Vel.vX * dt;
+        Transform.PosY += Vel.vY * dt;
+        Transform.PosZ += Vel.vZ * dt;
     }
-
-    TNX_REGISTER_SCHEMA(CubeEntity, EntityView, transform, velocity)
 };
-TNX_REGISTER_ENTITY(CubeEntity)
+TNX_REGISTER_ENTITY(EMyEntity)
 ```
 
 Users write natural OOP code while the engine handles SoA layout, double-buffering, and SIMD automatically.
@@ -241,10 +247,14 @@ SystemGroup tags.
 
 Server-authoritative model with GNS (GameNetworkingSockets) transport:
 
-- **NetThread** polls connections at 30Hz, routes InputFrame messages to correct World via OwnerID
+- **PIENetThread** dispatches messages to `ServerNetThread` and `ClientNetThread` sub-handlers within the same process
+- **ServerNetThread** injects per-player `InputFrame` packets into per-owner `InputBuffer` slots (
+  `World::GetPlayerSimInput(ownerID)`), ensuring client input drives only that player's Construct
 - **ReplicationSystem** walks the server Registry each net tick:
-    - Sends EntitySpawn (reliable) for new entities — includes ClassID, transform, scale, color, mesh
-    - Sends batched StateCorrection (unreliable) with authoritative transforms
+    - Sends `EntitySpawn` (reliable) for new entities — includes ClassID, transform, scale, color, mesh
+    - Sends batched `StateCorrection` (unreliable) with authoritative transforms
+- **Soul RPC system** — type-safe server/client RPC dispatch (`TNX_IMPL_SERVER` / `TNX_IMPL_CLIENT`) used for
+  `PlayerBegin` handshake and `PlayerBeginConfirm`
 - **PIE loopback** — editor creates server + N client Worlds in same process for local testing
 - **EntityNetHandle** — packed uint32 (NetOwnerID:8 + NetIndex:24) for network entity identity
 
@@ -301,6 +311,9 @@ ratios.
 ## Documentation
 
 - **[Architecture Overview](docs/ARCHITECTURE.md)** — Tiered storage, partition design, threading model, GPU upload
+- **[Game Flow](docs/FLOW.md)** — FlowManager, GameState stack, travel model
+- **[GameMode & Soul](docs/GAMEFLOW.md)** — GameMode lifecycle, player join/spawn flow, Soul RPC system
+- **[Networking](docs/NETWORKING.md)** — GNS transport, replication, input injection, PIE loopback
 - **[Performance Targets](docs/PERFORMANCE_TARGETS.md)** — Benchmarks, budgets, scalability analysis
 - **[Data Structures](docs/DATA_STRUCTURES.md)** — FieldProxy, EntityView, InstanceData, component patterns
 - **[Configuration Guide](docs/CONFIGURATION.md)** — EngineConfig presets and tuning

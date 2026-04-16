@@ -4,24 +4,46 @@
 project(Trinyx VERSION 0.1 LANGUAGES CXX)
 
 # -----------------------------------------------------------------------------
-# VULKAN
+# VULKAN (not required in headless builds)
 # -----------------------------------------------------------------------------
-find_package(Vulkan REQUIRED)
+if (NOT TNX_HEADLESS)
+    find_package(Vulkan REQUIRED)
+endif ()
 
 # -----------------------------------------------------------------------------
 # SOURCE MANAGEMENT
 # -----------------------------------------------------------------------------
 # Gather engine source files (Runtime only — Editor is added conditionally below).
-file(GLOB_RECURSE ENGINE_SOURCES "${CMAKE_SOURCE_DIR}/src/Runtime/*.cpp")
-file(GLOB_RECURSE ENGINE_HEADERS "${CMAKE_SOURCE_DIR}/src/Runtime/*.h")
+# CONFIGURE_DEPENDS: CMake will re-run configure automatically when files are
+# added or removed, so build directories don't need a manual cmake -B invocation.
+file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/Runtime/*.cpp")
+file(GLOB_RECURSE ENGINE_HEADERS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/Runtime/*.h")
+
+# Exclude Net sources when networking is disabled.
+if (NOT TNX_ENABLE_NETWORK)
+    list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/Net/.*\\.cpp$")
+    list(FILTER ENGINE_HEADERS EXCLUDE REGEX ".*/Net/.*\\.h$")
+endif ()
+
+# Exclude Rendering sources in headless builds — no GPU, no window, no Vulkan.
+if (TNX_HEADLESS)
+    list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/Rendering/.*\\.cpp$")
+    list(FILTER ENGINE_HEADERS EXCLUDE REGEX ".*/Rendering/.*\\.h$")
+    list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/Assets/.*\\.cpp$")
+    list(FILTER ENGINE_HEADERS EXCLUDE REGEX ".*/Assets/.*\\.h$")
+endif ()
+
+# Remove the old NetThread now that it is replaced by the role-split classes.
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/NetThread\\.cpp$")
+list(FILTER ENGINE_HEADERS EXCLUDE REGEX ".*/NetThread\\.h$")
 
 # volk: VOLK_IMPLEMENTATION is defined in VulkanContext.cpp — no standalone volk.c needed.
 set(VOLK_SOURCES "")
 
 # Dear ImGui + Editor sources (editor builds only).
 if (TNX_ENABLE_EDITOR)
-    file(GLOB_RECURSE EDITOR_SOURCES "${CMAKE_SOURCE_DIR}/src/Editor/*.cpp")
-    file(GLOB_RECURSE EDITOR_HEADERS "${CMAKE_SOURCE_DIR}/src/Editor/*.h")
+    file(GLOB_RECURSE EDITOR_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/Editor/*.cpp")
+    file(GLOB_RECURSE EDITOR_HEADERS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/Editor/*.h")
     set(GUIZMO_PATH "${CMAKE_SOURCE_DIR}/libs/guizmo")
     set(IMGUI_SOURCES
             "${IMGUI_PATH}/imgui.cpp"
@@ -115,7 +137,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 
 # B. SDL3 - Platform specific
 if(WIN32)
-    # Windows: Use bundled SDL3
+    # Windows: Use bundled pre-built binaries (libs/SDL3)
     target_include_directories(${PROJECT_NAME} PUBLIC
         "${SDL3_PATH}/include"
     )
@@ -123,18 +145,24 @@ if(WIN32)
         "${SDL3_PATH}/lib/x64/SDL3.lib"
     )
 elseif(UNIX)
-    # Linux: Use system SDL3
-    find_package(SDL3 REQUIRED CONFIG)
+    # Linux: SDL3 built from source in root CMakeLists (section 6.5)
     target_link_libraries(${PROJECT_NAME} PUBLIC SDL3::SDL3)
 endif()
 
-# C. Vulkan + volk + VMA + cgltf
-target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
-    "${VOLK_PATH}"
-    "${VMA_PATH}"
-    "${Vulkan_INCLUDE_DIRS}"
+# C. Vulkan + volk + VMA + cgltf (not needed in headless builds)
+if (NOT TNX_HEADLESS)
+    target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
+            "${VOLK_PATH}"
+            "${VMA_PATH}"
+            "${Vulkan_INCLUDE_DIRS}"
         "${CMAKE_SOURCE_DIR}/libs/cgltf"
-)
+    )
+else ()
+    # Headless still needs cgltf for any asset types that remain compiled in.
+    target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
+            "${CMAKE_SOURCE_DIR}/libs/cgltf"
+    )
+endif ()
 
 # E. Dear ImGui (editor builds only)
 if (TNX_ENABLE_EDITOR)
@@ -144,7 +172,9 @@ if (TNX_ENABLE_EDITOR)
             "${GUIZMO_PATH}"
     )
 endif ()
-target_link_libraries(${PROJECT_NAME} PUBLIC Vulkan::Vulkan)
+if (NOT TNX_HEADLESS)
+    target_link_libraries(${PROJECT_NAME} PUBLIC Vulkan::Vulkan)
+endif ()
 
 # D. Jolt Physics
 # Jolt::Jolt works whether Jolt was found via find_package (installed/vcpkg)
@@ -153,7 +183,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC Vulkan::Vulkan)
 target_link_libraries(${PROJECT_NAME} PUBLIC Jolt::Jolt)
 
 # F. GameNetworkingSockets (static)
-if (TARGET GameNetworkingSockets_s)
+if (TNX_ENABLE_NETWORK AND TARGET GameNetworkingSockets_s)
     target_link_libraries(${PROJECT_NAME} PUBLIC GameNetworkingSockets_s)
     target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC "${GNS_PATH}/include")
 endif()
@@ -163,8 +193,8 @@ endif()
 # Shader output directory baked into the binary as a compile-time constant.
 # vulkan.hpp: use dynamic dispatch (compatible with volk global function pointers).
 target_compile_definitions(${PROJECT_NAME} PUBLIC
-    TNX_SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders"
-    VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
+        $<$<NOT:$<BOOL:${TNX_HEADLESS}>>:TNX_SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders">
+        $<$<NOT:$<BOOL:${TNX_HEADLESS}>>:VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1>
         $<$<BOOL:${TNX_ENABLE_EDITOR}>:IMGUI_IMPL_VULKAN_USE_VOLK>
         $<$<NOT:$<CONFIG:Release>>:TNX_DEV_METRICS=1>
         $<$<BOOL:${TNX_DETAILED_METRICS}>:TNX_DEV_METRICS_DETAILED=1>
@@ -341,7 +371,7 @@ if(ENABLE_TRACY)
         TRACY_NO_ROCPROF=1
     )
     if(WIN32)
-        target_link_libraries(${PROJECT_NAME} PUBLIC ws2_32 dbghelp)
+        target_link_libraries(${PROJECT_NAME} PUBLIC ws2_32 dbghelp Winmm)
     elseif(UNIX)
         target_link_libraries(${PROJECT_NAME} PUBLIC pthread dl)
         # Some toolchains / distros still put clock_gettime in librt
