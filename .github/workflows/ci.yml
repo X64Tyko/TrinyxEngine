@@ -121,14 +121,14 @@ jobs:
 
       # -----------------------------------------------------------------------
       # Linux dependencies
-      # SDL3 is vendored (libs/SDL3) — no system package needed.
+      # libs/SDL3 contains Windows binaries only — Linux uses the system package.
       # OpenSSL is only needed for network configs on Linux; Windows uses BCrypt.
       # -----------------------------------------------------------------------
       - name: Install Linux base dependencies
         if: matrix.os == 'ubuntu-24.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ ccache
+          sudo apt-get install -y cmake ninja-build g++ ccache libsdl3-dev
 
       - name: Install Linux OpenSSL (network configs)
         if: matrix.os == 'ubuntu-24.04' && matrix.needs_openssl == true
@@ -243,7 +243,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ ccache libssl-dev
+          sudo apt-get install -y cmake ninja-build g++ ccache libssl-dev libsdl3-dev
 
       - name: Cache ccache
         uses: actions/cache@v4
