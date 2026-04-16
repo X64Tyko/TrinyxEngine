@@ -136,12 +136,15 @@ namespace TrinyxJobs
 
 		s_WakeSignal.store(0, std::memory_order_relaxed);
 
-		// Spawn workers — count determined by ThreadPinning topology scan
+		// Spawn workers — count determined by ThreadPinning topology scan.
+		// On constrained environments (CI VMs with ≤ ReservedCores logical cores),
+		// clamp to 1 worker rather than failing — all threads share cores anyway,
+		// and the Brain/Encoder coordinator model means workers still add throughput.
 		s_WorkerCount = TrinyxThreading::GetWorkerThreadCapacity();
 		if (s_WorkerCount == 0)
 		{
-			LOG_ENG_ERROR("[Jobs] No cores available for workers");
-			return false;
+			s_WorkerCount = 1;
+			LOG_ENG_INFO("[Jobs] Core count ≤ reserved threshold — running with 1 oversubscribed worker");
 		}
 
 		s_Running.store(true, std::memory_order_release);

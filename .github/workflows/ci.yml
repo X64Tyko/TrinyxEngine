@@ -267,7 +267,8 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DTNX_HEADLESS=ON \
-            -DENABLE_AVX2=OFF \
+            -DENABLE_AVX2=ON \
+            -DUSE_AVX2=OFF \
             -DTNX_ENABLE_ROLLBACK=OFF \
             -DTNX_ENABLE_NETWORK=ON \
             -DTNX_NET_MODEL=Server \
@@ -286,7 +287,8 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DTNX_HEADLESS=ON \
-            -DENABLE_AVX2=OFF \
+            -DENABLE_AVX2=ON \
+            -DUSE_AVX2=OFF \
             -DTNX_ENABLE_ROLLBACK=OFF \
             -DTNX_ENABLE_NETWORK=ON \
             -DTNX_NET_MODEL=Client \
