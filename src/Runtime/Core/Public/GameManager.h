@@ -32,6 +32,13 @@ template <typename Derived>
 class GameManager
 {
 public:
+	/// Called after ParseCommandLine but before Initialize(). Use this to parse
+	/// any game-specific CLI arguments (e.g. --test names for the Testbed).
+	void PreInitialize(int argc, char* argv[])
+	{
+		(void)argc; (void)argv;
+	}
+
 	/// Called after engine initialization completes (all threads, renderer, registry ready).
 	/// Use this to spawn initial entities, load levels, etc.
 	/// Return false to abort before entering the main loop.
@@ -76,13 +83,14 @@ protected:
 		TrinyxEngine& engine = TrinyxEngine::Get();                                      \
 		engine.ParseCommandLine(argc, argv);                                             \
 		GameClass game;                                                                  \
+		game.PreInitialize(argc, argv);                                                  \
 		if (engine.Initialize(game.GetWindowTitle(),                                     \
 		                      game.GetWindowWidth(),                                     \
 		                      game.GetWindowHeight(),                                    \
 		                      TNX_PROJECT_DIR))                                           \
 		{                                                                                \
 			if (game.PostInitialize(engine))                                             \
-				engine.Run(game);                                                            \
+				engine.Run(game);                                                        \
 		}                                                                                \
 		return 0;                                                                        \
 	}
