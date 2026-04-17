@@ -20,6 +20,7 @@
 #include "World.h"
 #ifndef TNX_HEADLESS
 #include "AudioManager.h"
+#include "../../../Runtime/Audio/Private/AudioInternal.h"
 #if TNX_ENABLE_EDITOR
 #include "EditorRenderer.h"
 #else
@@ -268,6 +269,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	// ---- Audio -----------------------------------------------------------
 	Audio = std::make_unique<AudioManager>();
 	Audio->Initialize(Config.MaxAudioVoices);
+	Audio::SetManager(Audio.get());
 #endif // !TNX_HEADLESS
 
 	LOG_ENG_INFO("TrinyxEngine initialization complete");
@@ -445,6 +447,7 @@ void TrinyxEngine::Shutdown()
 #ifndef TNX_HEADLESS
 	// Destroy thread objects BEFORE Vulkan teardown.
 	// RenderThread owns GPU resources that call vmaDestroy* in their destructors.
+	Audio::SetManager(nullptr);
 	Audio->Shutdown();
 	Audio.reset();
 	Render.reset();

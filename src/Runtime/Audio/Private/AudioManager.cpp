@@ -11,7 +11,7 @@
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-AudioManager::AudioManager()  = default;
+AudioManager::AudioManager() = default;
 AudioManager::~AudioManager() { Shutdown(); }
 
 bool AudioManager::Initialize(int maxVoices)
@@ -26,7 +26,7 @@ bool AudioManager::Initialize(int maxVoices)
 
 	// ---- Open default playback device ----------------------------------------
 	// Request float32 stereo 48kHz; SDL will give us the closest available.
-	SDL_AudioSpec desired{ SDL_AUDIO_F32, 2, 48000 };
+	SDL_AudioSpec desired{SDL_AUDIO_F32, 2, 48000};
 	DeviceID = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &desired);
 	if (DeviceID == 0)
 	{
@@ -41,7 +41,7 @@ bool AudioManager::Initialize(int maxVoices)
 	SDL_GetAudioDeviceFormat(DeviceID, &DeviceSpec, &sampleFrames);
 
 	LOG_ENG_INFO_F("[Audio] Device opened: format=%d channels=%d freq=%d (buffer ~%d frames)",
-	               DeviceSpec.format, DeviceSpec.channels, DeviceSpec.freq, sampleFrames);
+				   DeviceSpec.format, DeviceSpec.channels, DeviceSpec.freq, sampleFrames);
 
 	// ---- Allocate voice pool ------------------------------------------------
 	MaxVoices = maxVoices;
@@ -59,8 +59,7 @@ void AudioManager::Shutdown()
 	// Stop and release all active voices.
 	for (int i = 0; i < MaxVoices; ++i)
 	{
-		if (Pool[i].Handle.IsValid())
-			ReleaseVoice(Pool[i]);
+		if (Pool[i].Handle.IsValid()) ReleaseVoice(Pool[i]);
 	}
 
 	if (DeviceID)
@@ -89,7 +88,11 @@ uint32_t AudioManager::CommitToSlot(SoundAsset* asset, AssetID id, bool bPinned)
 	uint32_t slotID = UINT32_MAX;
 	for (uint32_t i = 0; i < SoundCount; ++i)
 	{
-		if (Slots[i].Asset == nullptr) { slotID = i; break; }
+		if (Slots[i].Asset == nullptr)
+		{
+			slotID = i;
+			break;
+		}
 	}
 	if (slotID == UINT32_MAX)
 	{
@@ -136,8 +139,7 @@ uint32_t AudioManager::LoadSound(const char* path, const std::string& name, Asse
 		return UINT32_MAX;
 	}
 
-	if (id.IsValid())
-		AssetRegistry::Get().Register(id, name, path, AssetType::Audio);
+	if (id.IsValid()) AssetRegistry::Get().Register(id, name, path, AssetType::Audio);
 
 	uint32_t slotID = CommitToSlot(asset, id, bPinned);
 	if (slotID == UINT32_MAX)
@@ -147,8 +149,8 @@ uint32_t AudioManager::LoadSound(const char* path, const std::string& name, Asse
 	}
 
 	LOG_ENG_INFO_F("[Audio] Loaded sound slot %u '%s' (%d frames, %dHz %dch)",
-	               slotID, name.empty() ? path : name.c_str(),
-	               asset->Frames, asset->SampleRate, asset->Channels);
+				   slotID, name.empty() ? path : name.c_str(),
+				   asset->Frames, asset->SampleRate, asset->Channels);
 	return slotID;
 }
 
@@ -201,8 +203,7 @@ void AudioManager::UnloadSound(AssetID id)
 	// Stop any voices playing this asset.
 	for (int i = 0; i < MaxVoices; ++i)
 	{
-		if (Pool[i].Handle.IsValid() && Pool[i].Asset == Slots[slot].Asset)
-			ReleaseVoice(Pool[i]);
+		if (Pool[i].Handle.IsValid() && Pool[i].Asset == Slots[slot].Asset) ReleaseVoice(Pool[i]);
 	}
 
 	FreeSound(Slots[slot].Asset);
@@ -219,8 +220,7 @@ void AudioManager::UnloadSound(AssetID id)
 void AudioManager::UnloadSound(TnxName name)
 {
 	const AssetEntry* entry = AssetRegistry::Get().FindByTName(name);
-	if (entry && entry->Type == AssetType::Audio)
-		UnloadSound(entry->ID);
+	if (entry && entry->Type == AssetType::Audio) UnloadSound(entry->ID);
 }
 
 // ---------------------------------------------------------------------------
@@ -229,8 +229,7 @@ void AudioManager::UnloadSound(TnxName name)
 
 Voice* AudioManager::FindVoice(SoundHandle handle)
 {
-	if (!handle.IsValid() || handle.Index >= static_cast<uint16_t>(MaxVoices))
-		return nullptr;
+	if (!handle.IsValid() || handle.Index >= static_cast<uint16_t>(MaxVoices)) return nullptr;
 	Voice& v = Pool[handle.Index];
 	return (v.Handle == handle) ? &v : nullptr;
 }
@@ -242,8 +241,7 @@ Voice* AudioManager::AllocateVoice(uint8_t priority)
 	// Fast path: find a free slot.
 	for (int i = 0; i < MaxVoices; ++i)
 	{
-		if (!Pool[i].Handle.IsValid())
-			return &Pool[i];
+		if (!Pool[i].Handle.IsValid()) return &Pool[i];
 	}
 
 	// Pool full — steal the lowest-priority voice; only steal if its priority <= requester's.
@@ -251,8 +249,7 @@ Voice* AudioManager::AllocateVoice(uint8_t priority)
 	Voice* victim = nullptr;
 	for (int i = 0; i < MaxVoices; ++i)
 	{
-		if (!victim || Pool[i].Priority < victim->Priority)
-			victim = &Pool[i];
+		if (!victim || Pool[i].Priority < victim->Priority) victim = &Pool[i];
 	}
 
 	if (victim && victim->Priority <= priority)
@@ -261,7 +258,7 @@ Voice* AudioManager::AllocateVoice(uint8_t priority)
 		return victim;
 	}
 
-	return nullptr;  // All voices have higher priority — drop this sound.
+	return nullptr; // All voices have higher priority — drop this sound.
 }
 
 void AudioManager::ReleaseVoice(Voice& v)
@@ -276,12 +273,23 @@ void AudioManager::ReleaseVoice(Voice& v)
 	v.bLoop    = false;
 	v.FadeRate = 0.f;
 	v.Volume.store(1.f, std::memory_order_relaxed);
-	v.Handle   = SoundHandle::Invalid();
+	v.Handle = SoundHandle::Invalid();
 }
 
 // ---------------------------------------------------------------------------
 // Playback API
 // ---------------------------------------------------------------------------
+
+SoundHandle AudioManager::Play(TnxName name, PlayParams params)
+{
+	const AssetEntry* entry = AssetRegistry::Get().FindByTName(name);
+	if (!entry || entry->Type != AssetType::Audio)
+	{
+		LOG_ENG_ERROR_F("[Audio] Play: TnxName '%s' not found in registry", name.GetStr());
+		return SoundHandle::Invalid();
+	}
+	return Play(entry->ID, params);
+}
 
 SoundHandle AudioManager::Play(AssetID id, PlayParams params)
 {
@@ -325,8 +333,7 @@ SoundHandle AudioManager::Play(AssetID id, PlayParams params)
 
 SoundHandle AudioManager::PlayAsset(const SoundAsset* asset, PlayParams params)
 {
-	if (!bInitialized || !asset || asset->PCM.empty())
-		return SoundHandle::Invalid();
+	if (!bInitialized || !asset || asset->PCM.empty()) return SoundHandle::Invalid();
 
 	Voice* v = AllocateVoice(params.Priority);
 	if (!v)
@@ -336,7 +343,7 @@ SoundHandle AudioManager::PlayAsset(const SoundAsset* asset, PlayParams params)
 	}
 
 	// Build source spec matching the decoded asset.
-	SDL_AudioSpec srcSpec{ SDL_AUDIO_F32, asset->Channels, asset->SampleRate };
+	SDL_AudioSpec srcSpec{SDL_AUDIO_F32, asset->Channels, asset->SampleRate};
 
 	v->Stream = SDL_CreateAudioStream(&srcSpec, &DeviceSpec);
 	if (!v->Stream)
@@ -350,23 +357,22 @@ SoundHandle AudioManager::PlayAsset(const SoundAsset* asset, PlayParams params)
 
 	// Apply initial gain and pitch.
 	SDL_SetAudioStreamGain(v->Stream, params.Volume);
-	if (params.Pitch != 1.f)
-		SDL_SetAudioStreamFrequencyRatio(v->Stream, params.Pitch);
+	if (params.Pitch != 1.f) SDL_SetAudioStreamFrequencyRatio(v->Stream, params.Pitch);
 
 	// Push the entire PCM buffer.
 	SDL_PutAudioStreamData(v->Stream,
-	                       asset->PCM.data(),
-	                       static_cast<int>(asset->PCM.size() * sizeof(float)));
+						   asset->PCM.data(),
+						   static_cast<int>(asset->PCM.size() * sizeof(float)));
 
 	// Assign handle.
 	const uint16_t gen = NextGeneration++;
-	if (NextGeneration == 0) NextGeneration = 1;  // wrap: skip 0 so {idx,0} stays invalid
+	if (NextGeneration == 0) NextGeneration = 1; // wrap: skip 0 so {idx,0} stays invalid
 
 	const uint16_t idx = static_cast<uint16_t>(v - Pool.get());
-	v->Handle   = { idx, gen };
-	v->Asset    = asset;
-	v->bLoop    = params.Loop;
-	v->Priority = params.Priority;
+	v->Handle          = {idx, gen};
+	v->Asset           = asset;
+	v->bLoop           = params.Loop;
+	v->Priority        = params.Priority;
 	v->Volume.store(params.Volume, std::memory_order_relaxed);
 	v->FadeTarget = 0.f;
 	v->FadeRate   = 0.f;
@@ -396,8 +402,7 @@ void AudioManager::FadeOut(SoundHandle handle, float durationSeconds)
 
 bool AudioManager::IsPlaying(SoundHandle handle) const
 {
-	if (!handle.IsValid() || handle.Index >= static_cast<uint16_t>(MaxVoices))
-		return false;
+	if (!handle.IsValid() || handle.Index >= static_cast<uint16_t>(MaxVoices)) return false;
 	return Pool[handle.Index].Handle == handle;
 }
 
@@ -427,7 +432,7 @@ void AudioManager::Update(float dt)
 		if (v.FadeRate != 0.f)
 		{
 			float vol = v.Volume.load(std::memory_order_relaxed);
-			vol += v.FadeRate * dt;
+			vol       += v.FadeRate * dt;
 
 			if (vol <= v.FadeTarget)
 			{
@@ -447,8 +452,8 @@ void AudioManager::Update(float dt)
 			if (v.bLoop)
 			{
 				SDL_PutAudioStreamData(v.Stream,
-				                       v.Asset->PCM.data(),
-				                       static_cast<int>(v.Asset->PCM.size() * sizeof(float)));
+									   v.Asset->PCM.data(),
+									   static_cast<int>(v.Asset->PCM.size() * sizeof(float)));
 			}
 			else
 			{
@@ -469,7 +474,11 @@ void AudioManager::TryAutoUnload(const SoundAsset* asset)
 	uint32_t slot = UINT32_MAX;
 	for (uint32_t i = 0; i < SoundCount; ++i)
 	{
-		if (Slots[i].Asset == asset) { slot = i; break; }
+		if (Slots[i].Asset == asset)
+		{
+			slot = i;
+			break;
+		}
 	}
 	if (slot == UINT32_MAX || Slots[slot].bPinned) return;
 
@@ -499,53 +508,129 @@ void AudioManager::TryAutoUnload(const SoundAsset* asset)
 
 uint32_t AudioManager::FindEventIndex(TnxName name) const
 {
-for (uint32_t i = 0; i < EventCount; ++i)
-{
-if (Events[i].Name == name) return i;
-}
-return UINT32_MAX;
-}
-
-void AudioManager::RegisterEvent(TnxName name, AssetID asset, PlayParams defaults)
-{
-// Update in place if already registered.
-uint32_t idx = FindEventIndex(name);
-if (idx != UINT32_MAX)
-{
-Events[idx].Asset    = asset;
-Events[idx].Defaults = defaults;
-return;
+	for (uint32_t i = 0; i < EventCount; ++i)
+	{
+		if (Events[i].Name == name) return i;
+	}
+	return UINT32_MAX;
 }
 
-if (EventCount >= MAX_AUDIO_EVENTS)
+void AudioManager::RegisterEventInternal(TnxName eventName, const AssetEntry& asset, PlayParams defaults)
 {
-LOG_ENG_WARN("[Audio] RegisterEvent: event table full");
-return;
+	// Fail if already registered — use UpdateEvent to change defaults.
+	if (FindEventIndex(eventName) != UINT32_MAX)
+	{
+		LOG_ENG_WARN_F("[Audio] RegisterEvent: '%s' already registered — use UpdateEvent to change defaults", eventName.GetStr());
+		return;
+	}
+
+	// Event name must not shadow a different audio asset — Trigger's fallback would be ambiguous.
+	const AssetEntry* clash = AssetRegistry::Get().FindByTName(eventName);
+	if (clash && clash->Type == AssetType::Audio && clash->ID != asset.ID)
+	{
+		LOG_ENG_WARN_F("[Audio] RegisterEvent: event name '%s' collides with audio asset '%s' — rename the event", eventName.GetStr(), clash->Name.GetStr());
+		return;
+	}
+
+	if (EventCount >= MAX_AUDIO_EVENTS)
+	{
+		LOG_ENG_WARN("[Audio] RegisterEvent: event table full");
+		return;
+	}
+
+	Events[EventCount++] = {eventName, asset.ID, defaults};
 }
 
-Events[EventCount++] = { name, asset, defaults };
+void AudioManager::RegisterEvent(TnxName eventName, AssetID id, PlayParams defaults)
+{
+	// Fail if already registered — use UpdateEvent to change defaults.
+	if (FindEventIndex(eventName) != UINT32_MAX)
+	{
+		LOG_ENG_WARN_F("[Audio] RegisterEvent: '%s' already registered — use UpdateEvent to change defaults", eventName.GetStr());
+		return;
+	}
+
+	const AssetEntry* entry = AssetRegistry::Get().Find(id);
+	if (!entry || entry->Type != AssetType::Audio)
+	{
+		LOG_ENG_ERROR_F("[Audio] RegisterEvent: AssetID not found in registry for event '%s'", eventName.GetStr());
+		return;
+	}
+	RegisterEventInternal(eventName, *entry, defaults);
+}
+
+void AudioManager::RegisterEvent(TnxName eventName, TnxName assetName, PlayParams defaults)
+{
+	// Fail if already registered — use UpdateEvent to change defaults.
+	if (FindEventIndex(eventName) != UINT32_MAX)
+	{
+		LOG_ENG_WARN_F("[Audio] RegisterEvent: '%s' already registered — use UpdateEvent to change defaults", eventName.GetStr());
+		return;
+	}
+	
+	const AssetEntry* entry = AssetRegistry::Get().FindByTName(assetName);
+	if (!entry || entry->Type != AssetType::Audio)
+	{
+		LOG_ENG_ERROR_F("[Audio] RegisterEvent: asset '%s' not found in registry", assetName.GetStr());
+		return;
+	}
+
+	if (eventName == assetName)
+	{
+		LOG_ENG_WARN_F("[Audio] RegisterEvent: event name '%s' is identical to its asset name — Trigger resolves assets by name without a registered event", eventName.GetStr());
+		return;
+	}
+
+	RegisterEventInternal(eventName, *entry, defaults);
+}
+
+void AudioManager::UpdateEvent(TnxName eventName, PlayParams defaults)
+{
+	const uint32_t idx = FindEventIndex(eventName);
+	if (idx == UINT32_MAX)
+	{
+		LOG_ENG_WARN_F("[Audio] UpdateEvent: no event registered for '%s'", eventName.GetStr());
+		return;
+	}
+	Events[idx].Defaults = defaults;
+}
+
+void AudioManager::DeregisterEvent(TnxName eventName)
+{
+	const uint32_t idx = FindEventIndex(eventName);
+	if (idx == UINT32_MAX) return;
+
+	// Swap with last to keep the array packed.
+	Events[idx] = Events[--EventCount];
 }
 
 SoundHandle AudioManager::Trigger(TnxName name, PlayParams overrides)
 {
-const uint32_t idx = FindEventIndex(name);
-if (idx == UINT32_MAX)
-{
-LOG_ENG_WARN_F("[Audio] Trigger: unknown event '%s'", name.GetStr());
-return SoundHandle::Invalid();
-}
+	const uint32_t idx = FindEventIndex(name);
+	if (idx == UINT32_MAX)
+	{
+		// No registered event — fall back to direct asset lookup by name.
+		// Allows Trigger(TnxName) without a prior RegisterEvent call.
+		const AssetEntry* entry = AssetRegistry::Get().FindByTName(name);
+		if (!entry || entry->Type != AssetType::Audio)
+		{
+			LOG_ENG_WARN_F("[Audio] Trigger: no event or asset found for '%s'", name.GetStr());
+			return SoundHandle::Invalid();
+		}
+		return Play(entry->ID, overrides);
+	}
 
-const AudioEventEntry& ev = Events[idx];
+	const AudioEventEntry& ev = Events[idx];
 
-// Merge overrides on top of defaults. PlayParams fields use their zero-value as
-// "not overridden", so we compare against the default-constructed defaults.
-PlayParams merged = ev.Defaults;
-const PlayParams kDefault{};
-if (overrides.Volume   != kDefault.Volume)   merged.Volume   = overrides.Volume;
-if (overrides.Pitch    != kDefault.Pitch)     merged.Pitch    = overrides.Pitch;
-if (overrides.Loop     != kDefault.Loop)      merged.Loop     = overrides.Loop;
-if (overrides.Bus      != kDefault.Bus)       merged.Bus      = overrides.Bus;
-if (overrides.Priority != kDefault.Priority)  merged.Priority = overrides.Priority;
+	// Merge overrides on top of defaults. PlayParams fields use their zero-value as
+	// "not overridden", so we compare against the default-constructed defaults.
+	PlayParams merged = ev.Defaults;
+	const PlayParams kDefault{};
+	if (overrides.Volume != kDefault.Volume) merged.Volume = overrides.Volume;
+	if (overrides.Pitch != kDefault.Pitch) merged.Pitch = overrides.Pitch;
+	if (overrides.Loop != kDefault.Loop) merged.Loop = overrides.Loop;
+	if (overrides.Bus != kDefault.Bus) merged.Bus = overrides.Bus;
+	if (overrides.Priority != kDefault.Priority) merged.Priority = overrides.Priority;
 
-return Play(ev.Asset, merged);
+	return Play(ev.Asset, merged);
 }

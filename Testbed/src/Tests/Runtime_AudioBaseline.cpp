@@ -50,7 +50,7 @@ RUNTIME_TEST(Runtime_AudioBaseline)
 
 	// Access the internal PlayAsset through LoadSound + Play(AssetID) by
 	// registering the WAV file if present; otherwise fall back to internal path.
-	const char* testWav = "content/test_audio.wav";
+	const char* testWav = "content/Audio/test_audio.wav";
 	AssetID testID      = AssetID::Create(0x0000010000000001LL, AssetType::Audio);
 
 	uint32_t slot = audio->LoadSound(testWav, "test_sine", testID);
