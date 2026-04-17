@@ -27,6 +27,24 @@ struct StripClass<M C::*>
 	using Type = M;
 };
 
+// Extracts a tuple of component types from a SchemaDefinition's member pointer list.
+// SchemaDefinition<Ptr1, Ptr2, ...> → std::tuple<ComponentType1, ComponentType2, ...>
+// Used by TNX_DEFINE_ENTITY to emit the EntityComponentsOf specialization.
+template <typename SchemaType>
+struct SchemaComponentTypes;
+
+template <typename... Ptrs>
+struct SchemaComponentTypes<SchemaDefinition<Ptrs...>>
+{
+	using Type = std::tuple<typename StripClass<Ptrs>::Type...>;
+};
+
+// Trait mapping an entity's scalar instantiation to its component tuple.
+// Specialized by TNX_DEFINE_ENTITY in each entity's .cpp file, where the class
+// is guaranteed complete (all field declarations processed before the .cpp sees it).
+template <typename T>
+struct EntityComponentsOf;
+
 template <typename Class>
 struct PrefabReflector
 {
@@ -189,13 +207,28 @@ FORCE_INLINE void ForEachField(Func&& func)
 }
 
 // --- MACRO ---
-#define TNX_REGISTER_ENTITY(CLASS) \
+
+// TNX_DEFINE_ENTITY(CLASS) — placed in each entity's .cpp file.
+// Registers the entity with the reflection/prefab system and specializes
+// EntityComponentsOf<CLASS<>> so concepts can inspect the component list.
+// The class is guaranteed complete when the .cpp is compiled, so member
+// pointer type extraction via DefineSchema() is safe here.
+#define TNX_DEFINE_ENTITY(CLASS) \
+    template<> \
+    struct EntityComponentsOf<CLASS<>> \
+    { \
+        using Type = typename SchemaComponentTypes< \
+            std::remove_cvref_t<decltype(CLASS<>::DefineSchema())>>::Type; \
+    }; \
     namespace { \
         static const bool g_Reflect_##CLASS = []() { \
             PrefabReflector<CLASS<>>::Register(); \
             return true; \
         }(); \
     }
+
+// Legacy alias — remove once all entity .cpp files are updated.
+#define TNX_REGISTER_ENTITY(CLASS) TNX_DEFINE_ENTITY(CLASS)
 #define TNX_REGISTER_SCHEMA(CLASS, SUPER, ...) \
     public: \
     static constexpr const char* EntityTypeName = #CLASS; \
@@ -212,13 +245,7 @@ FORCE_INLINE void ForEachField(Func&& func)
     \
     using Base = SUPER<CLASS, WIDTH>; \
     using WideType = CLASS<FieldWidth::Wide>; \
-    using MaskedType = CLASS<FieldWidth::WideMask>; \
-    \
-    private: \
-    struct _EntityRegistrar { \
-        _EntityRegistrar() { PrefabReflector<CLASS<>>::Register(); } \
-    }; \
-    [[maybe_unused]] TNX_USED_ATTR static inline _EntityRegistrar _entity_registered;
+    using MaskedType = CLASS<FieldWidth::WideMask>;
 
 #define TNX_REGISTER_SUPER_SCHEMA(CLASS, SUPER, ...) \
     public: \

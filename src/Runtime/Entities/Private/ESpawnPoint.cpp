@@ -1,4 +1,4 @@
 #include "ESpawnPoint.h"
 #include "SchemaReflector.h"
 
-TNX_REGISTER_ENTITY(ESpawnPoint)
+TNX_DEFINE_ENTITY(ESpawnPoint)

@@ -1,4 +1,4 @@
 #include "EPlayer.h"
 #include "SchemaReflector.h"
 
-TNX_REGISTER_ENTITY(EPlayer)
+TNX_DEFINE_ENTITY(EPlayer)

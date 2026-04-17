@@ -1,4 +1,4 @@
 #include "EPoint.h"
 #include "SchemaReflector.h"
 
-TNX_REGISTER_ENTITY(EPoint)
+TNX_DEFINE_ENTITY(EPoint)
