@@ -38,14 +38,22 @@ struct Callback
 		bindObj = obj;
 		stub = [](void* ptr, Args... args) -> Ret { return (static_cast<T*>(ptr)->*MemFn)(args...); };
 	}
-	
+
+	// Bind a free function (or a capturing-context thunk) with an optional context pointer.
+	// The function receives bindObj as its first argument, matching the internal Fn signature.
+	void BindStatic(Fn fn, void* ctx = nullptr)
+	{
+		bindObj = ctx;
+		stub    = fn;
+	}
+
 	void Reset()
 	{
 		bindObj = nullptr;
 		stub = nullptr;
 	}
-	
-	bool IsBound() const { return stub != nullptr && bindObj != nullptr; }
+
+	bool IsBound() const { return stub != nullptr; }
 };
 
 template <typename Ret, size_t MaxBinds, typename... Args>
@@ -66,6 +74,20 @@ struct FixedMultiCallback
 		}
 
 		LOG_ENG_ERROR("FixedMultiCallback::Bind - No free slots available for binding");
+	}
+
+	void BindStatic(typename Callback<Ret, Args...>::Fn fn, void* ctx = nullptr)
+	{
+		for (auto& CB : Bindings)
+		{
+			if (!CB.IsBound())
+			{
+				CB.BindStatic(fn, ctx);
+				return;
+			}
+		}
+
+		LOG_ENG_ERROR("FixedMultiCallback::BindStatic - No free slots available for binding");
 	}
 
 	FORCE_INLINE void operator()(Args... args) const requires std::is_void_v<Ret>
@@ -100,7 +122,29 @@ struct FixedMultiCallback
 			}
 		}
 	}
-	
+
+	void UnbindStatic(typename Callback<Ret, Args...>::Fn fn, void* ctx = nullptr)
+	{
+		for (auto& CB : Bindings)
+		{
+			if (CB.IsBound() && CB.stub == fn && CB.bindObj == ctx)
+			{
+				CB.Reset();
+				return;
+			}
+		}
+	}
+
+	// Unbind all bindings whose context object matches — used by Checkin
+	// so callers don't need to know whether they used Bind or BindStatic.
+	void UnbindByContext(void* ctx)
+	{
+		for (auto& CB : Bindings)
+		{
+			if (CB.IsBound() && CB.bindObj == ctx) CB.Reset();
+		}
+	}
+
 	void Reset()
 	{
 		for (auto& CB : Bindings)

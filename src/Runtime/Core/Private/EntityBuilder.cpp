@@ -96,13 +96,14 @@ static void WriteFieldValue(void* dst, size_t fieldSize, FieldValueType valueTyp
 	}
 }
 
-// Build a map of field name → (fieldSlotIndex, fieldSize, valueType) for an archetype
-// using ArchetypeFieldLayout + ComponentFieldRegistry for name resolution.
+// Build a map of field name → (fieldSlotIndex, fieldSize, valueType, refAssetType) for an
+// archetype using ArchetypeFieldLayout + ComponentFieldRegistry for name resolution.
 struct FieldLookup
 {
 	size_t ArrayIndex;
 	size_t Size;
 	FieldValueType ValueType;
+	AssetType RefAssetType = AssetType::Invalid; // Non-Invalid = asset reference field
 };
 
 static std::vector<std::pair<const char*, FieldLookup>> BuildFieldMap(const Archetype* arch)
@@ -118,7 +119,7 @@ static std::vector<std::pair<const char*, FieldLookup>> BuildFieldMap(const Arch
 							   : nullptr;
 		if (name)
 		{
-			map.push_back({name, {fdesc.fieldSlotIndex, fdesc.fieldSize, fdesc.valueType}});
+			map.push_back({name, {fdesc.fieldSlotIndex, fdesc.fieldSize, fdesc.valueType, fdesc.refAssetType}});
 		}
 	}
 	return map;
@@ -152,8 +153,6 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 
 	const std::string& typeName = typeVal->AsString();
 
-	// Compute spawn flags once. bBackground = Alive-only (won't tick/render until
-	// an explicit Alive→Active sweep). Active bit is masked in only when not background.
 	const uint32_t activeMask = bBackground ? 0u : static_cast<uint32_t>(TemporalFlagBits::Active);
 	const int32_t spawnFlags  = static_cast<int32_t>(activeMask | static_cast<uint32_t>(TemporalFlagBits::Alive));
 
@@ -166,63 +165,51 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 		return EntityHandle{};
 	}
 
-	// Create the entity
-	EntityHandle id = reg->CreateByClassID(classID);
-	if (!id.IsValid()) return EntityHandle{};
-
-	// Look up the actual slot from the record — don't guess. PushEntities may have
-	// reused a tombstoned slot from an earlier chunk, so "last chunk, tail" is wrong.
-	EntityRecord record = reg->GetRecord(id);
-	if (!record.IsValid()) return id;
-
-	Archetype* arch     = record.Arch;
-	Chunk* chunk        = record.TargetChunk;
-	uint32_t localIndex = record.LocalIndex;
-
-	if (!arch || !chunk) return id;
-
-	// Build field name → array index map for this archetype
-	auto fieldMap = BuildFieldMap(arch);
-
-	// Build field array table for the write frame
-	void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
-
-	auto WriteEntity = [&]
+	return reg->CreateByClassID(classID, [&](EntityRecord& record, void** fieldArrayTable)
 	{
+		auto fieldMap       = BuildFieldMap(record.Arch);
+		uint32_t localIndex = record.LocalIndex;
+
 		// Zero-initialize all fields for this entity.
-		// Fields omitted from JSON must not contain garbage — an unnormalized
-		// quaternion (NaN/denorm) will crash Jolt's multiply operator.
-		for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
+		for (const auto& [fkey, fdesc] : record.Arch->ArchetypeFieldLayout)
 		{
 			size_t idx = fdesc.fieldSlotIndex;
 			if (!fieldArrayTable[idx]) continue;
-
 			auto* base = static_cast<uint8_t*>(fieldArrayTable[idx]);
 			std::memset(base + localIndex * fdesc.fieldSize, 0, fdesc.fieldSize);
 		}
 
 		// Apply component field values from JSON
 		const JsonValue* components = entityJson.Find("components");
-		if (!components || !components->IsObject()) return;
-
-		for (const auto& [compName, compFields] : components->AsObject())
+		if (components && components->IsObject())
 		{
-			if (!compFields.IsObject()) continue;
-
-			// Walk each field in this component's JSON
-			for (const auto& [fieldName, fieldVal] : compFields.AsObject())
+			for (const auto& [compName, compFields] : components->AsObject())
 			{
-				const FieldLookup* field = FindField(fieldMap, fieldName);
-				if (!field)
-				{
-					LOG_ENG_WARN_F("[EntityBuilder] Unknown field '%s.%s' on entity type '%s'",
-								   compName.c_str(), fieldName.c_str(), typeName.c_str());
-					continue;
-				}
+				if (!compFields.IsObject()) continue;
 
-				// Write the value into the field array at the entity's local index
-				auto* base = static_cast<uint8_t*>(fieldArrayTable[field->ArrayIndex]);
-				WriteFieldValue(base + localIndex * field->Size, field->Size, field->ValueType, fieldVal);
+				for (const auto& [fieldName, fieldVal] : compFields.AsObject())
+				{
+					const FieldLookup* field = FindField(fieldMap, fieldName);
+					if (!field)
+					{
+						LOG_ENG_WARN_F("[EntityBuilder] Unknown field '%s.%s' on entity type '%s'",
+									   compName.c_str(), fieldName.c_str(), typeName.c_str());
+						continue;
+					}
+
+					// Asset ref fields: string value → RegisterPendingCheckout,
+					// number value → raw write (legacy scene files store raw slot indices).
+					if (field->RefAssetType != AssetType::Invalid && fieldVal.IsString())
+					{
+						auto* fieldPtr = static_cast<uint32_t*>(fieldArrayTable[field->ArrayIndex]) + localIndex;
+						AssetRegistry::RegisterPendingCheckout(fieldPtr, TnxName(fieldVal.AsString().c_str()));
+					}
+					else
+					{
+						auto* base = static_cast<uint8_t*>(fieldArrayTable[field->ArrayIndex]);
+						WriteFieldValue(base + localIndex * field->Size, field->Size, field->ValueType, fieldVal);
+					}
+				}
 			}
 		}
 
@@ -234,15 +221,7 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 			auto* flagsArr       = static_cast<int32_t*>(fieldArrayTable[flagsField->ArrayIndex]);
 			flagsArr[localIndex] = spawnFlags;
 		}
-	};
-
-	arch->BuildFieldArrayTable(chunk, fieldArrayTable,
-							   reg->GetTemporalCache()->GetActiveWriteFrame(),
-							   reg->GetVolatileCache()->GetActiveWriteFrame());
-
-	WriteEntity();
-
-	return id;
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -398,6 +377,21 @@ size_t EntityBuilder::SpawnFromFile(Registry* reg, const char* filePath, bool bB
 {
 	// Use the full recursive path so top-level loads also participate in cycle detection.
 	return SpawnFromAssetJSON(reg, filePath, nullptr, bBackground);
+}
+
+EntityHandle EntityBuilder::SpawnEntityFromFile(Registry* reg, const char* filePath, bool bBackground)
+{
+	JsonValue assetJson = LoadAssetJSON(filePath);
+	if (assetJson.IsNull()) return EntityHandle{};
+
+	// Only handle single-entity prefabs — scenes and construct prefabs are not valid here.
+	if (!assetJson.Find("type") || assetJson.Find("entities"))
+	{
+		LOG_ENG_WARN_F("[EntityBuilder] SpawnEntityFromFile: '%s' is not a single-entity prefab", filePath);
+		return EntityHandle{};
+	}
+
+	return SpawnEntity(reg, assetJson, bBackground);
 }
 
 // ---------------------------------------------------------------------------

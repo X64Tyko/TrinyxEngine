@@ -2,6 +2,7 @@
 
 #include "AssetRegistry.h"
 #include "Json.h"
+#include "Logger.h"
 #include "Types.h"
 #include <string>
 #include <vector>
@@ -54,6 +55,26 @@ struct EntityBuilder
 		if (path.empty()) return 0;
 		return SpawnFromFile(reg, path.c_str(), bBackground);
 	}
+
+	// Typed prefab spawn — loads a single-entity prefab from an AssetID and creates
+	// an entity of type TEntity. Asset-ref fields stored as strings are wired through
+	// the checkout system. Use from ConstructView::Initialize(owner, assetID).
+	template <template <FieldWidth> class TEntity>
+	static EntityHandle SpawnTyped(Registry* reg, AssetID prefabID, bool bBackground = false)
+	{
+		std::string path = AssetRegistry::Get().ResolvePath(prefabID);
+		if (path.empty())
+		{
+			LOG_ENG_ERROR_F("[EntityBuilder] SpawnTyped: AssetID not found in registry (raw=%lld)",
+							static_cast<long long>(prefabID.Raw));
+			return EntityHandle{};
+		}
+		return SpawnEntityFromFile(reg, path.c_str(), bBackground);
+	}
+
+	// Load a single-entity prefab from a file path and spawn it.
+	// Returns an invalid handle if the file is a scene or construct prefab.
+	static EntityHandle SpawnEntityFromFile(Registry* reg, const char* filePath, bool bBackground = false);
 
 	// --- Scene metadata ---
 

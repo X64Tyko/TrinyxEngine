@@ -45,6 +45,39 @@ struct SchemaComponentTypes<SchemaDefinition<Ptrs...>>
 template <typename T>
 struct EntityComponentsOf;
 
+// -----------------------------------------------------------------------
+// Asset-ref concepts — used by Registry::Create<T> and Checkout wiring
+// -----------------------------------------------------------------------
+
+// True if a component type declares FieldRefTypes and at least one entry
+// is a valid asset reference (not AssetType::Invalid).
+template <typename T>
+constexpr bool ComponentHasAssetRefsV = false;
+
+template <typename T>
+	requires requires { T::FieldRefTypes; }
+constexpr bool ComponentHasAssetRefsV<T> = []()
+{
+	for (auto t : T::FieldRefTypes) if (t != AssetType::Invalid) return true;
+	return false;
+}();
+
+template <typename T>
+concept ComponentHasAssetRefs = ComponentHasAssetRefsV<T>;
+
+// True for a std::tuple<Cs...> if any Cs has asset refs.
+template <typename TupleT>
+constexpr bool TupleHasAssetRefsV = false;
+
+template <typename... Cs>
+constexpr bool TupleHasAssetRefsV<std::tuple<Cs...>> = (ComponentHasAssetRefsV<Cs> || ...);
+
+// True if the entity type (scalar instantiation) has at least one component
+// with asset references, as determined by EntityComponentsOf.
+template <typename T>
+concept EntityHasAssetRefs = requires { typename EntityComponentsOf<T>::Type; }
+	&& TupleHasAssetRefsV<typename EntityComponentsOf<T>::Type>;
+
 template <typename Class>
 struct PrefabReflector
 {

@@ -10,6 +10,8 @@
 #include <string>
 
 #include "CacheSlotMeta.h"
+#include "TemporalComponentCache.h"
+#include "Registry.h"
 #include "World.h"
 
 // ---------------------------------------------------------------------------

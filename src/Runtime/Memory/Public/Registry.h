@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <vector>
 #include "Archetype.h"
+#include "AssetRegistry.h"
 #include "EntityRecord.h"
 #include "FlatMap.h"
 #include "ReflectionRegistry.h"
@@ -49,8 +50,16 @@ public:
 
 	template <typename T>
 	EntityHandle Create();
+	template <typename T, std::invocable<T&> Fn>
+	EntityHandle Create(Fn&& fn);
 	template <typename T>
 	std::vector<EntityHandle> Create(size_t count);
+
+	// Type-erased init-lambda create — used by EntityBuilder for runtime ClassID spawning.
+	// fn receives (record, fieldArrayTable) immediately after entity allocation; pending
+	// asset checkouts registered during fn are drained automatically before returning.
+	template <std::invocable<EntityRecord&, void**> Fn>
+	EntityHandle CreateByClassID(ClassID classID, Fn&& fn);
 
 	// Destroy + recreate at the same ClassID, reusing the handle slot
 	void Recreate(EntityHandle& inHandle);
@@ -260,6 +269,89 @@ EntityHandle Registry::Create()
 	GlobalEntityHandle GHandle;
 	CreateInternal(classID, {&GHandle, 1});
 	return MakeEntityHandle(GHandle, classID);
+}
+
+// Create<T>(fn) — entity creation with an init lambda.
+//
+// Hydrates a transient Scalar view bound to the entity's live slab slot, then calls
+// fn(view). Component assignment operators (e.g., CMeshRef::SetMesh, CMeshRef::operator=)
+// push to a thread-local pending checkout list during the lambda. After fn returns, all
+// pending checkouts are drained: OnLoaded/OnEvicted callbacks are bound with the field's
+// stable slab pointer as the context. The view is discarded after initialization.
+//
+// If any asset-ref fields remain at slot 0 after the lambda, a warning is logged per field.
+template <typename T, std::invocable<T&> Fn>
+EntityHandle Registry::Create(Fn&& fn)
+{
+	ClassID classID = T::StaticClassID();
+	GlobalEntityHandle GHandle;
+	CreateInternal(classID, {&GHandle, 1});
+	EntityHandle lHandle = MakeEntityHandle(GHandle, classID);
+
+	EntityRecord record = GetRecord(lHandle);
+	if (record.IsValid())
+	{
+		uint32_t temporalWrite = GetTemporalCache()->GetActiveWriteFrame();
+		uint32_t volatileWrite = GetVolatileCache()->GetActiveWriteFrame();
+
+		void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+		record.Arch->BuildFieldArrayTable(record.TargetChunk, fieldArrayTable, temporalWrite, volatileWrite);
+
+		T view;
+		view.Hydrate(fieldArrayTable, fieldArrayTable[0], record.LocalIndex);
+
+		fn(view);
+
+		// Warn about any asset-ref fields still at 0 (not set during the lambda)
+		for (const auto& [fkey, fdesc] : record.Arch->ArchetypeFieldLayout)
+		{
+			if (fdesc.refAssetType == AssetType::Invalid) continue;
+			auto* arr    = static_cast<uint32_t*>(fieldArrayTable[fdesc.fieldSlotIndex]);
+			uint32_t val = arr[record.LocalIndex];
+			if (val == 0) LOG_ENG_WARN("Registry::Create - entity has an asset-ref field that was not initialized (consider using SetMesh/SetMaterial in your init lambda)");
+		}
+
+		AssetRegistry::Get().DrainPendingCheckouts();
+	}
+
+	return lHandle;
+}
+
+// CreateByClassID(classID, fn) — type-erased init-lambda create.
+//
+// Allocates an entity by runtime ClassID, builds the field array table, and invokes
+// fn(record, fieldArrayTable). The caller (e.g. EntityBuilder) can write raw field data
+// and call RegisterPendingCheckout for asset-ref fields. Pending checkouts are drained
+// after fn returns. Asset-ref fields still at 0 emit a warning.
+template <std::invocable<EntityRecord&, void**> Fn>
+EntityHandle Registry::CreateByClassID(ClassID classID, Fn&& fn)
+{
+	GlobalEntityHandle GHandle;
+	CreateInternal(classID, {&GHandle, 1});
+	EntityHandle lHandle = MakeEntityHandle(GHandle, classID);
+
+	EntityRecord record = GetRecord(lHandle);
+	if (record.IsValid())
+	{
+		void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+		record.Arch->BuildFieldArrayTable(record.TargetChunk, fieldArrayTable,
+										  GetTemporalCache()->GetActiveWriteFrame(),
+										  GetVolatileCache()->GetActiveWriteFrame());
+
+		fn(record, fieldArrayTable);
+
+		for (const auto& [fkey, fdesc] : record.Arch->ArchetypeFieldLayout)
+		{
+			if (fdesc.refAssetType == AssetType::Invalid) continue;
+			auto* arr    = static_cast<uint32_t*>(fieldArrayTable[fdesc.fieldSlotIndex]);
+			uint32_t val = arr[record.LocalIndex];
+			if (val == 0) LOG_ENG_WARN("Registry::CreateByClassID - entity has an asset-ref field that was not initialized");
+		}
+
+		AssetRegistry::Get().DrainPendingCheckouts();
+	}
+
+	return lHandle;
 }
 
 template <typename T>

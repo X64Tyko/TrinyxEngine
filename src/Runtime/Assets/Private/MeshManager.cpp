@@ -186,6 +186,8 @@ uint32_t MeshManager::CommitToSlot(const MeshAsset& asset, AssetID id)
 		{
 			entry->Data  = reinterpret_cast<void*>(static_cast<uintptr_t>(slotID));
 			entry->State = RuntimeFlags::Loaded;
+			entry->OnLoaded(slotID);
+			entry->OnLoaded.Reset();
 		}
 	}
 

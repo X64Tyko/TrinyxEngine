@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Archetype.h"
+#include "EntityBuilder.h"
 #include "EntityView.h"
 #include "Registry.h"
 
@@ -48,6 +49,46 @@ public:
 		Reg->BindOnCacheSlotChange<Self, &Self::OnCacheSlotChanged>(Handle, this);
 
 		// Auto-register with owning Construct
+		owner->RegisterView({
+			this,
+			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); },
+			[](void* ptr) -> EntityHandle { return static_cast<Self*>(ptr)->GetEntityHandle(); }
+		});
+	}
+
+	// Initialize with an init lambda — asset checkouts are drained after fn returns.
+	template <typename TConstruct, std::invocable<TEntityView&> Fn>
+	void Initialize(TConstruct* owner, Fn&& fn)
+	{
+		Reg         = owner->GetRegistry();
+		Handle      = Reg->Create<TEntity<FieldWidth::Scalar>>(std::forward < Fn > (fn));
+		bOwnsEntity = true;
+		RehydrateCursors();
+		this->SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive);
+
+		using Self = ConstructView;
+		Reg->BindOnCacheSlotChange<Self, &Self::OnCacheSlotChanged>(Handle, this);
+
+		owner->RegisterView({
+			this,
+			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); },
+			[](void* ptr) -> EntityHandle { return static_cast<Self*>(ptr)->GetEntityHandle(); }
+		});
+	}
+
+	// Initialize from a prefab AssetID — loads JSON, applies fields, wires asset checkouts.
+	template <typename TConstruct>
+	void Initialize(TConstruct* owner, AssetID prefabID)
+	{
+		Reg         = owner->GetRegistry();
+		Handle      = EntityBuilder::SpawnTyped<TEntity>(Reg, prefabID);
+		bOwnsEntity = true;
+		RehydrateCursors();
+		this->SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive);
+
+		using Self = ConstructView;
+		Reg->BindOnCacheSlotChange<Self, &Self::OnCacheSlotChanged>(Handle, this);
+
 		owner->RegisterView({
 			this,
 			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); },

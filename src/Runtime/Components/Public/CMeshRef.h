@@ -1,6 +1,7 @@
 #pragma once
 #include "ComponentView.h"
 #include "SchemaReflector.h"
+#include "AssetRegistry.h"
 
 // MeshRef component — render mesh and material references.
 // Cold: stored in archetype chunks (AoS). Set at spawn, rarely changes.
@@ -26,6 +27,46 @@ struct CMeshRef : ComponentView<CMeshRef, WIDTH>
 	};
 
 	TNX_VOLATILE_FIELDS(CMeshRef, Render, MeshID, MaterialID, LODCount, CastShadow)
+
+	// --- Init-lambda assignment API (Scalar only) ---
+
+	// Checks out MeshID and, if the entry has a DefaultMaterial, a conditional MaterialID checkout.
+	void SetMesh(TnxName name) requires (WIDTH == FieldWidth::Scalar)
+	{
+		const AssetEntry* entry = AssetRegistry::Get().FindByTName(name);
+		if (!entry)
+		{
+			LOG_ENG_WARN_F("CMeshRef::SetMesh - mesh '%s' not found in asset registry", name.GetStr());
+			return;
+		}
+
+		AssetRegistry::RegisterPendingCheckout(&MeshID.WriteArray[MeshID.index], name);
+
+		if (entry->DefaultMaterial.Value != 0) AssetRegistry::RegisterPendingCheckout(&MaterialID.WriteArray[MaterialID.index], entry->DefaultMaterial, true);
+	}
+
+	// Checks out MaterialID only.
+	void SetMaterial(TnxName name) requires (WIDTH == FieldWidth::Scalar)
+	{
+		AssetRegistry::RegisterPendingCheckout(&MaterialID.WriteArray[MaterialID.index], name);
+	}
+
+	// Dispatches to SetMesh or SetMaterial based on the catalogued asset type.
+	CMeshRef& operator=(TnxName name) requires (WIDTH == FieldWidth::Scalar)
+	{
+		const AssetEntry* entry = AssetRegistry::Get().FindByTName(name);
+		if (!entry)
+		{
+			LOG_ENG_WARN_F("CMeshRef::operator= - asset '%s' not found in asset registry", name.GetStr());
+			return *this;
+		}
+
+		if (entry->Type == AssetType::StaticMesh || entry->Type == AssetType::SkeletalMesh) SetMesh(name);
+		else if (entry->Type == AssetType::Material) SetMaterial(name);
+		else LOG_ENG_WARN_F("CMeshRef::operator= - asset '%s' is not a mesh or material (type: %s)", name.GetStr(), AssetTypeName(entry->Type));
+
+		return *this;
+	}
 };
 
 TNX_REGISTER_COMPONENT(CMeshRef)

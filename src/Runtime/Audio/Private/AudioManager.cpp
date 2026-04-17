@@ -111,6 +111,8 @@ uint32_t AudioManager::CommitToSlot(SoundAsset* asset, AssetID id, bool bPinned)
 		{
 			e->Data  = reinterpret_cast<void*>(static_cast<uintptr_t>(slotID));
 			e->State = RuntimeFlags::Loaded;
+			e->OnLoaded(slotID);
+			e->OnLoaded.Reset();
 		}
 	}
 

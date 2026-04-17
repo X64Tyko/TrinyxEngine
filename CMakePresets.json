@@ -70,6 +70,19 @@
       }
     },
     {
+      "name": "headless",
+      "displayName": "Headless | Dedicated Server | Linux",
+      "inherits": "linux",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "TNX_HEADLESS": "ON",
+        "TNX_ENABLE_NETWORK": "ON",
+        "TNX_ENABLE_EDITOR": "OFF",
+        "TNX_ENABLE_ROLLBACK": "OFF",
+        "ENABLE_TRACY": "OFF"
+      }
+    },
+    {
       "name": "release-windows",
       "displayName": "Release | Windows",
       "inherits": "windows",
