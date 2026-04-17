@@ -27,6 +27,13 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang>:-Wl,--no-whole-archive>
 )
 
+# Force all Trinyx .obj files to be included so that static initializers in
+# entity .cpp files (TNX_DEFINE_ENTITY) actually run. Without this, MSVC's
+# /OPT:REF strips translation units that only contain internal-linkage statics.
+target_link_options(${PROJECT_NAME} PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/WHOLEARCHIVE:$<TARGET_FILE:Trinyx>>
+)
+
 # Project directory for INI config discovery (source dir, not build dir)
 target_compile_definitions(${PROJECT_NAME} PRIVATE
         TNX_PROJECT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"

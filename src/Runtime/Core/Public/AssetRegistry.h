@@ -116,8 +116,7 @@ public:
 	void Register(const AssetID& id, const std::string& name, const std::string& path,
 				  AssetType type, uint32_t schemaVersion = 0, AssetFlags flags = AssetFlags::None)
 	{
-		int64_t uuid        = id.GetUUID();
-		AssetEntry& entry   = Entries[uuid];
+		AssetEntry& entry   = Entries[id];
 		entry.ID            = id;
 		entry.Name          = TnxName(name.c_str());
 		entry.Path          = path;
@@ -126,20 +125,20 @@ public:
 		entry.Flags         = flags;
 		entry.State         = RuntimeFlags::None;
 
-		if (!name.empty()) NameIndex[entry.Name.Value] = uuid;
+		if (!name.empty()) NameIndex[entry.Name.Value] = id;
 	}
 
 	// --- Lookup ---
-	const AssetEntry* Find(const AssetID& id) const
+	FORCE_INLINE const AssetEntry* Find(const AssetID& id) const
 	{
-		return FindByUUID(ResolveAlias(id.GetUUID()));
+		return FindInternal(ResolveAlias(id));
 	}
 
 	// Primary name lookup — O(1) hash compare.
 	const AssetEntry* FindByTName(TnxName name) const
 	{
 		auto it = NameIndex.find(name.Value);
-		return it != NameIndex.end() ? FindByUUID(it->second) : nullptr;
+		return it != NameIndex.end() ? Find(it->second) : nullptr;
 	}
 
 	// String shim — hashes at call time, delegates to FindByTName.
@@ -150,7 +149,7 @@ public:
 
 	AssetEntry* FindMutable(const AssetID& id)
 	{
-		return FindMutableByUUID(ResolveAlias(id.GetUUID()));
+		return FindMutableByID(ResolveAlias(id));
 	}
 
 	// --- State queries ---
@@ -245,7 +244,7 @@ public:
 		auto it      = SlotIndex.find(key);
 		if (it == SlotIndex.end()) return;
 
-		AssetEntry* e = FindMutableByUUID(it->second);
+		AssetEntry* e = FindMutableByID(it->second);
 		if (!e) return;
 
 		e->OnLoaded.UnbindByContext(bindCtx);
@@ -254,11 +253,11 @@ public:
 	}
 
 	// Called by asset managers (MeshManager, AudioManager) when a slot is committed.
-	// Registers the (type, slot) → UUID reverse mapping used by CheckinBySlot.
+	// Registers the (type, slot) → EntryKey reverse mapping used by CheckinBySlot.
 	void RegisterSlot(AssetType type, uint32_t slot, const AssetID& id)
 	{
 		uint64_t key   = (static_cast<uint64_t>(type) << 32) | slot;
-		SlotIndex[key] = id.GetUUID();
+		SlotIndex[key] = id;
 	}
 
 	// Called on eviction to remove the reverse mapping.
@@ -345,13 +344,13 @@ public:
 	}
 
 	// --- Alias ---
-	void AddAlias(int64_t fromUUID, int64_t toUUID)
+	void AddAlias(const AssetID& from, const AssetID& to)
 	{
-		AliasTable[fromUUID] = toUUID;
+		AliasTable[from] = to;
 	}
 
 	// --- Iteration (editor Content Browser, debug) ---
-	const std::unordered_map<int64_t, AssetEntry>& GetAllEntries() const { return Entries; }
+	const std::unordered_map<AssetID, AssetEntry, AssetIDHash>& GetAllEntries() const { return Entries; }
 
 	// --- Bulk operations ---
 	void Clear()
@@ -376,21 +375,21 @@ private:
 		return tl_Pending;
 	}
 
-	int64_t ResolveAlias(int64_t uuid) const
+	FORCE_INLINE AssetID ResolveAlias(const AssetID& key) const
 	{
-		auto it = AliasTable.find(uuid);
-		return it != AliasTable.end() ? it->second : uuid;
+		auto it = AliasTable.find(key);
+		return it != AliasTable.end() ? it->second : key;
 	}
 
-	const AssetEntry* FindByUUID(int64_t uuid) const
+	FORCE_INLINE const AssetEntry* FindInternal(const AssetID& key) const
 	{
-		auto it = Entries.find(uuid);
+		auto it = Entries.find(key);
 		return it != Entries.end() ? &it->second : nullptr;
 	}
 
-	AssetEntry* FindMutableByUUID(int64_t uuid)
+	FORCE_INLINE AssetEntry* FindMutableByID(const AssetID& key)
 	{
-		auto it = Entries.find(uuid);
+		auto it = Entries.find(key);
 		return it != Entries.end() ? &it->second : nullptr;
 	}
 
@@ -400,8 +399,8 @@ private:
 	}
 
 	std::string ContentRoot;
-	std::unordered_map<int64_t, int64_t> AliasTable;
-	std::unordered_map<int64_t, AssetEntry> Entries;
-	std::unordered_map<uint32_t, int64_t> NameIndex; // TnxName hash → UUID
-	std::unordered_map<uint64_t, int64_t> SlotIndex; // (type<<32|slot) → UUID
+	std::unordered_map<AssetID, AssetID, AssetIDHash> AliasTable;
+	std::unordered_map<AssetID, AssetEntry, AssetIDHash> Entries;
+	std::unordered_map<uint32_t, AssetID> NameIndex; // TnxName hash → AssetID
+	std::unordered_map<uint64_t, AssetID> SlotIndex; // (type<<32|slot) → AssetID
 };

@@ -117,7 +117,6 @@ private:
 
 	std::string ContentRoot;
 	std::vector<AssetDatabaseEntry> Entries;
-	std::unordered_map<int64_t, size_t> UUIDIndex;     // UUID -> Entries index
 	std::unordered_map<std::string, size_t> PathIndex; // relative path -> Entries index
 
 	// Per-type monotonic counters for structured UUID generation.

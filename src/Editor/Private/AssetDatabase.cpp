@@ -57,21 +57,18 @@ std::string AssetDatabase::NameFromPath(const std::string& path)
 
 bool AssetDatabase::Rename(AssetID id, const std::string& newName)
 {
-	auto it = UUIDIndex.find(id.GetUUID());
-	if (it == UUIDIndex.end()) return false;
-
-	AssetDatabaseEntry& entry = Entries[it->second];
-	entry.Name                = newName;
-
-	// Update runtime registry
-	AssetRegistry& registry = AssetRegistry::Get();
-	AssetEntry* rtEntry     = registry.FindMutable(entry.ID);
-	if (rtEntry)
+	for (auto& entry : Entries)
 	{
-		rtEntry->Name = TnxName(newName.c_str());
-	}
+		if (entry.ID != id) continue;
 
-	return true;
+		entry.Name = newName;
+
+		AssetEntry* rtEntry = AssetRegistry::Get().FindMutable(id);
+		if (rtEntry) rtEntry->Name = TnxName(newName.c_str());
+
+		return true;
+	}
+	return false;
 }
 
 uint64_t AssetDatabase::HashFileContents(const char* filePath)
@@ -166,12 +163,11 @@ void AssetDatabase::Reconcile()
 			// Sidecar exists — validate content
 			uint64_t currentHash = HashFileContents(absPath.c_str());
 
-			// Find by UUID in our database
-			auto uuidIt = UUIDIndex.find(sc.UUID);
-			if (uuidIt != UUIDIndex.end())
+			auto pathIt = PathIndex.find(relPath);
+			if (pathIt != PathIndex.end())
 			{
-				// Known asset — check for content changes or path moves
-				size_t idx = uuidIt->second;
+				// Known asset — check for content changes
+				size_t idx = pathIt->second;
 				seen[idx]  = true;
 
 				AssetDatabaseEntry& entry = Entries[idx];
@@ -206,8 +202,7 @@ void AssetDatabase::Reconcile()
 
 				size_t idx = Entries.size();
 				Entries.push_back(entry);
-				UUIDIndex[entry.ID.GetUUID()] = idx;
-				PathIndex[relPath]            = idx;
+				PathIndex[relPath] = idx;
 				seen.push_back(true);
 
 				LOG_ENG_INFO_F("[AssetDB] Re-registered: %s", relPath.c_str());
@@ -245,8 +240,7 @@ void AssetDatabase::Reconcile()
 
 			size_t idx = Entries.size();
 			Entries.push_back(entry);
-			UUIDIndex[entry.ID.GetUUID()] = idx;
-			PathIndex[relPath]            = idx;
+			PathIndex[relPath] = idx;
 			seen.push_back(true);
 
 			LOG_ENG_INFO_F("[AssetDB] New asset imported: %s (UUID: %lld)", relPath.c_str(),
@@ -324,7 +318,6 @@ bool AssetDatabase::Load()
 	if (!assets || !assets->IsArray()) return false;
 
 	Entries.clear();
-	UUIDIndex.clear();
 	PathIndex.clear();
 
 	for (auto& item : assets->AsArray())
@@ -350,8 +343,7 @@ bool AssetDatabase::Load()
 
 		size_t idx = Entries.size();
 		Entries.push_back(entry);
-		UUIDIndex[entry.ID.GetUUID()] = idx;
-		PathIndex[entry.Path]         = idx;
+		PathIndex[entry.Path] = idx;
 	}
 
 	// Load per-type counters
@@ -379,8 +371,9 @@ bool AssetDatabase::Load()
 
 const AssetDatabaseEntry* AssetDatabase::FindByID(AssetID id) const
 {
-	auto it = UUIDIndex.find(id.GetUUID());
-	return it != UUIDIndex.end() ? &Entries[it->second] : nullptr;
+	for (const auto& entry : Entries)
+		if (entry.ID == id) return &entry;
+	return nullptr;
 }
 
 const AssetDatabaseEntry* AssetDatabase::FindByPath(const std::string& relativePath) const
