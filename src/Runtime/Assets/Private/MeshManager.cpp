@@ -128,10 +128,11 @@ bool MeshManager::Initialize(VulkanMemory* vkMem)
 }
 
 // -----------------------------------------------------------------------
-// RegisterMesh
+// CommitToSlot — internal; copies geometry into mega-buffers and updates
+// AssetRegistry Data/State. Does NOT call Register() — caller owns that.
 // -----------------------------------------------------------------------
 
-uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& name, AssetID id)
+uint32_t MeshManager::CommitToSlot(const MeshAsset& asset, AssetID id)
 {
 	if (MeshCount >= MAX_MESH_SLOTS)
 	{
@@ -153,7 +154,6 @@ uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& na
 		return UINT32_MAX;
 	}
 
-	// Copy data into mega-buffers
 	auto* vertDst = static_cast<uint8_t*>(VertexMegaBuffer.MappedPtr)
 		+ NextVertexOffset * sizeof(Vertex);
 	auto* idxDst = static_cast<uint8_t*>(IndexMegaBuffer.MappedPtr)
@@ -162,7 +162,6 @@ uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& na
 	std::memcpy(vertDst, asset.Vertices.data(), vertBytes);
 	std::memcpy(idxDst, asset.Indices.data(), indexBytes);
 
-	// Fill slot
 	uint32_t slotID   = MeshCount++;
 	SlotIDs[slotID]   = id;
 	MeshSlot& slot    = Slots[slotID];
@@ -172,7 +171,6 @@ uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& na
 	std::memcpy(slot.AABBMin, asset.AABBMin, sizeof(float) * 3);
 	std::memcpy(slot.AABBMax, asset.AABBMax, sizeof(float) * 3);
 
-	// Update GPU-side mesh table
 	auto* gpuTable                = static_cast<GpuMeshInfo*>(MeshTableBuffer.MappedPtr);
 	gpuTable[slotID].FirstIndex   = slot.FirstIndex;
 	gpuTable[slotID].IndexCount   = slot.IndexCount;
@@ -182,12 +180,8 @@ uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& na
 	NextVertexOffset += static_cast<uint32_t>(asset.Vertices.size());
 	NextIndexOffset  += static_cast<uint32_t>(asset.Indices.size());
 
-	// Register into AssetRegistry as the name/ID authority.
-	// Data stores the slot index so FindSlotByName/FindSlotByID can resolve without
-	// maintaining a parallel map here.
 	if (id.IsValid())
 	{
-		AssetRegistry::Get().Register(id, name, {}, AssetType::StaticMesh);
 		if (AssetEntry* entry = AssetRegistry::Get().FindMutable(id))
 		{
 			entry->Data  = reinterpret_cast<void*>(static_cast<uintptr_t>(slotID));
@@ -195,16 +189,74 @@ uint32_t MeshManager::RegisterMesh(const MeshAsset& asset, const std::string& na
 		}
 	}
 
-	LOG_ENG_INFO_F("[MeshManager] Registered mesh slot %u (%zu verts, %zu indices)",
-				   slotID, asset.Vertices.size(), asset.Indices.size());
 	return slotID;
 }
 
 // -----------------------------------------------------------------------
-// RegisterBuiltinCube — always slot 0
+// LoadMesh
 // -----------------------------------------------------------------------
 
-uint32_t MeshManager::RegisterBuiltinCube()
+uint32_t MeshManager::LoadMesh(const MeshAsset& asset, const std::string& name, AssetID id)
+{
+	// Register into AssetRegistry as the name/ID authority before committing the slot.
+	// CommitToSlot only updates Data/State — it does not touch the name.
+	if (id.IsValid()) AssetRegistry::Get().Register(id, name, {}, AssetType::StaticMesh);
+
+	uint32_t slotID = CommitToSlot(asset, id);
+
+	if (slotID != UINT32_MAX)
+		LOG_ENG_INFO_F("[MeshManager] Loaded mesh slot %u '%s' (%zu verts, %zu indices)",
+					   slotID, name.empty() ? "(unnamed)" : name.c_str(),
+					   asset.Vertices.size(), asset.Indices.size());
+	return slotID;
+}
+
+uint32_t MeshManager::LoadMesh(AssetID id)
+{
+	// If already loaded, return existing slot.
+	uint32_t slot = FindSlotByID(id);
+	if (slot != UINT32_MAX) return slot;
+
+	const AssetEntry* entry = AssetRegistry::Get().Find(id);
+	if (!entry || entry->Type != AssetType::StaticMesh)
+	{
+		LOG_ENG_ERROR("[MeshManager] LoadMesh: AssetID not in registry");
+		return UINT32_MAX;
+	}
+
+	std::string path = AssetRegistry::Get().ResolvePath(id);
+	if (path.empty())
+	{
+		LOG_ENG_ERROR("[MeshManager] LoadMesh: no resolvable path for AssetID");
+		return UINT32_MAX;
+	}
+
+	MeshAsset asset;
+	if (!LoadMeshAsset(asset, path))
+	{
+		LOG_ENG_ERROR_F("[MeshManager] LoadMesh: failed to decode '%s'", path.c_str());
+		return UINT32_MAX;
+	}
+
+	return CommitToSlot(asset, id);
+}
+
+uint32_t MeshManager::LoadMesh(TnxName name)
+{
+	const AssetEntry* entry = AssetRegistry::Get().FindByTName(name);
+	if (!entry || entry->Type != AssetType::StaticMesh)
+	{
+		LOG_ENG_ERROR_F("[MeshManager] LoadMesh: TnxName '%s' not in registry", name.GetStr());
+		return UINT32_MAX;
+	}
+	return LoadMesh(entry->ID);
+}
+
+// -----------------------------------------------------------------------
+// LoadBuiltinCube — always slot 0
+// -----------------------------------------------------------------------
+
+uint32_t MeshManager::LoadBuiltinCube()
 {
 	MeshAsset cube;
 	cube.Vertices.assign(BuiltinCube::Vertices,
@@ -218,14 +270,14 @@ uint32_t MeshManager::RegisterBuiltinCube()
 	cube.AABBMax[1] = 0.5f;
 	cube.AABBMax[2] = 0.5f;
 
-	return RegisterMesh(cube, "Cube", BuiltinMesh::CubeID());
+	return LoadMesh(cube, "Cube", BuiltinMesh::CubeID());
 }
 
 // -----------------------------------------------------------------------
-// RegisterBuiltinCapsule — procedural capsule (two hemispheres + cylinder)
+// LoadBuiltinCapsule — procedural capsule (two hemispheres + cylinder)
 // -----------------------------------------------------------------------
 
-uint32_t MeshManager::RegisterBuiltinCapsule(float radius, float halfHeight, uint32_t segments)
+uint32_t MeshManager::LoadBuiltinCapsule(float radius, float halfHeight, uint32_t segments)
 {
 	constexpr float PI = 3.14159265358979323846f;
 
@@ -353,5 +405,5 @@ uint32_t MeshManager::RegisterBuiltinCapsule(float radius, float halfHeight, uin
 	capsule.AABBMax[1] = halfHeight + radius;
 	capsule.AABBMax[2] = radius;
 
-	return RegisterMesh(capsule, "Capsule", BuiltinMesh::CapsuleID());
+	return LoadMesh(capsule, "Capsule", BuiltinMesh::CapsuleID());
 }

@@ -62,16 +62,22 @@ public:
 
 	bool Initialize(VulkanMemory* vkMem);
 
-	/// Register a MeshAsset — copies vertex/index data into the mega-buffers,
-	/// then registers name/ID into AssetRegistry (Data = slot index).
+	/// Load a MeshAsset — copies vertex/index data into the mega-buffers,
+	/// then records name/ID in AssetRegistry (Data = slot index).
 	/// Returns the slot ID, or UINT32_MAX on failure.
-	uint32_t RegisterMesh(const MeshAsset& asset, const std::string& name = {}, AssetID id = {});
+	uint32_t LoadMesh(const MeshAsset& asset, const std::string& name = {}, AssetID id = {});
 
-	/// Register the built-in cube mesh as slot 0.
-	uint32_t RegisterBuiltinCube();
+	/// Resolve by AssetID from AssetRegistry, decode from disk, and load.
+	uint32_t LoadMesh(AssetID id);
 
-	/// Register a built-in capsule mesh (two hemispheres + cylinder body).
-	uint32_t RegisterBuiltinCapsule(float radius, float halfHeight, uint32_t segments);
+	/// Resolve by TnxName from AssetRegistry, decode from disk, and load.
+	uint32_t LoadMesh(TnxName name);
+
+	/// Load the built-in cube mesh as slot 0.
+	uint32_t LoadBuiltinCube();
+
+	/// Load a built-in capsule mesh (two hemispheres + cylinder body).
+	uint32_t LoadBuiltinCapsule(float radius, float halfHeight, uint32_t segments);
 
 	uint64_t GetVertexBufferAddr() const { return VertexMegaBuffer.DeviceAddr; }
 	VkBuffer GetIndexBufferHandle() const { return static_cast<VkBuffer>(IndexMegaBuffer.Buffer); }
@@ -79,12 +85,18 @@ public:
 	const MeshSlot& GetSlot(uint32_t id) const { return Slots[id]; }
 	uint32_t GetMeshCount() const { return MeshCount; }
 
-	/// Find a mesh slot by display name. Returns UINT32_MAX if not registered.
-	uint32_t FindSlotByName(const std::string& name) const
+	/// Find a mesh slot by TnxName (primary API). Returns UINT32_MAX if not registered.
+	uint32_t FindSlotByTName(TnxName name) const
 	{
-		const AssetEntry* e = AssetRegistry::Get().FindByName(name);
+		const AssetEntry* e = AssetRegistry::Get().FindByTName(name);
 		if (!e || e->Type != AssetType::StaticMesh) return UINT32_MAX;
 		return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(e->Data));
+	}
+
+	/// Find a mesh slot by display name (string shim). Returns UINT32_MAX if not registered.
+	uint32_t FindSlotByName(const std::string& name) const
+	{
+		return FindSlotByTName(TnxName(name.c_str()));
 	}
 
 	/// Find a mesh slot by AssetID. Returns UINT32_MAX if not registered.
@@ -96,17 +108,20 @@ public:
 	}
 
 	/// Get the display name for a slot via AssetRegistry.
-	const std::string& GetSlotName(uint32_t slot) const
+	const char* GetSlotName(uint32_t slot) const
 	{
-		static const std::string empty;
-		if (slot >= MeshCount) return empty;
+		if (slot >= MeshCount) return "";
 		const AssetEntry* e = AssetRegistry::Get().Find(SlotIDs[slot]);
-		return e ? e->Name : empty;
+		return e ? e->Name.GetStr() : "";
 	}
 
 	AssetID GetSlotID(uint32_t slot) const { return SlotIDs[slot]; }
 
 private:
+	/// Copy asset data into mega-buffers, fill the slot, and update AssetRegistry Data/State.
+	/// Does NOT call Register() — caller is responsible for registration.
+	uint32_t CommitToSlot(const MeshAsset& asset, AssetID id);
+
 	VulkanBuffer VertexMegaBuffer;
 	VulkanBuffer IndexMegaBuffer;
 	VulkanBuffer MeshTableBuffer; // GpuMeshInfo[MAX_MESH_SLOTS], PersistentMapped + BDA

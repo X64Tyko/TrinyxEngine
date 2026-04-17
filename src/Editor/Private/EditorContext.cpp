@@ -13,6 +13,8 @@
 #include "ImGuizmo.h"
 #include "Logger.h"
 #include "LogicThread.h"
+#include "AudioAsset.h"
+#include "AudioManager.h"
 #include "MeshAsset.h"
 #include "MeshImporter.h"
 #include "MeshManager.h"
@@ -51,6 +53,9 @@ void EditorContext::Initialize(TrinyxEngine* engine, LogicThread* logic, MeshMan
 	EnginePtr = engine;
 	LogicPtr  = logic;
 	MeshMgr   = meshMgr;
+#ifndef TNX_HEADLESS
+	AudioMgr = engine->GetAudio();
+#endif
 
 	// Populate shared state pointers for panels
 	State.EnginePtr   = engine;
@@ -909,7 +914,7 @@ uint32_t EditorContext::ImportMeshAsset(const std::string& gltfPath)
 	const auto* dbEntry = AssetDB.FindByPath(relPath);
 	AssetID meshID      = dbEntry ? dbEntry->ID : AssetID{};
 
-	uint32_t slot = MeshMgr->RegisterMesh(asset, stem, meshID);
+	uint32_t slot = MeshMgr->LoadMesh(asset, stem, meshID);
 	if (slot != UINT32_MAX)
 	LOG_ENG_INFO_F("[Editor] Registered mesh '%s' at slot %u (AssetID: %lld)",
 				   stem.c_str(), slot, static_cast<long long>(meshID.GetUUID() >> 8));
@@ -939,7 +944,7 @@ void EditorContext::LoadAllMeshAssets()
 			continue;
 		}
 
-		uint32_t slot = MeshMgr->RegisterMesh(asset, entry.Name, entry.ID);
+		uint32_t slot = MeshMgr->LoadMesh(asset, entry.Name, entry.ID);
 		if (slot != UINT32_MAX)
 			LOG_ENG_INFO_F("[Editor] Loaded mesh '%s' → slot %u", entry.Path.c_str(), slot);
 	}
@@ -981,7 +986,7 @@ void EditorContext::HandleDroppedFile(const std::string& path)
 				AssetID dropID          = dropEntry ? dropEntry->ID : AssetID{};
 				std::string dropName    = dropEntry ? dropEntry->Name : p.stem().string();
 
-				uint32_t slot = MeshMgr->RegisterMesh(asset, dropName, dropID);
+				uint32_t slot = MeshMgr->LoadMesh(asset, dropName, dropID);
 				if (slot != UINT32_MAX)
 					LOG_ENG_INFO_F("[Editor] Loaded dropped mesh '%s' → slot %u", dropName.c_str(), slot);
 			}
@@ -991,6 +996,60 @@ void EditorContext::HandleDroppedFile(const std::string& path)
 	{
 		SpawnPrefab(path);
 	}
+#ifndef TNX_HEADLESS
+	else if (ext == ".wav" || ext == ".ogg")
+	{
+		// Convert source → .tnxaudio in content/. The source file is not copied.
+		if (AudioMgr && State.ConfigPtr)
+		{
+			std::string stem    = p.stem().string();
+			std::string outPath = std::string(State.ConfigPtr->ProjectDir)
+				+ "/content/" + stem + ".tnxaudio";
+
+			if (!ExportTnxAudio(path.c_str(), outPath.c_str()))
+			{
+				LOG_ENG_ERROR_F("[Editor] ExportTnxAudio failed for: %s", path.c_str());
+			}
+			else
+			{
+				AssetDB.Reconcile();
+
+				const auto* dbEntry = AssetDB.FindByPath(stem + ".tnxaudio");
+				AssetID audioID     = dbEntry ? dbEntry->ID : AssetID{};
+				std::string name    = dbEntry ? dbEntry->Name : stem;
+
+				uint32_t slot = AudioMgr->LoadSound(outPath.c_str(), name, audioID);
+				if (slot != UINT32_MAX)
+					LOG_ENG_INFO_F("[Editor] Imported audio '%s' → slot %u", name.c_str(), slot);
+				else
+					LOG_ENG_ERROR_F("[Editor] Failed to register imported audio: %s", outPath.c_str());
+			}
+		}
+	}
+	else if (ext == ".tnxaudio")
+	{
+		// Already engine format — copy to content/ and register.
+		if (AudioMgr && State.ConfigPtr)
+		{
+			std::string destPath = std::string(State.ConfigPtr->ProjectDir)
+				+ "/content/" + p.filename().string();
+			if (path != destPath) std::filesystem::copy_file(p, destPath, std::filesystem::copy_options::overwrite_existing);
+
+			AssetDB.Reconcile();
+
+			std::string stem    = p.stem().string();
+			const auto* dbEntry = AssetDB.FindByPath(p.filename().string());
+			AssetID audioID     = dbEntry ? dbEntry->ID : AssetID{};
+			std::string name    = dbEntry ? dbEntry->Name : stem;
+
+			uint32_t slot = AudioMgr->LoadSound(destPath.c_str(), name, audioID);
+			if (slot != UINT32_MAX)
+				LOG_ENG_INFO_F("[Editor] Loaded dropped .tnxaudio '%s' → slot %u", name.c_str(), slot);
+			else
+				LOG_ENG_ERROR_F("[Editor] Failed to load dropped .tnxaudio: %s", path.c_str());
+		}
+	}
+#endif
 	else
 	{
 		LOG_ENG_WARN_F("[Editor] Unsupported drop file type: %s", ext.c_str());

@@ -25,6 +25,7 @@ using NetThreadType = ClientNetThread;
 #include "VulkanContext.h"
 #include "VulkanMemory.h"
 #include "../../Rendering/Private/FramePacer.h"
+#include "AudioManager.h"
 #endif
 
 class RenderThread;
@@ -114,6 +115,7 @@ public:
 #ifndef TNX_HEADLESS
 	RendererType* GetRenderer() const { return Render.get(); }
 	SDL_Window* GetWindow() const { return EngineWindow; }
+	AudioManager* GetAudio() const { return Audio.get(); }
 #endif
 
 #ifdef TNX_ENABLE_NETWORK
@@ -181,6 +183,7 @@ private:
 	// --- Renderer (shared, reads from active world) ---
 #ifndef TNX_HEADLESS
 	std::unique_ptr<RendererType> Render;
+	std::unique_ptr<AudioManager> Audio;
 #endif
 
 	// --- Config ---

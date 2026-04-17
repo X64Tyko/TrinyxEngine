@@ -1198,17 +1198,17 @@ bool RendererCore<Derived>::CreateMeshBuffers()
 		return false;
 	}
 
-	uint32_t cubeSlot = Meshes.RegisterBuiltinCube();
+	uint32_t cubeSlot = Meshes.LoadBuiltinCube();
 	if (cubeSlot == UINT32_MAX)
 	{
-		LOG_ENG_ERROR("[Renderer] Failed to register built-in cube mesh");
+		LOG_ENG_ERROR("[Renderer] Failed to load built-in cube mesh");
 		return false;
 	}
 
-	uint32_t capsuleSlot = Meshes.RegisterBuiltinCapsule(0.4f, 0.9f, 16);
+	uint32_t capsuleSlot = Meshes.LoadBuiltinCapsule(0.4f, 0.9f, 16);
 	if (capsuleSlot == UINT32_MAX)
 	{
-		LOG_ENG_ERROR("[Renderer] Failed to register built-in capsule mesh");
+		LOG_ENG_ERROR("[Renderer] Failed to load built-in capsule mesh");
 		return false;
 	}
 

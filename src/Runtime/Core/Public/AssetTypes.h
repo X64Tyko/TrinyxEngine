@@ -168,6 +168,7 @@ inline AssetType AssetTypeFromExtension(const char* ext)
 	{
 		if (ext[3] == 's') return AssetType::Level;  // .tnxscene
 		if (ext[3] == 'p') return AssetType::Prefab; // .tnxprefab
+		if (ext[3] == 'a') return AssetType::Audio;  // .tnxaudio
 	}
 
 	// Common asset formats

@@ -239,24 +239,24 @@ void DetailsPanel::Draw(EditorState& state)
 						{
 							uint8_t* base                = static_cast<uint8_t*>(fieldArrayTable[idx]);
 							uint32_t* slotPtr            = reinterpret_cast<uint32_t*>(base + state.SelectedLocalIndex * fdesc.fieldSize);
-							uint32_t slotIdx             = *slotPtr;
-							const std::string& assetName = state.MeshMgrPtr->GetSlotName(slotIdx);
+							uint32_t slotIdx      = *slotPtr;
+							const char* assetName = state.MeshMgrPtr->GetSlotName(slotIdx);
 
 							ImGui::PushID(fieldName);
 
 							if (simPaused)
 							{
 								// Combo dropdown of available assets of this type
-								const char* preview = assetName.empty() ? "(none)" : assetName.c_str();
+								const char* preview = (!assetName || !*assetName) ? "(none)" : assetName;
 								ImGui::SetNextItemWidth(-1);
 								if (ImGui::BeginCombo("##asset", preview))
 								{
 									uint32_t meshCount = state.MeshMgrPtr->GetMeshCount();
 									for (uint32_t i = 0; i < meshCount; ++i)
 									{
-										const std::string& name = state.MeshMgrPtr->GetSlotName(i);
-										const char* label       = name.empty() ? "(unnamed)" : name.c_str();
-										bool selected           = (i == slotIdx);
+										const char* name  = state.MeshMgrPtr->GetSlotName(i);
+										const char* label = (!name || !*name) ? "(unnamed)" : name;
+										bool selected     = (i == slotIdx);
 										if (ImGui::Selectable(label, selected))
 										{
 											*slotPtr          = i;
@@ -284,7 +284,7 @@ void DetailsPanel::Draw(EditorState& state)
 							else
 							{
 								// Read-only name display when sim is running
-								if (!assetName.empty()) ImGui::Text("%s", assetName.c_str());
+								if (assetName && *assetName) ImGui::Text("%s", assetName);
 								else ImGui::Text("slot %u", slotIdx);
 							}
 

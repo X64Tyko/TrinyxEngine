@@ -19,6 +19,7 @@
 #include "TrinyxJobs.h"
 #include "World.h"
 #ifndef TNX_HEADLESS
+#include "AudioManager.h"
 #if TNX_ENABLE_EDITOR
 #include "EditorRenderer.h"
 #else
@@ -111,7 +112,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 
 		if (!SDL_WasInit(SDL_INIT_VIDEO))
 		{
-			if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS))
+			if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO))
 			{
 				std::cerr << "SDL_Init failed: " << SDL_GetError() << std::endl;
 				return false;
@@ -263,6 +264,10 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	DefaultWorld->GetLogicThread()->SetSimPaused(true); // Editor starts paused
 	Render->SetEngine(this);
 #endif
+
+	// ---- Audio -----------------------------------------------------------
+	Audio = std::make_unique<AudioManager>();
+	Audio->Initialize(Config.MaxAudioVoices);
 #endif // !TNX_HEADLESS
 
 	LOG_ENG_INFO("TrinyxEngine initialization complete");
@@ -351,6 +356,9 @@ void TrinyxEngine::RunMainLoop()
 	LastFrameCounter             = SDL_GetPerformanceCounter();
 
 	uint64_t sentinelFrameCount = 0;
+#ifndef TNX_HEADLESS
+	double audioAccum = 0.0;
+#endif
 
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
@@ -365,6 +373,18 @@ void TrinyxEngine::RunMainLoop()
 		if (Net) Net->Tick();
 #elif !defined(TNX_HEADLESS)
 		PumpEvents();
+
+		// Sentinel-driven audio update at AudioUpdateHz (accumulator, no busy-wait).
+		if (Audio)
+		{
+			audioAccum             += dt;
+			const double audioStep = 1.0 / std::max(1, Config.AudioUpdateHz);
+			while (audioAccum >= audioStep)
+			{
+				Audio->Update(static_cast<float>(audioStep));
+				audioAccum -= audioStep;
+			}
+		}
 #endif
 
 		// Tick the flow state machine — drives FlowState::Tick() on the active state
@@ -425,6 +445,8 @@ void TrinyxEngine::Shutdown()
 #ifndef TNX_HEADLESS
 	// Destroy thread objects BEFORE Vulkan teardown.
 	// RenderThread owns GPU resources that call vmaDestroy* in their destructors.
+	Audio->Shutdown();
+	Audio.reset();
 	Render.reset();
 #endif
 

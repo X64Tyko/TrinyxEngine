@@ -132,7 +132,13 @@ target_include_directories(${PROJECT_NAME} PUBLIC
         "${CMAKE_SOURCE_DIR}/src/Runtime/Construct/Public"
         "${CMAKE_SOURCE_DIR}/src/Runtime/Entities/Public"
         "${CMAKE_SOURCE_DIR}/src/Runtime/Flow/Public"
+        "${CMAKE_SOURCE_DIR}/src/Runtime/Audio/Public"
         "${CMAKE_SOURCE_DIR}/src/Editor/Public"
+)
+
+# stb_vorbis (single-header, no separate build step)
+target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
+        "${CMAKE_SOURCE_DIR}/libs/stb_vorbis"
 )
 
 # B. SDL3 - Platform specific

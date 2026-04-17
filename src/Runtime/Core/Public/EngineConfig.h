@@ -120,6 +120,13 @@ struct EngineConfig
 	int EngineLogLevel = Unset;
 	int GameLogLevel   = Unset;
 
+	// Audio — Sentinel update rate for the AudioManager (fade processing, stream refill).
+	// Decoupled from InputPollHz: 250Hz gives 4ms fade resolution at negligible CPU cost.
+	int AudioUpdateHz = Unset;
+
+	// Maximum simultaneous voices.  Exceeded voices are stolen by priority.
+	int MaxAudioVoices = Unset;
+
 	// --- Helpers ---
 	// These resolve Unset to compiled defaults for safe use.
 	double GetTargetFrameTime() const

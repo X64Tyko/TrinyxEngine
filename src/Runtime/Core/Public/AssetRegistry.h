@@ -1,5 +1,6 @@
 #pragma once
 #include "AssetTypes.h"
+#include "TnxName.h"
 
 #include <string>
 #include <unordered_map>
@@ -20,7 +21,7 @@
 struct AssetEntry
 {
 	AssetID ID;
-	std::string Name; // human-readable display name (e.g., "helmet", "FreeForAll")
+	TnxName Name;     // FNV1a hash + owned string — primary key in NameIndex
 	std::string Path; // relative to content root (runtime: pak-relative)
 	AssetType Type         = AssetType::Invalid;
 	AssetFlags Flags       = AssetFlags::None;
@@ -63,11 +64,17 @@ public:
 		return e ? ResolvePath(*e) : std::string{};
 	}
 
-	// Convenience: resolve by display name.
+	// Convenience: resolve by display name (TnxName).
+	std::string ResolvePathByTName(TnxName name) const
+	{
+		const AssetEntry* e = FindByTName(name);
+		return e ? ResolvePath(*e) : std::string{};
+	}
+
+	// Convenience: resolve by display name (string shim).
 	std::string ResolvePathByName(const std::string& name) const
 	{
-		const AssetEntry* e = FindByName(name);
-		return e ? ResolvePath(*e) : std::string{};
+		return ResolvePathByTName(TnxName(name.c_str()));
 	}
 
 	// --- Registration (editor/import pipeline) ---
@@ -77,14 +84,14 @@ public:
 		int64_t uuid        = id.GetUUID();
 		AssetEntry& entry   = Entries[uuid];
 		entry.ID            = id;
-		entry.Name          = name;
+		entry.Name          = TnxName(name.c_str());
 		entry.Path          = path;
 		entry.Type          = type;
 		entry.SchemaVersion = schemaVersion;
 		entry.Flags         = flags;
 		entry.State         = RuntimeFlags::None;
 
-		if (!name.empty()) NameIndex[name] = uuid;
+		if (!name.empty()) NameIndex[entry.Name.Value] = uuid;
 	}
 
 	// --- Lookup ---
@@ -93,10 +100,17 @@ public:
 		return FindByUUID(ResolveAlias(id.GetUUID()));
 	}
 
+	// Primary name lookup — O(1) hash compare.
+	const AssetEntry* FindByTName(TnxName name) const
+	{
+		auto it = NameIndex.find(name.Value);
+		return it != NameIndex.end() ? FindByUUID(it->second) : nullptr;
+	}
+
+	// String shim — hashes at call time, delegates to FindByTName.
 	const AssetEntry* FindByName(const std::string& name) const
 	{
-		auto it = NameIndex.find(name);
-		return it != NameIndex.end() ? FindByUUID(it->second) : nullptr;
+		return FindByTName(TnxName(name.c_str()));
 	}
 
 	AssetEntry* FindMutable(const AssetID& id)
@@ -212,5 +226,5 @@ private:
 	std::string ContentRoot;
 	std::unordered_map<int64_t, int64_t> AliasTable;
 	std::unordered_map<int64_t, AssetEntry> Entries;
-	std::unordered_map<std::string, int64_t> NameIndex; // display name → UUID
+	std::unordered_map<uint32_t, int64_t> NameIndex; // TnxName hash → UUID
 };

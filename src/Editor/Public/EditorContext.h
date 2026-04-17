@@ -14,6 +14,7 @@
 #include "WorldViewport.h"
 #include "imgui.h"
 
+class AudioManager;
 class EditorPanel;
 class FlowManager;
 class LogicThread;
@@ -173,5 +174,6 @@ private:
 	std::string FileDialogPath;
 	std::string ImportDialogPath;
 
-	MeshManager* MeshMgr = nullptr;
+	MeshManager* MeshMgr   = nullptr;
+	AudioManager* AudioMgr = nullptr;
 };

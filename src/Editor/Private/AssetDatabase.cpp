@@ -66,7 +66,10 @@ bool AssetDatabase::Rename(AssetID id, const std::string& newName)
 	// Update runtime registry
 	AssetRegistry& registry = AssetRegistry::Get();
 	AssetEntry* rtEntry     = registry.FindMutable(entry.ID);
-	if (rtEntry) rtEntry->Name = newName;
+	if (rtEntry)
+	{
+		rtEntry->Name = TnxName(newName.c_str());
+	}
 
 	return true;
 }

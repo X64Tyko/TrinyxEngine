@@ -92,6 +92,8 @@ static void FillFromFile(const char* path, EngineConfig& cfg)
 		else if (key == "DefaultState" && cfg.DefaultState[0] == '\0') snprintf(cfg.DefaultState, sizeof(cfg.DefaultState), "%s", val.c_str());
 		else if (key == "EngineLogLevel" && cfg.EngineLogLevel == EngineConfig::Unset) cfg.EngineLogLevel = ParseLogLevel(val);
 		else if (key == "GameLogLevel" && cfg.GameLogLevel == EngineConfig::Unset) cfg.GameLogLevel = ParseLogLevel(val);
+		else if (key == "AudioUpdateHz" && cfg.AudioUpdateHz == EngineConfig::Unset) cfg.AudioUpdateHz = std::stoi(val);
+		else if (key == "MaxAudioVoices" && cfg.MaxAudioVoices == EngineConfig::Unset) cfg.MaxAudioVoices = std::stoi(val);
 	}
 }
 
@@ -140,6 +142,8 @@ void EngineConfig::ApplyDefaults()
 	if (MAX_JOLT_BODIES == Unset) MAX_JOLT_BODIES = 11000;
 	if (TemporalFrameCount == Unset) TemporalFrameCount = 32;
 	if (JobCacheSize == Unset) JobCacheSize = 16 * 1024;
+	if (AudioUpdateHz == Unset) AudioUpdateHz = 250;
+	if (MaxAudioVoices == Unset) MaxAudioVoices = 64;
 }
 
 void EngineConfig::FillFrom(const EngineConfig& other)
@@ -158,6 +162,8 @@ void EngineConfig::FillFrom(const EngineConfig& other)
 
 	if (DefaultScene[0] == '\0' && other.DefaultScene[0] != '\0') snprintf(DefaultScene, sizeof(DefaultScene), "%s", other.DefaultScene);
 	if (DefaultState[0] == '\0' && other.DefaultState[0] != '\0') snprintf(DefaultState, sizeof(DefaultState), "%s", other.DefaultState);
+	if (AudioUpdateHz == Unset && other.AudioUpdateHz != Unset) AudioUpdateHz = other.AudioUpdateHz;
+	if (MaxAudioVoices == Unset && other.MaxAudioVoices != Unset) MaxAudioVoices = other.MaxAudioVoices;
 }
 
 EngineConfig EngineConfig::LoadProjectConfig(const char* projectDir)
