@@ -447,6 +447,11 @@ void AudioManager::Update(float dt)
 		}
 
 		// ---- Looping: refill when empty -------------------------------------
+		// TODO(streaming): this is whole-file refill — fine for SFX, not for music.
+		// Music needs chunked stb_vorbis decode pushed in Update() so the full PCM
+		// is never in RAM. SDL_GetAudioStreamQueued threshold + a per-voice read
+		// cursor is the hook point; the SoundAsset would carry a vorbis_file* instead
+		// of a decoded PCM vector for streaming assets.
 		if (SDL_GetAudioStreamQueued(v.Stream) == 0)
 		{
 			if (v.bLoop)
