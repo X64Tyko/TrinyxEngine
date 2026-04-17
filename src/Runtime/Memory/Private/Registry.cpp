@@ -1,4 +1,5 @@
 #include "Registry.h"
+#include "AssetRegistry.h"
 #include "CacheSlotMeta.h"
 #include "JoltPhysics.h"
 #include "Profiler.h"
@@ -370,6 +371,26 @@ void Registry::ProcessDeferredDestructions()
 
 		if (!Record->IsValid()) continue;
 		if (Record->GetGeneration() != GHandle.GetGeneration()) continue;
+
+		// Checkin any asset-ref fields before the slot is reclaimed.
+		{
+			void* FieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+			Record->Arch->BuildFieldArrayTable(
+				Record->TargetChunk, FieldArrayTable,
+				GetTemporalCache()->GetActiveWriteFrame(),
+				GetVolatileCache()->GetActiveWriteFrame());
+
+			for (auto& [key, fdesc] : Record->Arch->ArchetypeFieldLayout)
+			{
+				if (fdesc.refAssetType == AssetType::Invalid) continue;
+
+				auto* arr     = static_cast<uint32_t*>(FieldArrayTable[fdesc.fieldSlotIndex]);
+				uint32_t slot = arr[Record->LocalIndex];
+				if (slot == 0) continue;
+
+				AssetRegistry::Get().CheckinBySlot(fdesc.refAssetType, slot, &arr[Record->LocalIndex]);
+			}
+		}
 
 		if (DestroyRecord(*Record))
 		{

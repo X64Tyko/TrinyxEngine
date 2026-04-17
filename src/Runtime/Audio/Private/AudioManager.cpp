@@ -105,6 +105,10 @@ uint32_t AudioManager::CommitToSlot(SoundAsset* asset, AssetID id, bool bPinned)
 	Slots[slotID].bPinned = bPinned;
 	SlotIDs[slotID]       = id;
 
+	// Claim: register slot → UUID mapping immediately so CheckinBySlot can find
+	// a pending checkout even if the entity is despawned before data is ready.
+	if (id.IsValid()) AssetRegistry::Get().RegisterSlot(AssetType::Audio, slotID, id);
+
 	if (id.IsValid())
 	{
 		if (AssetEntry* e = AssetRegistry::Get().FindMutable(id))

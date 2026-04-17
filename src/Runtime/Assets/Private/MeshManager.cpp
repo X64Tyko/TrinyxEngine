@@ -164,6 +164,11 @@ uint32_t MeshManager::CommitToSlot(const MeshAsset& asset, AssetID id)
 
 	uint32_t slotID   = MeshCount++;
 	SlotIDs[slotID]   = id;
+
+	// Claim: register slot → UUID mapping immediately so CheckinBySlot can find
+	// a pending checkout even if the entity is despawned before data is ready.
+	if (id.IsValid()) AssetRegistry::Get().RegisterSlot(AssetType::StaticMesh, slotID, id);
+
 	MeshSlot& slot    = Slots[slotID];
 	slot.FirstIndex   = NextIndexOffset;
 	slot.IndexCount   = static_cast<uint32_t>(asset.Indices.size());

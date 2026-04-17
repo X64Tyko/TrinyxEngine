@@ -237,6 +237,37 @@ public:
 		if (e->PinCount > 0) --e->PinCount;
 	}
 
+	// O(1) checkin by (type, slot) — used by Registry::ProcessDeferredDestructions.
+	// Requires RegisterSlot to have been called when the asset was committed.
+	void CheckinBySlot(AssetType type, uint32_t slot, void* bindCtx)
+	{
+		uint64_t key = (static_cast<uint64_t>(type) << 32) | slot;
+		auto it      = SlotIndex.find(key);
+		if (it == SlotIndex.end()) return;
+
+		AssetEntry* e = FindMutableByUUID(it->second);
+		if (!e) return;
+
+		e->OnLoaded.UnbindByContext(bindCtx);
+		e->OnEvicted.UnbindByContext(bindCtx);
+		if (e->PinCount > 0) --e->PinCount;
+	}
+
+	// Called by asset managers (MeshManager, AudioManager) when a slot is committed.
+	// Registers the (type, slot) → UUID reverse mapping used by CheckinBySlot.
+	void RegisterSlot(AssetType type, uint32_t slot, const AssetID& id)
+	{
+		uint64_t key   = (static_cast<uint64_t>(type) << 32) | slot;
+		SlotIndex[key] = id.GetUUID();
+	}
+
+	// Called on eviction to remove the reverse mapping.
+	void UnregisterSlot(AssetType type, uint32_t slot)
+	{
+		uint64_t key = (static_cast<uint64_t>(type) << 32) | slot;
+		SlotIndex.erase(key);
+	}
+
 	// --- Init-lambda asset checkout ---
 	//
 	// Call RegisterPendingCheckout() from component assignment operators during an entity
@@ -285,6 +316,8 @@ public:
 		AssetEntry* e = FindMutable(id);
 		if (e && e->PinCount == 0 && e->Data)
 		{
+			uint32_t slot = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(e->Data));
+			UnregisterSlot(e->Type, slot);
 			e->OnEvicted();
 			e->OnLoaded.Reset();
 			// TODO: type-specific deallocation
@@ -300,6 +333,8 @@ public:
 		{
 			if (entry.PinCount == 0 && entry.Data)
 			{
+				uint32_t slot = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entry.Data));
+				UnregisterSlot(entry.Type, slot);
 				entry.OnEvicted();
 				entry.OnLoaded.Reset();
 				entry.Data  = nullptr;
@@ -324,6 +359,7 @@ public:
 		Entries.clear();
 		AliasTable.clear();
 		NameIndex.clear();
+		SlotIndex.clear();
 	}
 
 private:
@@ -367,4 +403,5 @@ private:
 	std::unordered_map<int64_t, int64_t> AliasTable;
 	std::unordered_map<int64_t, AssetEntry> Entries;
 	std::unordered_map<uint32_t, int64_t> NameIndex; // TnxName hash → UUID
+	std::unordered_map<uint64_t, int64_t> SlotIndex; // (type<<32|slot) → UUID
 };
