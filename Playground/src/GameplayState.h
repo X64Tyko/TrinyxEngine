@@ -9,11 +9,6 @@
 
 #include <string>
 
-#include "CacheSlotMeta.h"
-#include "TemporalComponentCache.h"
-#include "Registry.h"
-#include "World.h"
-
 // ---------------------------------------------------------------------------
 // GameplayState — The default in-game state for Playground.
 //
@@ -78,49 +73,13 @@ public:
 				Flow->LoadLevelByName(name.c_str(), /*bBackground=*/true);
 			}
 		}
-
-		if (eventID == static_cast<uint8_t>(FlowEventID::ServerReady))
-		{
-			World* world = Flow->GetWorld();
-			if (!world)
-			{
-				LOG_WARN("[GameplayState] ServerReady: no world, sweep skipped");
-				return;
-			}
-			FlowManager* flow = Flow;
-			Registry* reg     = world->GetRegistry();
-			world->PostAndWait([flow, reg](uint32_t)
-			{
-				ComponentCacheBase* cache  = reg->GetTemporalCache();
-				const uint32_t frame       = cache->GetActiveWriteFrame();
-				TemporalFrameHeader* hdr   = cache->GetFrameHeader(frame);
-				const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
-				auto* flags                = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
-				if (!flags) return;
-
-				const uint32_t max         = cache->GetMaxCachedEntityCount();
-				const uint32_t aliveBit    = static_cast<uint32_t>(TemporalFlagBits::Alive);
-				const uint32_t activeBit   = static_cast<uint32_t>(TemporalFlagBits::Active);
-				const uint32_t aliveShift  = TNX_CTZ32(aliveBit);
-				const uint32_t activeShift = TNX_CTZ32(activeBit);
-				int sweepCount             = 0;
-				for (uint32_t i = 0; i < max; ++i)
-				{
-					const uint32_t f    = static_cast<uint32_t>(flags[i]);
-					const uint32_t mask = -((f & aliveBit) >> aliveShift);
-					sweepCount          += static_cast<int>((activeBit & mask & ~f) >> activeShift);
-					flags[i]            = static_cast<int32_t>(f | (activeBit & mask));
-				}
-				LOG_NET_INFO_F(flow->GetSoul(0), "[Replication] ServerReady: swept %d Alive→Active", sweepCount);
-			});
-		}
 	}
 
 	void Tick(float dt) override { (void)dt; }
 
 	StateRequirements GetRequirements() const override
 	{
-		return {.NeedsWorld = true, .NeedsLevel = true};
+		return {.NeedsWorld = true, .NeedsLevel = true, .SweepsAliveFlagsOnServerReady = true};
 	}
 
 	const char* GetName() const override { return "GameplayState"; }

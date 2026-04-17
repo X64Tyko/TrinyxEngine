@@ -1,6 +1,7 @@
 #include "Registry.h"
 #include "AssetRegistry.h"
 #include "CacheSlotMeta.h"
+#include "FieldProxy.h"
 #include "JoltPhysics.h"
 #include "Profiler.h"
 #include <cassert>
@@ -535,6 +536,55 @@ void Registry::ResetRegistry()
 	VolatileSlab.ClearFrameData();
 
 	for (auto& arch : Archetypes) arch.second->FreeAllChunks();
+}
+
+int Registry::SweepAliveFlagsToActive()
+{
+	ComponentCacheBase* cache  = GetTemporalCache();
+	const uint32_t frame       = cache->GetActiveWriteFrame();
+	TemporalFrameHeader* hdr   = cache->GetFrameHeader(frame);
+	const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
+	auto* flags                = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
+	if (!flags) return 0;
+
+	const uint32_t max         = cache->GetMaxCachedEntityCount();
+	const uint32_t aliveBit    = static_cast<uint32_t>(TemporalFlagBits::Alive);
+	const uint32_t activeBit   = static_cast<uint32_t>(TemporalFlagBits::Active);
+	const uint32_t aliveShift  = TNX_CTZ32(aliveBit);
+	const uint32_t activeShift = TNX_CTZ32(activeBit);
+
+	using Traits          = SIMDTraits<int32_t, FieldWidth::Wide>;
+	const __m256i vAlive  = _mm256_set1_epi32(static_cast<int32_t>(aliveBit));
+	const __m256i vActive = _mm256_set1_epi32(static_cast<int32_t>(activeBit));
+	const __m256i vZero   = _mm256_setzero_si256();
+
+	__m256i vCount         = vZero;
+	const uint32_t wideMax = max & ~7u;
+	for (uint32_t i = 0; i < wideMax; i += 8)
+	{
+		__m256i f     = Traits::load(flags + i);
+		__m256i shift = _mm256_srli_epi32(_mm256_and_si256(f, vAlive), aliveShift); // 0 or 1
+		__m256i neg   = _mm256_sub_epi32(vZero, shift);                             // 0 or 0xFFFFFFFF
+		__m256i toSet = _mm256_and_si256(vActive, neg);                             // activeBit or 0
+		vCount        = _mm256_add_epi32(vCount, _mm256_srli_epi32(_mm256_andnot_si256(f, toSet), activeShift));
+		Traits::store(flags + i, vZero, _mm256_or_si256(f, toSet));
+	}
+
+	__m128i lo     = _mm256_castsi256_si128(vCount);
+	__m128i hi     = _mm256_extracti128_si256(vCount, 1);
+	__m128i sum128 = _mm_add_epi32(lo, hi);
+	__m128i sum64  = _mm_add_epi32(sum128, _mm_shuffle_epi32(sum128, _MM_SHUFFLE(1, 0, 3, 2)));
+	int sweepCount = _mm_cvtsi128_si32(_mm_add_epi32(sum64, _mm_shuffle_epi32(sum64, _MM_SHUFFLE(0, 1, 0, 1))));
+
+	for (uint32_t i = wideMax; i < max; ++i)
+	{
+		const uint32_t f    = static_cast<uint32_t>(flags[i]);
+		const uint32_t mask = -((f & aliveBit) >> aliveShift);
+		sweepCount          += static_cast<int>((activeBit & mask & ~f) >> activeShift);
+		flags[i]            = static_cast<int32_t>(f | (activeBit & mask));
+	}
+
+	return sweepCount;
 }
 
 uint32_t Registry::GetTotalChunkCount() const

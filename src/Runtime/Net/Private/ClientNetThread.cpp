@@ -4,6 +4,7 @@
 #include "ConstructRegistry.h"
 #include "EngineConfig.h"
 #include "FlowManager.h"
+#include "FlowState.h"
 #include "Input.h"
 #include "LogicThread.h"
 #include "NetChannel.h"
@@ -207,6 +208,19 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 						&& ev->EventID == static_cast<uint8_t>(FlowEventID::ServerReady))
 					{
 						ci->RepState = ClientRepState::Loaded;
+
+						const bool bSweep = flow && flow->GetActiveState()
+							&& flow->GetActiveState()->GetRequirements().SweepsAliveFlagsOnServerReady;
+						if (bSweep && clientWorld)
+						{
+							Registry* reg   = clientWorld->GetRegistry();
+							Soul* sweepSoul = soul;
+							clientWorld->PostAndWait([reg, sweepSoul](uint32_t)
+							{
+								int count = reg->SweepAliveFlagsToActive();
+								LOG_NET_INFO_F(sweepSoul, "[Replication] ServerReady: swept %d Alive→Active", count);
+							});
+						}
 
 						if (flow) flow->SendPlayerBeginRequest(NetChannel(ci, ConnectionMgr), msg.Header.FrameNumber, ci->Predictions);
 						ci->PlayerBeginSentAt = SDL_GetTicks();

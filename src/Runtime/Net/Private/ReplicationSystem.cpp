@@ -6,6 +6,7 @@
 #include "Construct.h"
 #include "ConstructRegistry.h"
 #include "FlowManager.h"
+#include "FlowState.h"
 #include "Logger.h"
 #include "LogicThread.h"
 #include "CMeshRef.h"
@@ -375,11 +376,21 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 
 		ci.RepState = ClientRepState::Loaded;
 		{
-			Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
-							 ? ServerWorld->GetFlowManager()->GetSoul(ci.OwnerID)
-							 : nullptr;
+			FlowManager* serverFlow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr;
+			Soul* soul              = serverFlow ? serverFlow->GetSoul(ci.OwnerID) : nullptr;
 			LOG_NET_INFO_F(soul, "[Replication] Initial flush: %d entities → ownerID=%u, ServerReady sent → Loaded",
 						   flushCount, ci.OwnerID);
+
+			const FlowState* activeState = serverFlow ? serverFlow->GetActiveState() : nullptr;
+			if (activeState && activeState->GetRequirements().SweepsAliveFlagsOnServerReady && ServerWorld)
+			{
+				Registry* reg = ServerWorld->GetRegistry();
+				ServerWorld->PostAndWait([reg, soul](uint32_t)
+				{
+					int count = reg->SweepAliveFlagsToActive();
+					LOG_NET_INFO_F(soul, "[Replication] ServerReady: server swept %d Alive→Active", count);
+				});
+			}
 		}
 	}
 

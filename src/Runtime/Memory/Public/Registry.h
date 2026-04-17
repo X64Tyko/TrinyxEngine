@@ -102,6 +102,12 @@ public:
 	ComponentCache<CacheTier::Volatile>* GetTemporalCache() { return &VolatileSlab; }
 #endif
 
+	// --- Replication helpers ---
+
+	// Promote all Alive-but-not-Active entities to Active in the temporal cache.
+	// Must be called on the Logic thread. Returns the count of entities promoted.
+	int SweepAliveFlagsToActive();
+
 	// --- Diagnostics ---
 
 	uint32_t GetTotalChunkCount() const;

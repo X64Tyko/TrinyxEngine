@@ -16,10 +16,11 @@ class FlowManager;
 // ---------------------------------------------------------------------------
 struct StateRequirements
 {
-	bool NeedsWorld      = false; // Registry, Physics, Logic thread
-	bool NeedsLevel      = false; // A .tnxscene loaded into the World
-	bool NeedsNetSession = false; // Active network connection
-	bool AllowsSouls     = true;  // Souls persist through this state
+	bool NeedsWorld                    = false; // Registry, Physics, Logic thread
+	bool NeedsLevel                    = false; // A .tnxscene loaded into the World
+	bool NeedsNetSession               = false; // Active network connection
+	bool AllowsSouls                   = true;  // Souls persist through this state
+	bool SweepsAliveFlagsOnServerReady = false; // used for activating entities after background load
 };
 
 // ---------------------------------------------------------------------------
