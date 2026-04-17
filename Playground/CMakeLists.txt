@@ -27,6 +27,10 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang>:-Wl,--no-whole-archive>
 )
 
+target_link_options(${PROJECT_NAME} PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/WHOLEARCHIVE:$<TARGET_FILE:Trinyx>>
+)
+
 # Playground-specific includes
 target_include_directories(${PROJECT_NAME} PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"

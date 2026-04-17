@@ -140,15 +140,17 @@ struct AssetID
 	}
 
 	// Equality strips everything except UUID
-	bool operator==(const AssetID& other) const { return GetUUID() == other.GetUUID(); }
-	bool operator!=(const AssetID& other) const { return GetUUID() != other.GetUUID(); }
+	bool operator==(const AssetID& other) const { return GetUUID() == other.GetUUID() && GetType() == other.GetType(); }
+	bool operator!=(const AssetID& other) const { return GetUUID() != other.GetUUID() && GetType() != other.GetType(); }
 };
 
 struct AssetIDHash
 {
 	size_t operator()(const AssetID& id) const
 	{
-		return std::hash<int64_t>{}(id.GetUUID());
+		// Combine type and UUID — matches the updated operator== semantics.
+		int64_t key = (static_cast<int64_t>(id.GetType()) << 56) | id.GetUUID();
+		return std::hash<int64_t>{}(key);
 	}
 };
 
