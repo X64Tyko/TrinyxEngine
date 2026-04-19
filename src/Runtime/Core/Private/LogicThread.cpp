@@ -7,6 +7,7 @@
 #include "Logger.h"
 #include "TemporalComponentCache.h"
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <cmath>
 
 #include "CameraConstruct.h"
@@ -21,6 +22,7 @@
 
 void LogicThread::Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
 							 InputBuffer* simInput, InputBuffer* vizInput,
+							 TrinyxMPSCRing<NetInputFrame>* inputAccumRing,
 							 TrinyxJobs::WorldQueueHandle worldQueue, const std::atomic<bool>* jobsInitialized,
 							 int windowWidth, int windowHeight)
 {
@@ -29,6 +31,7 @@ void LogicThread::Initialize(Registry* registry, const EngineConfig* config, Jol
 	PhysicsPtr     = physics;
 	SimInput       = simInput;
 	VizInput       = vizInput;
+	InputAccumRing = inputAccumRing;
 	WQHandle       = worldQueue;
 	JobsInitPtr    = jobsInitialized;
 	TemporalCache  = registry->GetTemporalCache();
@@ -37,6 +40,10 @@ void LogicThread::Initialize(Registry* registry, const EngineConfig* config, Jol
 	PhysicsDivizor = config->PhysicsUpdateInterval;
 
 	LastCompletedFrame.store(0, std::memory_order_release);
+
+#ifdef TNX_ENABLE_ROLLBACK
+	IncomingCorrections.Initialize(256);
+#endif
 
 	LOG_ENG_INFO("[LogicThread] Initialized");
 }
@@ -67,6 +74,189 @@ void LogicThread::Join()
 double LogicThread::GetFixedAlpha() const
 {
 	return (ConfigPtr->GetFixedStepTime() - Accumulator.load(std::memory_order_relaxed)) / ConfigPtr->GetFixedStepTime();
+}
+
+// TODO: We need the editor not to Propagate frames when paused so that we can rewind time for debugging
+bool LogicThread::TickPause(const uint64_t perfFrequency, const uint64_t frameStartCounter, double dt)
+{
+	// When paused: still process input (camera) and publish frames
+	// so the scene is visible, but skip all simulation.
+	if (bSimPaused.load(std::memory_order_acquire)) [[unlikely]]
+	{
+		ProcessSimInput(static_cast<SimFloat>(dt));
+		ProcessVizInput(static_cast<SimFloat>(dt));
+		PublishCompletedFrame();
+		RegistryPtr->PropagateFrame(FrameNumber++);
+
+		WaitForTiming(frameStartCounter, perfFrequency);
+		TrackFPS();
+		return true;
+	}
+	return false;
+}
+
+#ifdef TNX_ENABLE_ROLLBACK
+void LogicThread::ProcessRollback()
+{
+	// Drop server events that have aged past the temporal ring — they can never
+	// be targeted by a rollback and would only consume memory.
+	if (FrameNumber > TemporalCache->GetTotalFrameCount())
+		RegistryPtr->PruneServerEvents(FrameNumber - TemporalCache->GetTotalFrameCount());
+					
+	if (bRollbackTestRequested.load(std::memory_order_acquire)
+		&& FrameNumber > RollbackFrameCount + PhysicsDivizor)
+	{
+		bRollbackTestRequested.store(false, std::memory_order_relaxed);
+		ExecuteRollbackTest();
+	}
+	
+	if (bRollbackActive) return;
+	
+	// Drain any corrections that arrived from worker/net threads since last tick.
+	{
+		EntityTransformCorrection staged;
+		while (IncomingCorrections.TryPop(staged))
+			PendingCorrections.push_back(staged);
+	}
+
+	// Merge any pending spawn rollback request into the correction set.
+	// The spawn rollback has no correction values to check — it just ensures
+	// the entity exists in the ring from its birth frame onward.
+	uint32_t spawnRollbackFrame = PendingRollbackFrame.exchange(UINT32_MAX, std::memory_order_acq_rel);
+
+	// Drop corrections whose target frame predates the temporal ring. The ring
+	// slot for that frame has been reused for a newer frame, so any comparison
+	// would read stale data and produce a spurious divergence that can never be
+	// resolved — the ring can't go back that far and neither can Jolt.
+	{
+		const uint32_t ringSize   = TemporalCache->GetTotalFrameCount();
+		const uint32_t currentF   = TemporalCache->GetFrameHeader()->FrameNumber;
+		const uint32_t oldestSlab = (currentF >= ringSize - 1) ? (currentF - (ringSize - 1)) : 0u;
+
+		const auto stalePred = [oldestSlab](const EntityTransformCorrection& c)
+		{
+			return c.ClientFrame < oldestSlab;
+		};
+
+		auto staleBegin = std::remove_if(PendingCorrections.begin(),
+										 PendingCorrections.end(), stalePred);
+		if (staleBegin != PendingCorrections.end())
+		{
+			LOG_ENG_WARN_F("[Rollback] Discarding %zu stale correction(s) (frame < %u, ring depth=%u)",
+						   std::distance(staleBegin, PendingCorrections.end()),
+						   oldestSlab, ringSize);
+			PendingCorrections.erase(staleBegin, PendingCorrections.end());
+		}
+	}
+
+	uint32_t minFrame = spawnRollbackFrame;
+
+	if (!PendingCorrections.empty())
+	{
+		for (const auto& c : PendingCorrections)
+			if (c.ClientFrame < minFrame) minFrame = c.ClientFrame;
+	}
+
+	if (minFrame != UINT32_MAX)
+	{
+		// Clamp against the oldest Jolt snapshot we still have. Rolling back beyond
+		// the ring triggers an expensive cold rebuild; cap it to what we can restore.
+		if (PhysicsPtr)
+		{
+			const uint32_t oldestSnap = PhysicsPtr->GetOldestSnapshotFrame();
+			if (oldestSnap != UINT32_MAX && minFrame < oldestSnap)
+			{
+				LOG_ENG_WARN_F("[Rollback] Clamping target frame %u → %u (oldest Jolt snapshot)",
+							   minFrame, oldestSnap);
+				minFrame = oldestSnap;
+			}
+		}
+
+		ExecuteRollback(minFrame);
+	}
+}
+#endif
+
+void LogicThread::PhysicsLoop(const SimFloat fixedStepTime)
+{
+	PrePhysics(fixedStepTime);
+	ScalarPrePhysicsBatch.Execute(fixedStepTime);
+
+	if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
+	{
+		PhysicsPtr->FlushPendingBodies(RegistryPtr);
+		PhysicsPtr->PushKinematicTransforms(RegistryPtr, fixedStepTime);
+		ScalarPhysicsStepBatch.Execute(fixedStepTime * PhysicsDivizor);
+		TrinyxJobs::Dispatch([this, fixedStepTime](uint32_t)
+		{
+			PhysicsPtr->Step(fixedStepTime * PhysicsDivizor);
+		}, PhysicsPtr->GetJoltPhysCounter(), TrinyxJobs::Queue::Physics);
+	}
+
+	// Flush changes, then pull new transforms. This order means we remove orphans before pulling
+	if (FrameNumber % PhysicsDivizor == PhysicsDivizor - 1) [[unlikely]]
+	{
+		PhysicsPtr->PullActiveTransforms(RegistryPtr);
+#ifdef TNX_ENABLE_ROLLBACK
+		PhysicsPtr->SaveSnapshot(FrameNumber);
+#endif
+	}
+
+	PostPhysics(fixedStepTime);
+	ScalarPostPhysicsBatch.Execute(fixedStepTime);
+}
+
+bool LogicThread::FixedUpdate(const uint64_t perfFrequency, const SimFloat fixedStepTime, const int MaxPhysSubSteps, const uint64_t frameStartCounter)
+{
+	// Fixed update loop with substepping
+	if (Accumulator.load(std::memory_order_relaxed) <= 0) [[unlikely]]
+	{
+		TNX_ZONE_NC("Physics Loop", TNX_COLOR_LOGIC);
+
+		bool bDidStall = false;
+		int steps      = 0;
+		while (Accumulator.load(std::memory_order_relaxed) <= 0 && steps < MaxPhysSubSteps)
+		{
+			const bool bInputStalled = ProcessSimInput(fixedStepTime);
+			if (bInputStalled)
+			{
+				bDidStall = true;
+				break;
+			}
+
+			// FPS tracking
+			FpsFixedCount++;
+			FpsFixedTimer += fixedStepTime;
+
+#ifdef TNX_ENABLE_ROLLBACK
+			RecordFrameInput();
+#endif
+			
+			PhysicsLoop(fixedStepTime);
+			
+			Accumulator.store(Accumulator.load(std::memory_order_relaxed) + fixedStepTime,
+							  std::memory_order_relaxed);
+			++steps;
+			SimulationTime += fixedStepTime;
+
+			// Publish completed frame to RenderThread
+			ProcessVizInput(fixedStepTime);
+			PublishCompletedFrame();
+			RegistryPtr->PropagateFrame(FrameNumber++);
+
+#ifdef TNX_ENABLE_ROLLBACK
+			ProcessRollback();
+#endif
+		}
+		
+		TrackFPS();
+		// When stalled, sleep for one tick so the NetThread can process incoming
+		// InputFrame packets and advance LastReceivedFrame before we retry.
+		if (bDidStall || ConfigPtr->TargetFPS > 0)
+			WaitForTiming(frameStartCounter, perfFrequency);
+		return true; // don't do the scalar update immediately.
+	}
+	return false;
 }
 
 void LogicThread::ThreadMain()
@@ -105,111 +295,14 @@ void LogicThread::ThreadMain()
 		if (dt > MaxDt) dt = MaxDt;
 
 #if TNX_ENABLE_EDITOR
-		// When paused: still process input (camera) and publish frames
-		// so the scene is visible, but skip all simulation.
-		if (bSimPaused.load(std::memory_order_acquire))
-		{
-			ProcessSimInput(static_cast<SimFloat>(dt));
-			ProcessVizInput(static_cast<SimFloat>(dt));
-			PublishCompletedFrame();
-			RegistryPtr->PropagateFrame(FrameNumber++);
-
-			WaitForTiming(frameStartCounter, perfFrequency);
-			TrackFPS();
-			continue;
-		}
+		if (TickPause(perfFrequency, frameStartCounter, dt)) continue;
 #endif
 
 		double acc = Accumulator.load(std::memory_order_relaxed) - dt;
 		if (acc < MaxAccumulatedTime) acc = MaxAccumulatedTime;
 		Accumulator.store(acc, std::memory_order_relaxed);
 
-		// Fixed update loop with substepping
-		if (Accumulator.load(std::memory_order_relaxed) <= 0) [[unlikely]]
-		{
-			TNX_ZONE_NC("Physics Loop", TNX_COLOR_LOGIC);
-
-			int steps = 0;
-			while (Accumulator.load(std::memory_order_relaxed) <= 0 && steps < MaxPhysSubSteps)
-			{
-				const bool bInputStalled = ProcessSimInput(fixedStepTime);
-				if (bInputStalled)
-				{
-					// A player's input window hasn't arrived yet — hold FrameNumber by returning
-					// the time budget to the accumulator. The outer loop will wait for the next
-					// wall-clock tick and retry. FrameNumber does not advance.
-					Accumulator.store(Accumulator.load(std::memory_order_relaxed) + fixedStepTime,
-									  std::memory_order_relaxed);
-					break;
-				}
-
-				// FPS tracking
-				FpsFixedCount++;
-				FpsFixedTimer += fixedStepTime;
-
-#ifdef TNX_ENABLE_ROLLBACK
-				RecordFrameInput();
-#endif
-				PrePhysics(fixedStepTime);
-				ScalarPrePhysicsBatch.Execute(fixedStepTime);
-
-				if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
-				{
-					PhysicsPtr->FlushPendingBodies(RegistryPtr);
-					PhysicsPtr->PushKinematicTransforms(RegistryPtr, fixedStepTime);
-					ScalarPhysicsStepBatch.Execute(fixedStepTime * PhysicsDivizor);
-					TrinyxJobs::Dispatch([this, fixedStepTime](uint32_t)
-					{
-						PhysicsPtr->Step(fixedStepTime * PhysicsDivizor);
-					}, PhysicsPtr->GetJoltPhysCounter(), TrinyxJobs::Queue::Physics);
-				}
-
-				// Flush changes, then pull new transforms. This order means we remove orphans before pulling
-				if (FrameNumber % PhysicsDivizor == PhysicsDivizor - 1) [[unlikely]]
-				{
-					PhysicsPtr->PullActiveTransforms(RegistryPtr);
-#ifdef TNX_ENABLE_ROLLBACK
-					PhysicsPtr->SaveSnapshot(FrameNumber);
-#endif
-				}
-
-				PostPhysics(fixedStepTime);
-				ScalarPostPhysicsBatch.Execute(fixedStepTime);
-				Accumulator.store(Accumulator.load(std::memory_order_relaxed) + fixedStepTime,
-								  std::memory_order_relaxed);
-				++steps;
-				SimulationTime += fixedStepTime;
-
-				// Publish completed frame to RenderThread
-				ProcessVizInput(fixedStepTime);
-				PublishCompletedFrame();
-				RegistryPtr->PropagateFrame(FrameNumber++);
-
-#ifdef TNX_ENABLE_ROLLBACK
-				if (bRollbackTestRequested.load(std::memory_order_acquire)
-					&& FrameNumber > RollbackFrameCount + PhysicsDivizor)
-				{
-					bRollbackTestRequested.store(false, std::memory_order_relaxed);
-					ExecuteRollbackTest();
-				}
-
-				if (bRollbackRequested.load(std::memory_order_acquire))
-				{
-					bRollbackRequested.store(false, std::memory_order_relaxed);
-					if (bRollbackActive)
-					{
-						LOG_ENG_WARN("[Rollback] Rollback requested while one is already active — ignored");
-					}
-					else
-					{
-						ExecuteRollback(PendingRollbackFrame.load(std::memory_order_relaxed));
-					}
-				}
-#endif
-			}
-			TrackFPS();
-			continue; // don't do the scalar update immediately.
-		}
+		if (FixedUpdate(perfFrequency, fixedStepTime, MaxPhysSubSteps, frameStartCounter)) continue;
 
 		// Scalar update only if we're pretty sure we have time.
 		if (dt > Accumulator.load(std::memory_order_relaxed)) [[likely]]
@@ -230,6 +323,33 @@ void LogicThread::ThreadMain()
 bool LogicThread::ProcessSimInput(SimFloat dt)
 {
 	SimInput->Swap();
+
+	// Snapshot this frame's input for the net thread (client-side only).
+	// Runs immediately after Swap so frame tag is exact — FRONT holds the new data.
+	if (InputAccumRing)
+	{
+		NetInputFrame snap{};
+		snap.Frame = FrameNumber;
+		SimInput->SnapshotKeyState(snap.State.KeyState, sizeof(snap.State.KeyState));
+		snap.State.MouseDX      = SimInput->GetMouseDX();
+		snap.State.MouseDY      = SimInput->GetMouseDY();
+		snap.State.MouseButtons = SimInput->GetMouseButtonMask();
+
+		const uint16_t evCount = SimInput->GetEventCount();
+		snap.EventCount = static_cast<uint8_t>(evCount < 8 ? evCount : 8);
+		for (uint8_t i = 0; i < snap.EventCount; ++i)
+		{
+			InputData e = SimInput->ReadEvent();
+			snap.Events[i].Key          = static_cast<uint32_t>(e.Key);
+			snap.Events[i].FrameUSOffset = e.FrameUSOffset;
+			snap.Events[i].Pressed      = e.Pressed;
+			snap.Events[i]._Pad         = 0;
+		}
+
+		// Overwrite the oldest pre-connection frame if the ring is full so the consumer
+		// always sees the most recent Capacity frames when it drains on connect.
+		InputAccumRing->OverwritePush(snap);
+	}
 
 	// Server-side: pull each connected player's input from the PlayerInputLog for this frame.
 	// Returns true if any player's input window hasn't arrived yet — caller must hold FrameNumber.
@@ -504,6 +624,32 @@ void LogicThread::InjectFrameInput(uint32_t frameNum)
 	SimInput->ReadCursor           = 0;
 }
 
+void LogicThread::EnqueueCorrections(std::vector<EntityTransformCorrection> corrections,
+									 [[maybe_unused]] uint32_t earliestClientFrame)
+{
+	// Push to the lock-free ring buffer so worker/net threads don't race with the
+	// logic thread's PendingCorrections vector. The logic thread drains IncomingCorrections
+	// into PendingCorrections at the start of each rollback check.
+	for (auto& c : corrections)
+	{
+		if (!IncomingCorrections.TryPush(std::move(c)))
+			LOG_ENG_WARN("[Rollback] IncomingCorrections full — correction dropped");
+	}
+}
+
+void LogicThread::EnqueueSpawnRollback(uint32_t clientFrame)
+{
+	// Atomically update PendingRollbackFrame to be the minimum of the current pending
+	// value and the requested frame (oldest wins so we cover all spawns in one pass).
+	uint32_t current = PendingRollbackFrame.load(std::memory_order_relaxed);
+	while (clientFrame < current)
+	{
+		if (PendingRollbackFrame.compare_exchange_weak(current, clientFrame,
+			std::memory_order_release, std::memory_order_relaxed))
+			break;
+	}
+}
+
 void LogicThread::ExecuteRollback(uint32_t targetFrame)
 {
 	TNX_ZONE_N("Rollback");
@@ -515,11 +661,21 @@ void LogicThread::ExecuteRollback(uint32_t targetFrame)
 	const double fixedStepTime = ConfigPtr->GetFixedStepTime();
 
 	// Align to most recent Jolt flush boundary so physics state is consistent.
-	const uint32_t alignedTarget    = targetFrame - ((targetFrame % PhysicsDivizor + 1) % PhysicsDivizor);
+	const uint32_t alignedTarget = targetFrame - ((targetFrame % PhysicsDivizor + 1) % PhysicsDivizor);
+
+	if (alignedTarget >= T)
+	{
+		LOG_ENG_WARN_F("[Rollback] Target frame %u (aligned from %u) is at or beyond current frame %u — skipping",
+					   alignedTarget, targetFrame, T);
+		bRollbackActive = false;
+		PendingCorrections.clear();
+		return;
+	}
+
 	const uint32_t totalResimFrames = T - alignedTarget;
 
-	LOG_ENG_INFO_F("[Rollback] Rewind to frame %u (aligned from %u), resim %u frames to frame %u",
-				   alignedTarget, targetFrame, totalResimFrames, T);
+	LOG_ENG_INFO_F("[%s Rollback] Rewind to frame %u (aligned from %u), resim %u frames to frame %u",
+				   EngineModeNames[(uint8_t)ConfigPtr->Mode], alignedTarget, targetFrame, totalResimFrames, T);
 
 	// ── Rewind ─────────────────────────────────────────────────────────────
 	{
@@ -550,25 +706,29 @@ void LogicThread::ExecuteRollback(uint32_t targetFrame)
 
 		for (uint32_t i = 0; i < totalResimFrames; ++i)
 		{
+			// Replay server-driven events (spawns, sweeps) before physics so entities
+			// exist and flags are set for the frame they originally applied at.
+			RegistryPtr->ReplayServerEventsAt(FrameNumber);
+
 			InjectFrameInput(FrameNumber);
-			PrePhysics(fixedStepTime);
-			ScalarPrePhysicsBatch.Execute(fixedStepTime);
+			PhysicsLoop(fixedStepTime);
 
-			if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
+			// Check pending server corrections for this frame. If the resimmed value still
+			// diverges from the server-authoritative position, overwrite it now.
+			for (auto it = PendingCorrections.begin(); it != PendingCorrections.end();)
 			{
-				PhysicsPtr->Step(static_cast<float>(fixedStepTime * PhysicsDivizor));
+				if (it->ClientFrame != FrameNumber)
+				{
+					++it;
+					continue;
+				}
+				if (RegistryPtr->CheckAndCorrectEntityTransform(*it))
+				{
+					LOG_ENG_INFO_F("[Rollback] Correction applied at frame %u for netHandle=%u",
+								   FrameNumber, it->NetHandle);
+				}
+				it = PendingCorrections.erase(it);
 			}
-
-			if (FrameNumber % PhysicsDivizor == PhysicsDivizor - 1) [[unlikely]]
-			{
-				PhysicsPtr->FlushPendingBodies(RegistryPtr);
-				PhysicsPtr->PullActiveTransforms(RegistryPtr);
-				PhysicsPtr->SaveSnapshot(FrameNumber);
-			}
-
-			PostPhysics(fixedStepTime);
-			ScalarPostPhysicsBatch.Execute(fixedStepTime);
-			SimulationTime += fixedStepTime;
 
 			RegistryPtr->PropagateFrame(FrameNumber++);
 		}
@@ -576,6 +736,12 @@ void LogicThread::ExecuteRollback(uint32_t targetFrame)
 		LOG_ENG_INFO_F("[Rollback] Resimulation complete, frame %u", FrameNumber);
 	}
 
+	// Discard only corrections that fall before the resim window — corrections for the
+	// current frame or future frames must survive for the next rollback pass to apply them.
+	PendingCorrections.erase(
+		std::remove_if(PendingCorrections.begin(), PendingCorrections.end(),
+			[this](const EntityTransformCorrection& c) { return c.ClientFrame < FrameNumber; }),
+		PendingCorrections.end());
 	bRollbackActive = false;
 }
 
