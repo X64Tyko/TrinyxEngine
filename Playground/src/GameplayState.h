@@ -59,20 +59,8 @@ public:
 		Flow->UnloadLevel();
 	}
 
-	void OnNetEvent(uint8_t eventID) override
+	void OnNetEvent([[maybe_unused]] uint8_t eventID) override
 	{
-		if (eventID == static_cast<uint8_t>(FlowEventID::TravelNotify))
-		{
-			const std::string& levelName = Flow->GetPendingTravelPath();
-			if (!levelName.empty())
-			{
-				std::string name = levelName;
-				auto dot = name.rfind('.');
-				if (dot != std::string::npos) name = name.substr(0, dot);
-				LOG_INFO_F("[GameplayState] TravelNotify — loading level '%s' (background)", levelName.c_str());
-				Flow->LoadLevelByName(name.c_str(), /*bBackground=*/false);
-			}
-		}
 	}
 
 	void Tick(float dt) override { (void)dt; }

@@ -48,6 +48,10 @@ struct EntityBuilder
 	// calling thread — true async parsing is a future improvement.
 	static size_t SpawnFromFile(Registry* reg, const char* filePath, bool bBackground = false);
 
+	// Like SpawnFromFile but collects the GlobalEntityHandle of each spawned entity into outHandles.
+	static size_t SpawnFromFileTracked(Registry* reg, const char* filePath, bool bBackground,
+									   std::vector<GlobalEntityHandle>& outHandles);
+
 	// Load by AssetID — resolves path via AssetRegistry::ResolvePath.
 	static size_t SpawnFromAsset(Registry* reg, const AssetID& id, bool bBackground = false)
 	{

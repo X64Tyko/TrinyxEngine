@@ -662,10 +662,9 @@ void LogicThread::ExecuteRollback(uint32_t targetFrame)
 	const uint32_t frameCount  = TemporalCache->GetTotalFrameCount();
 	const double fixedStepTime = ConfigPtr->GetFixedStepTime();
 
-	// Go back one frame before the target so the dirty frame itself is included in the resim,
-	// not used as the (wrong forward-pass) slab base.  Then align to the Jolt flush boundary.
-	const uint32_t preTarget     = (targetFrame > 0) ? targetFrame - 1 : 0;
-	const uint32_t alignedTarget = preTarget - ((preTarget % PhysicsDivizor + 1) % PhysicsDivizor);
+	// Align to the physics snapshot boundary: largest frame F ≤ targetFrame where Jolt flushed.
+	// Snapshot frames are at D-1, 2D-1, ... so this is (targetFrame / D) * D - 1.
+	const uint32_t alignedTarget = (targetFrame / PhysicsDivizor) * PhysicsDivizor - 1;
 
 	if (alignedTarget >= T)
 	{
@@ -676,7 +675,7 @@ void LogicThread::ExecuteRollback(uint32_t targetFrame)
 		return;
 	}
 
-	const uint32_t totalResimFrames = T - alignedTarget;
+	const uint32_t totalResimFrames = (T - alignedTarget) + 1;
 
 	LOG_ENG_INFO_F("[%s Rollback] Rewind to frame %u (aligned from %u), resim %u frames to frame %u",
 				   EngineModeNames[(uint8_t)ConfigPtr->Mode], alignedTarget, targetFrame, totalResimFrames, T);
@@ -685,6 +684,8 @@ void LogicThread::ExecuteRollback(uint32_t targetFrame)
 	{
 		TNX_ZONE_N("Rollback_Rewind");
 
+		// Resims don't nest and PropagateFrame runs inside the resim loop, so the
+		// ring slot invariant (frame F → slot F % N) holds — no scan needed.
 		TemporalCache->SetActiveWriteFrame(alignedTarget % frameCount);
 
 		TrinyxJobs::WaitForCounter(PhysicsPtr->GetJoltPhysCounter(), TrinyxJobs::Queue::Logic);
@@ -694,11 +695,13 @@ void LogicThread::ExecuteRollback(uint32_t targetFrame)
 			LOG_ENG_WARN("[Rollback] Snapshot not found, falling back to rebuild-from-slab");
 			PhysicsPtr->ResetAllBodies();
 			PhysicsPtr->FlushPendingBodies(RegistryPtr);
-			// Save a fresh baseline snapshot at the rebuild point.
-			PhysicsPtr->SaveSnapshot(alignedTarget);
 		}
 
-		FrameNumber    = alignedTarget + 1;
+		FrameNumber = alignedTarget;
+		RegistryPtr->ReplayServerEventsAt(FrameNumber);
+		PhysicsPtr->SaveSnapshot(alignedTarget);
+		RegistryPtr->PropagateFrame(FrameNumber++);
+
 		SimulationTime = FrameNumber * fixedStepTime;
 	}
 
@@ -710,9 +713,6 @@ void LogicThread::ExecuteRollback(uint32_t targetFrame)
 
 		for (uint32_t i = 0; i < totalResimFrames; ++i)
 		{
-			// Replay server-driven events (spawns, sweeps) before physics so entities
-			// exist and flags are set for the frame they originally applied at.
-			RegistryPtr->ReplayServerEventsAt(FrameNumber);
 
 			InjectFrameInput(FrameNumber); // restore world SimInput from frame header
 			// Replay per-player net input so constructs reading soul->GetSimInput() get the
@@ -736,6 +736,10 @@ void LogicThread::ExecuteRollback(uint32_t targetFrame)
 				}
 				it = PendingCorrections.erase(it);
 			}
+
+			// Replay server-driven events (spawns, sweeps).
+			// Values come from completed frames
+			RegistryPtr->ReplayServerEventsAt(FrameNumber);
 
 			RegistryPtr->PropagateFrame(FrameNumber++);
 		}

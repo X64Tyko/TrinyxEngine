@@ -131,6 +131,11 @@ public:
 	void PushServerEvent(ServerEventEntry entry);
 	void ReplayServerEventsAt(uint32_t frame);
 	void PruneServerEvents(uint32_t oldestFrame);
+
+	// Snapshot all SoA field values for a newly spawned entity and register a server
+	// event at 'frame' that restores them during resim. Used by FlowManager::LoadLevel
+	// so that rollback across a level-load frame re-hydrates level entity slab slots.
+	void PushEntityReinitEvent(GlobalEntityHandle gHandle, uint32_t frame);
 #endif
 
 	// --- Diagnostics ---

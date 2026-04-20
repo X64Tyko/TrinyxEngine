@@ -742,7 +742,7 @@ void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayloa
 
 void ReplicationSystem::HandleStateCorrections(Registry* reg, const StateCorrectionEntry* entries,
 											   uint32_t count, [[maybe_unused]] uint32_t clientFrame,
-											   [[maybe_unused]] LogicThread* logic, uint32_t LastAckedFrame)
+											   [[maybe_unused]] LogicThread* logic, [[maybe_unused]] uint32_t LastAckedFrame)
 {
 #ifdef TNX_ENABLE_ROLLBACK
 	constexpr float kDivergenceThresholdSq = 0.01f * 0.01f; // 1cm

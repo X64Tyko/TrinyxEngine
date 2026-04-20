@@ -684,6 +684,62 @@ bool Registry::CheckAndCorrectEntityTransform(const EntityTransformCorrection& c
 	return true;
 }
 
+void Registry::PushEntityReinitEvent(GlobalEntityHandle gHandle, uint32_t frame)
+{
+	EntityRecord* rec = GlobalEntityRegistry.Records[gHandle.GetIndex()];
+	if (!rec || !rec->IsValid()) return;
+
+	Archetype* arch   = rec->Arch;
+	uint32_t localIdx = rec->LocalIndex;
+
+	// Snapshot every SoA field at the current write frame.
+	// Stored as (FieldKey, raw bytes) pairs — one allocation per field, small enough
+	// for static level geometry (typically 5-7 fields per entity).
+	struct FieldSnap
+	{
+		Archetype::FieldKey key;
+		std::vector<uint8_t> data;
+	};
+	std::vector<FieldSnap> snaps;
+	snaps.reserve(arch->ArchetypeFieldLayout.count());
+
+	void* table[MAX_FIELDS_PER_ARCHETYPE] = {};
+	arch->BuildFieldArrayTable(rec->TargetChunk, table,
+							   GetTemporalCache()->GetActiveWriteFrame(),
+							   GetVolatileCache()->GetActiveWriteFrame());
+
+	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
+	{
+		void* base = table[fdesc.fieldSlotIndex];
+		if (!base) continue;
+		const uint8_t* src = static_cast<const uint8_t*>(base) + localIdx * fdesc.fieldSize;
+		snaps.push_back({fkey, {src, src + fdesc.fieldSize}});
+	}
+
+	PushServerEvent({
+		frame, [this, gHandle, arch, snaps = std::move(snaps)]() mutable
+		{
+			EntityRecord* r = GlobalEntityRegistry.Records[gHandle.GetIndex()];
+			if (!r || !r->IsValid()) return;
+
+			void* t[MAX_FIELDS_PER_ARCHETYPE] = {};
+			arch->BuildFieldArrayTable(r->TargetChunk, t,
+									   GetTemporalCache()->GetActiveWriteFrame(),
+									   GetVolatileCache()->GetActiveWriteFrame());
+
+			for (const auto& snap : snaps)
+			{
+				const auto* fdesc = arch->ArchetypeFieldLayout.find(snap.key);
+				if (!fdesc) continue;
+				void* base = t[fdesc->fieldSlotIndex];
+				if (!base) continue;
+				uint8_t* dst = static_cast<uint8_t*>(base) + r->LocalIndex * fdesc->fieldSize;
+				std::memcpy(dst, snap.data.data(), snap.data.size());
+			}
+		}
+	});
+}
+
 void Registry::PushServerEvent(ServerEventEntry entry)
 {
 	ServerEvents.push_back(std::move(entry));

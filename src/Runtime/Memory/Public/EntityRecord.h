@@ -133,6 +133,7 @@ struct EntityArchive
 private:
 	friend class Registry;
 	friend class ReplicationSystem;
+	friend struct EntityBuilder;
 
 	// Private constructor - only Registry can create
 	EntityArchive() = default;

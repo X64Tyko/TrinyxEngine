@@ -47,7 +47,7 @@ struct AssetEntry
 	// Fired just before an asset is evicted from its slot.
 	// Persistent: survives load/reload cycles. Owners use this to
 	// invalidate cached slot indices and request a new checkout.
-	FixedMultiCallback<void, 32> OnEvicted;
+	FixedMultiCallback<void, 64> OnEvicted;
 };
 
 // -----------------------------------------------------------------------

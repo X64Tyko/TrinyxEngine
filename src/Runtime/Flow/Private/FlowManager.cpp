@@ -1,5 +1,6 @@
 #include "FlowManager.h"
 
+#include "AssetRegistry.h"
 #include "EntityBuilder.h"
 #include "GameMode.h"
 #include "FlowState.h"
@@ -7,9 +8,12 @@
 #include "NetChannel.h"
 #include "NetTypes.h"
 #include "ReflectionRegistry.h"
+#include "Registry.h"
 #include "World.h"
 
 #include <cstring>
+
+#include "LogicThread.h"
 
 FlowManager::FlowManager() = default;
 
@@ -259,12 +263,28 @@ void FlowManager::LoadLevel(const char* levelPath, bool bBackground)
 
 	Registry* reg        = ActiveWorld->GetRegistry();
 	const char* pathCStr = ActiveLevelPath.c_str();
+
+#ifdef TNX_ENABLE_ROLLBACK
+	const uint32_t spawnFrame = GetWorld()->GetLogicThread()->GetLastCompletedFrame() + 1;
+	Soul* soul                = GetSoul(GetWorld()->LocalOwnerID);
+	ActiveWorld->SpawnAndWait([reg, pathCStr, bBackground, spawnFrame, soul](uint32_t)
+	{
+		std::vector<GlobalEntityHandle> spawnedHandles;
+		size_t count = EntityBuilder::SpawnFromFileTracked(reg, pathCStr, bBackground, spawnedHandles);
+		LOG_NET_INFO_F(soul, "[FlowManager] LoadLevel: spawned %zu entities from %s%s at frame %u",
+					   count, pathCStr, bBackground ? " (Alive-only)" : "", spawnFrame);
+
+		// Push reInit events so resim crossing this frame can re-hydrate level entity slab slots.
+		for (GlobalEntityHandle gh : spawnedHandles) reg->PushEntityReinitEvent(gh, spawnFrame);
+	});
+#else
 	ActiveWorld->SpawnAndWait([reg, pathCStr, bBackground](uint32_t)
 	{
 		size_t count = EntityBuilder::SpawnFromFile(reg, pathCStr, bBackground);
 		LOG_NET_INFO_F(nullptr, "[FlowManager] LoadLevel: spawned %zu entities from %s%s",
 					   count, pathCStr, bBackground ? " (Alive-only)" : "");
 	});
+#endif
 
 	LOG_NET_INFO_F(nullptr, "[FlowManager] Level loaded: %s", levelPath);
 }
@@ -390,6 +410,23 @@ void FlowManager::Tick(float dt)
 			{
 				const uint32_t bit = bits & (~bits + 1); // isolate lowest set bit
 				const uint8_t id   = static_cast<uint8_t>(TNX_CTZ32(bit));
+
+				// Auto-handle TravelNotify for states that declare NeedsLevel.
+				// The FlowState receives OnNetEvent afterward in case it needs to
+				// do additional work (e.g., overlay logic, HUD reset).
+				if (id == static_cast<uint8_t>(FlowEventID::TravelNotify)
+					&& active->GetRequirements().NeedsLevel
+					&& !PendingTravelPath.empty())
+				{
+					// PendingTravelPath is a content-root-relative local path sent by the server.
+					// Resolve to absolute before passing to LoadLevel.
+					const std::string& root = AssetRegistry::Get().GetContentRoot();
+					std::string absPath     = root.empty()
+												  ? PendingTravelPath
+												  : root + "/" + PendingTravelPath;
+					LoadLevel(absPath.c_str(), /*bBackground=*/true);
+				}
+
 				active->OnNetEvent(id);
 				bits &= bits - 1;
 			}

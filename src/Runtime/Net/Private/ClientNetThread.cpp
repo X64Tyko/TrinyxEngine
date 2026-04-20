@@ -224,12 +224,12 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 						{
 							Registry* reg   = clientWorld->GetRegistry();
 							Soul* sweepSoul = soul;
-							clientWorld->PostAndWait([reg, sweepSoul](uint32_t frame)
+							clientWorld->PostAndWait([reg, sweepSoul, clientWorld](uint32_t)
 							{
 								int count = reg->SweepAliveFlagsToActive();
 								LOG_NET_INFO_F(sweepSoul, "[Replication] ServerReady: swept %d Alive→Active", count);
 #ifdef TNX_ENABLE_ROLLBACK
-								reg->PushServerEvent({frame, [reg]() { reg->SweepAliveFlagsToActive(); }});
+								reg->PushServerEvent({clientWorld->GetLogicThread()->GetLastCompletedFrame() + 1, [reg]() { reg->SweepAliveFlagsToActive(); }});
 #else
 								(void)frame;
 #endif

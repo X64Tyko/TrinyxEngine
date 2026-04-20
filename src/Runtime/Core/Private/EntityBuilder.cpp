@@ -141,6 +141,12 @@ static const FieldLookup* FindField(
 // EntityBuilder
 // ---------------------------------------------------------------------------
 
+// Thread-local cycle guard — stores absolute paths of prefabs currently being loaded.
+static thread_local std::unordered_set<std::string> ActivePrefabLoads;
+
+// Thread-local handle collector — non-null only during SpawnFromFileTracked.
+static thread_local std::vector<GlobalEntityHandle>* ActiveHandleCollector = nullptr;
+
 EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJson, bool bBackground)
 {
 	// Read entity type name
@@ -165,7 +171,7 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 		return EntityHandle{};
 	}
 
-	return reg->CreateByClassID(classID, [&](EntityRecord& record, void** fieldArrayTable)
+	EntityHandle lHandle = reg->CreateByClassID(classID, [&](EntityRecord& record, void** fieldArrayTable)
 	{
 		auto fieldMap       = BuildFieldMap(record.Arch);
 		uint32_t localIndex = record.LocalIndex;
@@ -222,14 +228,14 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 			flagsArr[localIndex] = spawnFlags;
 		}
 	});
-}
 
+	if (lHandle.IsValid() && ActiveHandleCollector) ActiveHandleCollector->push_back(reg->GlobalEntityRegistry.LookupGlobalHandle(lHandle));
+
+	return lHandle;
+}
 // ---------------------------------------------------------------------------
 // Prefab loading helpers
 // ---------------------------------------------------------------------------
-
-// Thread-local cycle guard — stores absolute paths of prefabs currently being loaded.
-static thread_local std::unordered_set<std::string> ActivePrefabLoads;
 
 // Load and parse an asset JSON file from an absolute path.
 static JsonValue LoadAssetJSON(const std::string& path)
@@ -377,6 +383,15 @@ size_t EntityBuilder::SpawnFromFile(Registry* reg, const char* filePath, bool bB
 {
 	// Use the full recursive path so top-level loads also participate in cycle detection.
 	return SpawnFromAssetJSON(reg, filePath, nullptr, bBackground);
+}
+
+size_t EntityBuilder::SpawnFromFileTracked(Registry* reg, const char* filePath, bool bBackground,
+										   std::vector<GlobalEntityHandle>& outHandles)
+{
+	ActiveHandleCollector = &outHandles;
+	size_t count          = SpawnFromAssetJSON(reg, filePath, nullptr, bBackground);
+	ActiveHandleCollector = nullptr;
+	return count;
 }
 
 EntityHandle EntityBuilder::SpawnEntityFromFile(Registry* reg, const char* filePath, bool bBackground)
