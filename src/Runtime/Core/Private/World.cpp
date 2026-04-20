@@ -49,9 +49,25 @@ bool World::Initialize(const EngineConfig& config, ConstructRegistry* constructR
 		return false;
 	}
 	Logic->Initialize(RegistryPtr.get(), &Config, Physics.get(),
-					  &SimInput, &VizInput, WQHandle, &bJobsInitialized,
+					  &SimInput, &VizInput,
+					  (Config.Mode == EngineMode::Client) ? &InputAccumRing : nullptr,
+					  (Config.Mode == EngineMode::Client) ? &bInputAccumEnabled : nullptr,
+					  WQHandle, &bJobsInitialized,
 					  windowWidth, windowHeight);
 	Logic->SetConstructRegistry(Constructs);
+
+	// Client-side input accumulator: ring sized to comfortably exceed the worst-case
+	// unacked window (~100 frames at 512Hz + 200ms RTT). 256 slots = ample headroom.
+	// Only initialized (and drained by the net thread) when running as a Client.
+	if (Config.Mode == EngineMode::Client)
+	{
+		if (!InputAccumRing.Initialize(256))
+		{
+			LOG_ENG_ERROR("[World] Failed to initialize InputAccumRing");
+			return false;
+		}
+		InputAccumConsumer.emplace(InputAccumRing.MakeConsumer());
+	}
 
 	LOG_ENG_INFO("[World] Initialized");
 	return true;

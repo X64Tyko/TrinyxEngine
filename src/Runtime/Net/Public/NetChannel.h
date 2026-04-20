@@ -6,6 +6,8 @@
 #include "NetConnectionManager.h"
 #include "NetTypes.h"
 
+class Soul;
+
 // ---------------------------------------------------------------------------
 // NetChannel — typed send wrapper for a single GNS connection.
 //
@@ -32,9 +34,10 @@ class NetChannel
 public:
 	NetChannel() = default;
 
-	NetChannel(ConnectionInfo* ci, NetConnectionManager* mgr)
+	NetChannel(ConnectionInfo* ci, NetConnectionManager* mgr, Soul* soul = nullptr)
 		: CI(ci)
 		, Mgr(mgr)
+		, NetSoul(soul)
 	{
 	}
 
@@ -105,6 +108,14 @@ public:
 	// The sequence is echoed rather than incremented — Pong is a mirror, not a new message.
 	bool SendPong(const PacketHeader& pingHeader);
 
+	// Build a header and stamp NextSeqOut++ on the connection — call from Sentinel
+	// before dispatching a job so the sequence number is assigned synchronously.
+	// The returned header is passed to NetConnectionManager::SendPrebuilt inside the job.
+	PacketHeader PrepareHeader(NetMessageType type, uint16_t payloadSize, uint32_t frameNumber = 0)
+	{
+		return MakeHeader(type, payloadSize, frameNumber);
+	}
+
 	bool     IsValid()  const { return CI != nullptr && Mgr != nullptr; }
 	uint8_t  OwnerID()  const { return CI ? CI->OwnerID : 0; }
 
@@ -112,6 +123,7 @@ private:
 	PacketHeader MakeHeader(NetMessageType type, uint16_t payloadSize, uint32_t frameNumber) const;
 	bool SendInternal(const PacketHeader& hdr, const uint8_t* payload, uint32_t size, bool reliable);
 
-	ConnectionInfo*      CI  = nullptr;
+	ConnectionInfo* CI        = nullptr;
 	NetConnectionManager* Mgr = nullptr;
+	Soul* NetSoul             = nullptr;
 };

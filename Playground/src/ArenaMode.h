@@ -100,7 +100,10 @@ private:
 			ConstructNetManifest manifest{};
 			manifest.PrefabIndex = typeHash;
 			manifest.NetFlags    = 0;
-			ref                  = reg->AllocateNetRef(player, soul.GetOwnerID(), manifest, typeHash, prefabIDRaw);
+			const uint32_t spawnFrame = world->GetLogicThread()
+											? world->GetLogicThread()->GetLastCompletedFrame()
+											: 0;
+			ref = reg->AllocateNetRef(player, soul.GetOwnerID(), manifest, typeHash, prefabIDRaw, spawnFrame);
 		}
 
 		soul.ClaimBody(ref);

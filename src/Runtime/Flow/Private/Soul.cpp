@@ -1,6 +1,7 @@
 #include "Soul.h"
 
 #include "FlowManager.h"
+#include "LogicThread.h"
 #include "World.h"
 #ifdef TNX_ENABLE_NETWORK
 #include "NetConnectionManager.h"
@@ -87,6 +88,12 @@ TNX_IMPL_SERVER(Soul, PlayerBegin, PlayerBeginRequestPayload)
 
 	if (result.has_value())
 	{
+		const World* w            = FlowMgr ? FlowMgr->GetWorld() : nullptr;
+		const LogicThread* logic  = w ? w->GetLogicThread() : nullptr;
+		const uint32_t spawnFrame = logic ? logic->GetLastCompletedFrame() : 0;
+
+		const uint32_t clientSpawnFrame = ctx.CI ? ctx.CI->ToClientFrame(spawnFrame) : spawnFrame;
+
 		PlayerBeginConfirmPayload confirm{};
 		confirm.PredictionID = params.PredictionID;
 		confirm.NetHandle    = result->Body.Handle.Value;
@@ -94,10 +101,18 @@ TNX_IMPL_SERVER(Soul, PlayerBegin, PlayerBeginRequestPayload)
 		confirm.PosX         = result->PosX;
 		confirm.PosY         = result->PosY;
 		confirm.PosZ         = result->PosZ;
+		confirm.SpawnFrame   = clientSpawnFrame;
+
+		// Seed LastAckedClientFrame so the first heartbeat ACK tells the client to start
+		// its retransmit window at spawnFrame, not frame 1. Without this, the client's
+		// firstFrame = LastServerAckedFrame+1 = 1 for the entire first ACK cycle, causing
+		// a window spanning hundreds of frames that aliases the ring buffer.
+		if (ctx.CI && clientSpawnFrame > 0) ctx.CI->LastAckedClientFrame = clientSpawnFrame - 1;
+
 		ctx.CI->RepState     = ClientRepState::Playing;
 		PlayerBeginConfirm(confirm);
-		LOG_NET_INFO_F(this, "[Soul] PlayerBeginConfirm sent (ownerID=%u, pos=%.1f,%.1f,%.1f)",
-					   OwnerID, confirm.PosX, confirm.PosY, confirm.PosZ);
+		LOG_NET_INFO_F(this, "[Soul] PlayerBeginConfirm sent (ownerID=%u, pos=%.1f,%.1f,%.1f, serverFrame=%u clientFrame=%u)",
+					   OwnerID, confirm.PosX, confirm.PosY, confirm.PosZ, spawnFrame, clientSpawnFrame);
 	}
 	else
 	{
@@ -126,7 +141,16 @@ TNX_IMPL_CLIENT(Soul, PlayerBeginConfirm, PlayerBeginConfirmPayload)
 	{
 		ctx.CI->Predictions.Clear(params.PredictionID);
 		ctx.CI->RepState = ClientRepState::Playing;
+
+		// Seed LastServerAckedFrame so TickInputSend() opens its window at SpawnFrame,
+		// not at frame 1. Without this, firstFrame = LastServerAckedFrame+1 = 1 for the
+		// entire first ACK round-trip, producing a payload spanning hundreds of frames
+		// that aliases the server-side ring buffer and causes "Input data loss" warnings.
+		if (params.SpawnFrame > 0) ctx.CI->LastServerAckedFrame = params.SpawnFrame - 1;
 	}
+
+	// Open the input accumulator gate — no frames should be pushed before Playing.
+	if (FlowMgr) if (World* w = FlowMgr->GetWorld()) w->EnableInputAccum();
 
 	if (FlowMgr)
 	{

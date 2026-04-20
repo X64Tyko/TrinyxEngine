@@ -8,6 +8,7 @@
 #include <immintrin.h>
 #include "Archetype.h"
 
+#include "CTransform.h"
 #include "SchemaReflector.h"
 
 Registry::Registry()
@@ -474,8 +475,8 @@ void Registry::PropagateFrame(uint32_t currentFrame)
 
 		const bool renderCaughtUp = RenderHasAcked && RenderAck.load(std::memory_order_acquire) >= LastPublishedFrame;
 		const int32_t clearMask   = renderCaughtUp
-									  ? ~(static_cast<int32_t>(TemporalFlagBits::Dirty) | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame))
-									  : ~static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
+										? ~(static_cast<int32_t>(TemporalFlagBits::Dirty) | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame))
+										: ~static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
 
 		// CacheSlotMeta (flags) is always in the temporal cache (or volatile when rollback is off).
 		// Get the flags field from the active write frame.
@@ -606,3 +607,99 @@ uint32_t Registry::GetTotalEntityCount() const
 	}
 	return totalEntities;
 }
+
+#ifdef TNX_ENABLE_ROLLBACK
+bool Registry::CheckAndCorrectEntityTransform(const EntityTransformCorrection& correction)
+{
+	EntityNetHandle netHandle{};
+	netHandle.Value = correction.NetHandle;
+
+	GlobalEntityHandle gHandle = GlobalEntityRegistry.LookupGlobalHandle(netHandle);
+	if (gHandle.GetIndex() == 0) return false;
+
+	EntityRecord* record = GlobalEntityRegistry.Records[gHandle.GetIndex()];
+	if (!record || !record->IsValid()) return false;
+
+	Archetype* arch   = record->Arch;
+	Chunk* chunk      = record->TargetChunk;
+	uint32_t localIdx = record->LocalIndex;
+
+	void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+	arch->BuildFieldArrayTable(chunk, fieldArrayTable,
+							   GetTemporalCache()->GetActiveWriteFrame(),
+							   GetVolatileCache()->GetActiveWriteFrame());
+
+	// Read the resimmed position from the current write frame
+	constexpr float kThresholdSq = 0.01f * 0.01f; // 1cm
+	float predictedX             = 0.f, predictedY = 0.f, predictedZ = 0.f;
+	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
+	{
+		if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
+		void* base = fieldArrayTable[fdesc.fieldSlotIndex];
+		if (!base) continue;
+		auto* fa = static_cast<float*>(base);
+		switch (fdesc.componentSlotIndex)
+		{
+			case 0: predictedX = fa[localIdx];
+				break;
+			case 1: predictedY = fa[localIdx];
+				break;
+			case 2: predictedZ = fa[localIdx];
+				break;
+			default: break;
+		}
+	}
+
+	const float dx = predictedX - correction.PosX;
+	const float dy = predictedY - correction.PosY;
+	const float dz = predictedZ - correction.PosZ;
+	if (dx * dx + dy * dy + dz * dz <= kThresholdSq) return false;
+
+	// Still divergent after resim — write server-authoritative transform
+	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
+	{
+		if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
+		void* base = fieldArrayTable[fdesc.fieldSlotIndex];
+		if (!base) continue;
+		auto* fa = static_cast<float*>(base);
+		switch (fdesc.componentSlotIndex)
+		{
+			case 0: fa[localIdx] = correction.PosX;
+				break;
+			case 1: fa[localIdx] = correction.PosY;
+				break;
+			case 2: fa[localIdx] = correction.PosZ;
+				break;
+			case 3: fa[localIdx] = correction.RotQx;
+				break;
+			case 4: fa[localIdx] = correction.RotQy;
+				break;
+			case 5: fa[localIdx] = correction.RotQz;
+				break;
+			case 6: fa[localIdx] = correction.RotQw;
+				break;
+			default: break;
+		}
+	}
+	return true;
+}
+
+void Registry::PushServerEvent(ServerEventEntry entry)
+{
+	ServerEvents.push_back(std::move(entry));
+}
+
+void Registry::ReplayServerEventsAt(uint32_t frame)
+{
+	for (auto& ev : ServerEvents)
+		if (ev.Frame == frame && ev.Replay) ev.Replay();
+}
+
+void Registry::PruneServerEvents(uint32_t oldestFrame)
+{
+	ServerEvents.erase(
+		std::remove_if(ServerEvents.begin(), ServerEvents.end(),
+					   [oldestFrame](const ServerEventEntry& ev) { return ev.Frame < oldestFrame; }),
+		ServerEvents.end());
+}
+#endif

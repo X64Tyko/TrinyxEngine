@@ -15,6 +15,11 @@ bool GNSContext::Initialize(GNSStatusChangedFn statusFn)
 {
 	if (bInitialized) return true;
 
+	// Manual poll mode must be set before GameNetworkingSockets_Init to prevent
+	// GNS from spawning its background service thread. All I/O is driven inline
+	// via Poll() from the NetThread.
+	SteamNetworkingSockets_SetManualPollMode(true);
+
 	SteamNetworkingErrMsg errMsg;
 	if (!GameNetworkingSockets_Init(nullptr, errMsg))
 	{
@@ -40,6 +45,11 @@ bool GNSContext::Initialize(GNSStatusChangedFn statusFn)
 	bInitialized = true;
 	LOG_ENG_INFO("[GNSContext] Initialized");
 	return true;
+}
+
+void GNSContext::Poll(int msWait)
+{
+	SteamNetworkingSockets_Poll(msWait);
 }
 
 void GNSContext::Shutdown()

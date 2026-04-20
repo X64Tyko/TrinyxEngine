@@ -7,17 +7,19 @@
 #include "Logger.h"
 
 #include <SDL3/SDL_timer.h>
+#include <atomic>
 #include <cstdlib>
 #include <memory>
+#include <thread>
 
 // Two-process loopback: CLIENT side.
 //
-// Runs ClientNetThread with Start() — the full ThreadMain loop runs on its own thread,
-// exercising the complete message-pump and HandleMessage dispatch path.
+// Drives ClientNetThread from a local poll thread (mirroring how Sentinel drives
+// PumpMessages in production — no dedicated net thread in NetThreadBase anymore).
 //
 // Flow tested:
 //   Connect → GNS connection established → OnConnectionStatusChanged auto-sends ConnectionHandshake
-//   → ThreadMain polls + dispatches → HandleMessage(ConnectionHandshake) receives server's
+//   → poll loop calls PumpMessages → HandleMessage(ConnectionHandshake) receives server's
 //   HandshakeAccept → AssignOwnerID(conn, SenderID) → LocalOwnerID set atomically
 //
 // The test thread polls GetLocalOwnerID() until non-zero, then validates the assignment
@@ -45,22 +47,32 @@ TEST(Net_Loopback_Client)
 	EngineConfig config{};
 	config.ApplyDefaults();
 
-	// Heap-allocate so we control destruction order — RAII stopper ensures
-	// the thread is always stopped before ClientNetThread destructs, even if
-	// an ASSERT fires (which throws std::runtime_error and unwinds the stack).
 	auto clientThread = std::make_unique<ClientNetThread>();
 	clientThread->Initialize(&gns, &config);
 
-	// Start the real ThreadMain — pumps RunCallbacks+PollIncoming+HandleMessage
-	// at InputNetHz, exactly as in production.
-	clientThread->Start();
-
-	// RAII guard: always Stop+Join before clientThread destructs.
-	struct ThreadStopper
+	// Spin a local poll thread to drive PumpMessages — mirrors Sentinel in production.
+	std::atomic<bool> pollRunning{true};
+	std::thread pollThread([&]()
 	{
-		ClientNetThread* T;
-		~ThreadStopper() { T->Stop(); T->Join(); }
-	} stopper{clientThread.get()};
+		while (pollRunning.load(std::memory_order_acquire))
+		{
+			clientThread->PumpMessages();
+			SDL_Delay(1); // ~1000Hz
+		}
+	});
+
+	// RAII guard: always stop poll thread before clientThread destructs.
+	struct PollStopper
+	{
+		std::atomic<bool>& Running;
+		std::thread& Thread;
+
+		~PollStopper()
+		{
+			Running.store(false, std::memory_order_release);
+			Thread.join();
+		}
+	} stopper{pollRunning, pollThread};
 
 	constexpr uint16_t kPort       = 27020;
 	HSteamNetConnection serverConn = clientThread->GetConnectionManager()->Connect("127.0.0.1", kPort);

@@ -4,8 +4,11 @@
 #include <functional>
 
 #include "ConstructBatch.h"
+#include "NetTypes.h"
 #include "Registry.h"
 #include "TrinyxJobs.h"
+#include "TrinyxMPMCRing.h"
+#include "TrinyxMPSCRing.h"
 #include "Types.h"
 
 // Forward declarations
@@ -30,6 +33,8 @@ public:
 
 	void Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
 					InputBuffer* simInput, InputBuffer* vizInput,
+					TrinyxMPSCRing<NetInputFrame>* inputAccumRing,
+					const std::atomic<bool>* inputAccumEnabled,
 					TrinyxJobs::WorldQueueHandle worldQueue, const std::atomic<bool>* jobsInitialized,
 					int windowWidth, int windowHeight);
 	void Start();
@@ -38,6 +43,16 @@ public:
 
 	bool IsRunning() const { return bIsRunning.load(std::memory_order_relaxed); }
 	void SetConstructRegistry(ConstructRegistry* cr) { ConstructsPtr = cr; }
+
+	/// Returns true while ExecuteRollback is running a resimulation pass.
+	/// Safe to call from Constructs (they tick on the logic thread). Used to
+	/// suppress side-effectful logic (input injection, timers, logging) that
+	/// should only run during the authoritative forward pass.
+#ifdef TNX_ENABLE_ROLLBACK
+	bool IsResimulating() const { return bRollbackActive; }
+#else
+	bool IsResimulating() const { return false; }
+#endif
 
 	/// Server-side hook: inject per-player input from PlayerInputLog into each player's
 	/// InputBuffer before gameplay logic runs. Called each fixed tick inside ProcessSimInput.
@@ -75,6 +90,9 @@ public:
 	// interpolation error and is far preferable to synchronization overhead.
 	double GetAccumulator() const { return Accumulator.load(std::memory_order_relaxed); }
 	double GetFixedAlpha() const;
+	bool TickPause(uint64_t perfFrequency, uint64_t frameStartCounter, double dt);
+	void PhysicsLoop(SimFloat fixedStepTime);
+	bool FixedUpdate(uint64_t perfFrequency, SimFloat fixedStepTime, int MaxPhysSubSteps, uint64_t frameStartCounter);
 
 	// Editor-readable FPS snapshots (updated once per second by TrackFPS).
 	// Relaxed loads — a stale value is harmless for a stats display.
@@ -92,14 +110,27 @@ public:
 #ifdef TNX_ENABLE_ROLLBACK
 	// Called from Sentinel thread (PumpEvents) on F5 press.
 	void RequestRollbackTest() { bRollbackTestRequested.store(true, std::memory_order_release); }
+	void ProcessRollback();
 
 	// Called from any thread (e.g. net reconciliation) to trigger a production rollback.
 	// targetFrame is the authoritative frame to rewind to; resim runs to current FrameNumber.
 	void RequestRollback(uint32_t targetFrame)
 	{
-		PendingRollbackFrame.store(targetFrame, std::memory_order_relaxed);
-		bRollbackRequested.store(true, std::memory_order_release);
+		PendingRollbackFrame.store(targetFrame, std::memory_order_release);
 	}
+
+	uint32_t GetPhysicsDivizor() const { return PhysicsDivizor; }
+
+	// Called from the Logic thread (via PostAndWait) when a state correction arrives.
+	// Queues server-authoritative transforms for comparison during resim and triggers
+	// a rollback to earliestClientFrame so the sim can re-derive correct state.
+	void EnqueueCorrections(std::vector<EntityTransformCorrection> corrections, uint32_t earliestClientFrame);
+
+	/// Request a rollback to clientFrame so newly-received spawns are inserted at their
+	/// correct historical ring slot. Thread-safe: called from the net thread after a
+	/// spawn handshake completes. Merges with any correction-driven rollback — the logic
+	/// thread takes whichever target is oldest.
+	void EnqueueSpawnRollback(uint32_t clientFrame);
 #endif
 
 private:
@@ -129,6 +160,8 @@ private:
 	// Input
 	InputBuffer* SimInput = nullptr;
 	InputBuffer* VizInput = nullptr;
+	TrinyxMPSCRing<NetInputFrame>* InputAccumRing = nullptr; // non-owning; client-side only
+	const std::atomic<bool>* InputAccumEnabled    = nullptr; // gated at PlayerBeginConfirm
 
 	// Server-side: per-player input injection hook (null on clients/standalone)
 	// Returns true if the sim should stall this tick (at least one player is behind).
@@ -174,10 +207,16 @@ private:
 #ifdef TNX_ENABLE_ROLLBACK
 	// --- Rollback ---
 	std::atomic<bool> bRollbackTestRequested{false};
-	std::atomic<bool> bRollbackRequested{false};
-	std::atomic<uint32_t> PendingRollbackFrame{0};
+	std::atomic<uint32_t> PendingRollbackFrame{UINT32_MAX};
 	bool bRollbackActive{false}; // Logic-thread-only guard: set during ExecuteRollback
 	static constexpr uint32_t RollbackFrameCount = 5;
+
+	std::vector<EntityTransformCorrection> PendingCorrections; // Logic-thread-only
+
+	// MPMC ring buffer: worker/net threads push corrections here; logic thread drains
+	// into PendingCorrections at the start of each rollback check. Sized for 256 entries
+	// (~10× the expected burst at 23Hz replication with up to 24 entities per packet).
+	TrinyxMPMCRing<EntityTransformCorrection> IncomingCorrections;
 
 	void ExecuteRollback(uint32_t targetFrame);   // Production rewind+resim — no test scaffolding
 	void ExecuteRollbackTest();                    // Test wrapper: save → ExecuteRollback → compare → restore

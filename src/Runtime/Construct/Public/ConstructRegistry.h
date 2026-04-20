@@ -92,7 +92,7 @@ public:
 	/// Called by ReplicationSystem::HandleConstructSpawn — the server's handle is in the payload.
 	/// Does NOT allocate a new NetIndex; uses the one already assigned by the server.
 	ConstructRef WireNetRef(void* ptr, ConstructNetHandle serverHandle,
-							ConstructNetManifest manifest, uint32_t typeHash)
+							ConstructNetManifest manifest, uint32_t typeHash, uint32_t spawnFrame)
 	{
 		const uint32_t netIndex = serverHandle.NetIndex;
 		const uint8_t ownerID   = serverHandle.NetOwnerID;
@@ -104,6 +104,7 @@ public:
 		rec.ConstructPtr = ptr;
 		rec.TypeHash     = typeHash;
 		rec.PrefabIDRaw  = 0;
+		rec.SpawnFrame   = spawnFrame;
 		rec.Generation   = 1;
 		rec.OwnerID      = ownerID;
 
@@ -122,7 +123,7 @@ public:
 	/// Allocate a net identity for a Construct (server or standalone).
 	/// Returns a valid ConstructRef with a non-zero NetIndex.
 	ConstructRef AllocateNetRef(void* ptr, uint8_t ownerID, ConstructNetManifest manifest,
-								uint32_t typeHash, int64_t prefabIDRaw)
+								uint32_t typeHash, int64_t prefabIDRaw, uint32_t spawnFrame = 0)
 	{
 		const uint32_t netIndex = NextNetIndex++;
 
@@ -135,6 +136,7 @@ public:
 		rec.ConstructPtr = ptr;
 		rec.TypeHash     = typeHash;
 		rec.PrefabIDRaw  = prefabIDRaw;
+		rec.SpawnFrame   = spawnFrame;
 		rec.Generation   = 1;
 		rec.OwnerID      = ownerID;
 
@@ -291,6 +293,20 @@ public:
 		const ConstructRecord* rec = Records.try_get_ptr(
 			LookupGlobalHandle(ref.Handle).GetIndex());
 		return rec && ref.Generation == rec->Generation;
+	}
+
+	/// Returns the earliest SpawnFrame across all live Construct records.
+	/// Used by LogicThread to clamp rollback targets — we must never roll back to
+	/// before the oldest Construct was spawned, as there is no replay event to re-create it.
+	uint32_t GetEarliestSpawnFrame() const
+	{
+		uint32_t earliest = UINT32_MAX;
+		for (uint32_t i = 1; i < NextNetIndex; ++i)
+		{
+			const ConstructRecord* rec = Records.try_get_ptr(i);
+			if (rec && rec->IsValid() && rec->SpawnFrame < earliest) earliest = rec->SpawnFrame;
+		}
+		return earliest;
 	}
 
 private:

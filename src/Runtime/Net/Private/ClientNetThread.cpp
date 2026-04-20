@@ -38,6 +38,12 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 
 	switch (type)
 	{
+		case NetMessageType::InputFrame:
+			{
+				//LOG_ENG_INFO_F("new Input Ack Floor: %u", msg.Header.AckedClientFrame);
+				break;
+			}
+
 		case NetMessageType::Ping:
 			{
 				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
@@ -96,10 +102,11 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 
 					// Record our own frame so we can translate local frame numbers to
 					// server-relative frames when building InputFrame packets.
-					World* w                  = WorldMap[msg.Header.SenderID];
-					ci->LocalFrameAtHandshake = (w && w->GetLogicThread())
-													? w->GetLogicThread()->GetLastCompletedFrame()
-													: 0;
+					World* w                        = WorldMap[msg.Header.SenderID];
+					ci->ClientLocalFrameAtHandshake = (w && w->GetLogicThread())
+														  ? w->GetLogicThread()->GetLastCompletedFrame()
+														  : 0;
+					if (w) w->SetServerFrameOffset(ci->GetFrameOffset());
 				}
 				ci->RepState = ClientRepState::Synchronizing;
 
@@ -128,7 +135,9 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 											  ? 128u
 											  : static_cast<uint32_t>(Config->FixedUpdateHz);
 				const float stepMs = 1000.0f / static_cast<float>(tickRate);
-				ci->InputLead      = static_cast<uint32_t>(ci->RTT_ms * 0.5f / stepMs) + 2u;
+				// InputLead is kept on ConnectionInfo for diagnostics but is no longer used
+				// to offset packet frame tags — the logic thread stamps each frame exactly.
+				ci->InputLead = static_cast<uint32_t>(ci->RTT_ms * 0.5f / stepMs) + 2u;
 
 				// Guard: ClockSync (unreliable) can arrive after TravelNotify (reliable).
 				if (ci->RepState == ClientRepState::Synchronizing)
@@ -215,10 +224,15 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 						{
 							Registry* reg   = clientWorld->GetRegistry();
 							Soul* sweepSoul = soul;
-							clientWorld->PostAndWait([reg, sweepSoul](uint32_t)
+							clientWorld->PostAndWait([reg, sweepSoul](uint32_t frame)
 							{
 								int count = reg->SweepAliveFlagsToActive();
 								LOG_NET_INFO_F(sweepSoul, "[Replication] ServerReady: swept %d Alive→Active", count);
+#ifdef TNX_ENABLE_ROLLBACK
+								reg->PushServerEvent({frame, [reg]() { reg->SweepAliveFlagsToActive(); }});
+#else
+								(void)frame;
+#endif
 							});
 						}
 
@@ -258,7 +272,7 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 				}
 
 				// Defer to TickReplication — never block the fast-path message loop.
-				DeferredEntitySpawn deferred{ownerID, msg.Payload};
+				DeferredEntitySpawn deferred{ownerID, msg.Header.FrameNumber, msg.Payload};
 				DeferredEntitySpawns.push_back(std::move(deferred));
 				break;
 			}
@@ -280,7 +294,7 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 					break;
 				}
 
-				DeferredConstructSpawn deferred{ownerID, msg.Payload};
+				DeferredConstructSpawn deferred{ownerID, msg.Header.FrameNumber, msg.Payload};
 
 				// Try immediately — if entities aren't ready yet, push to deferred queue.
 				if (!TrySpawnDeferred(deferred)) DeferredConstructSpawns.push_back(std::move(deferred));
@@ -298,18 +312,36 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 				ConnectionInfo* ci    = ConnectionMgr->FindConnection(msg.Connection);
 				const uint8_t ownerID = ci ? ci->OwnerID : 0;
 				World* clientWorld    = WorldMap[ownerID];
-				if (!clientWorld) break;
+				if (!clientWorld || !ci) break;
+
+				const uint32_t clientFrame = msg.Header.FrameNumber;
 
 				const uint32_t entryCount = static_cast<uint32_t>(
 					msg.Payload.size() / sizeof(StateCorrectionEntry));
 				const auto* entries = reinterpret_cast<const StateCorrectionEntry*>(msg.Payload.data());
-				std::vector<StateCorrectionEntry> corrections(entries, entries + entryCount);
 
-				Registry* corrReg                    = clientWorld->GetRegistry();
-				const StateCorrectionEntry* corrData = corrections.data();
-				clientWorld->PostAndWait([corrReg, corrData, entryCount](uint32_t)
+				Registry* corrReg      = clientWorld->GetRegistry();
+				LogicThread* corrLogic = clientWorld->GetLogicThread();
+
+				// Heap-allocate so the fire-and-forget Post lambda can safely outlive this scope.
+				// The lambda owns the vector and deletes it after use.
+				struct CorrCapture
 				{
-					ReplicationSystem::HandleStateCorrections(corrReg, corrData, entryCount);
+					Registry* reg;
+					LogicThread* logic;
+					std::vector<StateCorrectionEntry>* corrs;
+					uint32_t clientFrame;
+					uint32_t LastAckedFrame;
+				};
+				static_assert(sizeof(CorrCapture) <= 48, "CorrCapture exceeds job payload limit");
+
+				auto* corrHeap = new std::vector<StateCorrectionEntry>(entries, entries + entryCount);
+				CorrCapture cap{corrReg, corrLogic, corrHeap, clientFrame, ci->LastServerAckedFrame};
+				clientWorld->Post([cap](uint32_t)
+				{
+					ReplicationSystem::HandleStateCorrections(cap.reg, cap.corrs->data(),
+															  static_cast<uint32_t>(cap.corrs->size()), cap.clientFrame, cap.logic, cap.LastAckedFrame);
+					delete cap.corrs;
 				});
 				break;
 			}
@@ -421,6 +453,20 @@ bool ClientNetThread::TrySpawnDeferred(const DeferredConstructSpawn& entry)
 		*pDone = ReplicationSystem::HandleConstructSpawn(
 			constructs, entityReg, clientWorld, payloadData, payloadSize);
 	});
+
+	// If the construct was successfully created, request a rollback to its server spawn frame
+	// so any backing entity temporal data is populated from the correct historical frame.
+#ifdef TNX_ENABLE_ROLLBACK
+	if (done && entry.ServerSpawnFrame > 0 && payload.size() >= sizeof(ConstructSpawnPayload))
+	{
+		LogicThread* logic = clientWorld->GetLogicThread();
+		if (logic)
+		{
+			logic->EnqueueSpawnRollback(entry.ServerSpawnFrame);
+		}
+	}
+#endif
+
 	return done;
 }
 
@@ -444,10 +490,22 @@ void ClientNetThread::FlushDeferredEntitySpawns()
 
 		EntitySpawnPayload spawnData = *reinterpret_cast<const EntitySpawnPayload*>(it->Payload.data());
 		Registry* spawnReg           = clientWorld->GetRegistry();
-		clientWorld->SpawnAndWait([spawnReg, &spawnData](uint32_t)
+		uint32_t& SpawnFrame         = it->ServerSpawnFrame;
+		clientWorld->SpawnAndWait([spawnReg, &spawnData, SpawnFrame](uint32_t)
 		{
-			ReplicationSystem::HandleEntitySpawn(spawnReg, spawnData);
+			ReplicationSystem::HandleEntitySpawn(spawnReg, spawnData, SpawnFrame);
 		});
+
+		// Request a rollback to the entity's server spawn frame so the entity is inserted
+		// at the correct historical ring slot. ReplayServerEventsAt will re-hydrate it.
+#ifdef TNX_ENABLE_ROLLBACK
+		LogicThread* logic = clientWorld->GetLogicThread();
+		if (logic && it->ServerSpawnFrame > 0)
+		{
+			logic->EnqueueSpawnRollback(it->ServerSpawnFrame);
+		}
+#endif
+
 		it = DeferredEntitySpawns.erase(it);
 	}
 }
@@ -494,6 +552,19 @@ void ClientNetThread::TickReplication()
 
 void ClientNetThread::TickInputSend()
 {
+	if (!TrinyxJobs::IsRunning()) return;
+
+	// Skip if the previous job is still running — single-consumer MPSC ring
+	// can't safely be accessed by two jobs concurrently.
+	if (SendCounter.Value.load(std::memory_order_acquire) != 0) return;
+
+	ClientNetThread* self = this;
+	TrinyxJobs::Dispatch([self](uint32_t) { self->ExecuteInputSend(); },
+						 &SendCounter, TrinyxJobs::Queue::General);
+}
+
+void ClientNetThread::ExecuteInputSend()
+{
 	std::vector<HSteamNetConnection> clientHandles;
 	for (const auto& ci : ConnectionMgr->GetConnections())
 		if (ci.bClientInitiated && ci.bConnected && ci.OwnerID != 0)
@@ -504,58 +575,74 @@ void ClientNetThread::TickInputSend()
 		ConnectionInfo* ci = ConnectionMgr->FindConnection(handle);
 		if (!ci) continue;
 
-		// Don't send input until the server has confirmed our spawn.
 		if (ci->RepState < ClientRepState::Playing) continue;
 
 		World* world = WorldMap[ci->OwnerID];
 		if (!world) continue;
 
-		InputBuffer* netInput = world->GetNetInput();
-		netInput->Swap();
+		auto* consumer = world->GetInputAccumConsumer();
+		if (!consumer) continue;
 
-		const uint32_t localFrame = world->GetLogicThread()
-										? world->GetLogicThread()->GetLastCompletedFrame()
-										: 0;
+		// Drop floor — entirely in client-local frame space.
+		// Pre-handshake junk: frames before ClientLocalFrameAtHandshake are pre-connection noise.
+		// Already-acked: LastServerAckedFrame is echoed back by the server in client-local
+		// space (server converts from server-frame via log->FrameOffset before stamping).
+		const uint32_t preHandshakeFloor = ci->ClientLocalFrameAtHandshake > 0
+											   ? ci->ClientLocalFrameAtHandshake - 1
+											   : 0u;
 
-		const uint32_t frameOffset = ci->ServerFrameAtHandshake - ci->LocalFrameAtHandshake;
-		const uint32_t frame       = localFrame + frameOffset + ci->InputLead;
-
-		const uint32_t fixedHz     = (Config->FixedUpdateHz == EngineConfig::Unset) ? 512 : Config->FixedUpdateHz;
-		const uint32_t frameTimeUS = 1'000'000u / fixedHz;
-
-		// Trim events the server already consumed, then update key state + append new events.
-		ClientInputAccumulator& accum = ci->InputAccum;
-		accum.TrimAcked(ci->LastServerAckedFrame);
-
-		netInput->SnapshotKeyState(accum.State.KeyState, sizeof(accum.State.KeyState));
-		accum.State.MouseDX      = netInput->GetMouseDX();
-		accum.State.MouseDY      = netInput->GetMouseDY();
-		accum.State.MouseButtons = netInput->GetMouseButtonMask();
-
-		// Append new discrete events, tagging each with its absolute sim frame.
-		const uint16_t eventCount = netInput->GetEventCount();
-		if (eventCount > 8) [[unlikely]]
-		LOG_ENG_WARN_F("[ClientNet] Input event overflow: %u events in net window", eventCount);
-		for (uint16_t i = 0; i < eventCount; ++i)
+		// Window backstop: if acks stall (e.g. server is stalled and frozen its ack), the
+		// accumulator can grow well past MaxWindowFrames. The client would then keep sending
+		// the oldest MaxWindowFrames entries — frames the server already has — which can
+		// never advance LastReceivedFrame and permanently deadlocks the stall.
+		// Anchor the drop floor so the accumulator never exceeds MaxWindowFrames entries.
+		uint32_t windowBackstop = 0;
+		if (consumer->Size() > static_cast<size_t>(MaxWindowFrames))
 		{
-			InputData e       = netInput->ReadEvent();
-			const uint32_t simFrame = frame + e.FrameUSOffset / frameTimeUS;
-			accum.PendingEvents.push_back({simFrame, static_cast<uint32_t>(e.Key), e.Pressed});
+			NetInputFrame tail;
+			if (consumer->TryPeekAt(consumer->Size() - 1, tail) && tail.Frame >= MaxWindowFrames) windowBackstop = tail.Frame - MaxWindowFrames;
 		}
 
-		// Build wire payload from the full unacked window and send.
-		// Clamp firstFrame to frame: if the server over-ACKed (e.g. a stale ACK arrives
-		// after a reconnect), firstFrame could exceed frame and produce an inverted payload.
-		const uint32_t firstFrame       = std::min(ci->LastServerAckedFrame + 1, frame);
-		const InputFramePayload payload = accum.BuildPayload(firstFrame, frame, frameTimeUS);
+		const uint32_t dropFloor = std::max({ci->LastServerAckedFrame, preHandshakeFloor, windowBackstop});
+
+		size_t dropCount = 0;
+		while (dropCount < consumer->Size())
+		{
+			NetInputFrame front;
+			if (!consumer->TryPeekAt(dropCount, front)) break;
+			if (front.Frame > dropFloor) break;
+			++dropCount;
+		}
+		if (dropCount > 0) consumer->DropFront(dropCount);
+
+		// Peek up to MaxWindowFrames unacked entries.  Frame numbers are client-local —
+		// the server translates to server-frame space via PlayerInputLog::FrameOffset.
+		InputWindowPacket wirePayload{};
+		const uint32_t count = static_cast<uint32_t>(
+			std::min(consumer->Size(), static_cast<size_t>(MaxWindowFrames)));
+
+		for (uint32_t i = 0; i < count; ++i)
+		{
+			NetInputFrame frame;
+			if (!consumer->TryPeekAt(i, frame)) break;
+			wirePayload.Frames[i]  = frame;
+			wirePayload.FrameCount = i + 1;
+		}
+
+		if (wirePayload.FrameCount == 0) continue;
+
+		wirePayload.FirstFrame         = wirePayload.Frames[0].Frame;
+		const uint32_t lastClientFrame = wirePayload.Frames[wirePayload.FrameCount - 1].Frame;
+
+		//LOG_ENG_INFO_F("[ClientNet] Sending %u input frames (first=%u, last=%u)", wirePayload.FrameCount, wirePayload.FirstFrame, lastClientFrame);
 
 		PacketHeader header{};
 		header.Type        = static_cast<uint8_t>(NetMessageType::InputFrame);
 		header.Flags       = PacketFlag::DefaultFlags;
-		header.PayloadSize = sizeof(InputFramePayload);
-		header.FrameNumber = frame;
+		header.PayloadSize = sizeof(InputWindowPacket);
+		header.FrameNumber = lastClientFrame; // client-local; server translates via FrameOffset
 		header.SenderID    = ci->OwnerID;
 		ConnectionMgr->Send(handle, header,
-							reinterpret_cast<const uint8_t*>(&payload), false);
+							reinterpret_cast<const uint8_t*>(&wirePayload), false, /*noNagle=*/true);
 	}
 }

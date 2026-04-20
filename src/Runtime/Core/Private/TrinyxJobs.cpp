@@ -19,12 +19,12 @@ namespace TrinyxJobs
 	static constexpr uint32_t MaxWorldQueues = 16;
 
 	// One ring buffer per global queue
-	static TrinyxRingBuffer<Job> s_Queues[QueueCount];
+	static TrinyxMPMCRing<Job> s_Queues[QueueCount];
 
 	// Per-world queue pool — only the owning LogicThread drains these
 	struct WorldQueueSlot
 	{
-		TrinyxRingBuffer<Job> Ring;
+		TrinyxMPMCRing<Job> Ring;
 		std::atomic<bool> Active{false};
 	};
 
@@ -183,6 +183,11 @@ namespace TrinyxJobs
 		for (uint32_t q = 0; q < QueueCount; ++q) s_Queues[q].Shutdown();
 
 		LOG_ENG_INFO("[Jobs] Shutdown complete");
+	}
+
+	bool IsRunning()
+	{
+		return s_Running.load(std::memory_order_acquire);
 	}
 
 	void SubmitJob(const Job& job, Queue queue)

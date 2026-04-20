@@ -31,6 +31,7 @@ namespace TrinyxThreading
 	static uint32_t s_LogicalCores  = 0;
 	static bool s_HasSMT            = false;
 	static bool s_Initialized       = false;
+	static bool s_PinningEnabled    = true;
 
 	static constexpr uint32_t ReservedCores = 4; // Sentinel, Brain, Encoder, NetThread
 
@@ -217,7 +218,7 @@ namespace TrinyxThreading
 
 	void PinThread(std::thread& t)
 	{
-		if (s_CoreList.empty()) return;
+		if (!s_PinningEnabled || s_CoreList.empty()) return;
 
 		CoreEntry& core = s_CoreList[0];
 		do
@@ -264,6 +265,7 @@ namespace TrinyxThreading
 
 	void PinCurrentThread(uint32_t coreId)
 	{
+		if (!s_PinningEnabled) return;
 #ifdef _WIN32
 		DWORD_PTR mask = (1ULL << coreId);
 		SetThreadAffinityMask(GetCurrentThread(), mask);
@@ -296,4 +298,12 @@ namespace TrinyxThreading
 	}
 
 	bool HasSMT() { return s_HasSMT; }
+
+	void SetPinningEnabled(bool enabled)
+	{
+		s_PinningEnabled = enabled;
+		LOG_ENG_INFO_F("[ThreadPinning] Thread pinning %s", enabled ? "enabled" : "disabled");
+	}
+
+	bool IsPinningEnabled() { return s_PinningEnabled; }
 }

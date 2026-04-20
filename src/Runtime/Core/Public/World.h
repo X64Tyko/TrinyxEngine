@@ -1,12 +1,15 @@
 #pragma once
 #include <memory>
 #include <functional>
+#include <optional>
 #include <span>
 #include <vector>
 
 #include "EngineConfig.h"
 #include "Input.h"
+#include "NetTypes.h"
 #include "TrinyxJobs.h"
+#include "TrinyxMPSCRing.h"
 
 class Registry;
 class LogicThread;
@@ -84,7 +87,6 @@ public:
 	LogicThread* GetLogicThread() const { return Logic.get(); }
 	InputBuffer* GetSimInput() { return &SimInput; }
 	InputBuffer* GetVizInput() { return &VizInput; }
-	InputBuffer* GetNetInput() { return &NetInput; }
 
 	/// Engine-internal: returns the correct sim input buffer for a player by ownerID.
 	/// Gameplay code must use Soul::GetSimInput(world) — it applies SoulRole routing.
@@ -121,7 +123,19 @@ public:
 		while (PlayerVizInputs.size() < ownerID) PlayerVizInputs.push_back(std::make_unique<InputBuffer>());
 	}
 
-	/// All buffers Sentinel should fan input into. Iterate instead of adding push sites.
+	/// MPSC ring for outbound input accumulation (client-side only).
+	/// Logic thread pushes one NetInputFrame per sim frame at ProcessSimInput time.
+	/// Net thread drains via the issued Consumer — call GetInputAccumConsumer() from net thread.
+	/// Gate: the ring only accepts pushes after EnableInputAccum() is called (at Playing).
+	TrinyxMPSCRing<NetInputFrame>& GetInputAccumRing() { return InputAccumRing; }
+
+	TrinyxMPSCRing<NetInputFrame>::Consumer* GetInputAccumConsumer()
+	{
+		return InputAccumConsumer.has_value() ? &InputAccumConsumer.value() : nullptr;
+	}
+
+	void EnableInputAccum() { bInputAccumEnabled.store(true, std::memory_order_release); }
+	bool IsInputAccumEnabled() const { return bInputAccumEnabled.load(std::memory_order_acquire); }
 	std::span<InputBuffer* const> GetInputTargets() const { return InputTargets; }
 	const EngineConfig& GetConfig() const { return Config; }
 	EngineConfig& GetConfigMut() { return Config; }
@@ -141,6 +155,11 @@ public:
 	// --- Network ownership ---
 	uint8_t LocalOwnerID = 0; // This world's owner (0 = server, 1-255 = client)
 
+	/// Offset to add to a local logic frame number to get the equivalent server frame.
+	/// 0 on the server (local IS server). Set by ClientNetThread at handshake.
+	uint32_t GetServerFrameOffset() const { return ServerFrameOffset; }
+	void SetServerFrameOffset(uint32_t offset) { ServerFrameOffset = offset; }
+
 	// Test-only: hard-reset the registry (wipes all entities, handles, caches).
 	void ResetRegistry() const;
 	void ConfirmLocalRecycles() const;
@@ -156,14 +175,19 @@ private:
 
 	InputBuffer SimInput;
 	InputBuffer VizInput;
-	InputBuffer NetInput;
-	std::vector<std::unique_ptr<InputBuffer>> PlayerSimInputs; // per-player sim input, grown on EnsurePlayerInputSlot
-	std::vector<std::unique_ptr<InputBuffer>> PlayerVizInputs; // per-player viz input, grown on EnsurePlayerInputSlot
-	InputBuffer* InputTargets[3]          = {&SimInput, &VizInput, &NetInput};
+	std::vector<std::unique_ptr<InputBuffer>> PlayerSimInputs;
+	std::vector<std::unique_ptr<InputBuffer>> PlayerVizInputs;
+	InputBuffer* InputTargets[2]          = {&SimInput, &VizInput};
 	TrinyxJobs::WorldQueueHandle WQHandle = TrinyxJobs::InvalidWorldQueue;
+
+	// Client-side outbound input accumulator — logic thread produces, net thread consumes.
+	TrinyxMPSCRing<NetInputFrame> InputAccumRing;
+	std::optional<TrinyxMPSCRing<NetInputFrame>::Consumer> InputAccumConsumer;
 
 	ConstructRegistry* Constructs = nullptr; // Non-owning — FlowManager owns the registry
 	ReplicationSystem* Replicator = nullptr; // Non-owning — TrinyxEngine or EditorContext owns it
-	FlowManager*       FlowMgr    = nullptr; // Non-owning — set by FlowManager::CreateWorld
+	FlowManager* FlowMgr          = nullptr; // Non-owning — set by FlowManager::CreateWorld
+	uint32_t ServerFrameOffset    = 0;       // Local→server frame delta; set by ClientNetThread at handshake
 	std::atomic<bool> bJobsInitialized{false};
+	std::atomic<bool> bInputAccumEnabled{false}; // Gated to true at PlayerBeginConfirm (client-side only)
 };

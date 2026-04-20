@@ -70,7 +70,7 @@ public:
 				auto dot = name.rfind('.');
 				if (dot != std::string::npos) name = name.substr(0, dot);
 				LOG_INFO_F("[GameplayState] TravelNotify — loading level '%s' (background)", levelName.c_str());
-				Flow->LoadLevelByName(name.c_str(), /*bBackground=*/true);
+				Flow->LoadLevelByName(name.c_str(), /*bBackground=*/false);
 			}
 		}
 	}

@@ -42,12 +42,12 @@ struct AssetEntry
 	// One-shot per load event: cleared after firing so stale listeners
 	// never accumulate. Bindings with the same context object are safe
 	// to add again after re-checkout.
-	FixedMultiCallback<void, 8, uint32_t> OnLoaded;
+	FixedMultiCallback<void, 32, uint32_t> OnLoaded;
 
 	// Fired just before an asset is evicted from its slot.
 	// Persistent: survives load/reload cycles. Owners use this to
 	// invalidate cached slot indices and request a new checkout.
-	FixedMultiCallback<void, 4> OnEvicted;
+	FixedMultiCallback<void, 32> OnEvicted;
 };
 
 // -----------------------------------------------------------------------

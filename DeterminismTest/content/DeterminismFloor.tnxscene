@@ -1,0 +1,50 @@
+{
+  "name": "DeterminismFloor",
+  "defaultState": "DeterminismState",
+  "entities": [
+    {
+      "type": "CubeEntity",
+      "components": {
+        "CacheSlotMeta": {
+          "Flags": -2013265920.0
+        },
+        "CTransform": {
+          "PosX": 0.0,
+          "PosY": -2.0,
+          "PosZ": -10.0,
+          "RotQx": 0.0,
+          "RotQy": 0.0,
+          "RotQz": 0.0,
+          "RotQw": 1.0
+        },
+        "CColor": {
+          "R": 0.35,
+          "G": 0.35,
+          "B": 0.38,
+          "A": 1.0
+        },
+        "CJoltBody": {
+          "Shape": 0.0,
+          "HalfExtentX": 50.0,
+          "HalfExtentY": 0.5,
+          "HalfExtentZ": 50.0,
+          "Motion": 0.0,
+          "Mass": 0.0,
+          "Friction": 0.5,
+          "Restitution": 0.30000001192092896
+        },
+        "CMeshRef": {
+          "MeshID": 1.0,
+          "MaterialID": 0.0,
+          "LODCount": 0.0,
+          "CastShadow": 0.0
+        },
+        "CScale": {
+          "ScaleX": 50.0,
+          "ScaleY": 0.5,
+          "ScaleZ": 50.0
+        }
+      }
+    }
+  ]
+}

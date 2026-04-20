@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <type_traits>
 
@@ -32,6 +33,20 @@ enum class NetMessageType : uint8_t
 	Unknown             = 19, // Sentinel: unrecognised message type — receiver must drop
 	Count
 };
+
+inline const char* NetMessageTypeName(uint8_t type)
+{
+	static constexpr const char* kNames[] = {
+		"ConnectionHandshake", "InputFrame", "StateCorrection", "EntitySpawn",
+		"EntityDestroy", "Ping", "Pong", "FlowEvent",
+		"PlayerBeginRequest", "PlayerBeginConfirm", "PlayerBeginReject", "ClockSync",
+		"TravelNotify", "LevelReady", "GameModeManifest", "ClientModeManifest",
+		"SoulRPC", "ConstructSpawn", "Custom", "Unknown",
+	};
+	static_assert(static_cast<size_t>(NetMessageType::Count) == 20,
+				  "NetMessageTypeName table out of sync with NetMessageType enum");
+	return type < static_cast<uint8_t>(NetMessageType::Count) ? kNames[type] : "???";
+}
 
 // ---------------------------------------------------------------------------
 // Packet header field sizes — adjust these to resize the wire format.
@@ -95,6 +110,15 @@ struct PacketHeader
 
 	bool HasAck() const { return Flags & PacketFlag::HasAck; }
 	bool HasTimestamp() const { return Flags & PacketFlag::HasTimestamp; }
+
+	/// Fill buf with a compact human-readable summary. Returns buf.
+	/// Example: "InputFrame | sender=1 | seq=42 | frame=1024 | sz=12"
+	const char* ToString(char* buf, size_t sz) const
+	{
+		snprintf(buf, sz, "%s | sender=%u | seq=%u | frame=%u | sz=%u",
+				 NetMessageTypeName(Type), SenderID, SequenceNum, FrameNumber, PayloadSize);
+		return buf;
+	}
 
 	// --- Serialization (little-endian wire format) ---
 
@@ -232,12 +256,20 @@ struct StateCorrectionEntry
 {
 	uint32_t NetHandle; // EntityNetHandle.Value
 
-	// Authoritative position + rotation from server
+	// Authoritative position + rotation at the correction frame (header.FrameNumber)
 	float PosX, PosY, PosZ;
 	float RotQx, RotQy, RotQz, RotQw;
+
+	// Server resim annotation. ResimFrameDelta > 0 means the server resimulated this entity;
+	// the resim root was (header.FrameNumber - ResimFrameDelta) in client-local frame space.
+	// ResimPos/Rot are the authoritative values at that root frame (to patch the client slab).
+	// 0 = normal current-frame correction, no slab patch needed.
+	uint32_t ResimFrameDelta;
+	float ResimPosX, ResimPosY, ResimPosZ;
+	float ResimRotQx, ResimRotQy, ResimRotQz, ResimRotQw;
 };
 
-static_assert(sizeof(StateCorrectionEntry) == 32, "StateCorrectionEntry must be 32 bytes");
+static_assert(sizeof(StateCorrectionEntry) == 64, "StateCorrectionEntry must be 64 bytes");
 
 // ---------------------------------------------------------------------------
 // ConstructSpawnPayload — header for a server→client Construct creation message.
@@ -253,15 +285,16 @@ static_assert(sizeof(StateCorrectionEntry) == 32, "StateCorrectionEntry must be 
 // ---------------------------------------------------------------------------
 struct ConstructSpawnPayload
 {
-	uint32_t Handle;   // ConstructNetHandle.Value (OwnerID + NetIndex)
-	uint32_t Manifest; // ConstructNetManifest.Value (PrefabIndex = type hash, NetFlags)
-	uint8_t ViewCount; // number of trailing EntityNetHandle values (4 bytes each)
+	uint32_t Handle;     // ConstructNetHandle.Value (OwnerID + NetIndex)
+	uint32_t Manifest;   // ConstructNetManifest.Value (PrefabIndex = type hash, NetFlags)
+	uint32_t SpawnFrame; // Server frame at which this Construct was created — used to clamp rollback targets
+	uint8_t ViewCount;   // number of trailing EntityNetHandle values (4 bytes each)
 	uint8_t _Pad[3];
 
 	// Trailing: ViewCount * uint32_t (EntityNetHandle.Value)
 };
 
-static_assert(sizeof(ConstructSpawnPayload) == 12, "ConstructSpawnPayload header must be 12 bytes");
+static_assert(sizeof(ConstructSpawnPayload) == 16, "ConstructSpawnPayload header must be 16 bytes");
 
 // ---------------------------------------------------------------------------
 // HandshakePayload — server accept response carries session bootstrap data.
@@ -349,9 +382,14 @@ struct PlayerBeginConfirmPayload
 	float PosX, PosY, PosZ; // Authoritative spawn position
 	uint16_t Generation;    // ConstructRef generation — client uses this to form a valid ConstructRef
 	uint16_t _Pad;
+	uint32_t SpawnFrame; // Server sim frame at which the spawn was confirmed.
+	// Client seeds LastServerAckedFrame = SpawnFrame - 1 so
+	// TickInputSend() starts its window at SpawnFrame, not frame 1.
+	// Server seeds LastAckedClientFrame similarly so the first ACK
+	// heartbeat doesn't retroactively open a huge unacked window.
 };
 
-static_assert(sizeof(PlayerBeginConfirmPayload) == 24, "PlayerBeginConfirmPayload must be 24 bytes");
+static_assert(sizeof(PlayerBeginConfirmPayload) == 28, "PlayerBeginConfirmPayload must be 28 bytes");
 
 // ---------------------------------------------------------------------------
 // PlayerBeginRejectPayload — server rejects a spawn request.
@@ -415,16 +453,24 @@ struct PlayerBeginResult
 // ---------------------------------------------------------------------------
 // ClockSyncPayload — bidirectional clock synchronisation probe.
 //
-// Client → Server (request):  ClientTimestamp set, ServerFrame = 0.
+// Client → Server (request):  ClientTimestamp set, ServerFrame = 0,
+//                              LocalFrameAtHandshake = client's logic frame when the
+//                              HandshakeAccept was received.  The server uses this to
+//                              compute FrameOffset = ServerFrameAtHandshake − LocalFrameAtHandshake
+//                              and store it on PlayerInputLog.  All InputFrame payloads
+//                              carry client-local frame numbers; the server translates.
+//
 // Server → Client (response): ServerFrame set to current FrameNumber,
-//                              ClientTimestamp echoed for RTT calculation.
+//                              ClientTimestamp echoed for RTT calculation,
+//                              LocalFrameAtHandshake echoed back (unused on client, zero-cost).
+//
 // Sent unreliable (NetMessageType::ClockSync).
 // ---------------------------------------------------------------------------
 struct ClockSyncPayload
 {
-	uint64_t ClientTimestamp; // SDL_GetPerformanceCounter() at send time
-	uint32_t ServerFrame;     // Server current FrameNumber (0 in request, filled in response)
-	uint32_t _Pad;
+	uint64_t ClientTimestamp;       // SDL_GetPerformanceCounter() at send time
+	uint32_t ServerFrame;           // Server current FrameNumber (0 in request, filled in response)
+	uint32_t LocalFrameAtHandshake; // Client's logic frame when HandshakeAccept was received
 };
 
 static_assert(sizeof(ClockSyncPayload) == 16, "ClockSyncPayload must be 16 bytes");
@@ -554,7 +600,7 @@ struct PredictionLedger
 };
 
 
-// Wire-safe discrete input event — used inside InputFramePayload.
+// Wire-safe discrete input event — used inside NetInputFrame.
 // Mirrors InputData but without alignas(16), keeping the network payload compact.
 struct NetInputEvent
 {
@@ -567,29 +613,49 @@ struct NetInputEvent
 static_assert(sizeof(NetInputEvent) == 8, "NetInputEvent must be 8 bytes");
 
 // Held input state snapshotted each net tick. Stored per-frame in PlayerInputLog
-// independently from the discrete event list carried in InputFramePayload.
+// independently from the discrete event list carried in InputWindowPacket.
 struct InputSnapshot
 {
 	uint8_t KeyState[64] = {}; // held-key bitfield (all 512 SDL scancodes)
-	float   MouseDX      = 0.f;
-	float   MouseDY      = 0.f;
+	float MouseDX        = 0.f;
+	float MouseDY        = 0.f;
 	uint8_t MouseButtons = 0;
 	uint8_t _Pad[3]      = {};
 };
+
 static_assert(sizeof(InputSnapshot) == 76, "InputSnapshot must be 76 bytes");
 
-// Input frame sent by the client at InputNetHz (default 128Hz).
-// Covers [FirstClientFrame, LastClientFrame] — typically 4 sim frames at 512Hz/128Hz.
-// ---------------------------------------------------------------------------
-struct InputFramePayload
+// Window sizing: must cover the full unacked span between server ACKs.
+// At 512Hz sim / 30Hz NetworkUpdateHz, the server ACKs every ~17 sim frames.
+// 24 frames gives safe headroom (= ~47ms at 512Hz) for loopback and LAN.
+// IMPORTANT: MaxWindowFrames must be < PlayerInputLog::Depth (32) — see PlayerInputLog.h.
+// For real-network use with >60ms RTT, increase MaxWindowFrames AND PlayerInputLog::Depth in tandem.
+static constexpr uint32_t MaxWindowFrames = 64;
+
+// Self-contained input for exactly one sim frame.
+// Snapshotted by the logic thread at ProcessSimInput time — frame tag is exact by construction.
+// FrameUSOffset on each event is the offset within THIS frame (not across the window).
+struct NetInputFrame
 {
-	InputSnapshot State;        // held key + mouse state for [FirstClientFrame, LastClientFrame]
-	uint32_t FirstClientFrame;  // first sim frame this payload applies to
-	uint32_t LastClientFrame;   // last sim frame (client frame at send time)
-	uint8_t EventCount;         // number of valid entries in Events[] (max 8)
+	uint32_t Frame;      // absolute sim frame this payload was snapshotted at
+	InputSnapshot State; // held key + mouse state at the start of this frame
+	uint8_t EventCount;  // number of valid entries in Events[] (max 8)
 	uint8_t _Pad[3];
-	NetInputEvent Events[8];    // discrete events within the window
+	NetInputEvent Events[8]; // discrete events that occurred within this frame
 };
 
-static_assert(sizeof(InputFramePayload) == 152, "InputFramePayload must be 152 bytes");
+static_assert(sizeof(NetInputFrame) == 4 + 76 + 4 + 64, "NetInputFrame size mismatch");
+
+// Wire payload: a sliding window of per-frame snapshots, oldest→newest.
+// Snapped at ProcessSimInput time so frame numbers are exact — no extrapolation math needed.
+// FirstFrame = Frames[0].Frame; FrameCount = number of valid entries.
+struct InputWindowPacket
+{
+	uint32_t FirstFrame;
+	uint32_t FrameCount;
+	NetInputFrame Frames[MaxWindowFrames];
+};
+
+static_assert(sizeof(InputWindowPacket) == 8 + MaxWindowFrames * sizeof(NetInputFrame),
+			  "InputWindowPacket size mismatch");
 

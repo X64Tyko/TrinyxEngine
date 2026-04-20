@@ -86,6 +86,10 @@ public:
 	// Restore physics to the exact state saved at frameNumber.
 	// Returns false if the requested frame is no longer in the ring buffer.
 	bool RestoreSnapshot(uint32_t frameNumber);
+
+	// Returns the oldest frame number in the snapshot ring, or UINT32_MAX if empty.
+	// Used by LogicThread to clamp rollback targets to the range we can actually restore.
+	uint32_t GetOldestSnapshotFrame() const;
 #endif
 
 private:

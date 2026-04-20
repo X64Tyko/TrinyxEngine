@@ -1,5 +1,6 @@
 #include "TrinyxEngine.h"
 
+#include <filesystem>
 #include <iostream>
 #include <SDL3/SDL.h>
 #ifndef TNX_HEADLESS
@@ -98,7 +99,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	Logger::Get().Init("TrinyxEngine.log", LogLevel::Debug);
 	LOG_ENG_INFO("TrinyxEngine initialization started");
 	TrinyxThreading::Initialize();
-	TrinyxThreading::PinCurrentThread(TrinyxThreading::GetIdealCore(CoreAffinity::Input));
+	// Sentinel pin deferred to after config load — EnableThreadPinning may disable it.
 
 	// ---- SDL init --------------------------------------------------------
 	if (Config.Headless)
@@ -175,6 +176,10 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	// Re-apply CLI flags that must not be overridden by INI files.
 	Config.Headless  = headlessCLI;
 	Config.MaxFrames = maxFramesCLI;
+
+	// Apply thread pinning preference now that config is resolved.
+	TrinyxThreading::SetPinningEnabled(Config.EnableThreadPinning);
+	TrinyxThreading::PinCurrentThread(TrinyxThreading::GetIdealCore(CoreAffinity::Input));
 
 	// Apply per-channel log levels from config (Unset → Info for Engine, Debug for Game).
 	{
@@ -333,14 +338,9 @@ void TrinyxEngine::StartThreadsAndJobs()
 		// Spin while we wait so that we don't initialize workers before our Primary threads
 	}
 
-	// Server model uses inline Tick() from the main loop — no extra thread.
-	// Client and PIE models spin a dedicated net thread.
+	// All net models are now driven from the Sentinel main loop — no dedicated net thread.
 #ifdef TNX_ENABLE_NETWORK
-#if defined(TNX_NET_MODEL_SERVER)
-	// Inline — no Start(); main loop calls Net->Tick()
-#else
-	if (Net) Net->Start();
-#endif
+	// (no Start() call needed)
 #endif
 
 	bool JobsInitialized = TrinyxJobs::Initialize(&Config);
@@ -361,6 +361,12 @@ void TrinyxEngine::RunMainLoop()
 #ifndef TNX_HEADLESS
 	double audioAccum = 0.0;
 #endif
+#ifdef TNX_ENABLE_NETWORK
+	double netInputAccum      = 0.0; // gates TickInputSend at InputNetHz (128Hz)
+	double netTickAccum       = 0.0; // gates Tick (replication) at NetworkUpdateHz (30Hz)
+	const double netInputStep = 1.0 / std::max(1, Config.InputNetHz == EngineConfig::Unset ? 128 : Config.InputNetHz);
+	const double netTickStep  = 1.0 / std::max(1, Config.NetworkUpdateHz == EngineConfig::Unset ? 30 : Config.NetworkUpdateHz);
+#endif
 
 	while (bIsRunning.load(std::memory_order_acquire))
 	{
@@ -371,8 +377,7 @@ void TrinyxEngine::RunMainLoop()
 		LastFrameCounter          = frameStart;
 
 #if defined(TNX_NET_MODEL_SERVER) && defined(TNX_ENABLE_NETWORK)
-		// Dedicated server: main thread is the network poller — no SDL events.
-		if (Net) Net->Tick();
+		// Dedicated server has no SDL window — skip event pump.
 #elif !defined(TNX_HEADLESS)
 		PumpEvents();
 
@@ -391,6 +396,33 @@ void TrinyxEngine::RunMainLoop()
 
 		// Tick the flow state machine — drives FlowState::Tick() on the active state
 		Flow->Tick(dt);
+
+#ifdef TNX_ENABLE_NETWORK
+		if (Net)
+		{
+			// PumpMessages every sentinel tick: Poll(0) + recv + HandleMessage (may dispatch jobs).
+			Net->PumpMessages();
+
+			netInputAccum += static_cast<double>(dt);
+			netTickAccum  += static_cast<double>(dt);
+
+			// Input send gated at InputNetHz (128Hz).
+			if (netInputAccum >= netInputStep)
+			{
+				netInputAccum -= netInputStep;
+				Net->TickInputSend();
+				// Force sendto immediately — packet is on the wire before sleep.
+				GNS.Poll();
+			}
+
+			// Replication + clock sync gated at NetworkUpdateHz (30Hz).
+			if (netTickAccum >= netTickStep)
+			{
+				netTickAccum -= netTickStep;
+				Net->Tick();
+			}
+		}
+#endif
 
 		if (DefaultWorld->GetLogicThread() && !DefaultWorld->GetLogicThread()->IsRunning())
 		{
@@ -428,15 +460,11 @@ void TrinyxEngine::Shutdown()
 #ifndef TNX_HEADLESS
 	if (Render) Render->Stop();
 #endif
-#ifdef TNX_ENABLE_NETWORK
-	if (Net) Net->Stop();
-#endif
 	Flow->JoinWorld();
 #ifndef TNX_HEADLESS
 	if (Render) Render->Join();
 #endif
 #ifdef TNX_ENABLE_NETWORK
-	if (Net) Net->Join();
 	Net.reset();
 	GNS.Shutdown();
 #endif

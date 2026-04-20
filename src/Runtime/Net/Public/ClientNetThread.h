@@ -1,5 +1,6 @@
 #pragma once
 #include "NetThreadBase.h"
+#include "TrinyxJobs.h"
 #include <cstdint>
 #include <vector>
 
@@ -25,7 +26,8 @@ public:
 	void SetClientWorld(uint8_t ownerID, World* world) { MapConnectionToWorld(ownerID, world); }
 
 	/// Send one InputFrame packet to the server for each active client connection.
-	/// Called from NetThreadBase::ThreadMain at InputNetHz (fast path).
+	/// Dispatches a General-queue job so Sentinel returns immediately.
+	/// Safe to call at 128Hz — skips dispatch if the previous job hasn't finished.
 	void TickInputSend();
 
 	/// Drain deferred ConstructSpawn payloads that were waiting for EntitySpawn to land.
@@ -33,15 +35,24 @@ public:
 	void HandleMessage(const ReceivedMessage& msg);
 
 private:
+	/// Hot-path payload — runs on a worker thread. Owns the actual packet build + send.
+	void ExecuteInputSend();
+
+	/// Completion counter for the in-flight InputSend job.
+	/// Sentinel checks Value == 0 before dispatching the next job to prevent overlap.
+	TrinyxJobs::JobCounter SendCounter;
+
 	struct DeferredEntitySpawn
 	{
 		uint8_t OwnerID;
+		uint32_t ServerSpawnFrame; // PacketHeader.FrameNumber at time of receipt
 		std::vector<uint8_t> Payload;
 	};
 
 	struct DeferredConstructSpawn
 	{
 		uint8_t OwnerID;
+		uint32_t ServerSpawnFrame; // PacketHeader.FrameNumber at time of receipt (= payload SpawnFrame)
 		std::vector<uint8_t> Payload;
 	};
 

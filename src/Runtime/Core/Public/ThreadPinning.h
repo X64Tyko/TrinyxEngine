@@ -55,4 +55,11 @@ namespace TrinyxThreading
 
 	/// Whether the CPU has SMT (hyperthreading) enabled.
 	bool HasSMT();
+
+	/// Enable or disable thread pinning globally.
+	/// Disable in PIE/editor builds where multiple worlds oversubscribe available cores.
+	/// Must be called before any PinThread() or PinCurrentThread() calls take effect.
+	/// Default: enabled. Set false before starting threads to make all pin calls no-ops.
+	void SetPinningEnabled(bool enabled);
+	bool IsPinningEnabled();
 }

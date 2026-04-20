@@ -260,7 +260,7 @@ uint32_t MeshManager::LoadMesh(TnxName name)
 }
 
 // -----------------------------------------------------------------------
-// LoadBuiltinCube — always slot 0
+// LoadBuiltinCube — always slot 1 (slot 0 is the invalid sentinel)
 // -----------------------------------------------------------------------
 
 uint32_t MeshManager::LoadBuiltinCube()

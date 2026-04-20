@@ -1,11 +1,11 @@
 #include "TestFramework.h"
-#include "TrinyxRingBuffer.h"
+#include "TrinyxMPMCRing.h"
 
-// Validates that TryPush returns false (not UB or block) when the ring buffer is full.
+// Validates that TryPush returns false (not UB or block) when TrinyxMPMCRing is full.
 // Capacity 4 means exactly 4 items can be in-flight before the buffer saturates.
 TEST(RingBuffer_Full)
 {
-	TrinyxRingBuffer<int> rb;
+	TrinyxMPMCRing<int> rb;
 	ASSERT(rb.Initialize(4));
 
 	// Fill to capacity

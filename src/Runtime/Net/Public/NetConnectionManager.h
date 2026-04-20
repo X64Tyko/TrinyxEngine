@@ -8,62 +8,6 @@
 #include "Events.h"
 #include "NetTypes.h"
 
-// ---------------------------------------------------------------------------
-// ClientInputAccumulator — persistent outbound input payload for one client
-// connection. Lives in ConnectionInfo; updated each TickInputSend tick.
-//
-// Design: the payload IS the persistent object. Key state is always the most
-// recent snapshot. Events are tagged with their absolute sim frame so they can
-// be trimmed by LastServerAckedFrame and have FrameUSOffset reconstructed at
-// send time relative to the current FirstClientFrame.
-// ---------------------------------------------------------------------------
-struct PendingNetInputEvent
-{
-	uint32_t SimFrame; // absolute sim frame this event belongs to
-	uint32_t Key;      // SDL_Scancode
-	uint8_t Pressed;   // 1 = down, 0 = up
-};
-
-struct ClientInputAccumulator
-{
-	InputSnapshot State{};
-	std::vector<PendingNetInputEvent> PendingEvents;
-
-	// Remove events that the server has already consumed.
-	void TrimAcked(uint32_t lastAckedFrame)
-	{
-		PendingEvents.erase(
-			std::remove_if(PendingEvents.begin(), PendingEvents.end(),
-						   [lastAckedFrame](const PendingNetInputEvent& e) { return e.SimFrame <= lastAckedFrame; }),
-			PendingEvents.end());
-	}
-
-	// Build wire payload. FrameUSOffset per event is reconstructed relative to firstFrame.
-	// Events are capped at 8 on the wire; oldest are sent first (lowest SimFrame).
-	InputFramePayload BuildPayload(uint32_t firstFrame, uint32_t lastFrame, uint32_t frameTimeUS) const
-	{
-		InputFramePayload p{};
-		p.State            = State;
-		p.FirstClientFrame = firstFrame;
-		p.LastClientFrame  = lastFrame;
-
-		uint8_t count = 0;
-		for (const PendingNetInputEvent& pe : PendingEvents)
-		{
-			if (count >= 8) break;
-			p.Events[count].Key     = pe.Key;
-			p.Events[count].Pressed = pe.Pressed;
-			p.Events[count]._Pad    = 0;
-			// Reconstruct μs offset relative to the current send window's FirstClientFrame.
-			p.Events[count].FrameUSOffset = static_cast<uint16_t>(
-				(pe.SimFrame - firstFrame) * frameTimeUS);
-			count++;
-		}
-		p.EventCount = count;
-		return p;
-	}
-};
-
 // Forward declarations — avoid pulling GNS headers into every consumer
 class ISteamNetworkingSockets;
 class GNSContext;
@@ -80,14 +24,43 @@ static constexpr size_t MaxNetConnections = 1 << NetOwnerID_Bits;
 // ---------------------------------------------------------------------------
 struct ConnectionInfo
 {
-	HSteamNetConnection Handle      = 0;    // GNS connection handle
-	uint8_t OwnerID                 = 0;    // Assigned NetOwnerID (0 = server/unassigned)
-	uint32_t NextSeqOut             = 0;    // Next outgoing sequence number
-	uint32_t LastSeqIn              = 0;    // Latest received sequence number (for ack piggybacking)
-	uint32_t AckBitfield            = 0;    // Received-packet bitfield (for ack piggybacking)
-	float RTT_ms                    = 0.0f; // Smoothed round-trip time in milliseconds
-	uint32_t ServerFrameAtHandshake = 0;    // Server FrameNumber when HandshakeAccept was sent
-	uint32_t LocalFrameAtHandshake  = 0;    // Client's own frame when HandshakeAccept was received
+	HSteamNetConnection Handle           = 0;    // GNS connection handle
+	uint8_t OwnerID                      = 0;    // Assigned NetOwnerID (0 = server/unassigned)
+	uint32_t NextSeqOut                  = 0;    // Next outgoing sequence number
+	uint32_t LastSeqIn                   = 0;    // Latest received sequence number (for ack piggybacking)
+	uint32_t AckBitfield                 = 0;    // Received-packet bitfield (for ack piggybacking)
+	float RTT_ms                         = 0.0f; // Smoothed round-trip time in milliseconds
+	uint32_t ServerFrameAtHandshake      = 0;    // Server FrameNumber when HandshakeAccept was sent
+	uint32_t ClientLocalFrameAtHandshake = 0;    // Client's local frame at handshake.
+	//   Client-side: set when HandshakeAccept is received.
+	//   Server-side: set from ClockSyncRequest.LocalFrameAtHandshake.
+
+	// ---------------------------------------------------------------------------
+	// Frame-space translation helpers.
+	//
+	// offset = ServerFrameAtHandshake - ClientLocalFrameAtHandshake.
+	// Negative when the client leads the server (the common case with InputLead > 0).
+	// All arithmetic uses int64_t intermediates to avoid overflow at large frame counts.
+	// ---------------------------------------------------------------------------
+	int32_t GetFrameOffset() const
+	{
+		return static_cast<int32_t>(
+			static_cast<int64_t>(ServerFrameAtHandshake) -
+			static_cast<int64_t>(ClientLocalFrameAtHandshake));
+	}
+
+	// Convert a server-space frame number to client-local frame space.
+	uint32_t ToClientFrame(uint32_t serverFrame) const
+	{
+		return static_cast<uint32_t>(static_cast<int64_t>(serverFrame) - GetFrameOffset());
+	}
+
+	// Convert a client-local frame number to server-space frame.
+	uint32_t ToServerFrame(uint32_t clientFrame) const
+	{
+		return static_cast<uint32_t>(static_cast<int64_t>(clientFrame) + GetFrameOffset());
+	}
+
 	uint32_t InputLead              = 0;    // Frames to lead the server — set after ClockSync
 	uint8_t ClockSyncProbesSent     = 0;    // Ping probes sent during Synchronizing phase
 	uint8_t ClockSyncProbesRecvd    = 0;    // Pong responses received during Synchronizing phase
@@ -98,17 +71,15 @@ struct ConnectionInfo
 	bool bClientInitiated           = false; // True only for connections we opened via Connect() — reliable even in GNS loopback
 	bool bInitialSpawnFlushed       = false; // Server-side: true after first full entity batch sent to this client
 
-	// Client-side: last frame the server confirmed it consumed. Advances on inbound
-	// AckedClientFrame — never on send. Drives TrimAcked() and FirstClientFrame floor.
+	// Client-side: last frame the server confirmed it consumed — in client-local frame space
+	// (the server converts from server-frame via FrameOffset before stamping the header).
+	// Advances on inbound AckedClientFrame — never on send.
+	// Drives DropFront() on the MPSC accumulator ring.
 	uint32_t LastServerAckedFrame = 0;
 
-	// Server-side: last client input frame consumed by the injector. Stamped into every
-	// outbound header so the client can trim its send window.
+	// Server-side: last client-local input frame consumed by the injector (client-frame space).
+	// Stamped into every outbound header so the client can trim its send window.
 	uint32_t LastAckedClientFrame = 0;
-
-	// Client-side: persistent outbound input payload. Key state is always current;
-	// events accumulate until acked, trimmed by LastServerAckedFrame before each send.
-	ClientInputAccumulator InputAccum;
 
 	// Client-side only — tracks in-flight spawn predictions awaiting Confirm/Reject.
 	PredictionLedger Predictions;
@@ -179,10 +150,31 @@ public:
 
 	/// Send a header + payload to a specific connection. Returns true on success.
 	bool Send(HSteamNetConnection conn, const PacketHeader& header,
-			  const uint8_t* payload, bool reliable = false);
+			  const uint8_t* payload, bool reliable = false, bool noNagle = false);
+
+	/// Send a pre-built header (sequence already stamped by Sentinel) + payload.
+	/// Use from job workers — does NOT touch NextSeqOut on ConnectionInfo.
+	bool SendPrebuilt(HSteamNetConnection conn, const PacketHeader& header,
+					  const uint8_t* payload, bool noNagle = false)
+	{
+		return Send(conn, header, payload, /*reliable=*/false, noNagle);
+	}
 
 	/// Send raw bytes (header already serialized into buffer).
-	bool SendRaw(HSteamNetConnection conn, const uint8_t* data, uint32_t size, bool reliable = false);
+	bool SendRaw(HSteamNetConnection conn, const uint8_t* data, uint32_t size, bool reliable = false, bool noNagle = false);
+
+	/// Force NoNagle on all unreliable sends from this manager.
+	/// Equivalent to the EngineConfig::NoNagle setting. Safe to call before Start().
+	void SetNoNagle(bool enabled) { bGlobalNoNagle = enabled; }
+
+	/// Set GNS per-connection send rate (bytes/sec). Applied to every connection
+	/// at Connect/Accept time. -1 = leave GNS default (256KB/s).
+	/// Set both min and max to the same value to pin the rate.
+	void SetSendRate(int minBytesPerSec, int maxBytesPerSec)
+	{
+		SendRateMin = minBytesPerSec;
+		SendRateMax = maxBytesPerSec;
+	}
 
 	/// Run GNS internal callbacks (connection status changes, etc.).
 	/// Must be called regularly from the polling thread.
@@ -250,6 +242,10 @@ private:
 	ISteamNetworkingSockets* Sockets = nullptr; // Borrowed from GNSContext
 	HSteamListenSocket ListenSocket  = 0;
 	HSteamNetPollGroup PollGroup     = 0;
+
+	bool bGlobalNoNagle = false;
+	int  SendRateMin    = -1; // -1 = use GNS default
+	int SendRateMax     = -1;
 
 	std::vector<ConnectionInfo> Connections;
 

@@ -80,17 +80,18 @@ TEST(Net_InputFrameRouting)
 	constexpr uint32_t kSimFrame = 10;
 	constexpr uint8_t kWScancode = 26;
 
-	InputFramePayload payload{};
-	payload.State.KeyState[kWScancode >> 3] |= (1u << (kWScancode & 7));
-	payload.State.MouseDX                   = 1.5f;
-	payload.State.MouseDY                   = -0.5f;
-	payload.FirstClientFrame                = kSimFrame;
-	payload.LastClientFrame                 = kSimFrame;
+	InputWindowPacket payload{};
+	payload.FirstFrame                                = kSimFrame;
+	payload.FrameCount                                = 1;
+	payload.Frames[0].Frame                           = kSimFrame;
+	payload.Frames[0].State.KeyState[kWScancode >> 3] |= (1u << (kWScancode & 7));
+	payload.Frames[0].State.MouseDX                   = 1.5f;
+	payload.Frames[0].State.MouseDY                   = -0.5f;
 
 	PacketHeader header{};
 	header.Type        = static_cast<uint8_t>(NetMessageType::InputFrame);
 	header.Flags       = PacketFlag::DefaultFlags;
-	header.PayloadSize = sizeof(InputFramePayload);
+	header.PayloadSize = sizeof(InputWindowPacket);
 	header.SequenceNum = 1;
 	header.FrameNumber = kSimFrame;
 	header.SenderID    = kOwnerID;

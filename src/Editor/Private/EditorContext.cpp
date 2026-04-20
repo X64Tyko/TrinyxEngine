@@ -1494,8 +1494,7 @@ void EditorContext::StartPIE()
 	ServerFlow->GetWorld()->SetReplicationSystem(Replicator.get());
 	net->SetReplicationSystem(Replicator.get());
 
-	// Start the shared net thread (polls connections at NetworkUpdateHz)
-	if (!net->IsRunning()) net->Start();
+	// PIENetThread is now driven by the Sentinel main loop — no Start() needed.
 
 	if (EnginePtr->OnPIEStarted.IsBound())
 		EnginePtr->OnPIEStarted(ServerFlow->GetWorld(), connMgr);
@@ -1558,12 +1557,8 @@ void EditorContext::StopPIE()
 		)
 		ServerFlow->GetWorld()->SetReplicationSystem(nullptr);
 
-		// Stop net thread so we can safely manipulate connections
-		if (net->IsRunning())
-		{
-			net->Stop();
-			net->Join();
-		}
+		// PIENetThread is Sentinel-driven — no Stop/Join needed.
+		// Connections are closed below; PumpMessages will drain remaining messages.
 
 		NetConnectionManager* connMgr = net->GetConnectionManager();
 

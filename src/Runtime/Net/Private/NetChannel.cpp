@@ -4,6 +4,7 @@
 
 #include "Logger.h"
 #include "NetConnectionManager.h"
+#include "Soul.h"
 
 PacketHeader NetChannel::MakeHeader(NetMessageType type, uint16_t payloadSize, uint32_t frameNumber) const
 {
@@ -37,8 +38,13 @@ bool NetChannel::SendInternal(const PacketHeader& hdr, const uint8_t* payload, u
 {
 	if (!CI || !Mgr) return false;
 	const bool ok = Mgr->Send(CI->Handle, hdr, payload, reliable);
-	if (!ok) [[unlikely]]
-		LOG_ENG_WARN_F("[NetChannel] Send failed: handle=%u type=%u ownerID=%u reliable=%d",
+	if (ok) [[likely]]
+	{
+		char hdrStr[128];
+		LOG_NET_DEBUG_F(NetSoul, "[NetConnectionManager] Sending %s", hdr.ToString(hdrStr, sizeof(hdrStr)));
+	}
+	else [[unlikely]]
+		LOG_NET_WARN_F(NetSoul, "[NetChannel] Send failed: handle=%u type=%u ownerID=%u reliable=%d",
 					   CI->Handle, hdr.Type, CI->OwnerID, static_cast<int>(reliable));
 	return ok;
 }

@@ -38,6 +38,11 @@ struct EngineConfig
 	// TNX_HEADLESS compile-time define, or implied by TNX_NET_MODEL=Server.
 	bool Headless = false;
 
+	// Thread pinning: assign threads to specific CPU cores for reduced scheduling jitter.
+	// Disable in PIE/editor builds where multiple worlds oversubscribe available cores.
+	// Can be overridden via EnableThreadPinning=false in EditorDefaults.ini.
+	bool EnableThreadPinning = true;
+
 	// Exit the main loop after this many sentinel frames. 0 = run indefinitely.
 	// Useful for CI: --max-frames 60 runs one second of logic then exits cleanly.
 	int MaxFrames = 0;
@@ -119,6 +124,19 @@ struct EngineConfig
 	// Set via EngineLogLevel / GameLogLevel in *.ini.  Values map to LogLevel: 0=Trace … 4=Error.
 	int EngineLogLevel = Unset;
 	int GameLogLevel   = Unset;
+
+	// Disable GNS Nagle coalescing for all unreliable sends (not just input).
+	// Input sends always bypass Nagle regardless of this setting.
+	// Default: false (only input bypasses Nagle).
+	bool NoNagle = false;
+
+	// GNS per-connection send rate clamp (bytes/sec). Unset = leave GNS default (256KB/s).
+	// Raise this significantly for loopback (PIE) or determinism tests.
+	// Both Min and Max should typically be set to the same value to pin the rate.
+	// TODO: bring this down once we've characterized real-network bandwidth needs.
+	// Example: 10 * 1024 * 1024 = 10MB/s for loopback.
+	int SendRateMin = Unset;
+	int SendRateMax = Unset;
 
 	// Audio — Sentinel update rate for the AudioManager (fade processing, stream refill).
 	// Decoupled from InputPollHz: 250Hz gives 4ms fade resolution at negligible CPU cost.

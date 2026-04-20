@@ -74,7 +74,7 @@ public:
 			col.A     = 1.0f;
 
 			auto& mesh  = Body.Mesh;
-			mesh.MeshID = 1u; // Capsule (slot 0=Cube, slot 1=Capsule)
+			mesh.MeshID = 2u; // Capsule (slot 0=invalid, slot 1=Cube, slot 2=Capsule)
 
 			Body.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive | TemporalFlagBits::Replicated);
 		}
@@ -191,7 +191,7 @@ public:
 		}
 	}
 
-	void ScalarUpdate(SimFloat /*dt*/)
+	void PostPhysics(SimFloat /*dt*/)
 	{
 		const uint8_t ownerID = GetOwnerID();
 		Soul* soul            = GetOwnerSoul();

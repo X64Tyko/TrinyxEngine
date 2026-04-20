@@ -52,17 +52,18 @@ cmake --build cmake-build-relwithdebinfo-visual-studio --config RelWithDebInfo
 
 **Key CMake options** (append to the configure step):
 
-| Option | Default | Purpose |
-|--------|---------|---------|
-| `TNX_ENABLE_EDITOR=ON/OFF` | OFF | Enable editor UI (ImGui + GPU picking) |
-| `TNX_ENABLE_ROLLBACK=ON/OFF` | OFF | Enable N-frame rollback history for netcode |
-| `ENABLE_TRACY=ON/OFF` | ON | Tracy profiler integration |
-| `TRACY_PROFILE_LEVEL=1/2/3` | 3 | 1=coarse (~1%), 2=medium (~5%), 3=per-entity (~50%+ overhead) |
-| `ENABLE_AVX2=ON/OFF` | ON | `-march=native` on GCC/Clang |
-| `GENERATE_ASSEMBLY=ON/OFF` | OFF | Emit `.s` files for vectorization inspection |
-| `VECTORIZATION_REPORTS=ON/OFF` | OFF | Compiler loop-vectorization diagnostics |
-| `TNX_ALIGN_64=ON/OFF` | OFF | 64-byte vs 32-byte field array alignment |
-| `TNX_DETAILED_METRICS=ON/OFF` | OFF | Per-frame latency breakdown logging |
+| Option                         | Default | Purpose                                                                                                    |
+|--------------------------------|---------|------------------------------------------------------------------------------------------------------------|
+| `TNX_ENABLE_EDITOR=ON/OFF`     | OFF     | Enable editor UI (ImGui + GPU picking)                                                                     |
+| `TNX_ENABLE_ROLLBACK=ON/OFF`   | OFF     | Enable N-frame rollback history for netcode (forces `TNX_DETERMINISM=ON`)                                  |
+| `TNX_DETERMINISM=ON/OFF`       | OFF     | Cross-platform determinism: disables FMA/fast-math in engine and Jolt (`JPH_CROSS_PLATFORM_DETERMINISTIC`) |
+| `ENABLE_TRACY=ON/OFF`          | ON      | Tracy profiler integration                                                                                 |
+| `TRACY_PROFILE_LEVEL=1/2/3`    | 3       | 1=coarse (~1%), 2=medium (~5%), 3=per-entity (~50%+ overhead)                                              |
+| `ENABLE_AVX2=ON/OFF`           | ON      | `-march=native` on GCC/Clang                                                                               |
+| `GENERATE_ASSEMBLY=ON/OFF`     | OFF     | Emit `.s` files for vectorization inspection                                                               |
+| `VECTORIZATION_REPORTS=ON/OFF` | OFF     | Compiler loop-vectorization diagnostics                                                                    |
+| `TNX_ALIGN_64=ON/OFF`          | OFF     | 64-byte vs 32-byte field array alignment                                                                   |
+| `TNX_DETAILED_METRICS=ON/OFF`  | OFF     | Per-frame latency breakdown logging                                                                        |
 
 **Example builds:**
 ```bash

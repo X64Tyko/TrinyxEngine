@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <vector>
 
@@ -65,7 +66,11 @@ public:
 		manifest.PrefabIndex = typeHash;
 		manifest.NetFlags    = 0;
 
-		ConstructRef ref = reg->AllocateNetRef(ptr, ownerID, manifest, typeHash, prefabIDRaw);
+		const uint32_t spawnFrame = ServerWorld && ServerWorld->GetLogicThread()
+										? ServerWorld->GetLogicThread()->GetLastCompletedFrame()
+										: 0;
+
+		ConstructRef ref = reg->AllocateNetRef(ptr, ownerID, manifest, typeHash, prefabIDRaw, spawnFrame);
 
 		// Collect view handles from the typed Construct immediately — typed pointer is in scope.
 		constexpr size_t MaxViews = 8;
@@ -94,11 +99,12 @@ public:
 		// Pre-build the ConstructSpawnPayload and append to the pending queue.
 		const size_t payloadSize = sizeof(ConstructSpawnPayload) + viewCount * sizeof(uint32_t);
 		std::vector<uint8_t> buf(payloadSize, 0);
-		auto* payload      = reinterpret_cast<ConstructSpawnPayload*>(buf.data());
-		payload->Handle    = ref.Handle.Value;
-		payload->Manifest  = manifest.Value;
-		payload->ViewCount = viewCount;
-		uint32_t* trailing = reinterpret_cast<uint32_t*>(buf.data() + sizeof(ConstructSpawnPayload));
+		auto* payload       = reinterpret_cast<ConstructSpawnPayload*>(buf.data());
+		payload->Handle     = ref.Handle.Value;
+		payload->Manifest   = manifest.Value;
+		payload->SpawnFrame = spawnFrame;
+		payload->ViewCount  = viewCount;
+		uint32_t* trailing  = reinterpret_cast<uint32_t*>(buf.data() + sizeof(ConstructSpawnPayload));
 		for (uint8_t i = 0; i < viewCount; ++i) trailing[i] = netHandleValues[i];
 
 		PendingConstructSpawns.push_back(std::move(buf));
@@ -109,11 +115,16 @@ public:
 	}
 
 	/// Spawn an entity on the client Registry using a received EntitySpawnPayload.
-	/// Uses CreateInternal (GlobalEntityHandle), wires NetToRecord, writes field data.
-	static void HandleEntitySpawn(Registry* reg, const struct EntitySpawnPayload& payload);
+	/// Uses CreateInternal (GlobalEntityHandle), wires NetToRecord, writes field data,
+	/// and pushes a ServerEventEntry so rollback resim can re-hydrate the temporal slot.
+	static void HandleEntitySpawn(Registry* reg, const struct EntitySpawnPayload& payload, uint32_t frame);
 
 	/// Apply state corrections to client entities by looking up NetHandle → GlobalEntityHandle.
-	static void HandleStateCorrections(Registry* reg, const struct StateCorrectionEntry* entries, uint32_t count);
+	/// Under TNX_ENABLE_ROLLBACK: compares the predicted transform at clientFrame against the
+	/// server-authoritative values; divergent entities are queued for correction during resim
+	/// and a rollback is triggered. Without rollback: blind write to the current write frame.
+	static void HandleStateCorrections(Registry* reg, const struct StateCorrectionEntry* entries,
+									   uint32_t count, uint32_t clientFrame, class LogicThread* logic, uint32_t LastAckedFrame);
 
 	/// Create a client-side Construct from a received ConstructSpawn message.
 	/// Looks up the client factory from ReflectionRegistry via PrefabIndex (type hash),
@@ -123,6 +134,11 @@ public:
 	/// should defer and retry next tick.
 	static bool HandleConstructSpawn(ConstructRegistry* reg, Registry* entityReg,
 									 World* clientWorld, const uint8_t* data, size_t len);
+
+	/// Record that the server resimulated ownerID's input from serverFrame.
+	/// Called from the LogicThread injector lambda when an input mismatch fires.
+	/// Thread-safe: atomic min-update so multiple dirty marks coalesce to the earliest.
+	void AddPendingResim(uint8_t ownerID, uint32_t serverFrame);
 
 private:
 	void SendSpawns(NetConnectionManager* connMgr, uint32_t frameNumber);
@@ -141,4 +157,9 @@ private:
 	// Pre-built ConstructSpawn payloads pending send to all loaded clients.
 	// Payloads include resolved EntityNetHandles — built at RegisterConstruct time.
 	std::vector<std::vector<uint8_t>> PendingConstructSpawns;
+
+	// Per-ownerID pending resim server frame. Written from the LogicThread injector
+	// (input mismatch); drained by SendStateCorrections on the net thread.
+	// UINT32_MAX = nothing pending. Min-updated atomically to coalesce dirty marks.
+	std::atomic<uint32_t> PendingResimFrames[MaxOwnerIDs];
 };

@@ -26,7 +26,20 @@ void ReplicationSystem::Initialize(World* serverWorld)
 {
 	ServerWorld = serverWorld;
 	Replicated.clear();
+	for (auto& f : PendingResimFrames) f.store(UINT32_MAX, std::memory_order_relaxed);
 	LOG_ENG_INFO("[Replication] Initialized");
+}
+
+void ReplicationSystem::AddPendingResim(uint8_t ownerID, uint32_t serverFrame)
+{
+	if (ownerID == 0 || ownerID >= MaxOwnerIDs) return;
+	uint32_t current = PendingResimFrames[ownerID].load(std::memory_order_relaxed);
+	while (serverFrame < current)
+	{
+		if (PendingResimFrames[ownerID].compare_exchange_weak(current, serverFrame,
+															  std::memory_order_release, std::memory_order_relaxed))
+			break;
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -81,14 +94,22 @@ void ReplicationSystem::SendConstructSpawns(NetConnectionManager* connMgr, uint3
 		header.Type        = static_cast<uint8_t>(NetMessageType::ConstructSpawn);
 		header.Flags       = PacketFlag::DefaultFlags;
 		header.PayloadSize = static_cast<uint16_t>(buf.size());
-		header.FrameNumber = frameNumber;
 		header.SenderID    = 0;
 
 		for (const auto& ci : connections)
 		{
 			if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
 			if (ci.RepState < ClientRepState::Loaded) continue;
-			connMgr->Send(ci.Handle, header, buf.data(), /*reliable=*/true);
+
+			const uint32_t ciClientFrame = ci.ToClientFrame(frameNumber);
+			header.FrameNumber           = ciClientFrame;
+
+			// Patch SpawnFrame inside a per-connection copy so each client receives its own frame-space value.
+			std::vector<uint8_t> perClientBuf = buf;
+			auto* perClientPayload            = reinterpret_cast<ConstructSpawnPayload*>(perClientBuf.data());
+			perClientPayload->SpawnFrame      = ci.ToClientFrame(perClientPayload->SpawnFrame);
+
+			connMgr->Send(ci.Handle, header, perClientBuf.data(), /*reliable=*/true);
 			{
 				Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
 								 ? ServerWorld->GetFlowManager()->GetSoul(ci.OwnerID)
@@ -194,7 +215,7 @@ bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* e
 	ConstructNetManifest wireManifest{};
 	wireManifest.PrefabIndex = typeHash;
 
-	ConstructRef ref = reg->WireNetRef(raw, serverHandle, wireManifest, typeHash);
+	ConstructRef ref = reg->WireNetRef(raw, serverHandle, wireManifest, typeHash, header->SpawnFrame);
 
 	// Deliver to the owning Soul
 	if (soul)
@@ -290,7 +311,8 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 	if (Replicated.size() < maxEntities) Replicated.resize(maxEntities, false);
 
 	// Helper: build and send one EntitySpawn for entity at index i.
-	auto SendOneSpawn = [&](uint32_t i, HSteamNetConnection handle, bool bAliveOnly)
+	// clientFrame must already be translated to the receiver's local frame space.
+	auto SendOneSpawn = [&](uint32_t i, HSteamNetConnection handle, bool bAliveOnly, uint32_t clientFrame)
 	{
 		GlobalEntityHandle gHandle = reg->GlobalEntityRegistry.LookupGlobalHandle(static_cast<EntityCacheHandle>(i));
 		EntityRecord* record       = reg->GlobalEntityRegistry.Records[gHandle.GetIndex()];
@@ -336,7 +358,7 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 		spawnHeader.Type        = static_cast<uint8_t>(NetMessageType::EntitySpawn);
 		spawnHeader.Flags       = PacketFlag::DefaultFlags;
 		spawnHeader.PayloadSize = sizeof(EntitySpawnPayload);
-		spawnHeader.FrameNumber = frameNumber;
+		spawnHeader.FrameNumber = clientFrame;
 		spawnHeader.SenderID    = 0;
 		connMgr->Send(handle, spawnHeader, reinterpret_cast<const uint8_t*>(&spawnMsg), true);
 	};
@@ -350,12 +372,14 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 		if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
 		if (ci.RepState != ClientRepState::LevelLoaded || ci.bInitialSpawnFlushed) continue;
 
+		const uint32_t ciClientFrame = ci.ToClientFrame(frameNumber);
+
 		int flushCount = 0;
 		for (uint32_t i = 0; i < maxEntities; ++i)
 		{
 			if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Alive))) continue;
 			if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Replicated))) continue;
-			SendOneSpawn(i, ci.Handle, /*bAliveOnly=*/true);
+			SendOneSpawn(i, ci.Handle, /*bAliveOnly=*/true, ciClientFrame);
 			flushCount++;
 		}
 
@@ -370,7 +394,7 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 		serverReadyHeader.Flags       = PacketFlag::DefaultFlags;
 		serverReadyHeader.SequenceNum = ci.NextSeqOut++;
 		serverReadyHeader.SenderID    = 0;
-		serverReadyHeader.FrameNumber = frameNumber;
+		serverReadyHeader.FrameNumber = ciClientFrame;
 		serverReadyHeader.PayloadSize = sizeof(FlowEventPayload);
 		connMgr->Send(ci.Handle, serverReadyHeader, reinterpret_cast<const uint8_t*>(&serverReadyMsg), true);
 
@@ -384,10 +408,10 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 			const FlowState* activeState = serverFlow ? serverFlow->GetActiveState() : nullptr;
 			if (activeState && activeState->GetRequirements().SweepsAliveFlagsOnServerReady && ServerWorld)
 			{
-				Registry* reg = ServerWorld->GetRegistry();
-				ServerWorld->PostAndWait([reg, soul](uint32_t)
+				Registry* lReg = ServerWorld->GetRegistry();
+				ServerWorld->PostAndWait([lReg, soul](uint32_t)
 				{
-					int count = reg->SweepAliveFlagsToActive();
+					int count = lReg->SweepAliveFlagsToActive();
 					LOG_NET_INFO_F(soul, "[Replication] ServerReady: server swept %d Alive→Active", count);
 				});
 			}
@@ -409,7 +433,8 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 			if (ci.RepState < ClientRepState::Loaded) continue; // Not ready yet
 			if (!ci.bInitialSpawnFlushed) continue;
 
-			SendOneSpawn(i, ci.Handle, /*bAliveOnly=*/false);
+			const uint32_t ciClientFrame = ci.ToClientFrame(frameNumber);
+			SendOneSpawn(i, ci.Handle, /*bAliveOnly=*/false, ciClientFrame);
 		}
 
 		Replicated[i] = true;
@@ -426,6 +451,7 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 
 void ReplicationSystem::SendStateCorrections(NetConnectionManager* connMgr, uint32_t frameNumber)
 {
+	//LOG_ENG_INFO_F("[Replication] Sending state corrections for frame %u", frameNumber);
 	Registry* reg = ServerWorld->GetRegistry();
 
 	ComponentCacheBase* temporalCache = reg->GetTemporalCache();
@@ -447,6 +473,41 @@ void ReplicationSystem::SendStateCorrections(NetConnectionManager* connMgr, uint
 	if (!flags || !posX) return;
 
 	const uint32_t maxEntities = temporalCache->GetMaxCachedEntityCount();
+	const uint32_t ringSize    = temporalCache->GetTotalFrameCount();
+
+	// Snapshot pending resim frames for this tick and pre-fetch their field arrays.
+	// Indexed by ownerID. delta==0 means no resim pending for that owner.
+	struct ResimArrays
+	{
+		const float* posX  = nullptr;
+		const float* posY  = nullptr;
+		const float* posZ  = nullptr;
+		const float* rotQx = nullptr;
+		const float* rotQy = nullptr;
+		const float* rotQz = nullptr;
+		const float* rotQw = nullptr;
+		uint32_t delta     = 0; // frameNumber - resimFrom; 0 = nothing pending
+	};
+	ResimArrays resimArrays[MaxOwnerIDs]{};
+	bool bHasResimFrames = false;
+
+	for (uint32_t oid = 1; oid < MaxOwnerIDs; ++oid)
+	{
+		const uint32_t resimFrom = PendingResimFrames[oid].exchange(UINT32_MAX, std::memory_order_acq_rel);
+		if (resimFrom == UINT32_MAX || resimFrom >= frameNumber) continue;
+
+		bHasResimFrames               = true;
+		const uint32_t delta          = frameNumber - resimFrom;
+		TemporalFrameHeader* resimHdr = temporalCache->GetFrameHeader(resimFrom % ringSize);
+		resimArrays[oid].delta        = delta;
+		resimArrays[oid].posX         = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 0));
+		resimArrays[oid].posY         = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 1));
+		resimArrays[oid].posZ         = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 2));
+		resimArrays[oid].rotQx        = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 3));
+		resimArrays[oid].rotQy        = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 4));
+		resimArrays[oid].rotQz        = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 5));
+		resimArrays[oid].rotQw        = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 6));
+	}
 
 	// Build correction batch — gather all replicated active entities
 	std::vector<StateCorrectionEntry> batch;
@@ -471,27 +532,131 @@ void ReplicationSystem::SendStateCorrections(NetConnectionManager* connMgr, uint
 		entry.RotQy     = rotQy ? rotQy[i] : 0.0f;
 		entry.RotQz     = rotQz ? rotQz[i] : 0.0f;
 		entry.RotQw     = rotQw ? rotQw[i] : 1.0f;
+
+		const uint32_t oid = record->NetworkID.NetOwnerID;
+		if (oid > 0 && oid < MaxOwnerIDs)
+		{
+			const ResimArrays& ra = resimArrays[oid];
+			if (ra.delta > 0 && ra.posX)
+			{
+				entry.ResimFrameDelta = ra.delta;
+				entry.ResimPosX       = ra.posX[i];
+				entry.ResimPosY       = ra.posY ? ra.posY[i] : 0.0f;
+				entry.ResimPosZ       = ra.posZ ? ra.posZ[i] : 0.0f;
+				entry.ResimRotQx      = ra.rotQx ? ra.rotQx[i] : 0.0f;
+				entry.ResimRotQy      = ra.rotQy ? ra.rotQy[i] : 0.0f;
+				entry.ResimRotQz      = ra.rotQz ? ra.rotQz[i] : 0.0f;
+				entry.ResimRotQw      = ra.rotQw ? ra.rotQw[i] : 1.0f;
+			}
+		}
+
 		batch.push_back(entry);
 	}
 
 	if (batch.empty()) return;
 
-	// Send as single unreliable message. If it exceeds MTU, GNS handles fragmentation.
+	// Send as single unreliable message per connection with per-connection client-frame translation.
 	uint32_t payloadSize = static_cast<uint32_t>(batch.size() * sizeof(StateCorrectionEntry));
 
 	PacketHeader header{};
 	header.Type        = static_cast<uint8_t>(NetMessageType::StateCorrection);
 	header.Flags       = PacketFlag::DefaultFlags;
 	header.PayloadSize = static_cast<uint16_t>(payloadSize > 65535 ? 65535 : payloadSize);
-	header.FrameNumber = frameNumber;
 	header.SenderID    = 0;
 
 	for (const auto& ci : connMgr->GetConnections())
 	{
 		if (ci.bConnected && ci.bServerSide && ci.OwnerID > 0)
 		{
+			if (frameNumber > ci.LastAckedClientFrame && !bHasResimFrames) continue;
+
+			header.FrameNumber = ci.ToClientFrame(frameNumber);
 			connMgr->Send(ci.Handle, header,
 						  reinterpret_cast<const uint8_t*>(batch.data()), false);
+		}
+	}
+}
+
+// File-scope helper: write EntitySpawnPayload fields into the given temporal + volatile frames.
+// Called at spawn time (write + read frames) and by the server event log during resim (write frame only).
+static void WriteEntitySpawnFields([[maybe_unused]] Registry* reg, EntityRecord* record,
+								   const EntitySpawnPayload& payload,
+								   uint32_t temporalFrame, uint32_t volatileFrame)
+{
+	Archetype* arch   = record->Arch;
+	Chunk* chunk      = record->TargetChunk;
+	uint32_t localIdx = record->LocalIndex;
+
+	void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+	arch->BuildFieldArrayTable(chunk, fieldArrayTable, temporalFrame, volatileFrame);
+
+	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
+	{
+		void* fieldBase = fieldArrayTable[fdesc.fieldSlotIndex];
+		if (!fieldBase) continue;
+
+		auto* floatArr = static_cast<float*>(fieldBase);
+		auto* intArr   = static_cast<int32_t*>(fieldBase);
+		auto* uintArr  = static_cast<uint32_t*>(fieldBase);
+
+		ComponentTypeID compID = fdesc.componentID;
+
+		if (compID == CacheSlotMeta<>::StaticTypeID())
+		{
+			if (fdesc.componentSlotIndex == 0) intArr[localIdx] = EntitySpawnPayload::GetFlags(payload.SpawnFlags);
+		}
+		else if (compID == CTransform<>::StaticTypeID())
+		{
+			switch (fdesc.componentSlotIndex)
+			{
+				case 0: floatArr[localIdx] = payload.PosX;
+					break;
+				case 1: floatArr[localIdx] = payload.PosY;
+					break;
+				case 2: floatArr[localIdx] = payload.PosZ;
+					break;
+				case 3: floatArr[localIdx] = payload.RotQx;
+					break;
+				case 4: floatArr[localIdx] = payload.RotQy;
+					break;
+				case 5: floatArr[localIdx] = payload.RotQz;
+					break;
+				case 6: floatArr[localIdx] = payload.RotQw;
+					break;
+				default: break;
+			}
+		}
+		else if (compID == CScale<>::StaticTypeID())
+		{
+			switch (fdesc.componentSlotIndex)
+			{
+				case 0: floatArr[localIdx] = payload.ScaleX;
+					break;
+				case 1: floatArr[localIdx] = payload.ScaleY;
+					break;
+				case 2: floatArr[localIdx] = payload.ScaleZ;
+					break;
+				default: break;
+			}
+		}
+		else if (compID == CColor<>::StaticTypeID())
+		{
+			switch (fdesc.componentSlotIndex)
+			{
+				case 0: floatArr[localIdx] = payload.ColorR;
+					break;
+				case 1: floatArr[localIdx] = payload.ColorG;
+					break;
+				case 2: floatArr[localIdx] = payload.ColorB;
+					break;
+				case 3: floatArr[localIdx] = payload.ColorA;
+					break;
+				default: break;
+			}
+		}
+		else if (compID == CMeshRef<>::StaticTypeID())
+		{
+			if (fdesc.componentSlotIndex == 0) uintArr[localIdx] = payload.MeshID;
 		}
 	}
 }
@@ -501,7 +666,7 @@ void ReplicationSystem::SendStateCorrections(NetConnectionManager* connMgr, uint
 // Uses Registry internals via friend access (GlobalEntityHandle, CreateInternal)
 // ---------------------------------------------------------------------------
 
-void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayload& payload)
+void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayload& payload, [[maybe_unused]] uint32_t frame)
 {
 	EntityNetHandle receivedNetHandle{};
 	receivedNetHandle.Value = payload.NetHandle;
@@ -534,101 +699,73 @@ void ReplicationSystem::HandleEntitySpawn(Registry* reg, const EntitySpawnPayloa
 	// Write field data into the newly created entity's archetype slot.
 	// Newly spawned entities must be initialized in BOTH frames so that FieldProxy
 	// reads (which target the read frame) see correct data immediately — without
-	// waiting for the next PropagateFrame.  State corrections run at 30 Hz so a
-	// one-frame gap would cause JoltCharacter to be placed at the origin.
-	Archetype* arch   = record->Arch;
-	Chunk* chunk      = record->TargetChunk;
-	uint32_t localIdx = record->LocalIndex;
+	// waiting for the next PropagateFrame.
+	WriteEntitySpawnFields(reg, record, payload,
+						   reg->GetTemporalCache()->GetActiveWriteFrame(),
+						   reg->GetVolatileCache()->GetActiveWriteFrame());
+	WriteEntitySpawnFields(reg, record, payload,
+						   reg->GetTemporalCache()->GetActiveReadFrame(),
+						   reg->GetVolatileCache()->GetActiveReadFrame());
 
-	auto WriteFields = [&](uint32_t temporalFrame, uint32_t volatileFrame)
+#ifdef TNX_ENABLE_ROLLBACK
+	// Register a replay entry so rollback resim can re-hydrate this entity's temporal slot
+	// at the spawn frame, preventing PropagateFrame from propagating zero/stale state over it.
 	{
-		void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
-		arch->BuildFieldArrayTable(chunk, fieldArrayTable, temporalFrame, volatileFrame);
-
-		for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
-		{
-			void* fieldBase = fieldArrayTable[fdesc.fieldSlotIndex];
-			if (!fieldBase) continue;
-
-			auto* floatArr = static_cast<float*>(fieldBase);
-			auto* intArr   = static_cast<int32_t*>(fieldBase);
-			auto* uintArr  = static_cast<uint32_t*>(fieldBase);
-
-			ComponentTypeID compID = fdesc.componentID;
-
-			if (compID == CacheSlotMeta<>::StaticTypeID())
+		GlobalEntityHandle capturedGH      = gHandle;
+		EntitySpawnPayload capturedPayload = payload;
+		reg->PushServerEvent({
+			frame,
+			[capturedGH, capturedPayload, reg]()
 			{
-				if (fdesc.componentSlotIndex == 0) intArr[localIdx] = EntitySpawnPayload::GetFlags(payload.SpawnFlags);
+				EntityRecord* rec = reg->GlobalEntityRegistry.Records[capturedGH.GetIndex()];
+				if (!rec || !rec->IsValid()) return;
+				WriteEntitySpawnFields(reg, rec, capturedPayload,
+									   reg->GetTemporalCache()->GetActiveWriteFrame(),
+									   reg->GetVolatileCache()->GetActiveWriteFrame());
 			}
-			else if (compID == CTransform<>::StaticTypeID())
-			{
-				switch (fdesc.componentSlotIndex)
-				{
-					case 0: floatArr[localIdx] = payload.PosX;
-						break;
-					case 1: floatArr[localIdx] = payload.PosY;
-						break;
-					case 2: floatArr[localIdx] = payload.PosZ;
-						break;
-					case 3: floatArr[localIdx] = payload.RotQx;
-						break;
-					case 4: floatArr[localIdx] = payload.RotQy;
-						break;
-					case 5: floatArr[localIdx] = payload.RotQz;
-						break;
-					case 6: floatArr[localIdx] = payload.RotQw;
-						break;
-					default: break;
-				}
-			}
-			else if (compID == CScale<>::StaticTypeID())
-			{
-				switch (fdesc.componentSlotIndex)
-				{
-					case 0: floatArr[localIdx] = payload.ScaleX;
-						break;
-					case 1: floatArr[localIdx] = payload.ScaleY;
-						break;
-					case 2: floatArr[localIdx] = payload.ScaleZ;
-						break;
-					default: break;
-				}
-			}
-			else if (compID == CColor<>::StaticTypeID())
-			{
-				switch (fdesc.componentSlotIndex)
-				{
-					case 0: floatArr[localIdx] = payload.ColorR;
-						break;
-					case 1: floatArr[localIdx] = payload.ColorG;
-						break;
-					case 2: floatArr[localIdx] = payload.ColorB;
-						break;
-					case 3: floatArr[localIdx] = payload.ColorA;
-						break;
-					default: break;
-				}
-			}
-			else if (compID == CMeshRef<>::StaticTypeID())
-			{
-				if (fdesc.componentSlotIndex == 0) uintArr[localIdx] = payload.MeshID;
-			}
-		}
-	};
-
-	WriteFields(reg->GetTemporalCache()->GetActiveWriteFrame(),
-				reg->GetVolatileCache()->GetActiveWriteFrame());
-	WriteFields(reg->GetTemporalCache()->GetActiveReadFrame(),
-				reg->GetVolatileCache()->GetActiveReadFrame());
+		});
+	}
+#endif
 }
 
 // ---------------------------------------------------------------------------
 // HandleStateCorrections — client-side: apply authoritative transforms
-// Looks up entities by NetHandle → GlobalEntityHandle → EntityRecord
+//
+// TNX_ENABLE_ROLLBACK: reads each entity's predicted transform at clientFrame,
+// compares against the server value, and queues divergent entities as
+// EntityTransformCorrections. EnqueueCorrections then triggers a rollback so
+// the engine resimulates from clientFrame; on each correction's target frame the
+// resimmed value is re-checked and overwritten only if still divergent.
+//
+// Without rollback: blind write to the current write frame (best-effort snap).
 // ---------------------------------------------------------------------------
 
-void ReplicationSystem::HandleStateCorrections(Registry* reg, const StateCorrectionEntry* entries, uint32_t count)
+void ReplicationSystem::HandleStateCorrections(Registry* reg, const StateCorrectionEntry* entries,
+											   uint32_t count, [[maybe_unused]] uint32_t clientFrame,
+											   [[maybe_unused]] LogicThread* logic, uint32_t LastAckedFrame)
 {
+#ifdef TNX_ENABLE_ROLLBACK
+	constexpr float kDivergenceThresholdSq = 0.01f * 0.01f; // 1cm
+
+	const auto* temporal      = reg->GetTemporalCache();
+	const uint32_t ringSize   = temporal->GetTotalFrameCount();
+	const uint32_t currentF   = temporal->GetFrameHeader()->FrameNumber;
+	const uint32_t oldestSlab = (currentF >= ringSize - 1) ? (currentF - (ringSize - 1)) : 0u;
+
+	// If this correction predates the temporal ring the slot has been reused — we
+	// have no predicted state to compare against, and rollback can't reach that far.
+	// Skip the entry; the eventual smooth-interp path will live here instead.
+	if (clientFrame < oldestSlab)
+	{
+		LOG_ENG_DEBUG_F("[Replication] Skipping stale StateCorrection: frame=%u "
+						"(oldest=%u, ring depth=%u)",
+						clientFrame, oldestSlab, ringSize);
+		return;
+	}
+
+	std::vector<EntityTransformCorrection> corrections;
+	const uint32_t volatileFrame = reg->GetVolatileCache()->GetActiveWriteFrame();
+
 	for (uint32_t i = 0; i < count; ++i)
 	{
 		const StateCorrectionEntry& entry = entries[i];
@@ -636,17 +773,125 @@ void ReplicationSystem::HandleStateCorrections(Registry* reg, const StateCorrect
 		EntityNetHandle netHandle{};
 		netHandle.Value = entry.NetHandle;
 
-		// Look up GlobalEntityHandle from the received NetHandle
 		GlobalEntityHandle gHandle = reg->GlobalEntityRegistry.LookupGlobalHandle(netHandle);
-		if (gHandle.GetIndex() == 0) continue; // Unknown entity — spawn not received yet
+		if (gHandle.GetIndex() == 0) continue;
 
 		EntityRecord* record = reg->GlobalEntityRegistry.Records[gHandle.GetIndex()];
 		if (!record || !record->IsValid()) continue;
 
-		// Write transforms directly into the entity's archetype fields
 		Archetype* arch   = record->Arch;
 		Chunk* chunk      = record->TargetChunk;
 		uint32_t localIdx = record->LocalIndex;
+
+		// If the server flagged a resim root, check whether our slab at that frame also
+		// diverges. If so, enqueue a correction there so the rollback patches from the true
+		// root rather than just snapping the current frame.
+		if (entry.ResimFrameDelta > 0 && clientFrame >= entry.ResimFrameDelta)
+		{
+			const uint32_t clientResimFrame = clientFrame - entry.ResimFrameDelta;
+			if (clientResimFrame >= oldestSlab)
+			{
+				void* resimFieldTable[MAX_FIELDS_PER_ARCHETYPE];
+				arch->BuildFieldArrayTable(chunk, resimFieldTable, clientResimFrame, volatileFrame);
+
+				float resimX = 0.f, resimY = 0.f, resimZ = 0.f;
+				for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
+				{
+					if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
+					void* base = resimFieldTable[fdesc.fieldSlotIndex];
+					if (!base) continue;
+					auto* fa = static_cast<float*>(base);
+					switch (fdesc.componentSlotIndex)
+					{
+						case 0: resimX = fa[localIdx];
+							break;
+						case 1: resimY = fa[localIdx];
+							break;
+						case 2: resimZ = fa[localIdx];
+							break;
+						default: break;
+					}
+				}
+
+				const float rdx = resimX - entry.ResimPosX;
+				const float rdy = resimY - entry.ResimPosY;
+				const float rdz = resimZ - entry.ResimPosZ;
+				if (rdx * rdx + rdy * rdy + rdz * rdz > kDivergenceThresholdSq)
+				{
+					LOG_ENG_WARN_F("[Replication] ResimRoot divergence: netHandle=%u resimFrame=%u dist=%.4fm",
+								   entry.NetHandle, clientResimFrame,
+								   std::sqrt(rdx * rdx + rdy * rdy + rdz * rdz));
+					corrections.push_back({
+						entry.NetHandle, clientResimFrame,
+						entry.ResimPosX, entry.ResimPosY, entry.ResimPosZ,
+						entry.ResimRotQx, entry.ResimRotQy, entry.ResimRotQz, entry.ResimRotQw
+					});
+				}
+			}
+		}
+
+		if (clientFrame <= LastAckedFrame)
+		{
+			// Read the predicted transform from the historical ring-buffer slot for clientFrame.
+			// BuildFieldArrayTable modularly indexes by fieldFrameCount, so clientFrame wraps correctly.
+			void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+			arch->BuildFieldArrayTable(chunk, fieldArrayTable, clientFrame, volatileFrame);
+
+			float predictedX = 0.f, predictedY = 0.f, predictedZ = 0.f;
+			for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
+			{
+				if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
+				void* base = fieldArrayTable[fdesc.fieldSlotIndex];
+				if (!base) continue;
+				auto* fa = static_cast<float*>(base);
+				switch (fdesc.componentSlotIndex)
+				{
+					case 0: predictedX = fa[localIdx];
+						break;
+					case 1: predictedY = fa[localIdx];
+						break;
+					case 2: predictedZ = fa[localIdx];
+						break;
+					default: break;
+				}
+			}
+
+			const float dx = predictedX - entry.PosX;
+			const float dy = predictedY - entry.PosY;
+			const float dz = predictedZ - entry.PosZ;
+			if (dx * dx + dy * dy + dz * dz > kDivergenceThresholdSq)
+			{
+				LOG_ENG_WARN_F("[Replication] Divergence: netHandle=%u frame=%u dist=%.4fm",
+							   entry.NetHandle, clientFrame, std::sqrt(dx * dx + dy * dy + dz * dz));
+				corrections.push_back({
+					entry.NetHandle, clientFrame,
+					entry.PosX, entry.PosY, entry.PosZ,
+					entry.RotQx, entry.RotQy, entry.RotQz, entry.RotQw
+				});
+			}
+		}
+	}
+
+	if (!corrections.empty() && logic) logic->EnqueueCorrections(std::move(corrections), clientFrame);
+
+#else
+	// Without rollback: blind write to current write frame
+	for (uint32_t i = 0; i < count; ++i)
+	{
+		const StateCorrectionEntry& entry = entries[i];
+
+		EntityNetHandle netHandle{};
+		netHandle.Value = entry.NetHandle;
+
+		GlobalEntityHandle gHandle = reg->GlobalEntityRegistry.LookupGlobalHandle(netHandle);
+		if (gHandle.GetIndex() == 0) continue;
+
+		EntityRecord* record = reg->GlobalEntityRegistry.Records[gHandle.GetIndex()];
+		if (!record || !record->IsValid()) continue;
+
+		Archetype* arch     = record->Arch;
+		Chunk*     chunk    = record->TargetChunk;
+		uint32_t   localIdx = record->LocalIndex;
 
 		void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 		arch->BuildFieldArrayTable(chunk, fieldArrayTable,
@@ -656,30 +901,26 @@ void ReplicationSystem::HandleStateCorrections(Registry* reg, const StateCorrect
 		for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 		{
 			if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
-
-			void* fieldBase = fieldArrayTable[fdesc.fieldSlotIndex];
-			if (!fieldBase) continue;
-
-			auto* floatArr = static_cast<float*>(fieldBase);
-
+			void* base = fieldArrayTable[fdesc.fieldSlotIndex];
+			if (!base) continue;
+			auto* fa = static_cast<float*>(base);
 			switch (fdesc.componentSlotIndex)
 			{
-				case 0: floatArr[localIdx] = entry.PosX;
+				case 0: fa[localIdx] = entry.PosX;
 					break;
-				case 1: floatArr[localIdx] = entry.PosY;
+				case 1: fa[localIdx] = entry.PosY;
 					break;
-				case 2: floatArr[localIdx] = entry.PosZ;
+				case 2: fa[localIdx] = entry.PosZ;
 					break;
-				case 3: floatArr[localIdx] = entry.RotQx;
+				case 3: fa[localIdx] = entry.RotQx;
 					break;
-				case 4: floatArr[localIdx] = entry.RotQy;
+				case 4: fa[localIdx] = entry.RotQy;
 					break;
-				case 5: floatArr[localIdx] = entry.RotQz;
-					break;
-				case 6: floatArr[localIdx] = entry.RotQw;
-					break;
+				case 5: fa[localIdx] = entry.RotQz; break;
+				case 6: fa[localIdx] = entry.RotQw; break;
 				default: break;
 			}
 		}
 	}
+#endif
 }

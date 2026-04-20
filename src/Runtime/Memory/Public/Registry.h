@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <functional>
 #include <queue>
 #include <span>
 #include <unordered_map>
@@ -107,6 +108,30 @@ public:
 	// Promote all Alive-but-not-Active entities to Active in the temporal cache.
 	// Must be called on the Logic thread. Returns the count of entities promoted.
 	int SweepAliveFlagsToActive();
+
+#ifdef TNX_ENABLE_ROLLBACK
+	// During rollback resim: re-read this entity's current write-frame position and compare
+	// against the server-authoritative value in correction. If still divergent, overwrite
+	// all CTransform fields (pos + rot) and return true. Returns false if converged.
+	bool CheckAndCorrectEntityTransform(const EntityTransformCorrection& correction);
+
+	// Server-driven discrete events (spawns, sweeps) that must be replayed during rollback
+	// resim so the corrected timeline stays deterministically consistent with the server.
+	//
+	// Push once on the logic thread when the event first executes (inside SpawnAndWait /
+	// PostAndWait lambdas). During resim, ReplayServerEventsAt replays all events whose
+	// frame matches the current resim frame. PruneServerEvents drops events that have aged
+	// out of the temporal ring — they can never be targeted by a rollback.
+	struct ServerEventEntry
+	{
+		uint32_t Frame;
+		std::function<void()> Replay;
+	};
+
+	void PushServerEvent(ServerEventEntry entry);
+	void ReplayServerEventsAt(uint32_t frame);
+	void PruneServerEvents(uint32_t oldestFrame);
+#endif
 
 	// --- Diagnostics ---
 
@@ -250,6 +275,12 @@ private:
 	VolatileComponentCache VolatileSlab;
 	JoltPhysics* PhysicsPtr = nullptr;
 
+#ifdef TNX_ENABLE_ROLLBACK
+	// All calls to PushServerEvent execute on the logic thread (inside PostAndWait /
+	// SpawnAndWait lambdas). No cross-thread access — no lock needed.
+	std::vector<ServerEventEntry> ServerEvents;
+#endif
+
 	// --- Handle allocation/recycling methods ---
 
 	GlobalEntityHandle AllocateGlobalHandle();
@@ -308,13 +339,17 @@ EntityHandle Registry::Create(Fn&& fn)
 
 		fn(view);
 
-		// Warn about any asset-ref fields still at 0 (not set during the lambda)
+		// Warn about mesh-ref fields still at 0 — slot 0 is the invalid sentinel.
+		// Material refs are excluded: MaterialID=0 means "no material", which is valid.
 		for (const auto& [fkey, fdesc] : record.Arch->ArchetypeFieldLayout)
 		{
-			if (fdesc.refAssetType == AssetType::Invalid) continue;
+			if (fdesc.refAssetType != AssetType::StaticMesh &&
+				fdesc.refAssetType != AssetType::SkeletalMesh)
+				continue;
 			auto* arr    = static_cast<uint32_t*>(fieldArrayTable[fdesc.fieldSlotIndex]);
 			uint32_t val = arr[record.LocalIndex];
-			if (val == 0) LOG_ENG_WARN("Registry::Create - entity has an asset-ref field that was not initialized (consider using SetMesh/SetMaterial in your init lambda)");
+			if (val == 0)
+				LOG_ENG_WARN("Registry::Create - MeshID not set (slot 0 is invalid; use SetMesh in your init lambda)");
 		}
 
 		AssetRegistry::Get().DrainPendingCheckouts();
@@ -328,7 +363,7 @@ EntityHandle Registry::Create(Fn&& fn)
 // Allocates an entity by runtime ClassID, builds the field array table, and invokes
 // fn(record, fieldArrayTable). The caller (e.g. EntityBuilder) can write raw field data
 // and call RegisterPendingCheckout for asset-ref fields. Pending checkouts are drained
-// after fn returns. Asset-ref fields still at 0 emit a warning.
+// after fn returns. Mesh-ref fields still at 0 emit a warning (slot 0 is the invalid sentinel).
 template <std::invocable<EntityRecord&, void**> Fn>
 EntityHandle Registry::CreateByClassID(ClassID classID, Fn&& fn)
 {
@@ -345,14 +380,6 @@ EntityHandle Registry::CreateByClassID(ClassID classID, Fn&& fn)
 										  GetVolatileCache()->GetActiveWriteFrame());
 
 		fn(record, fieldArrayTable);
-
-		for (const auto& [fkey, fdesc] : record.Arch->ArchetypeFieldLayout)
-		{
-			if (fdesc.refAssetType == AssetType::Invalid) continue;
-			auto* arr    = static_cast<uint32_t*>(fieldArrayTable[fdesc.fieldSlotIndex]);
-			uint32_t val = arr[record.LocalIndex];
-			if (val == 0) LOG_ENG_WARN("Registry::CreateByClassID - entity has an asset-ref field that was not initialized");
-		}
 
 		AssetRegistry::Get().DrainPendingCheckouts();
 	}

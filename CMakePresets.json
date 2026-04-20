@@ -18,6 +18,7 @@
         "VECTORIZATION_REPORTS": "OFF",
         "TNX_ALIGN_64": "OFF",
         "TNX_ENABLE_ROLLBACK": "ON",
+        "TNX_DETERMINISM": "OFF",
         "TNX_DETAILED_METRICS": "OFF",
         "TNX_ENABLE_EDITOR": "OFF",
         "TNX_GPU_PICKING": "OFF",
@@ -88,6 +89,20 @@
       "inherits": "windows",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "determinism-test",
+      "displayName": "DeterminismTest | Rollback Harness | Linux",
+      "inherits": "linux",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "TNX_HEADLESS": "OFF",
+        "TNX_ENABLE_NETWORK": "ON",
+        "TNX_ENABLE_EDITOR": "OFF",
+        "TNX_ENABLE_ROLLBACK": "ON",
+        "TNX_DETERMINISM": "ON",
+        "ENABLE_TRACY": "OFF"
       }
     }
   ],
@@ -181,6 +196,14 @@
       "displayName": "Release | All | Windows",
       "configurePreset": "release-windows",
       "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "determinism-test",
+      "displayName": "Build DeterminismTest",
+      "configurePreset": "determinism-test",
+      "targets": [
+        "DeterminismTest"
+      ]
     }
   ]
 }

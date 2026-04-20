@@ -14,11 +14,9 @@
 // Frame indexing is 1:1 with the slab: the server can look up a frame's input
 // the same way it accesses historical component data.
 //
-// Store() splits an incoming InputFramePayload across every sim frame in its
-// [FirstClientFrame, LastClientFrame] span. Discrete events are distributed to
-// the specific sim frame they occurred in, determined by FrameUSOffset relative
-// to the fixed sim frame duration (1,000,000 / FixedUpdateHz μs). The held key
-// state applies identically to all frames in the span.
+// Store() writes an incoming InputWindowPacket. Each NetInputFrame maps
+// exactly 1:1 to a sim frame slot — no FrameUSOffset redistribution math needed.
+// Each frame's keystate and events are stored directly from the payload.
 //
 // A SimFrame discriminator in each entry detects ring-buffer aliasing — if the
 // slot's SimFrame doesn't match the requested frame, the slot is stale/empty.
@@ -41,7 +39,7 @@
 /// One slot in the log — holds the resolved input for a single sim frame.
 struct PlayerInputLogEntry
 {
-	uint32_t SimFrame       = UINT32_MAX; // UINT32_MAX = slot is empty / not yet written
+	uint32_t SimFrame = UINT32_MAX; // UINT32_MAX = slot is empty / not yet written
 	// The LastClientFrame of the packet whose keystate is stored here.
 	// Lower = older snapshot = more accurate for this sim frame.
 	// Out-of-order arrivals only overwrite if they carry a fresher (older) snapshot.
@@ -72,21 +70,38 @@ struct InputConsumeResult
 struct PlayerInputLog
 {
 	std::unique_ptr<PlayerInputLogEntry[]> Entries;
-	uint32_t Depth             = 0;
-	uint32_t LastConsumedFrame = 0;
-	uint32_t LastReceivedFrame = 0;
+	uint32_t Depth               = 0;
+	uint32_t LastConsumedFrame   = 0;
+	uint32_t LastReceivedFrame   = 0;
 	uint32_t HighWaterFirstFrame = 0;
+
+	// Client-to-server frame offset: serverFrame = clientFrame + FrameOffset.
+	// Set from ClockSyncPayload.LocalFrameAtHandshake on the server:
+	//   FrameOffset = ServerFrameAtHandshake - ClientLocalFrameAtHandshake
+	// All public frame numbers in this log are server-frame space.
+	// Can be updated by heartbeat as simulation times drift.
+	// Signed: the client normally leads the server (InputLead frames), so
+	// FrameOffset is typically negative (e.g. -3 at InputLead=3).
+	int32_t FrameOffset = 0;
 
 	// Set true when PlayerBeginConfirm is dispatched (RepState → Playing).
 	// The injector skips this log until then.
-	bool     bActive           = false;
+	bool bActive = false;
 
 	// Dirty tracking: set when a real packet corrects a previously predicted frame.
-	bool     bDirty            = false;
+	bool bDirty                 = false;
 	uint32_t EarliestDirtyFrame = UINT32_MAX;
 
-	bool     IsDirty()   const { return bDirty; }
-	void     ClearDirty()      { bDirty = false; EarliestDirtyFrame = UINT32_MAX; }
+	// Stall log rate-limiting: UINT32_MAX = never logged yet (first occurrence always fires).
+	uint32_t LastStallLogFrame = UINT32_MAX;
+
+	bool IsDirty() const { return bDirty; }
+
+	void ClearDirty()
+	{
+		bDirty             = false;
+		EarliestDirtyFrame = UINT32_MAX;
+	}
 
 	/// Must be called before use. Allocates Depth slots.
 	void Initialize(uint32_t temporalFrameCount)
@@ -96,86 +111,75 @@ struct PlayerInputLog
 	}
 
 	/// Called by NetThread when an InputFrame arrives.
+	/// Payload carries client-local frame numbers. FrameOffset is applied internally
+	/// to translate to server-frame space before ring indexing.
 	/// For frames not yet consumed: store normally (first-write-wins with out-of-order correction).
 	/// For frames already consumed as predicted: compare and mark dirty if different.
-	void Store(const InputFramePayload& payload, uint32_t fixedUpdateHz)
+	void Store(const InputWindowPacket& payload)
 	{
-		if (!Entries) return;
+		if (!Entries || payload.FrameCount == 0) return;
 
-		// First packet activates the log: seed all counters so the injector's lead gate
-		// starts from this frame, not from 0.
+		// Translate the incoming window from client-local to server-frame space.
+		const uint32_t firstFrame = static_cast<uint32_t>(static_cast<int64_t>(payload.FirstFrame) + FrameOffset);
+		const uint32_t lastFrame  = firstFrame + payload.FrameCount - 1;
+
+		//LOG_ENG_INFO_F("[PlayerInputLog] Storing %u input frames (first=%u, last=%u)", payload.FrameCount, payload.FirstFrame, payload.FirstFrame + payload.FrameCount - 1);
+
+		// First packet activates the log.
 		if (!bActive)
 		{
-			const uint32_t seed = payload.FirstClientFrame > 0 ? payload.FirstClientFrame - 1 : 0;
+			const uint32_t seed = firstFrame > 0 ? firstFrame - 1 : 0;
 			LastReceivedFrame   = seed;
 			LastConsumedFrame   = seed;
 			HighWaterFirstFrame = seed;
 			bActive             = true;
 		}
 
-		// Drop only if the entire span is strictly behind what we've already consumed AND
-		// we've seen a later window start (so there's nothing to correct). The inner loop
-		// handles the correction path for frames that were predicted — removing this early
-		// return is safe because the loop skips already-consumed non-predicted frames.
-		if (payload.LastClientFrame < HighWaterFirstFrame) return;
+		if (lastFrame < HighWaterFirstFrame) return;
 
-		const uint32_t frameTimeUS = 1'000'000u / fixedUpdateHz;
+		if (firstFrame > HighWaterFirstFrame) HighWaterFirstFrame = firstFrame;
 
-		// Advance watermark — records the furthest-forward window start we've seen.
-		// Out-of-order packets are clamped to this so they can't touch frames that a
-		// later packet has already superseded.
-		if (payload.FirstClientFrame > HighWaterFirstFrame) HighWaterFirstFrame = payload.FirstClientFrame;
-
-		const uint32_t effectiveFirst = [&]() -> uint32_t {
-			uint32_t first = std::max(payload.FirstClientFrame, HighWaterFirstFrame);
-			// Frames older than one full ring-buffer depth before LastConsumedFrame have been
-			// evicted — their slots have been overwritten and can never be corrected. Clamping
-			// here keeps Store() O(ring_depth + new_frames) regardless of session duration.
-			if (LastConsumedFrame >= Depth)
-				first = std::max(first, LastConsumedFrame - Depth + 1);
+		const uint32_t effectiveFirst = [&]() -> uint32_t
+		{
+			uint32_t first = std::max(firstFrame, HighWaterFirstFrame);
+			if (LastConsumedFrame >= Depth) first = std::max(first, LastConsumedFrame - Depth + 1);
 			return first;
 		}();
 
-		for (uint32_t frame = effectiveFirst; frame <= payload.LastClientFrame; ++frame)
+		// No upper cap on the store loop — the ring uses modular indexing (frame % Depth),
+		// so storing ahead is safe. Capping at safeLastFrame (LastConsumedFrame + Depth)
+		// caused data loss: once LastReceivedFrame advances and the client drops acked frames,
+		// those out-of-window frames will never be resent, leaving permanent gaps.
+		for (uint32_t frame = effectiveFirst; frame <= lastFrame; ++frame)
 		{
-			PlayerInputLogEntry& entry = Entries[frame % Depth];
+			const uint32_t windowIdx = frame - firstFrame;
+			if (windowIdx >= payload.FrameCount) break;
 
-			// Build the incoming event set for this frame so we can compare it.
-			const uint32_t windowOffsetStart = (frame - payload.FirstClientFrame) * frameTimeUS;
-			const uint32_t windowOffsetEnd   = windowOffsetStart + frameTimeUS;
+			const NetInputFrame& src   = payload.Frames[windowIdx];
+			PlayerInputLogEntry& entry = Entries[frame % Depth];
 
 			if (frame <= LastConsumedFrame)
 			{
-				// Frame was already simulated. Only care if it was predicted — compare and
-				// mark dirty so the server can resim with the real input.
 				if (entry.SimFrame != frame || !entry.bPredicted) continue;
 
-				const bool keystateChanged = (std::memcmp(entry.State.KeyState, payload.State.KeyState, 64) != 0)
-										  || (entry.State.MouseDX != payload.State.MouseDX)
-										  || (entry.State.MouseDY != payload.State.MouseDY)
-										  || (entry.State.MouseButtons != payload.State.MouseButtons);
+				const bool keystateChanged = (std::memcmp(entry.State.KeyState, src.State.KeyState, 64) != 0)
+					|| (entry.State.MouseDX != src.State.MouseDX)
+					|| (entry.State.MouseDY != src.State.MouseDY)
+					|| (entry.State.MouseButtons != src.State.MouseButtons);
 
-				// Check if the incoming event set for this frame differs.
-				uint8_t incomingEventCount = 0;
-				NetInputEvent incomingEvents[8];
-				for (uint8_t e = 0; e < payload.EventCount && incomingEventCount < 8; ++e)
-				{
-					const uint32_t evOffset = payload.Events[e].FrameUSOffset;
-					if (evOffset >= windowOffsetStart && evOffset < windowOffsetEnd)
-						incomingEvents[incomingEventCount++] = payload.Events[e];
-				}
+				const bool eventsChanged = (src.EventCount != entry.EventCount)
+					|| (src.EventCount > 0
+						&& std::memcmp(src.Events, entry.Events, src.EventCount * sizeof(NetInputEvent)) != 0);
 
-				const bool eventsChanged = (incomingEventCount != entry.EventCount)
-					|| (incomingEventCount > 0
-						&& std::memcmp(incomingEvents, entry.Events, incomingEventCount * sizeof(NetInputEvent)) != 0);
+				// Always confirm as real — even a matching prediction must shed bPredicted=true
+				// so ConsumeFrame returns Hit during resim instead of LateOrAliased.
+				entry.bPredicted = false;
 
 				if (keystateChanged || eventsChanged)
 				{
-					// Overwrite with real data and mark the log dirty for resim.
-					entry.State        = payload.State;
-					entry.bPredicted   = false;
-					entry.EventCount   = static_cast<uint8_t>(incomingEventCount);
-					std::memcpy(entry.Events, incomingEvents, incomingEventCount * sizeof(NetInputEvent));
+					entry.State      = src.State;
+					entry.EventCount = src.EventCount;
+					std::memcpy(entry.Events, src.Events, src.EventCount * sizeof(NetInputEvent));
 
 					bDirty = true;
 					if (frame < EarliestDirtyFrame) EarliestDirtyFrame = frame;
@@ -183,32 +187,22 @@ struct PlayerInputLog
 				continue;
 			}
 
-			// Frame not yet consumed — normal store path.
-			// Prefer the packet whose snapshot is oldest (smallest LastClientFrame).
+			// Normal store path — first-write-wins, out-of-order freshness by lastFrame.
 			const bool slotMatchesFrame  = (entry.SimFrame == frame);
-			const bool incomingIsFresher = (payload.LastClientFrame < entry.SnapshotFrame);
+			const bool incomingIsFresher = (lastFrame < entry.SnapshotFrame);
 			if (slotMatchesFrame && !incomingIsFresher) continue;
 
-			entry.State = payload.State;
+			entry.State         = src.State;
 			entry.SimFrame      = frame;
-			entry.SnapshotFrame = payload.LastClientFrame;
+			entry.SnapshotFrame = lastFrame;
 			entry.bPredicted    = false;
-			entry.EventCount    = 0;
-
-			for (uint8_t e = 0; e < payload.EventCount && entry.EventCount < 8; ++e)
-			{
-				const uint32_t evOffset = payload.Events[e].FrameUSOffset;
-				if (evOffset >= windowOffsetStart && evOffset < windowOffsetEnd)
-					entry.Events[entry.EventCount++] = payload.Events[e];
-			}
+			entry.EventCount    = src.EventCount;
+			std::memcpy(entry.Events, src.Events, src.EventCount * sizeof(NetInputEvent));
 		}
 
-		// Only advance LastReceivedFrame when the range is valid and frames were actually stored.
-		// An inverted range (FirstClientFrame > LastClientFrame) means nothing was stored —
-		// advancing here would make ConsumeFrame return LateOrAliased for unstored frames.
-		if (payload.FirstClientFrame <= payload.LastClientFrame
-			&& payload.LastClientFrame > LastReceivedFrame)
-			LastReceivedFrame = payload.LastClientFrame;
+		// LastReceivedFrame tracks "has the client sent us frames up to here?" —
+		// used by the stall check. Always update from the packet's actual last frame.
+		if (lastFrame > LastReceivedFrame) LastReceivedFrame = lastFrame;
 	}
 
 	/// Called by server LogicThread injector each sim tick.
@@ -244,7 +238,11 @@ struct PlayerInputLog
 			{
 				const PlayerInputLogEntry& prev = Entries[f % Depth];
 				if (prev.SimFrame != f) continue;
-				if (!prev.bPredicted) { lastReal = &prev; break; }
+				if (!prev.bPredicted)
+				{
+					lastReal = &prev;
+					break;
+				}
 				if (!lastPredicted) lastPredicted = &prev;
 			}
 			const PlayerInputLogEntry* lastKnown = lastReal ? lastReal : lastPredicted;
@@ -253,7 +251,11 @@ struct PlayerInputLog
 			entry.SnapshotFrame = UINT32_MAX;
 			entry.bPredicted    = true;
 			entry.EventCount    = 0; // discrete events are never predicted
-			entry.State = lastKnown ? lastKnown->State : InputSnapshot{};
+			entry.State         = lastKnown ? lastKnown->State : InputSnapshot{};
+			// Mouse deltas are per-frame values, not persistent state — zero them so the
+			// server doesn't predict the same mouse movement forever and dirty every frame.
+			entry.State.MouseDX = 0.f;
+			entry.State.MouseDY = 0.f;
 
 			if (frameNumber > LastConsumedFrame) LastConsumedFrame = frameNumber;
 			return {&entry, InputMissReason::NotYetReceived};

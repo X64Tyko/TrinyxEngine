@@ -164,3 +164,13 @@ struct ConstructRef
 static_assert(sizeof(ConstructRef) == 8, "ConstructRef must be 8 bytes");
 
 using EntityCacheHandle = uint32_t;
+
+// Server-authoritative transform snapshot — queued during rollback for post-resim comparison.
+// If the entity's resimmed position still diverges from PosXYZ, the correction is applied.
+struct EntityTransformCorrection
+{
+	uint32_t NetHandle;
+	uint32_t ClientFrame;
+	float    PosX, PosY, PosZ;
+	float    RotQx, RotQy, RotQz, RotQw;
+};

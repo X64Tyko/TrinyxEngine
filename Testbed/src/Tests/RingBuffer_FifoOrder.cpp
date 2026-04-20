@@ -1,12 +1,12 @@
 #include "TestFramework.h"
-#include "TrinyxRingBuffer.h"
+#include "TrinyxMPMCRing.h"
 
-// Validates strict FIFO ordering on TrinyxRingBuffer.
+// Validates strict FIFO ordering on TrinyxMPMCRing.
 // Interleaves pushes and pops to prove the MPMC sequence counter stays coherent
 // across partial drain/refill cycles.
 TEST(RingBuffer_FifoOrder)
 {
-	TrinyxRingBuffer<int> rb;
+	TrinyxMPMCRing<int> rb;
 	ASSERT(rb.Initialize(8));
 
 	// Push 1-4, pop 1-2, push 5-6, pop 3-6

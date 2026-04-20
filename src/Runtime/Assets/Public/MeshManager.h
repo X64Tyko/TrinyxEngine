@@ -41,7 +41,9 @@ namespace BuiltinMesh
 //
 // AssetRegistry is the authority for name/ID lookup. MeshManager holds
 // only the GPU geometry slots and a minimal slot→AssetID reverse map.
-// Slot 0 is always the built-in cube mesh.
+// Slot 0 is reserved as the invalid/error sentinel (never populated).
+// Slot 1 is always the built-in cube mesh.
+// Slot 2 is always the built-in capsule mesh.
 // -----------------------------------------------------------------------
 
 class MeshManager
@@ -128,7 +130,7 @@ private:
 
 	uint32_t NextVertexOffset = 0; // in vertices (not bytes)
 	uint32_t NextIndexOffset  = 0; // in indices  (not bytes)
-	uint32_t MeshCount        = 0;
+	uint32_t MeshCount        = 1; // slot 0 reserved as invalid sentinel
 	MeshSlot Slots[MAX_MESH_SLOTS]{};
 	AssetID  SlotIDs[MAX_MESH_SLOTS]{}; // slot → AssetID reverse map for GetSlotName/GetSlotID
 };

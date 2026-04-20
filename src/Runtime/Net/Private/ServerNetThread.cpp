@@ -25,8 +25,7 @@ void ServerNetThread::OnClientDisconnectedCB(uint8_t ownerID)
 {
 	if (ownerID != 0 && ownerID < MaxOwnerIDs) InputLogs[ownerID].reset(); // free the log; slot becomes nullptr
 
-	if (FlowManager* flow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr)
-		if (ownerID != 0) flow->OnClientDisconnected(ownerID);
+	if (FlowManager* flow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr) if (ownerID != 0) flow->OnClientDisconnected(ownerID);
 }
 
 void ServerNetThread::CreateInputLog(uint8_t ownerID)
@@ -40,7 +39,7 @@ void ServerNetThread::CreateInputLog(uint8_t ownerID)
 	// The log must be deep enough to cover the full lead window. If maxLead > Depth,
 	// the backward search in ConsumeFrame can't reach real data when the server is near
 	// the lead limit, and predictions fall back to zeros. Use the larger of the two.
-	const uint32_t maxLead = static_cast<uint32_t>(Config ? Config->MaxClientInputLead : 16);
+	const uint32_t maxLead  = static_cast<uint32_t>(Config ? Config->MaxClientInputLead : 16);
 	const uint32_t logDepth = std::max(temporalFrameCount, maxLead + 1);
 
 	InputLogs[ownerID] = std::make_unique<PlayerInputLog>();
@@ -58,26 +57,58 @@ void ServerNetThread::WirePlayerInputInjector(World* world)
 	// Two-pass: stall check first so we never partially inject a frame.
 	logic->SetPlayerInputInjector([this, world, logic](uint32_t frameNumber) -> bool
 	{
+		// Coalesced rollback pre-pass: if the previous injection pass (or earlier) accumulated
+		// a pending input-mismatch resim frame, fire it now — but only outside a resim.
+		// During resim, the injector still runs for each replayed frame; dirty marks accumulate
+		// into PendingInputResimFrame but must not trigger a recursive rollback request.
+		// After the resim completes the next non-resim call fires one consolidated rollback
+		// covering all dirty marks that arrived during the burst.
+		if (!logic->IsResimulating() && PendingInputResimFrame != UINT32_MAX)
+		{
+#ifdef TNX_ENABLE_ROLLBACK
+			logic->RequestRollback(PendingInputResimFrame);
+#endif
+			PendingInputResimFrame = UINT32_MAX;
+		}
+
 		const int maxLead = Config ? Config->MaxClientInputLead : 16;
 
 		// Pass 1 — stall check: if any active player is beyond the lead budget, hold the
 		// entire sim this tick. No input is consumed or injected until all are in window.
 		if (maxLead >= 0)
 		{
+			// Ack pre-pass: update LastAckedClientFrame for all active owners from
+			// LastReceivedFrame before the stall check. If we stall and return early,
+			// injection (Pass 2) never runs and the ack would otherwise freeze — leaving
+			// the client's drop floor stuck so it resends the same old frames forever,
+			// which can never advance LastReceivedFrame and permanently deadlocks the stall.
 			for (uint32_t ownerID = 1; ownerID < MaxOwnerIDs; ++ownerID)
 			{
 				const PlayerInputLog* log = InputLogs[ownerID].get();
 				if (!log || !log->bActive) continue;
+				if (ConnectionInfo* ci = ConnectionMgr ? ConnectionMgr->FindConnectionByOwnerID(static_cast<uint8_t>(ownerID), /*requireServerSide=*/true) : nullptr)
+				{
+					ci->LastAckedClientFrame = static_cast<uint32_t>(static_cast<int64_t>(log->LastReceivedFrame) - log->FrameOffset);
+				}
+			}
+
+			for (uint32_t ownerID = 1; ownerID < MaxOwnerIDs; ++ownerID)
+			{
+				PlayerInputLog* log = InputLogs[ownerID].get();
+				if (!log || !log->bActive) continue;
 
 				if (frameNumber > log->LastReceivedFrame + static_cast<uint32_t>(maxLead))
 				{
-					// Rate-limit: log once per second (512 frames) per owner to avoid flooding.
-					if (frameNumber % 512 == 0)
+					// Log on first occurrence and then at most once per second (512 frames).
+					const bool shouldLog = (log->LastStallLogFrame == UINT32_MAX)
+						|| (frameNumber >= log->LastStallLogFrame + 512);
+					if (shouldLog)
 					{
-						FlowManager* injFlow = world ? world->GetFlowManager() : nullptr;
-						Soul* soul           = injFlow ? injFlow->GetSoul(static_cast<uint8_t>(ownerID)) : nullptr;
-						LOG_NET_WARN_F(soul, "[ServerNet] Stalling sim for ownerID %u: frame %u, lastReceived %u, lead %d",
-									   ownerID, frameNumber, log->LastReceivedFrame, maxLead);
+						log->LastStallLogFrame = frameNumber;
+						FlowManager* injFlow   = world ? world->GetFlowManager() : nullptr;
+						Soul* soul             = injFlow ? injFlow->GetSoul(static_cast<uint8_t>(ownerID)) : nullptr;
+						LOG_NET_WARN_F(soul, "[ServerNet] Stalling sim for ownerID %u: frame %u, lastReceived %u, lastConsumed %u, lead %d",
+									   ownerID, frameNumber, log->LastReceivedFrame, log->LastConsumedFrame, maxLead);
 					}
 					return true;
 				}
@@ -121,9 +152,9 @@ void ServerNetThread::WirePlayerInputInjector(World* world)
 					const char* tag = (result.Reason == InputMissReason::Hit) ? "Hit" : "Predicted";
 					LOG_ENG_DEBUG_F("[Injector] ownerID=%u frame=%u %s anyKey=%d k[0]=0x%02X k[3]=0x%02X lastRecv=%u lastConsumed=%u",
 									ownerID, frameNumber, tag,
-								(result.Entry->State.KeyState[0] || result.Entry->State.KeyState[3]) ? 1 : 0,
-								result.Entry->State.KeyState[0], result.Entry->State.KeyState[3],
-								log->LastReceivedFrame, log->LastConsumedFrame);
+									(result.Entry->State.KeyState[0] || result.Entry->State.KeyState[3]) ? 1 : 0,
+									result.Entry->State.KeyState[0], result.Entry->State.KeyState[3],
+									log->LastReceivedFrame, log->LastConsumedFrame);
 				}
 			}
 			else if (result.Reason == InputMissReason::LateOrAliased)
@@ -137,27 +168,49 @@ void ServerNetThread::WirePlayerInputInjector(World* world)
 			// Expose the injected (or predicted/carried-forward) state to the sim this frame.
 			if (buf) buf->Swap();
 
-			// ACK the highest frame for which we have real received data.
+			// ACK the highest frame for which we have real received data, converted to
+			// client-local frame space.  The client's drop floor uses client-local numbers
+			// exclusively — no offset math on the client side.
 			// Use LastReceivedFrame — NOT LastConsumedFrame — because LastConsumedFrame
 			// advances on predicted entries too. ACKing a predicted frame would tell the
 			// client to trim its retransmit window past frames the server never actually
 			// received, causing firstFrame > frame (inverted payload range) on the client.
-			if (ConnectionInfo* ci = ConnectionMgr ? ConnectionMgr->FindConnectionByOwnerID(static_cast<uint8_t>(ownerID), /*requireServerSide=*/true) : nullptr)
-				ci->LastAckedClientFrame = log->LastReceivedFrame;
+			if (ConnectionInfo* ci = ConnectionMgr ? ConnectionMgr->FindConnectionByOwnerID(static_cast<uint8_t>(ownerID), /*requireServerSide=*/true) : nullptr) ci->LastAckedClientFrame = static_cast<uint32_t>(static_cast<int64_t>(log->LastReceivedFrame) - log->FrameOffset);
 
-			// Trigger resim if a real packet corrected predicted frames.
+			// Accumulate into PendingInputResimFrame (coalescing) rather than calling
+			// RequestRollback immediately. The pre-pass at the top of the next non-resim
+			// injection call fires one consolidated rollback covering the earliest dirty
+			// frame across all packets that arrived since the last rollback.
 			if (log->IsDirty())
 			{
 				const uint32_t resimFrom = log->EarliestDirtyFrame;
 				log->ClearDirty();
+
+				// Guard: only schedule rollback if the dirty frame is within the recoverable
+				// ring window. The ring has already overwritten slots for older frames, so
+				// rolling back further would read recycled data and produce a worse result
+				// than accepting the error.
+				const uint32_t serverFrame = logic->GetLastCompletedFrame();
+				const uint32_t ringDepth   = log->Depth;
+				const bool inWindow        = (serverFrame < ringDepth || resimFrom >= serverFrame - ringDepth);
+
+				if (inWindow)
+				{
+					{
+						FlowManager* injFlow = world ? world->GetFlowManager() : nullptr;
+						Soul* soul           = injFlow ? injFlow->GetSoul(static_cast<uint8_t>(ownerID)) : nullptr;
+						LOG_NET_INFO_F(soul, "[ServerNet] Input mismatch for ownerID %u, queuing resim from frame %u", ownerID, resimFrom);
+					}
+					if (resimFrom < PendingInputResimFrame) PendingInputResimFrame = resimFrom;
+					if (Replicator) Replicator->AddPendingResim(static_cast<uint8_t>(ownerID), resimFrom);
+				}
+				else
 				{
 					FlowManager* injFlow = world ? world->GetFlowManager() : nullptr;
 					Soul* soul           = injFlow ? injFlow->GetSoul(static_cast<uint8_t>(ownerID)) : nullptr;
-					LOG_NET_INFO_F(soul, "[ServerNet] Input mismatch for ownerID %u, resim from frame %u", ownerID, resimFrom);
+					LOG_NET_WARN_F(soul, "[ServerNet] Input correction for ownerID %u too old (frame %u, window [%u..%u]) — accepting divergence",
+								   ownerID, resimFrom, serverFrame >= ringDepth ? serverFrame - ringDepth : 0u, serverFrame);
 				}
-#ifdef TNX_ENABLE_ROLLBACK
-				logic->RequestRollback(resimFrom);
-#endif
 			}
 		}
 
@@ -191,230 +244,244 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 	{
 		case NetMessageType::InputFrame:
 			{
-			if (msg.Payload.size() < sizeof(InputFramePayload))
-			{
-				LOG_ENG_WARN_F("[ServerNet] InputFrame payload too small (%zu)", msg.Payload.size());
-				break;
-			}
-			const uint8_t ownerID = msg.Header.SenderID;
-			const auto* payload   = reinterpret_cast<const InputFramePayload*>(msg.Payload.data());
+				if (msg.Payload.size() < sizeof(InputWindowPacket))
+				{
+					LOG_ENG_WARN_F("[ServerNet] InputFrame payload too small (%zu)", msg.Payload.size());
+					break;
+				}
+				const uint8_t ownerID = msg.Header.SenderID;
+				const auto* payload   = reinterpret_cast<const InputWindowPacket*>(msg.Payload.data());
 
-			PlayerInputLog* log = GetInputLog(ownerID);
+				PlayerInputLog* log = GetInputLog(ownerID);
 				if (!log)
 				{
 					LOG_ENG_WARN_F("[ServerNet] InputFrame from OwnerID %u — no log (not connected?)", ownerID);
+					break;
+				}
+
+				log->Store(*payload);
+
+				// Immediately ACK the new floor so the client can advance its drop window
+				// without waiting for the next injection pass or state-correction heartbeat.
+				// Update LastAckedClientFrame from LastReceivedFrame first — same formula as
+				// the injector's ack pre-pass — so MakeHeader stamps the fresh value.
+				if (ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection))
+				{
+					ci->LastAckedClientFrame = static_cast<uint32_t>(static_cast<int64_t>(log->LastReceivedFrame) - log->FrameOffset);
+					NetChannel(ci, ConnectionMgr).SendHeaderOnly(NetMessageType::InputFrame, /*reliable=*/false);
+				}
 				break;
 			}
-
-			// Split payload across per-sim-frame slots in the log. Each frame slot (frame % Depth)
-			// mirrors the temporal slab so LogicThread can look up input by frame index directly.
-			const uint32_t fixedHz = (Config && Config->FixedUpdateHz != EngineConfig::Unset)
-										 ? static_cast<uint32_t>(Config->FixedUpdateHz)
-										 : 512u;
-			log->Store(*payload, fixedHz);
-			break;
-		}
 
 		case NetMessageType::Ping:
-		{
-			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-			if (ci) NetChannel(ci, ConnectionMgr).SendPong(msg.Header);
-			break;
-		}
+			{
+				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+				if (ci) NetChannel(ci, ConnectionMgr).SendPong(msg.Header);
+				break;
+			}
 
 		case NetMessageType::Pong:
-		{
-			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-			if (ci)
 			{
-				const uint16_t now  = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
-				const uint16_t sent = msg.Header.Timestamp;
-				const float rtt     = static_cast<float>(static_cast<uint16_t>(now - sent));
-				if (ci->RTT_ms <= 0.0f) ci->RTT_ms = rtt;
-				else ci->RTT_ms                    = ci->RTT_ms * 0.875f + rtt * 0.125f;
+				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+				if (ci)
+				{
+					const uint16_t now  = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
+					const uint16_t sent = msg.Header.Timestamp;
+					const float rtt     = static_cast<float>(static_cast<uint16_t>(now - sent));
+					if (ci->RTT_ms <= 0.0f) ci->RTT_ms = rtt;
+					else ci->RTT_ms                    = ci->RTT_ms * 0.875f + rtt * 0.125f;
+				}
+				break;
 			}
-			break;
-		}
 
 		case NetMessageType::ConnectionHandshake:
-		{
-			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-			if (!ci)
 			{
-				LOG_ENG_WARN_F("[ServerNet] ConnectionHandshake from unknown connection %u", msg.Connection);
+				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+				if (!ci)
+				{
+					LOG_ENG_WARN_F("[ServerNet] ConnectionHandshake from unknown connection %u", msg.Connection);
+					break;
+				}
+
+				if (msg.Header.SenderID != 0)
+				{
+					LOG_ENG_WARN_F("[ServerNet] ConnectionHandshake from client with existing ownerID %u", msg.Header.SenderID);
+					break;
+				}
+
+				ConnectionMgr->GenerateNetID(msg.Connection);
+
+				if (ServerWorld) ServerWorld->EnsurePlayerInputSlot(ci->OwnerID);
+
+				const uint32_t serverFrame = (ServerWorld && ServerWorld->GetLogicThread())
+												 ? ServerWorld->GetLogicThread()->GetLastCompletedFrame()
+												 : 0;
+				ci->ServerFrameAtHandshake = serverFrame;
+
+				// Create the per-player input log now that we have a stable ownerID.
+				// Log is inactive until Activate() is called at PlayerBeginConfirm time.
+				CreateInputLog(ci->OwnerID);
+				ci->RepState = ClientRepState::Synchronizing;
+
+				HandshakePayload hsPay{};
+				hsPay.TickRate = static_cast<uint32_t>(
+					Config->FixedUpdateHz == EngineConfig::Unset ? 128 : Config->FixedUpdateHz);
+				hsPay.ServerFrame = serverFrame;
+
+				NetChannel(ci, ConnectionMgr).Send(
+					NetMessageType::ConnectionHandshake, hsPay, /*reliable=*/true, serverFrame);
+
+				{
+					Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
+									 ? ServerWorld->GetFlowManager()->GetSoul(ci->OwnerID)
+									 : nullptr;
+					LOG_NET_INFO_F(soul, "[ServerNet] HandshakeAccept → OwnerID=%u frame=%u tickRate=%u",
+								   ci->OwnerID, serverFrame, hsPay.TickRate);
+				}
 				break;
 			}
-
-			if (msg.Header.SenderID != 0)
-			{
-				LOG_ENG_WARN_F("[ServerNet] ConnectionHandshake from client with existing ownerID %u", msg.Header.SenderID);
-				break;
-			}
-
-			ConnectionMgr->GenerateNetID(msg.Connection);
-
-			if (ServerWorld) ServerWorld->EnsurePlayerInputSlot(ci->OwnerID);
-
-			const uint32_t serverFrame = (ServerWorld && ServerWorld->GetLogicThread())
-											 ? ServerWorld->GetLogicThread()->GetLastCompletedFrame()
-											 : 0;
-			ci->ServerFrameAtHandshake = serverFrame;
-
-			// Create the per-player input log now that we have a stable ownerID.
-			// Log is inactive until Activate() is called at PlayerBeginConfirm time.
-			CreateInputLog(ci->OwnerID);
-			ci->RepState               = ClientRepState::Synchronizing;
-
-			HandshakePayload hsPay{};
-			hsPay.TickRate = static_cast<uint32_t>(
-				Config->FixedUpdateHz == EngineConfig::Unset ? 128 : Config->FixedUpdateHz);
-			hsPay.ServerFrame = serverFrame;
-
-			NetChannel(ci, ConnectionMgr).Send(
-				NetMessageType::ConnectionHandshake, hsPay, /*reliable=*/true, serverFrame);
-
-			{
-				Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
-								 ? ServerWorld->GetFlowManager()->GetSoul(ci->OwnerID)
-								 : nullptr;
-				LOG_NET_INFO_F(soul, "[ServerNet] HandshakeAccept → OwnerID=%u frame=%u tickRate=%u",
-							   ci->OwnerID, serverFrame, hsPay.TickRate);
-			}
-			break;
-		}
 
 		case NetMessageType::ClockSync:
-		{
-			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-			if (!ci) break;
-
-			if (msg.Payload.size() < sizeof(ClockSyncPayload))
 			{
-				LOG_ENG_WARN_F("[ServerNet] ClockSync payload too small (%zu)", msg.Payload.size());
+				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+				if (!ci) break;
+
+				if (msg.Payload.size() < sizeof(ClockSyncPayload))
+				{
+					LOG_ENG_WARN_F("[ServerNet] ClockSync payload too small (%zu)", msg.Payload.size());
+					break;
+				}
+
+				const auto* req = reinterpret_cast<const ClockSyncPayload*>(msg.Payload.data());
+
+				// Record the client's local frame at handshake time and derive the translation
+				// offset for PlayerInputLog.  InputFrame packets carry client-local frame numbers;
+				// FrameOffset converts them to server-frame space for ring indexing.
+				// This is the hook for heartbeat drift correction — update FrameOffset here
+				// whenever the server's heartbeat computes a corrected estimate.
+				ci->ClientLocalFrameAtHandshake = req->LocalFrameAtHandshake;
+				if (PlayerInputLog* log = GetInputLog(ci->OwnerID)) log->FrameOffset = ci->GetFrameOffset();
+
+				const uint32_t serverFrame = (ServerWorld && ServerWorld->GetLogicThread())
+												 ? ServerWorld->GetLogicThread()->GetLastCompletedFrame()
+												 : 0;
+
+				ClockSyncPayload resp{};
+				resp.ClientTimestamp = req->ClientTimestamp;
+				resp.ServerFrame     = serverFrame;
+
+				NetChannel ch(ci, ConnectionMgr);
+				ch.Send(NetMessageType::ClockSync, resp, /*reliable=*/false, serverFrame);
+
+				const std::string localPath = (ServerWorld && ServerWorld->GetFlowManager())
+												  ? ServerWorld->GetFlowManager()->GetActiveLevelLocalPath()
+												  : std::string{};
+				if (!localPath.empty())
+				{
+					TravelPayload travelMsg{};
+					travelMsg.PathLength = static_cast<uint8_t>(std::min(localPath.size(), size_t(254)));
+					if (localPath.size() > 254)
+						LOG_ENG_WARN_F("[ServerNet] Level path truncated: %s", localPath.c_str());
+					std::memcpy(travelMsg.LevelPath, localPath.c_str(), travelMsg.PathLength);
+					travelMsg.LevelPath[travelMsg.PathLength] = '\0';
+
+					ch.Send(NetMessageType::TravelNotify, travelMsg, /*reliable=*/true, serverFrame);
+
+					ci->RepState = ClientRepState::LevelLoading;
+					{
+						Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
+										 ? ServerWorld->GetFlowManager()->GetSoul(ci->OwnerID)
+										 : nullptr;
+						LOG_NET_INFO_F(soul, "[ServerNet] ClockSyncResponse + TravelNotify → LevelLoading (frame=%u, level=%s)",
+									   serverFrame, travelMsg.LevelPath);
+					}
+				}
+				else
+				{
+					ci->RepState = ClientRepState::Loading;
+					{
+						Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
+										 ? ServerWorld->GetFlowManager()->GetSoul(ci->OwnerID)
+										 : nullptr;
+						LOG_NET_INFO_F(soul, "[ServerNet] ClockSyncResponse → Loading (frame=%u) [no level loaded]", serverFrame);
+					}
+				}
 				break;
 			}
 
-			const auto* req = reinterpret_cast<const ClockSyncPayload*>(msg.Payload.data());
-
-			const uint32_t serverFrame = (ServerWorld && ServerWorld->GetLogicThread())
-											 ? ServerWorld->GetLogicThread()->GetLastCompletedFrame()
-											 : 0;
-
-			ClockSyncPayload resp{};
-			resp.ClientTimestamp = req->ClientTimestamp;
-			resp.ServerFrame     = serverFrame;
-
-			NetChannel ch(ci, ConnectionMgr);
-			ch.Send(NetMessageType::ClockSync, resp, /*reliable=*/false, serverFrame);
-
-			const std::string localPath = (ServerWorld && ServerWorld->GetFlowManager())
-				? ServerWorld->GetFlowManager()->GetActiveLevelLocalPath() : std::string{};
-			if (!localPath.empty())
-			{
-				TravelPayload travelMsg{};
-				travelMsg.PathLength = static_cast<uint8_t>(std::min(localPath.size(), size_t(254)));
-				if (localPath.size() > 254)
-				LOG_ENG_WARN_F("[ServerNet] Level path truncated: %s", localPath.c_str());
-				std::memcpy(travelMsg.LevelPath, localPath.c_str(), travelMsg.PathLength);
-				travelMsg.LevelPath[travelMsg.PathLength] = '\0';
-
-				ch.Send(NetMessageType::TravelNotify, travelMsg, /*reliable=*/true, serverFrame);
-
-				ci->RepState = ClientRepState::LevelLoading;
-				{
-					Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
-									 ? ServerWorld->GetFlowManager()->GetSoul(ci->OwnerID)
-									 : nullptr;
-					LOG_NET_INFO_F(soul, "[ServerNet] ClockSyncResponse + TravelNotify → LevelLoading (frame=%u, level=%s)",
-								   serverFrame, travelMsg.LevelPath);
-				}
-			}
-			else
-			{
-				ci->RepState = ClientRepState::Loading;
-				{
-					Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
-									 ? ServerWorld->GetFlowManager()->GetSoul(ci->OwnerID)
-									 : nullptr;
-					LOG_NET_INFO_F(soul, "[ServerNet] ClockSyncResponse → Loading (frame=%u) [no level loaded]", serverFrame);
-				}
-			}
-			break;
-		}
-
 		case NetMessageType::LevelReady:
-		{
-			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-			if (!ci) break;
-
-			if (ci->RepState == ClientRepState::LevelLoading)
 			{
-				ci->RepState = ClientRepState::LevelLoaded;
-				if (FlowManager* flow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr) flow->OnClientLoaded(ci->OwnerID);
+				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+				if (!ci) break;
 
-				// Log after OnClientLoaded so the Soul exists and shows the correct role tag.
-				Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
-								 ? ServerWorld->GetFlowManager()->GetSoul(ci->OwnerID)
-								 : nullptr;
-				LOG_NET_INFO_F(soul, "[ServerNet] LevelReady received — client LevelLoaded (ownerID=%u)", ci->OwnerID);
+				if (ci->RepState == ClientRepState::LevelLoading)
+				{
+					ci->RepState = ClientRepState::LevelLoaded;
+					if (FlowManager* flow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr) flow->OnClientLoaded(ci->OwnerID);
+
+					// Log after OnClientLoaded so the Soul exists and shows the correct role tag.
+					Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
+									 ? ServerWorld->GetFlowManager()->GetSoul(ci->OwnerID)
+									 : nullptr;
+					LOG_NET_INFO_F(soul, "[ServerNet] LevelReady received — client LevelLoaded (ownerID=%u)", ci->OwnerID);
+				}
+				break;
 			}
-			break;
-		}
 
 		case NetMessageType::EntityDestroy:
 			// TODO
 			break;
 
 		case NetMessageType::SoulRPC:
-		{
-			LOG_ENG_INFO("Received Soul RPC");
-
-			// All Soul-layer RPCs arrive here. The header identifies the MethodID
-			// and ParamSize; FlowManager routes to the correct Soul handler.
-			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-			if (!ci) break;
-
-			if (msg.Payload.size() >= sizeof(RPCHeader))
 			{
-				const auto* rpcHdrPeek = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
-				LOG_ENG_INFO_F("[ServerNet] SoulRPC received: ownerID=%u methodID=%u repState=%d",
-							   ci->OwnerID, rpcHdrPeek->MethodID, static_cast<int>(ci->RepState));
-			}
+				LOG_ENG_INFO("Received Soul RPC");
 
-			if (msg.Payload.size() < sizeof(RPCHeader))
-			{
-				LOG_ENG_WARN_F("[ServerNet] SoulRPC payload too small (%zu bytes)", msg.Payload.size());
-				break;
-			}
+				// All Soul-layer RPCs arrive here. The header identifies the MethodID
+				// and ParamSize; FlowManager routes to the correct Soul handler.
+				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+				if (!ci) break;
 
-			const auto* rpcHdr = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
-			const uint8_t* params = msg.Payload.data() + sizeof(RPCHeader);
-			const size_t paramBytes = msg.Payload.size() - sizeof(RPCHeader);
-
-			if (paramBytes < rpcHdr->ParamSize)
-			{
-				LOG_ENG_WARN_F("[ServerNet] SoulRPC param underrun (MethodID=%u, want=%u, got=%zu)",
-				           rpcHdr->MethodID, rpcHdr->ParamSize, paramBytes);
-				break;
-			}
-
-			{
-				if (FlowManager* flow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr)
+				if (msg.Payload.size() >= sizeof(RPCHeader))
 				{
-					if (Soul* soul = flow->GetSoul(ci->OwnerID))
+					const auto* rpcHdrPeek = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
+					LOG_ENG_INFO_F("[ServerNet] SoulRPC received: ownerID=%u methodID=%u repState=%d",
+								   ci->OwnerID, rpcHdrPeek->MethodID, static_cast<int>(ci->RepState));
+				}
+
+				if (msg.Payload.size() < sizeof(RPCHeader))
+				{
+					LOG_ENG_WARN_F("[ServerNet] SoulRPC payload too small (%zu bytes)", msg.Payload.size());
+					break;
+				}
+
+				const auto* rpcHdr      = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
+				const uint8_t* params   = msg.Payload.data() + sizeof(RPCHeader);
+				const size_t paramBytes = msg.Payload.size() - sizeof(RPCHeader);
+
+				if (paramBytes < rpcHdr->ParamSize)
+				{
+					LOG_ENG_WARN_F("[ServerNet] SoulRPC param underrun (MethodID=%u, want=%u, got=%zu)",
+								   rpcHdr->MethodID, rpcHdr->ParamSize, paramBytes);
+					break;
+				}
+
+				{
+					if (FlowManager* flow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr)
 					{
-						RPCContext ctx{ci, ConnectionMgr};
-						soul->DispatchServerRPC(ctx, *rpcHdr, params);
-					}
-					else
-					{
-						LOG_NET_WARN_F(soul, "[ServerNet] SoulRPC: no Soul for ownerID=%u (MethodID=%u)",
-									   ci->OwnerID, rpcHdr->MethodID);
+						if (Soul* soul = flow->GetSoul(ci->OwnerID))
+						{
+							RPCContext ctx{ci, ConnectionMgr};
+							soul->DispatchServerRPC(ctx, *rpcHdr, params);
+						}
+						else
+						{
+							LOG_NET_WARN_F(soul, "[ServerNet] SoulRPC: no Soul for ownerID=%u (MethodID=%u)",
+										   ci->OwnerID, rpcHdr->MethodID);
+						}
 					}
 				}
+				break;
 			}
-			break;
-		}
 
 		// PlayerBeginRequest (legacy) — superseded by SoulRPC/PlayerBegin. Kept
 		// for wire-compat during the transition; can be removed once clients are updated.

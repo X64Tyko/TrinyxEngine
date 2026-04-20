@@ -1212,7 +1212,7 @@ bool RendererCore<Derived>::CreateMeshBuffers()
 		return false;
 	}
 
-	LOG_ENG_INFO_F("[Renderer] MeshManager ready — cube at slot %u, capsule at slot %u",
+	LOG_ENG_INFO_F("[Renderer] MeshManager ready — cube at slot %u, capsule at slot %u (slot 0 reserved as invalid)",
 				   cubeSlot, capsuleSlot);
 	return true;
 }

@@ -31,6 +31,7 @@ option(VECTORIZATION_REPORTS "Enable compiler vectorization reports" OFF)
 option(ENABLE_AVX2 "Enable AVX2 instruction set" ON)
 option(TNX_ALIGN_64 "Use 64-byte alignment for field arrays (zero cache line splits, more memory)" OFF)
 option(TNX_ENABLE_ROLLBACK "Enable N-frame rollback history. Off = TNX_TEMPORAL_FIELDS components use Volatile (5-frame) storage." OFF)
+option(TNX_DETERMINISM "Enable cross-platform determinism: disables FMA/fast-math in the engine and Jolt (JPH_CROSS_PLATFORM_DETERMINISTIC). Automatically forced ON by TNX_ENABLE_ROLLBACK." OFF)
 option(TNX_DETAILED_METRICS "Log per-frame latency breakdown (Buffer/Pipeline/Scanout). Noisy." OFF)
 if (TNX_DETAILED_METRICS)
     add_compile_definitions(TNX_DETAILED_METRICS)
@@ -98,8 +99,20 @@ endif ()
 if (TNX_ENABLE_ROLLBACK)
     add_compile_definitions(TNX_ENABLE_ROLLBACK)
     message(STATUS "Rollback history: ENABLED")
+    # Rollback requires bit-identical simulation — force determinism on.
+    if (NOT TNX_DETERMINISM)
+        message(STATUS "TNX_ENABLE_ROLLBACK forces TNX_DETERMINISM=ON")
+        set(TNX_DETERMINISM ON CACHE BOOL "" FORCE)
+    endif ()
 else ()
     message(STATUS "Rollback history: DISABLED (Temporal fields stored in Volatile slab)")
+endif ()
+
+if (TNX_DETERMINISM)
+    add_compile_definitions(TNX_DETERMINISM)
+    message(STATUS "Determinism: ENABLED (FMA disabled, fp:precise / -ffp-contract=off applied to engine and Jolt)")
+else ()
+    message(STATUS "Determinism: DISABLED (fast-math allowed)")
 endif ()
 
 if (TNX_TESTING)
@@ -237,6 +250,11 @@ if(MSVC)
     # Optional: Ensure __cplusplus macro reports the correct version6
     add_compile_options(/Zc:__cplusplus)
 
+    # Determinism: use fp:precise to suppress FMA fusion on MSVC.
+    if (TNX_DETERMINISM)
+        add_compile_options(/fp:precise)
+    endif ()
+
 else()
     add_compile_options(-Wall -Wextra -Wpedantic -Werror -Wno-ignored-attributes -Wno-missing-field-initializers)
 
@@ -262,6 +280,12 @@ else()
         add_compile_definitions(TNX_HAS_AVX2)
         message(STATUS "Native architecture instructions enabled")
     endif()
+
+    # Determinism: disable FMA and float contraction so the engine produces
+    # bit-identical results across GCC/Clang builds and platforms.
+    if (TNX_DETERMINISM)
+        add_compile_options(-ffp-contract=off)
+    endif ()
 endif()
 
 # -----------------------------------------------------------------------------
@@ -287,8 +311,8 @@ else ()
     set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
     set(PROFILER_IN_DEBUG_AND_RELEASE       OFF CACHE BOOL "" FORCE)
 
-    # Rollback requires cross-platform determinism (disables FMA, sets fp:precise).
-    if (TNX_ENABLE_ROLLBACK)
+    # Determinism: propagates JPH_CROSS_PLATFORM_DETERMINISTIC via Jolt's PUBLIC interface.
+    if (TNX_DETERMINISM)
         set(CROSS_PLATFORM_DETERMINISTIC ON CACHE BOOL "" FORCE)
     endif ()
 
@@ -446,3 +470,4 @@ endif () # TNX_ENABLE_NETWORK
 add_subdirectory(Trinyx)
 add_subdirectory(Testbed)
 add_subdirectory(Playground)
+add_subdirectory(DeterminismTest)

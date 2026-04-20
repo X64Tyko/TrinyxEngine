@@ -80,6 +80,7 @@ struct ConstructRecord
 	void* ConstructPtr  = nullptr;  // Type-erased pointer to the live Construct
 	uint32_t TypeHash   = 0;        // FNV-1a of type name, for RPC dispatch
 	int64_t PrefabIDRaw = 0;        // AssetID raw value of the spawning prefab
+	uint32_t SpawnFrame = 0;        // Absolute frame at which this Construct was created (local or replicated)
 	uint8_t Generation  = 0;        // Bumped on destroy — matches GlobalConstructHandle::Generation
 	uint8_t OwnerID     = 0;        // Fast access; redundant with NetworkID.NetOwnerID
 	uint8_t _Pad[2]     = {};

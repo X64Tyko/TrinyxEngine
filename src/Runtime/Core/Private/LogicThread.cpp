@@ -23,21 +23,23 @@
 void LogicThread::Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
 							 InputBuffer* simInput, InputBuffer* vizInput,
 							 TrinyxMPSCRing<NetInputFrame>* inputAccumRing,
+							 const std::atomic<bool>* inputAccumEnabled,
 							 TrinyxJobs::WorldQueueHandle worldQueue, const std::atomic<bool>* jobsInitialized,
 							 int windowWidth, int windowHeight)
 {
-	RegistryPtr    = registry;
-	ConfigPtr      = config;
-	PhysicsPtr     = physics;
-	SimInput       = simInput;
-	VizInput       = vizInput;
-	InputAccumRing = inputAccumRing;
-	WQHandle       = worldQueue;
-	JobsInitPtr    = jobsInitialized;
-	TemporalCache  = registry->GetTemporalCache();
-	WindowWidth    = windowWidth;
-	WindowHeight   = windowHeight;
-	PhysicsDivizor = config->PhysicsUpdateInterval;
+	RegistryPtr       = registry;
+	ConfigPtr         = config;
+	PhysicsPtr        = physics;
+	SimInput          = simInput;
+	VizInput          = vizInput;
+	InputAccumRing    = inputAccumRing;
+	InputAccumEnabled = inputAccumEnabled;
+	WQHandle          = worldQueue;
+	JobsInitPtr       = jobsInitialized;
+	TemporalCache     = registry->GetTemporalCache();
+	WindowWidth       = windowWidth;
+	WindowHeight      = windowHeight;
+	PhysicsDivizor    = config->PhysicsUpdateInterval;
 
 	LastCompletedFrame.store(0, std::memory_order_release);
 
@@ -326,7 +328,7 @@ bool LogicThread::ProcessSimInput(SimFloat dt)
 
 	// Snapshot this frame's input for the net thread (client-side only).
 	// Runs immediately after Swap so frame tag is exact — FRONT holds the new data.
-	if (InputAccumRing)
+	if (InputAccumRing && InputAccumEnabled && InputAccumEnabled->load(std::memory_order_acquire))
 	{
 		NetInputFrame snap{};
 		snap.Frame = FrameNumber;
@@ -660,8 +662,10 @@ void LogicThread::ExecuteRollback(uint32_t targetFrame)
 	const uint32_t frameCount  = TemporalCache->GetTotalFrameCount();
 	const double fixedStepTime = ConfigPtr->GetFixedStepTime();
 
-	// Align to most recent Jolt flush boundary so physics state is consistent.
-	const uint32_t alignedTarget = targetFrame - ((targetFrame % PhysicsDivizor + 1) % PhysicsDivizor);
+	// Go back one frame before the target so the dirty frame itself is included in the resim,
+	// not used as the (wrong forward-pass) slab base.  Then align to the Jolt flush boundary.
+	const uint32_t preTarget     = (targetFrame > 0) ? targetFrame - 1 : 0;
+	const uint32_t alignedTarget = preTarget - ((preTarget % PhysicsDivizor + 1) % PhysicsDivizor);
 
 	if (alignedTarget >= T)
 	{
@@ -710,7 +714,10 @@ void LogicThread::ExecuteRollback(uint32_t targetFrame)
 			// exist and flags are set for the frame they originally applied at.
 			RegistryPtr->ReplayServerEventsAt(FrameNumber);
 
-			InjectFrameInput(FrameNumber);
+			InjectFrameInput(FrameNumber); // restore world SimInput from frame header
+			// Replay per-player net input so constructs reading soul->GetSimInput() get the
+			// correct real (or re-predicted) state for this frame, not the stale forward-pass buffer.
+			if (PlayerInputInjector) PlayerInputInjector(FrameNumber);
 			PhysicsLoop(fixedStepTime);
 
 			// Check pending server corrections for this frame. If the resimmed value still

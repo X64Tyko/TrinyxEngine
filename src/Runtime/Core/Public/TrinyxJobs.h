@@ -6,7 +6,7 @@
 #include <cstring>
 #include <type_traits>
 
-#include "TrinyxRingBuffer.h"
+#include "TrinyxMPMCRing.h"
 
 struct EngineConfig;
 
@@ -92,6 +92,10 @@ namespace TrinyxJobs
 
 	/// Signal workers to stop and join all threads. Safe to call multiple times.
 	void Shutdown();
+
+	/// Returns true if the job system has been initialized and workers are running.
+	/// Check before dispatching from code that may outlive the engine (e.g. net threads).
+	bool IsRunning();
 
 	// ---- Dispatch --------------------------------------------------------
 

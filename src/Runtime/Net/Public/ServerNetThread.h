@@ -67,4 +67,10 @@ private:
 	// One log per ownerID slot — only allocated for connected players.
 	// Slot 0 (server) is never populated. Depth == TemporalFrameCount.
 	std::array<std::unique_ptr<PlayerInputLog>, MaxOwnerIDs> InputLogs{};
+
+	// Coalesced input-mismatch rollback target. Accumulated on the LogicThread by the
+	// injector lambda whenever a real packet corrects a predicted frame. Fired at the
+	// start of the next non-resim injection pass so that all dirty marks from the burst
+	// are folded into one rollback instead of one per frame.
+	uint32_t PendingInputResimFrame = UINT32_MAX;
 };

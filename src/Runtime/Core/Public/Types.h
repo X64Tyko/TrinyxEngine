@@ -72,6 +72,13 @@ enum class EngineMode : uint8_t
 	ListenServer, // Server + local client in one process (PIE default)
 };
 
+[[maybe_unused]] static const char* EngineModeNames[] = {
+	"Standalone",
+	"Client",
+	"Server",
+	"ListenServer",
+};
+
 // Identifies the lifetime tier of a Construct — determines what survives
 // level transitions, World resets, and session teardown.
 // FlowManager uses this to enforce destruction/survival on transitions.
