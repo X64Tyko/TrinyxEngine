@@ -126,6 +126,10 @@ public:
 	// a rollback to earliestClientFrame so the sim can re-derive correct state.
 	void EnqueueCorrections(std::vector<EntityTransformCorrection> corrections, uint32_t earliestClientFrame);
 
+	// Called when a state correction arrives for a frame the client hasn't reached yet.
+	// Applied inline during PhysicsLoop when FrameNumber == correction.ClientFrame — no rollback.
+	void EnqueuePredictedCorrections(std::vector<EntityTransformCorrection> corrections);
+
 	/// Request a rollback to clientFrame so newly-received spawns are inserted at their
 	/// correct historical ring slot. Thread-safe: called from the net thread after a
 	/// spawn handshake completes. Merges with any correction-driven rollback — the logic
@@ -217,6 +221,11 @@ private:
 	// into PendingCorrections at the start of each rollback check. Sized for 256 entries
 	// (~10× the expected burst at 23Hz replication with up to 24 entities per packet).
 	TrinyxMPMCRing<EntityTransformCorrection> IncomingCorrections;
+
+	// Corrections for frames the client hasn't processed yet (clientFrame > LastAckedFrame).
+	// Applied inline during PhysicsLoop when FrameNumber reaches the correction's target frame.
+	// Never trigger a rollback — the forward pass hasn't written that frame yet.
+	TrinyxMPMCRing<EntityTransformCorrection> IncomingPredictedCorrections;
 
 	void ExecuteRollback(uint32_t targetFrame);   // Production rewind+resim — no test scaffolding
 	void ExecuteRollbackTest();                    // Test wrapper: save → ExecuteRollback → compare → restore

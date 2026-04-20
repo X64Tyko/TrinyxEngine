@@ -197,8 +197,7 @@ bool ReplicationSystem::HandleConstructSpawn(ConstructRegistry* reg, Registry* e
 	// If no Soul exists for this ownerID, lazily create an Echo Soul so the
 	// Construct can be claimed and input-gated correctly (e.g., server-owned
 	// constructs received on the client have ownerID=0 and no prior Soul).
-	if (!soul && flow)
-		soul = flow->EnsureEchoSoul(ownerID);
+	if (!soul && flow) soul = flow->EnsureEchoSoul(ownerID);
 
 	// Create the client-side Construct via the replication path
 	void* raw = factory(reg, clientWorld, resolvedHandles, resolvedCount, soul);
@@ -446,12 +445,16 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 }
 
 // ---------------------------------------------------------------------------
-// SendStateCorrections — unreliable batched transforms for all replicated entities
+// SendStateCorrections — per-connection dirty-entity correction batches.
+//
+// Pre-scan: collect replicated entities dirtied this frame or whose owner has a pending resim.
+// Per-connection: build an annotated batch from the dirty list — resim data is only filled in
+// for entities owned by the receiving client. This structure is the hook point for relevancy
+// filtering and delta compression in the future.
 // ---------------------------------------------------------------------------
 
 void ReplicationSystem::SendStateCorrections(NetConnectionManager* connMgr, uint32_t frameNumber)
 {
-	//LOG_ENG_INFO_F("[Replication] Sending state corrections for frame %u", frameNumber);
 	Registry* reg = ServerWorld->GetRegistry();
 
 	ComponentCacheBase* temporalCache = reg->GetTemporalCache();
@@ -475,8 +478,7 @@ void ReplicationSystem::SendStateCorrections(NetConnectionManager* connMgr, uint
 	const uint32_t maxEntities = temporalCache->GetMaxCachedEntityCount();
 	const uint32_t ringSize    = temporalCache->GetTotalFrameCount();
 
-	// Snapshot pending resim frames for this tick and pre-fetch their field arrays.
-	// Indexed by ownerID. delta==0 means no resim pending for that owner.
+	// Snapshot pending resim frames for this tick. Indexed by ownerID; delta==0 means no pending resim.
 	struct ResimArrays
 	{
 		const float* posX  = nullptr;
@@ -486,20 +488,17 @@ void ReplicationSystem::SendStateCorrections(NetConnectionManager* connMgr, uint
 		const float* rotQy = nullptr;
 		const float* rotQz = nullptr;
 		const float* rotQw = nullptr;
-		uint32_t delta     = 0; // frameNumber - resimFrom; 0 = nothing pending
+		uint32_t delta     = 0;
 	};
 	ResimArrays resimArrays[MaxOwnerIDs]{};
-	bool bHasResimFrames = false;
 
 	for (uint32_t oid = 1; oid < MaxOwnerIDs; ++oid)
 	{
 		const uint32_t resimFrom = PendingResimFrames[oid].exchange(UINT32_MAX, std::memory_order_acq_rel);
 		if (resimFrom == UINT32_MAX || resimFrom >= frameNumber) continue;
 
-		bHasResimFrames               = true;
-		const uint32_t delta          = frameNumber - resimFrom;
 		TemporalFrameHeader* resimHdr = temporalCache->GetFrameHeader(resimFrom % ringSize);
-		resimArrays[oid].delta        = delta;
+		resimArrays[oid].delta        = frameNumber - resimFrom;
 		resimArrays[oid].posX         = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 0));
 		resimArrays[oid].posY         = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 1));
 		resimArrays[oid].posZ         = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 2));
@@ -509,71 +508,99 @@ void ReplicationSystem::SendStateCorrections(NetConnectionManager* connMgr, uint
 		resimArrays[oid].rotQw        = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 6));
 	}
 
-	// Build correction batch — gather all replicated active entities
-	std::vector<StateCorrectionEntry> batch;
-	batch.reserve(256);
+	// Pre-scan: collect replicated entities that are dirty or have a pending owner resim.
+	// Record lookups are done once here, shared across all per-connection batches.
+	struct DirtyEntityInfo
+	{
+		uint32_t slabIndex;
+		uint32_t netHandleValue;
+		uint32_t ownerID;
+	};
+	std::vector<DirtyEntityInfo> dirtyEntities;
+	dirtyEntities.reserve(128);
+
+	constexpr int32_t kActive       = static_cast<int32_t>(TemporalFlagBits::Active);
+	constexpr int32_t kDirtiedFrame = static_cast<int32_t>(TemporalFlagBits::Dirty);
 
 	for (uint32_t i = 0; i < maxEntities; ++i)
 	{
 		if (i >= Replicated.size() || !Replicated[i]) continue;
-		if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Active))) continue;
+		if (!(flags[i] & kActive)) continue;
 
-		// Look up the entity's assigned NetHandle from its record
 		GlobalEntityHandle gHandle = reg->GlobalEntityRegistry.LookupGlobalHandle(static_cast<EntityCacheHandle>(i));
 		EntityRecord* record       = reg->GlobalEntityRegistry.Records[gHandle.GetIndex()];
 		if (!record || !record->IsValid()) continue;
 
-		StateCorrectionEntry entry{};
-		entry.NetHandle = record->NetworkID.Value;
-		entry.PosX      = posX[i];
-		entry.PosY      = posY[i];
-		entry.PosZ      = posZ[i];
-		entry.RotQx     = rotQx ? rotQx[i] : 0.0f;
-		entry.RotQy     = rotQy ? rotQy[i] : 0.0f;
-		entry.RotQz     = rotQz ? rotQz[i] : 0.0f;
-		entry.RotQw     = rotQw ? rotQw[i] : 1.0f;
+		const uint32_t oid     = record->NetworkID.GetOwnerID();
+		const bool bDirty      = (flags[i] & kDirtiedFrame) != 0;
+		const bool bOwnerResim = (oid > 0 && oid < MaxOwnerIDs && resimArrays[oid].delta > 0);
 
-		const uint32_t oid = record->NetworkID.NetOwnerID;
-		if (oid > 0 && oid < MaxOwnerIDs)
-		{
-			const ResimArrays& ra = resimArrays[oid];
-			if (ra.delta > 0 && ra.posX)
-			{
-				entry.ResimFrameDelta = ra.delta;
-				entry.ResimPosX       = ra.posX[i];
-				entry.ResimPosY       = ra.posY ? ra.posY[i] : 0.0f;
-				entry.ResimPosZ       = ra.posZ ? ra.posZ[i] : 0.0f;
-				entry.ResimRotQx      = ra.rotQx ? ra.rotQx[i] : 0.0f;
-				entry.ResimRotQy      = ra.rotQy ? ra.rotQy[i] : 0.0f;
-				entry.ResimRotQz      = ra.rotQz ? ra.rotQz[i] : 0.0f;
-				entry.ResimRotQw      = ra.rotQw ? ra.rotQw[i] : 1.0f;
-			}
-		}
+		if (!bDirty && !bOwnerResim) continue;
 
-		batch.push_back(entry);
+		dirtyEntities.push_back({i, record->NetworkID.Value, oid});
 	}
 
-	if (batch.empty()) return;
+	if (dirtyEntities.empty()) return;
 
-	// Send as single unreliable message per connection with per-connection client-frame translation.
-	uint32_t payloadSize = static_cast<uint32_t>(batch.size() * sizeof(StateCorrectionEntry));
-
+	// Per-connection: build annotated batch from the dirty list and send.
+	// Resim data is only filled in for entities owned by the receiving client.
+	// TODO: add relevancy filter and delta compression inside this loop.
 	PacketHeader header{};
-	header.Type        = static_cast<uint8_t>(NetMessageType::StateCorrection);
-	header.Flags       = PacketFlag::DefaultFlags;
-	header.PayloadSize = static_cast<uint16_t>(payloadSize > 65535 ? 65535 : payloadSize);
-	header.SenderID    = 0;
+	header.Type     = static_cast<uint8_t>(NetMessageType::StateCorrection);
+	header.Flags    = PacketFlag::DefaultFlags;
+	header.SenderID = 0;
+
+	std::vector<StateCorrectionEntry> batch;
+	batch.reserve(dirtyEntities.size());
 
 	for (const auto& ci : connMgr->GetConnections())
 	{
-		if (ci.bConnected && ci.bServerSide && ci.OwnerID > 0)
-		{
-			if (frameNumber > ci.LastAckedClientFrame && !bHasResimFrames) continue;
+		if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
 
-			header.FrameNumber = ci.ToClientFrame(frameNumber);
-			connMgr->Send(ci.Handle, header,
-						  reinterpret_cast<const uint8_t*>(batch.data()), false);
+		// Don't send frames the client hasn't reached yet unless this client has a pending resim
+		// (resim corrections must always land, even if the frame is technically in the client's future).
+		const bool bClientHasResim = (ci.OwnerID < MaxOwnerIDs && resimArrays[ci.OwnerID].delta > 0);
+
+		batch.clear();
+		for (const auto& de : dirtyEntities)
+		{
+			const uint32_t i = de.slabIndex;
+
+			StateCorrectionEntry entry{};
+			entry.NetHandle = de.netHandleValue;
+			entry.PosX      = posX[i];
+			entry.PosY      = posY[i];
+			entry.PosZ      = posZ[i];
+			entry.RotQx     = rotQx ? rotQx[i] : 0.0f;
+			entry.RotQy     = rotQy ? rotQy[i] : 0.0f;
+			entry.RotQz     = rotQz ? rotQz[i] : 0.0f;
+			entry.RotQw     = rotQw ? rotQw[i] : 1.0f;
+
+			if (de.ownerID == ci.OwnerID)
+			{
+				const ResimArrays& ra = resimArrays[de.ownerID];
+				if (ra.delta > 0 && ra.posX)
+				{
+					entry.ResimFrameDelta = ra.delta;
+					entry.ResimPosX       = ra.posX[i];
+					entry.ResimPosY       = ra.posY ? ra.posY[i] : 0.0f;
+					entry.ResimPosZ       = ra.posZ ? ra.posZ[i] : 0.0f;
+					entry.ResimRotQx      = ra.rotQx ? ra.rotQx[i] : 0.0f;
+					entry.ResimRotQy      = ra.rotQy ? ra.rotQy[i] : 0.0f;
+					entry.ResimRotQz      = ra.rotQz ? ra.rotQz[i] : 0.0f;
+					entry.ResimRotQw      = ra.rotQw ? ra.rotQw[i] : 1.0f;
+				}
+			}
+
+			if (ci.LastAckedClientFrame >= frameNumber || de.ownerID != ci.OwnerID || bClientHasResim) batch.push_back(entry);
 		}
+
+		if (batch.empty()) continue;
+
+		const uint32_t payloadSize = static_cast<uint32_t>(batch.size() * sizeof(StateCorrectionEntry));
+		header.FrameNumber         = ci.ToClientFrame(frameNumber);
+		header.PayloadSize         = static_cast<uint16_t>(payloadSize > 65535 ? 65535 : payloadSize);
+		connMgr->Send(ci.Handle, header, reinterpret_cast<const uint8_t*>(batch.data()), false);
 	}
 }
 
@@ -764,10 +791,13 @@ void ReplicationSystem::HandleStateCorrections(Registry* reg, const StateCorrect
 	}
 
 	std::vector<EntityTransformCorrection> corrections;
+	std::vector<EntityTransformCorrection> predictedCorrections;
 	const uint32_t volatileFrame = reg->GetVolatileCache()->GetActiveWriteFrame();
+	bool bPushCorrection         = false;
 
 	for (uint32_t i = 0; i < count; ++i)
 	{
+		bPushCorrection                   = false;
 		const StateCorrectionEntry& entry = entries[i];
 
 		EntityNetHandle netHandle{};
@@ -821,49 +851,67 @@ void ReplicationSystem::HandleStateCorrections(Registry* reg, const StateCorrect
 					LOG_ENG_WARN_F("[Replication] ResimRoot divergence: netHandle=%u resimFrame=%u dist=%.4fm",
 								   entry.NetHandle, clientResimFrame,
 								   std::sqrt(rdx * rdx + rdy * rdy + rdz * rdz));
-					corrections.push_back({
-						entry.NetHandle, clientResimFrame,
-						entry.ResimPosX, entry.ResimPosY, entry.ResimPosZ,
-						entry.ResimRotQx, entry.ResimRotQy, entry.ResimRotQz, entry.ResimRotQw
-					});
+					bPushCorrection = true;
 				}
 			}
 		}
 
-		if (clientFrame <= LastAckedFrame)
+		// Read the predicted transform from the historical ring-buffer slot for clientFrame.
+		// BuildFieldArrayTable modularly indexes by fieldFrameCount, so clientFrame wraps correctly.
+		void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+		arch->BuildFieldArrayTable(chunk, fieldArrayTable, clientFrame, volatileFrame);
+
+		float predictedX = 0.f, predictedY = 0.f, predictedZ = 0.f;
+		for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 		{
-			// Read the predicted transform from the historical ring-buffer slot for clientFrame.
-			// BuildFieldArrayTable modularly indexes by fieldFrameCount, so clientFrame wraps correctly.
-			void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
-			arch->BuildFieldArrayTable(chunk, fieldArrayTable, clientFrame, volatileFrame);
-
-			float predictedX = 0.f, predictedY = 0.f, predictedZ = 0.f;
-			for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
+			if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
+			void* base = fieldArrayTable[fdesc.fieldSlotIndex];
+			if (!base) continue;
+			auto* fa = static_cast<float*>(base);
+			switch (fdesc.componentSlotIndex)
 			{
-				if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
-				void* base = fieldArrayTable[fdesc.fieldSlotIndex];
-				if (!base) continue;
-				auto* fa = static_cast<float*>(base);
-				switch (fdesc.componentSlotIndex)
-				{
-					case 0: predictedX = fa[localIdx];
-						break;
-					case 1: predictedY = fa[localIdx];
-						break;
-					case 2: predictedZ = fa[localIdx];
-						break;
-					default: break;
-				}
+				case 0: predictedX = fa[localIdx];
+					break;
+				case 1: predictedY = fa[localIdx];
+					break;
+				case 2: predictedZ = fa[localIdx];
+					break;
+				default: break;
 			}
+		}
 
-			const float dx = predictedX - entry.PosX;
-			const float dy = predictedY - entry.PosY;
-			const float dz = predictedZ - entry.PosZ;
-			if (dx * dx + dy * dy + dz * dz > kDivergenceThresholdSq)
+		const float dx = predictedX - entry.PosX;
+		const float dy = predictedY - entry.PosY;
+		const float dz = predictedZ - entry.PosZ;
+		if (dx * dx + dy * dy + dz * dz > kDivergenceThresholdSq)
+		{
+			LOG_ENG_WARN_F("[Replication] Divergence: netHandle=%u frame=%u dist=%.4fm",
+						   entry.NetHandle, clientFrame, std::sqrt(dx * dx + dy * dy + dz * dz));
+			bPushCorrection = true;
+		}
+
+		if (bPushCorrection)
+		{
+			if (entry.ResimFrameDelta > 0)
 			{
-				LOG_ENG_WARN_F("[Replication] Divergence: netHandle=%u frame=%u dist=%.4fm",
-							   entry.NetHandle, clientFrame, std::sqrt(dx * dx + dy * dy + dz * dz));
+				const uint32_t clientResimFrame = clientFrame - entry.ResimFrameDelta;
 				corrections.push_back({
+					entry.NetHandle, clientResimFrame,
+					entry.ResimPosX, entry.ResimPosY, entry.ResimPosZ,
+					entry.ResimRotQx, entry.ResimRotQy, entry.ResimRotQz, entry.ResimRotQw
+				});
+			}
+			else if (clientFrame <= LastAckedFrame)
+			{
+				corrections.push_back({
+					entry.NetHandle, clientFrame,
+					entry.PosX, entry.PosY, entry.PosZ,
+					entry.RotQx, entry.RotQy, entry.RotQz, entry.RotQw
+				});
+			}
+			else // predicted frame — apply inline during PhysicsLoop, no rollback needed
+			{
+				predictedCorrections.push_back({
 					entry.NetHandle, clientFrame,
 					entry.PosX, entry.PosY, entry.PosZ,
 					entry.RotQx, entry.RotQy, entry.RotQz, entry.RotQw
@@ -872,7 +920,15 @@ void ReplicationSystem::HandleStateCorrections(Registry* reg, const StateCorrect
 		}
 	}
 
-	if (!corrections.empty() && logic) logic->EnqueueCorrections(std::move(corrections), clientFrame);
+	if (!corrections.empty() && logic)
+	{
+		uint32_t earliest = UINT32_MAX;
+		for (const auto& c : corrections) earliest = std::min(earliest, c.ClientFrame);
+			logic->EnqueueCorrections(std::move(corrections), earliest);
+	}
+
+	if (!predictedCorrections.empty() && logic)
+		logic->EnqueuePredictedCorrections(std::move(predictedCorrections));
 
 #else
 	// Without rollback: blind write to current write frame
@@ -889,9 +945,9 @@ void ReplicationSystem::HandleStateCorrections(Registry* reg, const StateCorrect
 		EntityRecord* record = reg->GlobalEntityRegistry.Records[gHandle.GetIndex()];
 		if (!record || !record->IsValid()) continue;
 
-		Archetype* arch     = record->Arch;
-		Chunk*     chunk    = record->TargetChunk;
-		uint32_t   localIdx = record->LocalIndex;
+		Archetype* arch   = record->Arch;
+		Chunk* chunk      = record->TargetChunk;
+		uint32_t localIdx = record->LocalIndex;
 
 		void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 		arch->BuildFieldArrayTable(chunk, fieldArrayTable,
@@ -916,8 +972,10 @@ void ReplicationSystem::HandleStateCorrections(Registry* reg, const StateCorrect
 					break;
 				case 4: fa[localIdx] = entry.RotQy;
 					break;
-				case 5: fa[localIdx] = entry.RotQz; break;
-				case 6: fa[localIdx] = entry.RotQw; break;
+				case 5: fa[localIdx] = entry.RotQz;
+					break;
+				case 6: fa[localIdx] = entry.RotQw;
+					break;
 				default: break;
 			}
 		}

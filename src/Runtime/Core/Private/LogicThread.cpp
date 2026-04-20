@@ -45,6 +45,7 @@ void LogicThread::Initialize(Registry* registry, const EngineConfig* config, Jol
 
 #ifdef TNX_ENABLE_ROLLBACK
 	IncomingCorrections.Initialize(256);
+	IncomingPredictedCorrections.Initialize(256);
 #endif
 
 	LOG_ENG_INFO("[LogicThread] Initialized");
@@ -206,6 +207,27 @@ void LogicThread::PhysicsLoop(const SimFloat fixedStepTime)
 
 	PostPhysics(fixedStepTime);
 	ScalarPostPhysicsBatch.Execute(fixedStepTime);
+
+#ifdef TNX_ENABLE_ROLLBACK
+	// Apply any server corrections that target exactly this frame.
+	// These arrived for frames the client hadn't processed yet, so no rollback is needed —
+	// the forward pass hasn't committed this frame's data yet when we reach here.
+	{
+		EntityTransformCorrection corr{};
+		while (IncomingPredictedCorrections.TryPop(corr))
+		{
+			if (corr.ClientFrame != FrameNumber)
+			{
+				// Wrong frame — push back for the next matching step.
+				// (In steady state this should be rare: the server should target exactly FrameNumber.)
+				if (!IncomingPredictedCorrections.TryPush(corr))
+					LOG_ENG_WARN("[Rollback] IncomingPredictedCorrections full re-push dropped");
+				break; // Ring is ordered; stop scanning once we've wrapped.
+			}
+			RegistryPtr->CheckAndCorrectEntityTransform(corr);
+		}
+	}
+#endif
 }
 
 bool LogicThread::FixedUpdate(const uint64_t perfFrequency, const SimFloat fixedStepTime, const int MaxPhysSubSteps, const uint64_t frameStartCounter)
@@ -636,6 +658,15 @@ void LogicThread::EnqueueCorrections(std::vector<EntityTransformCorrection> corr
 	{
 		if (!IncomingCorrections.TryPush(std::move(c)))
 			LOG_ENG_WARN("[Rollback] IncomingCorrections full — correction dropped");
+	}
+}
+
+void LogicThread::EnqueuePredictedCorrections(std::vector<EntityTransformCorrection> corrections)
+{
+	for (auto& c : corrections)
+	{
+		if (!IncomingPredictedCorrections.TryPush(std::move(c)))
+			LOG_ENG_WARN("[Rollback] IncomingPredictedCorrections full — correction dropped");
 	}
 }
 
