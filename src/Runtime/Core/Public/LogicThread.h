@@ -226,6 +226,7 @@ private:
 	// Applied inline during PhysicsLoop when FrameNumber reaches the correction's target frame.
 	// Never trigger a rollback — the forward pass hasn't written that frame yet.
 	TrinyxMPMCRing<EntityTransformCorrection> IncomingPredictedCorrections;
+	std::queue<EntityTransformCorrection> PendingPredictedCorrections; // Logic-thread-only
 
 	void ExecuteRollback(uint32_t targetFrame);   // Production rewind+resim — no test scaffolding
 	void ExecuteRollbackTest();                    // Test wrapper: save → ExecuteRollback → compare → restore

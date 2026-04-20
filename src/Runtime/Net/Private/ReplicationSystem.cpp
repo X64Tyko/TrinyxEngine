@@ -901,16 +901,18 @@ void ReplicationSystem::HandleStateCorrections(Registry* reg, const StateCorrect
 					entry.ResimRotQx, entry.ResimRotQy, entry.ResimRotQz, entry.ResimRotQw
 				});
 			}
-			else if (clientFrame <= LastAckedFrame)
+			else if (clientFrame < currentF)
 			{
+				// Historical — client has already simulated this frame, rollback needed.
 				corrections.push_back({
 					entry.NetHandle, clientFrame,
 					entry.PosX, entry.PosY, entry.PosZ,
 					entry.RotQx, entry.RotQy, entry.RotQz, entry.RotQw
 				});
 			}
-			else // predicted frame — apply inline during PhysicsLoop, no rollback needed
+			else
 			{
+				// Future — client hasn't reached this frame yet, apply inline during PhysicsLoop.
 				predictedCorrections.push_back({
 					entry.NetHandle, clientFrame,
 					entry.PosX, entry.PosY, entry.PosZ,

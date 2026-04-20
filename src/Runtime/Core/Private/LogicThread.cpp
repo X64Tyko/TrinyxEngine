@@ -216,15 +216,20 @@ void LogicThread::PhysicsLoop(const SimFloat fixedStepTime)
 		EntityTransformCorrection corr{};
 		while (IncomingPredictedCorrections.TryPop(corr))
 		{
-			if (corr.ClientFrame != FrameNumber)
+			if (corr.ClientFrame > FrameNumber)
 			{
-				// Wrong frame — push back for the next matching step.
-				// (In steady state this should be rare: the server should target exactly FrameNumber.)
-				if (!IncomingPredictedCorrections.TryPush(corr))
-					LOG_ENG_WARN("[Rollback] IncomingPredictedCorrections full re-push dropped");
-				break; // Ring is ordered; stop scanning once we've wrapped.
+				PendingPredictedCorrections.push(corr);
+				continue;
 			}
 			RegistryPtr->CheckAndCorrectEntityTransform(corr);
+		}
+
+		while (PendingPredictedCorrections.size() > 0)
+		{
+			corr = PendingPredictedCorrections.front();
+			PendingPredictedCorrections.pop();
+			if (IncomingPredictedCorrections.TryPush(corr))
+				LOG_ENG_WARN_F("[Rollback] Discarding stale predicted correction (frame %u)", corr.ClientFrame);
 		}
 	}
 #endif
@@ -265,6 +270,9 @@ bool LogicThread::FixedUpdate(const uint64_t perfFrequency, const SimFloat fixed
 
 			// Publish completed frame to RenderThread
 			ProcessVizInput(fixedStepTime);
+#ifdef TNX_ENABLE_ROLLBACK
+			RegistryPtr->ReplayServerEventsAt(FrameNumber);
+#endif
 			PublishCompletedFrame();
 			RegistryPtr->PropagateFrame(FrameNumber++);
 
