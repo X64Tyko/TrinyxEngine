@@ -1,8 +1,8 @@
 # Audio System
 
-Baseline that plays sounds and music today; designed as the correct substrate for a
-full Wwise-class system and GPU Physics-Based Audio (PBA) synthesis without future
-architectural rewrites.
+Designed as the correct substrate for a full Wwise-class system and GPU Physics-Based Audio (PBA)
+synthesis without future architectural rewrites. **Status: Not yet implemented** — SDL3 thin wrapper
+is the planned first step (handle-based, for Anti-Event compatibility).
 
 ---
 

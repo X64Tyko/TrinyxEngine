@@ -21,7 +21,7 @@ Statically linked. One per process lifetime.
 
 ### NetConnectionManager
 
-Server/client socket API. `Listen(port)` / `Connect(address, port)`, `PollIncoming()` / `Send()`.
+Socket API. `Listen(port)` / `Connect(address, port)`, `PollIncoming()` / `Send()`.
 
 Per-connection state (`ConnectionInfo`): GNS handle, OwnerID, sequence numbers, RTT, ack bitfield,
 `ClientRepState` machine. Max simultaneous connections = 2^`NetOwnerID_Bits` (currently 8 bits → 256).
@@ -322,9 +322,9 @@ All networking code uses this vocabulary — never raw "server"/"client" as noun
 | `AuthorityNetThread` | Authority-side net handler |
 | `OwnerNetThread` | Owner-side net handler |
 
-### `LogicThread<TSimMode>` — Sim Mode Refactor
+### `LogicThread<TSimMode>` — Sim Mode Refactor *(designed, not yet implemented)*
 
-`LogicThread` is being templatized on a CRTP sim mode to eliminate all in-line Authority/Owner branching:
+`LogicThread` will be templatized on a CRTP sim mode to eliminate all in-line Authority/Owner branching:
 
 ```cpp
 template<typename TSimMode>

@@ -165,7 +165,7 @@ in the long run.
 - `ConstructView<TEntity>` — generic view template, creates a backing ECS entity of any EntityView type,
   auto-rehydrates FieldProxy cursors on frame advance and defrag. Partition auto-derived from entity's components.
 - `ConstructRegistry` — type-erased registry of live Constructs, deferred destruction
-- `CameraConstruct` — in-world camera (LogicView, yaw/pitch/FOV state), swappable ActiveCamera on LogicThread
+- `CameraConstruct` — in-world camera (yaw/pitch/FOV state, owned by Soul via CameraManager — see camera system design in NETWORKING.md)
 - `JoltCharacter` — Jolt CharacterVirtual wrapper for Construct-driven character controllers (capsule shape,
   grounding, stair stepping, slope sliding). Decoupled from JoltBody component — no Jolt body in the ECS.
 - `JoltLayers` — shared header for Jolt object/broadphase layer constants (extracted from JoltPhysics.cpp)
@@ -200,7 +200,7 @@ in the long run.
 **Networking (2026-03 — in progress):**
 
 - `GNSContext` — GameNetworkingSockets wrapper (header isolation, static link)
-- `NetConnectionManager` — server/client socket API, Listen/Connect, per-connection state (RTT, OwnerID, sequence
+- `NetConnectionManager` — socket API (Listen/Connect), per-connection state (RTT, OwnerID, sequence
   tracking)
 - `NetThread` — dedicated network poller at NetworkUpdateHz (default 30Hz), routes InputFrame messages to correct World
 - `ReplicationSystem` — server-side entity replication:
@@ -218,7 +218,7 @@ in the long run.
 - `MAX_FIELDS_PER_ARCHETYPE = 256` in Types.h
 - `DualArrayTableBuffer[MAX_FIELDS_PER_ARCHETYPE * 2]` moved from 256 KB stack to Registry member
 - `Archetype::BuildFieldArrayTable` with dual-pointer interleave
-- `Archetype::GetTemporalFieldWritePtr` (note: should eventually migrate to TemporalComponentCache)
+- ~~`Archetype::GetTemporalFieldWritePtr`~~ → migrated to `ComponentCacheBase::GetWriteFramePtr(void*)` / `GetReadFramePtr(void*)` ✅ Done (2026-04-21)
 - VulkanContext::CreateInstance suppresses unused `window` param with `/*window*/`
 - Tracy TRACY_SOURCES compiled with `-w` (suppress all upstream warnings)
 

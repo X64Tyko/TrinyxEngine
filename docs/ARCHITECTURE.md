@@ -1149,7 +1149,7 @@ target; dedicated server follows from the same code paths.
 - **GNSContext** — GNS init/teardown, isolates GNS headers
 - **NetConnectionManager** — per-connection `ConnectionInfo` (GNS handle, OwnerID, RTT, `ClientRepState`)
 - **NetThread** — 30Hz poller (configurable), routes `NetMessageType` dispatch
-- **ReplicationSystem** — server-side entity flush (EntitySpawn + StateCorrection), fires `ServerReady`
+- **ReplicationSystem** — Authority-side entity flush (EntitySpawn + StateCorrection), fires `AuthorityReady`
 - **NetChannel** — typed per-connection send API; home for delta state, coalescing, RPC dispatch
 - **Soul** — one per OwnerID (even splitscreen), owns the `NetChannel`, drives spawn flow
 - **ConstructHandle** *(planned)* — 32-bit handle (`OwnerID:8 | LocalIndex:16 | Generation:8`), modeled
@@ -1157,7 +1157,7 @@ target; dedicated server follows from the same code paths.
 
 ## Network Identity
 
-**EntityNetHandle** — `NetOwnerID:8 | NetIndex:24`. OwnerID 0 = server, 1-255 = clients.
+**EntityNetHandle** — `NetOwnerID:8 | NetIndex:24`. OwnerID 0 = Authority, 1-255 = Owners.
 
 **Three handle spaces in Registry:** GlobalEntityHandle (internal) / EntityHandle (local OOP) / EntityNetHandle (
 network)
@@ -1224,8 +1224,8 @@ Server + N client Worlds in same process. Each client: own OwnerID, viewport, sl
 
 - [ ] **ConstructHandle** — 32-bit `OwnerID:8|LocalIndex:16|Generation:8`, PagedMap-backed ConstructRegistry,
   owner-local indices. See [NETWORKING.md](NETWORKING.md).
-- [ ] `GetTemporalFieldWritePtr` migrated from Archetype to TemporalComponentCache
-- [ ] `TemporalFrameStride` removed from Archetype (duplicated state — call cache->GetFrameStride())
+- [x] ~~`GetTemporalFieldWritePtr` migrated from Archetype to TemporalComponentCache~~ ✅ Done (2026-04-21) — now `ComponentCacheBase::GetWriteFramePtr(void*)`/`GetReadFramePtr(void*)`
+- [x] ~~`TemporalFrameStride` removed from Archetype~~ ✅ Done (2026-04-21) — `BuildFieldArrayTable` queries cache directly
 - [ ] `GetLiveChunkCount` needs per-chunk live counters or Active flag scanning (currently approximation from global
   counter)
 - [ ] **Presentation Reconciler** (Anti-Events, speculative presentation diff)

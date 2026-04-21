@@ -245,17 +245,17 @@ SystemGroup tags.
 
 ### Networking
 
-Server-authoritative model with GNS (GameNetworkingSockets) transport:
+Authority-authoritative model with GNS (GameNetworkingSockets) transport:
 
-- **PIENetThread** dispatches messages to `ServerNetThread` and `ClientNetThread` sub-handlers within the same process
-- **ServerNetThread** injects per-player `InputFrame` packets into per-owner `InputBuffer` slots (
-  `World::GetPlayerSimInput(ownerID)`), ensuring client input drives only that player's Construct
-- **ReplicationSystem** walks the server Registry each net tick:
+- **PIENetThread** dispatches messages to `AuthorityNetThread` and `OwnerNetThread` sub-handlers within the same process
+- **AuthorityNetThread** injects per-player `InputFrame` packets into per-owner `InputBuffer` slots (
+  `World::GetPlayerSimInput(ownerID)`), ensuring Owner input drives only that player's Construct
+- **ReplicationSystem** walks the Authority Registry each net tick:
     - Sends `EntitySpawn` (reliable) for new entities — includes ClassID, transform, scale, color, mesh
     - Sends batched `StateCorrection` (unreliable) with authoritative transforms
-- **Soul RPC system** — type-safe server/client RPC dispatch (`TNX_IMPL_SERVER` / `TNX_IMPL_CLIENT`) used for
+- **Soul RPC system** — type-safe Authority/Owner RPC dispatch (`TNX_IMPL_SERVER` / `TNX_IMPL_CLIENT`) used for
   `PlayerBegin` handshake and `PlayerBeginConfirm`
-- **PIE loopback** — editor creates server + N client Worlds in same process for local testing
+- **PIE loopback** — editor creates Authority + N Owner Worlds in same process for local testing
 - **EntityNetHandle** — packed uint32 (NetOwnerID:8 + NetIndex:24) for network entity identity
 
 ```bash

@@ -176,7 +176,7 @@ OnPlayerLeft(soul)
 
 ## PredictionLedger
 
-Owned by `ConnectionInfo` — transport-scoped, client-side only.
+Owned by `ConnectionInfo` — transport-scoped, Owner-side only.
 
 ```
 PredictionID → (LocalEntityHandle, RequestFrame, PrefabID)
@@ -266,7 +266,7 @@ sequenceDiagram
 
 **Soul identity in local co-op:** `InputLead` stores a controller index (0–3) instead of a network
 `OwnerID`. `FlowManager` maps local gamepad connect/disconnect events to `OnPlayerJoined` /
-`OnPlayerLeft` the same way the server-side path maps network connect/disconnect.
+`OnPlayerLeft` the same way the Authority-side path maps network connect/disconnect.
 
 **Split-screen viewport assignment** is a FlowState concern (how the camera divides the screen), not a
 GameMode concern. GameMode only sees Souls and Bodies.
