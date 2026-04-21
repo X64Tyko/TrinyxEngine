@@ -69,14 +69,14 @@ enum class EngineMode : uint8_t
 	Standalone,   // No networking — default for singleplayer / editor
 	Client,       // Connects to remote server, renders locally
 	Server,       // Headless — no window/Vulkan/renderer
-	ListenServer, // Server + local client in one process (PIE default)
+	Host, // Server + local client in one process (PIE default)
 };
 
 [[maybe_unused]] static const char* EngineModeNames[] = {
 	"Standalone",
 	"Client",
 	"Server",
-	"ListenServer",
+	"Host",
 };
 
 // Identifies the lifetime tier of a Construct — determines what survives

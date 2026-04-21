@@ -75,7 +75,7 @@ void TrinyxEngine::ParseCommandLine(int argc, char* argv[])
 		}
 		else if (strcmp(argv[i], "--listen") == 0)
 		{
-			Config.Mode = EngineMode::ListenServer;
+			Config.Mode = EngineMode::Host;
 		}
 		else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc)
 		{

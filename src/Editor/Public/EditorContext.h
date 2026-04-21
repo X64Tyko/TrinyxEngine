@@ -147,7 +147,7 @@ private:
 	std::unique_ptr<FlowManager> ServerFlow;
 	std::unique_ptr<WorldViewport> ServerViewport; // nullptr if headless
 	std::unique_ptr<ReplicationSystem> Replicator;
-	EngineConfig ServerConfig; // Server-mode config (game config + Mode=Server/ListenServer)
+	EngineConfig ServerConfig; // Server-mode config (game config + Mode=Server/Host)
 	std::vector<PIEClient> PIEClients;
 	bool bPIEActive          = false;
 	bool bPrePIESimWasPaused = true; // Editor sim paused state before PIE — restored on StopPIE

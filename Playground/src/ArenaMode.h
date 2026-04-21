@@ -37,7 +37,7 @@ public:
 
 	// Called by FlowManager when a client is fully loaded (LevelReady received).
 	// In networked play, remote clients send a PlayerBeginRequest RPC — don't spawn for them here.
-	// In Standalone and ListenServer, the local player (ownerID=0) spawns immediately.
+	// In Standalone and Host, the local player (ownerID=0) spawns immediately.
 	void OnPlayerJoined(Soul& soul) override
 	{
 		if (GetWorld()->GetReplicationSystem() && soul.GetOwnerID() != 0) return;

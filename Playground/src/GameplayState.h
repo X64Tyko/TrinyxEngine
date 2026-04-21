@@ -46,7 +46,7 @@ public:
 		if (dot != std::string::npos) sceneName = sceneName.substr(0, dot);
 		Flow->LoadLevelByName(sceneName.c_str());
 
-		if (cfg->Mode == EngineMode::Standalone || cfg->Mode == EngineMode::ListenServer)
+		if (cfg->Mode == EngineMode::Standalone || cfg->Mode == EngineMode::Host)
 		{
 			// Route through FlowManager → ArenaMode::OnPlayerJoined for the local player.
 			// OwnerID 0 is the standalone/listen-server-local player's Soul.

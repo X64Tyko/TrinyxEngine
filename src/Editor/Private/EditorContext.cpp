@@ -1282,7 +1282,7 @@ void EditorContext::StartPIE()
 
 	// Build server and client configs from the game config (no editor overrides)
 	ServerConfig      = *EnginePtr->GetGameConfig();
-	ServerConfig.Mode = bServerVisible ? EngineMode::ListenServer : EngineMode::Server;
+	ServerConfig.Mode = bServerVisible ? EngineMode::Host : EngineMode::Server;
 
 	// Create server flow (owns server world + constructs)
 	ServerFlow = std::make_unique<FlowManager>();

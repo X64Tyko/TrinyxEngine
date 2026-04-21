@@ -229,7 +229,7 @@ private:
 		World* world          = GetWorld();
 		const EngineMode mode = world->GetConfig().Mode;
 		if (mode == EngineMode::Client) world->GetSimInput()->PushKey(key, down);
-		// Server/ListenServer: do nothing — input arrives via the net path.
+		// Server/Host: do nothing — input arrives via the net path.
 	}
 
 	// ---------------------------------------------------------------------------
