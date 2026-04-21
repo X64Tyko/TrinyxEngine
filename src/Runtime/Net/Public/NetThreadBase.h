@@ -21,10 +21,10 @@ struct ReceivedMessage;
 // Owns the GNS transport and rate-limited Tick logic. No OS thread — polling
 // and rate gating run on the Sentinel thread in TrinyxEngine::RunMainLoop.
 //
-// Derived must implement three hooks:
+// Derived must implement two hooks (TickInputSend has a public no-op default):
 //   void HandleMessage(const ReceivedMessage& msg)   — role-specific routing
 //   void TickReplication()                            — no-op on client
-//   void TickInputSend()                              — no-op on server; client sends InputFrame
+//   void TickInputSend()  [optional override]         — no-op on server; client sends InputFrame
 //
 // All instances run in the same mode:
 //   Sentinel calls PumpMessages() each 1ms tick (Poll + recv + HandleMessage).
@@ -63,13 +63,13 @@ public:
 	// OwnerID 0 = server world. 1-255 = client connections.
 	void MapConnectionToWorld(uint8_t ownerID, World* world) { WorldMap[ownerID] = world; }
 
-protected:
-	Derived& Self() { return *static_cast<Derived*>(this); }
-
 	// Default no-op — server inherits this; client and PIE override.
 	void TickInputSend()
 	{
 	}
+
+protected:
+	Derived& Self() { return *static_cast<Derived*>(this); }
 
 	GNSContext* GNS            = nullptr;
 	const EngineConfig* Config = nullptr;
