@@ -42,10 +42,10 @@ endif ()
 option(TNX_ENABLE_EDITOR "Enable editor UI (ImGui integration). Adds editor panels and overlay." OFF)
 option(TNX_ENABLE_NETWORK "Enable networking (GameNetworkingSockets + Protobuf). Required for multiplayer." ON)
 # TNX_NET_MODEL selects the networking role baked into the build.
-#   PIE    — Editor in-process: one ServerNetThread + N ClientNetThread, ticked by PIENetThread.
+#   PIE    — Editor in-process: one AuthorityNetThread + N OwnerNetThread, ticked by PIENetThread.
 #            Automatically selected when TNX_ENABLE_EDITOR is ON.
-#   Server — Dedicated server: ServerNetThread only. Implies TNX_HEADLESS (no window, no GPU).
-#   Client — Standalone client: ClientNetThread only.
+#   Server — Dedicated server: AuthorityNetThread only. Implies TNX_HEADLESS (no window, no GPU).
+#   Client — Standalone client: OwnerNetThread only.
 set(TNX_NET_MODEL "Client" CACHE STRING "Networking role: PIE | Server | Client")
 set_property(CACHE TNX_NET_MODEL PROPERTY STRINGS "PIE" "Server" "Client")
 option(TNX_TESTING "Enable test harnesses (rollback determinism test, etc.). Debug/profiling tool." OFF)
@@ -84,13 +84,13 @@ if (TNX_ENABLE_NETWORK)
     add_compile_definitions(TNX_ENABLE_NETWORK)
     if (TNX_NET_MODEL STREQUAL "PIE")
         add_compile_definitions(TNX_NET_MODEL_PIE)
-        message(STATUS "Networking: ENABLED — PIE model (ServerNetThread + ClientNetThread)")
+        message(STATUS "Networking: ENABLED — PIE model (AuthorityNetThread + OwnerNetThread)")
     elseif (TNX_NET_MODEL STREQUAL "Server")
         add_compile_definitions(TNX_NET_MODEL_SERVER)
-        message(STATUS "Networking: ENABLED — Server model (ServerNetThread)")
+        message(STATUS "Networking: ENABLED — Server model (AuthorityNetThread)")
     else ()
         add_compile_definitions(TNX_NET_MODEL_CLIENT)
-        message(STATUS "Networking: ENABLED — Client model (ClientNetThread)")
+        message(STATUS "Networking: ENABLED — Client model (OwnerNetThread)")
     endif ()
 else ()
     message(STATUS "Networking: DISABLED (standalone builds only)")

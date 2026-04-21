@@ -7,7 +7,7 @@
 class World;
 
 // ---------------------------------------------------------------------------
-// ClientNetThread
+// OwnerNetThread
 //
 // Handles all client-side message routing:
 //   ConnectionHandshake (client receive)  Ping/Pong  Pong
@@ -17,13 +17,13 @@ class World;
 // FlowManager is resolved from the client World (world->GetFlowManager()) so
 // there is no separate FlowMgr pointer to keep in sync.
 // ---------------------------------------------------------------------------
-class ClientNetThread : public NetThreadBase<ClientNetThread>
+class OwnerNetThread : public NetThreadBase<OwnerNetThread>
 {
-	friend class NetThreadBase<ClientNetThread>;
+	friend class NetThreadBase<OwnerNetThread>;
 
 public:
 	/// Non-owning. Required for EntitySpawn and StateCorrection routing.
-	void SetClientWorld(uint8_t ownerID, World* world) { MapConnectionToWorld(ownerID, world); }
+	void SetOwnerWorld(uint8_t ownerID, World* world) { MapConnectionToWorld(ownerID, world); }
 
 	/// Send one InputFrame packet to the server for each active client connection.
 	/// Dispatches a General-queue job so Sentinel returns immediately.

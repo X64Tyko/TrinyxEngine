@@ -56,7 +56,7 @@ public:
 
 	/// Server-side hook: inject per-player input from PlayerInputLog into each player's
 	/// InputBuffer before gameplay logic runs. Called each fixed tick inside ProcessSimInput.
-	/// Wire up after both LogicThread and ServerNetThread are initialized.
+	/// Wire up after both LogicThread and AuthorityNetThread are initialized.
 	/// Returns true if the sim should stall (at least one player's input window hasn't arrived).
 	/// Signature: bool(uint32_t frameNumber)
 	void SetPlayerInputInjector(std::function<bool(uint32_t)> injector)

@@ -221,8 +221,8 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 			Net->InitChildren();
 			// Server world wired below, after FlowManager::CreateWorld().
 #elif defined(TNX_NET_MODEL_SERVER)
-	// ServerNetThread resolves FlowManager via ServerWorld->GetFlowManager().
-	// SetServerWorld() is called below after CreateWorld().
+	// AuthorityNetThread resolves FlowManager via AuthorityWorld->GetFlowManager().
+	// SetAuthorityWorld() is called below after CreateWorld().
 #endif
 		}
 	}
@@ -248,11 +248,11 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	if (Net) Net->SetReplicationSystem(Replicator.get());
 #endif
 #if defined(TNX_NET_MODEL_PIE)
-	if (Net) Net->SetServerWorld(DefaultWorld);
+	if (Net) Net->SetAuthorityWorld(DefaultWorld);
 #elif defined(TNX_NET_MODEL_SERVER)
 	// Wire the per-player input injector into the server world's LogicThread.
-	// PIE wires this in EditorContext after SetServerWorld() is called per-session.
-	if (Net) Net->SetServerWorld(DefaultWorld);
+	// PIE wires this in EditorContext after SetAuthorityWorld() is called per-session.
+	if (Net) Net->SetAuthorityWorld(DefaultWorld);
 	if (Net) Net->WirePlayerInputInjector(DefaultWorld);
 #endif
 	}
@@ -314,9 +314,9 @@ bool TrinyxEngine::EnsureNetworking()
 	Net->Initialize(&GNS, &Config);
 #if defined(TNX_NET_MODEL_PIE)
 	Net->InitChildren();
-	if (DefaultWorld) Net->SetServerWorld(DefaultWorld);
+	if (DefaultWorld) Net->SetAuthorityWorld(DefaultWorld);
 #elif defined(TNX_NET_MODEL_SERVER)
-// ServerNetThread resolves FlowManager via ServerWorld->GetFlowManager().
+// AuthorityNetThread resolves FlowManager via AuthorityWorld->GetFlowManager().
 #endif
 	return true;
 }

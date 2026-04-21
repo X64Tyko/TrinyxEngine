@@ -9,7 +9,7 @@ class ReplicationSystem;
 class World;
 
 // ---------------------------------------------------------------------------
-// ServerNetThread
+// AuthorityNetThread
 //
 // Handles all server-side message routing:
 //   ConnectionHandshake (server accept)  InputFrame  Ping/Pong
@@ -18,17 +18,17 @@ class World;
 // Owns the server world pointer (non-owning ref) and replication system
 // (also non-owning — caller manages lifetime).
 //
-// FlowManager is resolved from ServerWorld->GetFlowManager() — no separate
+// FlowManager is resolved from AuthorityWorld->GetFlowManager() — no separate
 // FlowMgr pointer needed.
 // ---------------------------------------------------------------------------
-class ServerNetThread : public NetThreadBase<ServerNetThread>
+class AuthorityNetThread : public NetThreadBase<AuthorityNetThread>
 {
-	friend class NetThreadBase<ServerNetThread>;
+	friend class NetThreadBase<AuthorityNetThread>;
 
 public:
 	/// Non-owning. Set before Start() / first Tick().
-	void SetServerWorld(World* world) { ServerWorld = world; }
-	World* GetServerWorld() const { return ServerWorld; }
+	void SetAuthorityWorld(World* world) { AuthorityWorld = world; }
+	World* GetAuthorityWorld() const { return AuthorityWorld; }
 
 	void SetReplicationSystem(ReplicationSystem* repl) { Replicator = repl; }
 
@@ -44,7 +44,7 @@ public:
 	}
 
 	/// Wire the per-player input injector into the world's LogicThread.
-	/// Call after SetServerWorld() — the injector runs each sim tick inside ProcessSimInput,
+	/// Call after SetAuthorityWorld() — the injector runs each sim tick inside ProcessSimInput,
 	/// pulling ConsumeFrame() results from each connected player's log and injecting into
 	/// their InputBuffer so gameplay code reads correct per-player input.
 	void WirePlayerInputInjector(World* world);
@@ -62,7 +62,7 @@ private:
 	void OnClientDisconnectedCB(uint8_t ownerID);
 
 	ReplicationSystem* Replicator = nullptr;
-	World* ServerWorld            = nullptr;
+	World* AuthorityWorld            = nullptr;
 
 	// One log per ownerID slot — only allocated for connected players.
 	// Slot 0 (server) is never populated. Depth == TemporalFrameCount.

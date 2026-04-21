@@ -1,4 +1,4 @@
-#include "ClientNetThread.h"
+#include "OwnerNetThread.h"
 
 #include "CacheSlotMeta.h"
 #include "ConstructRegistry.h"
@@ -19,7 +19,7 @@
 
 #include <SDL3/SDL_timer.h>
 
-void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
+void OwnerNetThread::HandleMessage(const ReceivedMessage& msg)
 {
 	// Every server-sent header carries the last client input frame it consumed.
 	// Advance LastServerAckedFrame so TickInputSend() widens from there, not from last send.
@@ -62,7 +62,7 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 					if (ci->RTT_ms <= 0.0f) ci->RTT_ms = rtt;
 					else ci->RTT_ms                    = ci->RTT_ms * 0.875f + rtt * 0.125f;
 
-					if (ci->bClientInitiated
+					if (ci->bOwnerInitiated
 						&& ci->RepState == ClientRepState::Synchronizing
 						&& ci->ClockSyncProbesRecvd < 8)
 					{
@@ -434,7 +434,7 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 
 // ---------------------------------------------------------------------------
 
-bool ClientNetThread::TrySpawnDeferred(const DeferredConstructSpawn& entry)
+bool OwnerNetThread::TrySpawnDeferred(const DeferredConstructSpawn& entry)
 {
 	World* clientWorld = WorldMap[entry.OwnerID];
 	if (!clientWorld) return true; // World gone — drop it
@@ -469,7 +469,7 @@ bool ClientNetThread::TrySpawnDeferred(const DeferredConstructSpawn& entry)
 	return done;
 }
 
-void ClientNetThread::FlushDeferredEntitySpawns()
+void OwnerNetThread::FlushDeferredEntitySpawns()
 {
 	for (auto it = DeferredEntitySpawns.begin(); it != DeferredEntitySpawns.end();)
 	{
@@ -513,7 +513,7 @@ void ClientNetThread::FlushDeferredEntitySpawns()
 	}
 }
 
-void ClientNetThread::TickReplication()
+void OwnerNetThread::TickReplication()
 {
 	// Retry PlayerBeginRequest for connections stuck in Loaded state.
 	constexpr uint64_t RetryIntervalMs = 150;
@@ -521,7 +521,7 @@ void ClientNetThread::TickReplication()
 
 	for (auto& ci : ConnectionMgr->GetConnections())
 	{
-		if (!ci.bClientInitiated || !ci.bConnected) continue;
+		if (!ci.bOwnerInitiated || !ci.bConnected) continue;
 		if (ci.RepState != ClientRepState::Loaded) continue;
 		if (ci.PlayerBeginSentAt == 0) continue;
 		if (now - ci.PlayerBeginSentAt < RetryIntervalMs) continue;
@@ -553,7 +553,7 @@ void ClientNetThread::TickReplication()
 	}
 }
 
-void ClientNetThread::TickInputSend()
+void OwnerNetThread::TickInputSend()
 {
 	if (!TrinyxJobs::IsRunning()) return;
 
@@ -561,16 +561,16 @@ void ClientNetThread::TickInputSend()
 	// can't safely be accessed by two jobs concurrently.
 	if (SendCounter.Value.load(std::memory_order_acquire) != 0) return;
 
-	ClientNetThread* self = this;
+	OwnerNetThread* self = this;
 	TrinyxJobs::Dispatch([self](uint32_t) { self->ExecuteInputSend(); },
 						 &SendCounter, TrinyxJobs::Queue::General);
 }
 
-void ClientNetThread::ExecuteInputSend()
+void OwnerNetThread::ExecuteInputSend()
 {
 	std::vector<HSteamNetConnection> clientHandles;
 	for (const auto& ci : ConnectionMgr->GetConnections())
-		if (ci.bClientInitiated && ci.bConnected && ci.OwnerID != 0)
+		if (ci.bOwnerInitiated && ci.bConnected && ci.OwnerID != 0)
 			clientHandles.push_back(ci.Handle);
 
 	for (HSteamNetConnection handle : clientHandles)

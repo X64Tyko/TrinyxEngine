@@ -149,7 +149,7 @@ void NetConnectionManager::AcceptConnection(HSteamNetConnection conn)
 	}
 
 	AddConnection(conn);
-	if (ConnectionInfo* ci = FindConnection(conn)) ci->bServerSide = true;
+	if (ConnectionInfo* ci = FindConnection(conn)) ci->bAuthoritySide = true;
 	ApplySendRate(conn, SendRateMin, SendRateMax);
 	LOG_ENG_INFO_F("[NetConnectionManager] Accepted connection %u (server-side)", conn);
 }
@@ -189,7 +189,7 @@ HSteamNetConnection NetConnectionManager::Connect(const char* address, uint16_t 
 	}
 
 	AddConnection(conn);
-	if (ConnectionInfo* ci = FindConnection(conn)) ci->bClientInitiated = true;
+	if (ConnectionInfo* ci = FindConnection(conn)) ci->bOwnerInitiated = true;
 	ApplySendRate(conn, SendRateMin, SendRateMax);
 	LOG_ENG_INFO_F("[NetConnectionManager] Connecting to %s:%u (handle %u)", address, port, conn);
 	return conn;
@@ -320,7 +320,7 @@ void NetConnectionManager::AssignOwnerID(HSteamNetConnection conn, uint8_t owner
 	{
 		ci->OwnerID = ownerID;
 #if defined(TNX_TESTING) || defined(TNX_ENABLE_EDITOR)
-		if (ci->bClientInitiated) LocalOwnerID.store(ownerID, std::memory_order_release);
+		if (ci->bOwnerInitiated) LocalOwnerID.store(ownerID, std::memory_order_release);
 #endif
 		LOG_ENG_INFO_F("[NetConnectionManager] Assigned OwnerID %u to connection %u", ownerID, conn);
 	}
@@ -395,7 +395,7 @@ void NetConnectionManager::OnConnectionStatusChanged(SteamNetConnectionStatusCha
 					ci->bConnected = true;
 					LOG_ENG_INFO_F("[NetConnectionManager] Connection %u established", info->m_hConn);
 
-					if (ci->bServerSide)
+					if (ci->bAuthoritySide)
 					{
 						mgr->OnClientConnected(*ci);
 					}

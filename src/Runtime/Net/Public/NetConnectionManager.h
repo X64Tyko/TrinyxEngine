@@ -67,8 +67,8 @@ struct ConnectionInfo
 	double LastHeartbeatTime        = 0.0;  // SDL_GetPerformanceCounter() / freq at last Ping send
 	ClientRepState RepState         = ClientRepState::PendingHandshake;
 	bool bConnected                 = false;
-	bool bServerSide                = false; // True for server-accepted handles, false for client-initiated
-	bool bClientInitiated           = false; // True only for connections we opened via Connect() — reliable even in GNS loopback
+	bool bAuthoritySide                = false; // True for server-accepted handles, false for client-initiated
+	bool bOwnerInitiated           = false; // True only for connections we opened via Connect() — reliable even in GNS loopback
 	bool bInitialSpawnFlushed       = false; // Server-side: true after first full entity batch sent to this client
 
 	// Client-side: last frame the server confirmed it consumed — in client-local frame space
@@ -187,14 +187,14 @@ public:
 
 	/// Find connection info by OwnerID. Returns nullptr if not found.
 	/// O(n) over active connections — only use outside hot-path code.
-	/// In PIE, two ConnectionInfo entries share the same OwnerID (bServerSide and
-	/// bClientInitiated). Pass requireServerSide=true to get the server-accepted leg.
+	/// In PIE, two ConnectionInfo entries share the same OwnerID (bAuthoritySide and
+	/// bOwnerInitiated). Pass requireServerSide=true to get the server-accepted leg.
 	ConnectionInfo* FindConnectionByOwnerID(uint8_t ownerID, bool requireServerSide = false)
 	{
 		for (ConnectionInfo& ci : Connections)
 		{
 			if (ci.OwnerID != ownerID) continue;
-			if (requireServerSide && !ci.bServerSide) continue;
+			if (requireServerSide && !ci.bAuthoritySide) continue;
 			return &ci;
 		}
 		return nullptr;

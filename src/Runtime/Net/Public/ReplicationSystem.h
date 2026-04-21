@@ -66,8 +66,8 @@ public:
 		manifest.PrefabIndex = typeHash;
 		manifest.NetFlags    = 0;
 
-		const uint32_t spawnFrame = ServerWorld && ServerWorld->GetLogicThread()
-										? ServerWorld->GetLogicThread()->GetLastCompletedFrame()
+		const uint32_t spawnFrame = AuthorityWorld && AuthorityWorld->GetLogicThread()
+										? AuthorityWorld->GetLogicThread()->GetLastCompletedFrame()
 										: 0;
 
 		ConstructRef ref = reg->AllocateNetRef(ptr, ownerID, manifest, typeHash, prefabIDRaw, spawnFrame);
@@ -81,7 +81,7 @@ public:
 		// Resolve local EntityHandles → EntityNetHandles against the server Registry.
 		// If an entity doesn't have a net handle yet, assign one now so the client
 		// can look it up after receiving the EntitySpawn for this entity.
-		Registry* entityReg = ServerWorld ? ServerWorld->GetRegistry() : nullptr;
+		Registry* entityReg = AuthorityWorld ? AuthorityWorld->GetRegistry() : nullptr;
 		uint32_t netHandleValues[MaxViews]{};
 		if (entityReg)
 		{
@@ -149,7 +149,7 @@ private:
 	/// Allocates a NetIndex, wires NetToRecord, sets the record's NetworkID.
 	EntityNetHandle AssignNetHandle(Registry* reg, GlobalEntityHandle gHandle, uint8_t ownerID = 0);
 
-	World* ServerWorld = nullptr;
+	World* AuthorityWorld = nullptr;
 
 	// Track which cache indices have been replicated (spawned on clients).
 	std::vector<bool> Replicated;

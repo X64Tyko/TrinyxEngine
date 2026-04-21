@@ -148,7 +148,7 @@ void NetThreadBase<Derived>::TickClockSync(double nowSec)
 
 	std::vector<HSteamNetConnection> handles;
 	for (const auto& ci : ConnectionMgr->GetConnections())
-		if (ci.bConnected && ci.bClientInitiated)
+		if (ci.bConnected && ci.bOwnerInitiated)
 			handles.push_back(ci.Handle);
 
 	for (HSteamNetConnection handle : handles)

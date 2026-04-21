@@ -24,7 +24,7 @@
 
 void ReplicationSystem::Initialize(World* serverWorld)
 {
-	ServerWorld = serverWorld;
+	AuthorityWorld = serverWorld;
 	Replicated.clear();
 	for (auto& f : PendingResimFrames) f.store(UINT32_MAX, std::memory_order_relaxed);
 	LOG_ENG_INFO("[Replication] Initialized");
@@ -48,11 +48,11 @@ void ReplicationSystem::AddPendingResim(uint8_t ownerID, uint32_t serverFrame)
 
 void ReplicationSystem::Tick(NetConnectionManager* connMgr)
 {
-	if (!ServerWorld || !connMgr) return;
+	if (!AuthorityWorld || !connMgr) return;
 	if (connMgr->GetConnectionCount() == 0) return;
 
-	const uint32_t frameNumber = ServerWorld->GetLogicThread()
-									 ? ServerWorld->GetLogicThread()->GetLastCompletedFrame()
+	const uint32_t frameNumber = AuthorityWorld->GetLogicThread()
+									 ? AuthorityWorld->GetLogicThread()->GetLastCompletedFrame()
 									 : 0;
 
 	SendSpawns(connMgr, frameNumber);
@@ -75,7 +75,7 @@ void ReplicationSystem::SendConstructSpawns(NetConnectionManager* connMgr, uint3
 	bool anyReady = false;
 	for (const auto& ci : connections)
 	{
-		if (ci.bConnected && ci.bServerSide && ci.OwnerID > 0 &&
+		if (ci.bConnected && ci.bAuthoritySide && ci.OwnerID > 0 &&
 			ci.RepState >= ClientRepState::Loaded)
 		{
 			anyReady = true;
@@ -98,7 +98,7 @@ void ReplicationSystem::SendConstructSpawns(NetConnectionManager* connMgr, uint3
 
 		for (const auto& ci : connections)
 		{
-			if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
+			if (!ci.bConnected || !ci.bAuthoritySide || ci.OwnerID == 0) continue;
 			if (ci.RepState < ClientRepState::Loaded) continue;
 
 			const uint32_t ciClientFrame = ci.ToClientFrame(frameNumber);
@@ -111,8 +111,8 @@ void ReplicationSystem::SendConstructSpawns(NetConnectionManager* connMgr, uint3
 
 			connMgr->Send(ci.Handle, header, perClientBuf.data(), /*reliable=*/true);
 			{
-				Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
-								 ? ServerWorld->GetFlowManager()->GetSoul(ci.OwnerID)
+				Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
+								 ? AuthorityWorld->GetFlowManager()->GetSoul(ci.OwnerID)
 								 : nullptr;
 				LOG_NET_INFO_F(soul, "[Replication] ConstructSpawn → ownerID=%u viewCount=%u",
 							   ci.OwnerID, payload->ViewCount);
@@ -268,7 +268,7 @@ EntityNetHandle ReplicationSystem::AssignNetHandle(Registry* reg, GlobalEntityHa
 
 void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frameNumber)
 {
-	Registry* reg = ServerWorld->GetRegistry();
+	Registry* reg = AuthorityWorld->GetRegistry();
 
 	ComponentCacheBase* temporalCache = reg->GetTemporalCache();
 	ComponentCacheBase* volatileCache = reg->GetVolatileCache();
@@ -370,7 +370,7 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 
 	for (auto& ci : connections)
 	{
-		if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
+		if (!ci.bConnected || !ci.bAuthoritySide || ci.OwnerID == 0) continue;
 		if (ci.RepState != ClientRepState::LevelLoaded || ci.bInitialSpawnFlushed) continue;
 
 		const uint32_t ciClientFrame = ci.ToClientFrame(frameNumber);
@@ -403,16 +403,16 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 
 		ci.RepState = ClientRepState::Loaded;
 		{
-			FlowManager* serverFlow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr;
+			FlowManager* serverFlow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr;
 			Soul* soul              = serverFlow ? serverFlow->GetSoul(ci.OwnerID) : nullptr;
 			LOG_NET_INFO_F(soul, "[Replication] Initial flush: %zu entities → ownerID=%u, ServerReady sent → Loaded",
 						   spawnBatch.size(), ci.OwnerID);
 
 			const FlowState* activeState = serverFlow ? serverFlow->GetActiveState() : nullptr;
-			if (activeState && activeState->GetRequirements().SweepsAliveFlagsOnServerReady && ServerWorld)
+			if (activeState && activeState->GetRequirements().SweepsAliveFlagsOnServerReady && AuthorityWorld)
 			{
-				Registry* lReg = ServerWorld->GetRegistry();
-				ServerWorld->PostAndWait([lReg, soul](uint32_t)
+				Registry* lReg = AuthorityWorld->GetRegistry();
+				AuthorityWorld->PostAndWait([lReg, soul](uint32_t)
 				{
 					int count = lReg->SweepAliveFlagsToActive();
 					LOG_NET_INFO_F(soul, "[Replication] ServerReady: server swept %d Alive→Active", count);
@@ -439,7 +439,7 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 	{
 		for (const auto& ci : connections)
 		{
-			if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
+			if (!ci.bConnected || !ci.bAuthoritySide || ci.OwnerID == 0) continue;
 			if (ci.RepState < ClientRepState::Loaded) continue;
 			if (!ci.bInitialSpawnFlushed) continue;
 
@@ -468,7 +468,7 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 
 void ReplicationSystem::SendStateCorrections(NetConnectionManager* connMgr, uint32_t frameNumber)
 {
-	Registry* reg = ServerWorld->GetRegistry();
+	Registry* reg = AuthorityWorld->GetRegistry();
 
 	ComponentCacheBase* temporalCache = reg->GetTemporalCache();
 	uint32_t temporalFrame            = temporalCache->GetActiveReadFrame();
@@ -568,7 +568,7 @@ void ReplicationSystem::SendStateCorrections(NetConnectionManager* connMgr, uint
 
 	for (const auto& ci : connMgr->GetConnections())
 	{
-		if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
+		if (!ci.bConnected || !ci.bAuthoritySide || ci.OwnerID == 0) continue;
 
 		// Don't send frames the client hasn't reached yet unless this client has a pending resim
 		// (resim corrections must always land, even if the frame is technically in the client's future).

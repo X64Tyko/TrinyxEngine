@@ -6,18 +6,18 @@
 
 #include "GNSContext.h"
 #include "NetConnectionManager.h"
-#include "ServerNetThread.h"
+#include "AuthorityNetThread.h"
 #include "PlayerInputLog.h"
 #include "EngineConfig.h"
 
 #include <SDL3/SDL_timer.h>
 #include <cstring>
 
-// Validates InputFrame routing from a GNS client through a ServerNetThread into
+// Validates InputFrame routing from a GNS client through a AuthorityNetThread into
 // the server-side PlayerInputLog for that player. Tests: inline Tick(),
 // InputFrame deserialization, PlayerInputLog.Store(), first-write-wins correctness.
 //
-// Real-world flow: client sends InputFrame → ServerNetThread::HandleMessage dispatches
+// Real-world flow: client sends InputFrame → AuthorityNetThread::HandleMessage dispatches
 // it to PlayerInputLog::Store → LogicThread reads it via ConsumeFrame each fixed step.
 // The test directly inspects the PlayerInputLog entry rather than InputBuffer (which
 // is for local keyboard input, not network-received input).
@@ -34,7 +34,7 @@ TEST(Net_InputFrameRouting)
 	config.NetworkUpdateHz = 30;
 	config.ApplyDefaults();
 
-	ServerNetThread net;
+	AuthorityNetThread net;
 	net.Initialize(&gnsLocal, &config);
 
 	NetConnectionManager* mgr = net.GetConnectionManager();

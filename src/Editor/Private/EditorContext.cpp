@@ -1293,17 +1293,17 @@ void EditorContext::StartPIE()
 		ServerFlow.reset();
 		return;
 	}
-	World* ServerWorld = ServerFlow->GetWorld();
+	World* AuthorityWorld = ServerFlow->GetWorld();
 
 	// Load scene into server world via spawn handshake
-	ServerWorld->SetJobsInitialized(true);
+	AuthorityWorld->SetJobsInitialized(true);
 
 	// Allocate server viewport (if visible)
 	EditorRenderer* renderer = EnginePtr->GetRenderer();
 	if (bServerVisible)
 	{
 		ServerViewport              = std::make_unique<WorldViewport>();
-		ServerViewport->TargetWorld = ServerWorld;
+		ServerViewport->TargetWorld = AuthorityWorld;
 		renderer->AllocateViewportResources(ServerViewport.get(), 960, 540);
 		renderer->AddViewport(ServerViewport.get());
 	}
@@ -1402,8 +1402,8 @@ void EditorContext::StartPIE()
 	}
 
 	// Wire the server world pointer before clients connect so that ConnectionHandshake
-	// processing (EnsurePlayerInputSlot) finds a valid ServerWorld.
-	net->SetServerWorld(ServerFlow->GetWorld());
+	// processing (EnsurePlayerInputSlot) finds a valid AuthorityWorld.
+	net->SetAuthorityWorld(ServerFlow->GetWorld());
 
 	// Connect each client via loopback and discover server-side handles
 	std::vector<uint32_t> knownHandles;
@@ -1487,7 +1487,7 @@ void EditorContext::StartPIE()
 		}
 	}
 
-	net->GetServer().WirePlayerInputInjector(ServerFlow->GetWorld());
+	net->GetAuthority().WirePlayerInputInjector(ServerFlow->GetWorld());
 
 	Replicator = std::make_unique<ReplicationSystem>();
 	Replicator->Initialize(ServerFlow->GetWorld());
@@ -1583,7 +1583,7 @@ void EditorContext::StopPIE()
 
 		// Clear all client handler registrations
 		net->ClearClients();
-		net->SetServerWorld(nullptr);
+		net->SetAuthorityWorld(nullptr);
 
 		connMgr->StopListening();
 	}

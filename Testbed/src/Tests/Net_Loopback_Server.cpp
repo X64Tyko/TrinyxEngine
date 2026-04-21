@@ -3,7 +3,7 @@
 #include "TestFramework.h"
 #include "EngineConfig.h"
 #include "GNSContext.h"
-#include "ServerNetThread.h"
+#include "AuthorityNetThread.h"
 #include "Logger.h"
 
 #include <SDL3/SDL_timer.h>
@@ -11,9 +11,9 @@
 
 // Two-process loopback: SERVER side.
 //
-// Runs ServerNetThread in inline (PollAndDispatch) mode — no Start(), the test
+// Runs AuthorityNetThread in inline (PollAndDispatch) mode — no Start(), the test
 // thread drives the loop. Tests the real HandleMessage dispatch path:
-//   client connects → auto-sends ConnectionHandshake → ServerNetThread assigns OwnerID
+//   client connects → auto-sends ConnectionHandshake → AuthorityNetThread assigns OwnerID
 //   → sends HandshakeAccept response.
 //
 // This test only runs when TNX_LOOPBACK_SERVER=1 is set in the environment.
@@ -35,7 +35,7 @@ TEST(Net_Loopback_Server)
 	EngineConfig config{};
 	config.ApplyDefaults();
 
-	ServerNetThread serverThread;
+	AuthorityNetThread serverThread;
 	serverThread.Initialize(&gns, &config);
 
 	constexpr uint16_t kPort = 27020;
@@ -53,7 +53,7 @@ TEST(Net_Loopback_Server)
 	ASSERT(serverThread.GetConnectionManager()->GetConnectionCount() >= 1);
 	LOG_ENG_ALWAYS("[Net_Loopback_Server] Client connected — waiting for handshake...");
 
-	// The client's auto-sent ConnectionHandshake triggers HandleMessage in ServerNetThread
+	// The client's auto-sent ConnectionHandshake triggers HandleMessage in AuthorityNetThread
 	// which calls GenerateNetID and assigns an OwnerID. Poll until that happens.
 	const HSteamNetConnection clientHandle = serverThread.GetConnectionManager()->GetConnections()[0].Handle;
 	const uint64_t handshakeDeadline       = SDL_GetTicks() + 5000;

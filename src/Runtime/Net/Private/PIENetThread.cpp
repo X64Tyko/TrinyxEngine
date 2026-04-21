@@ -8,18 +8,18 @@
 
 void PIENetThread::InitChildren()
 {
-	Server.InitAsHandler(GNS, Config, ConnectionMgr);
-	Server.BindSoulCallbacks();
+	Authority.InitAsHandler(GNS, Config, ConnectionMgr);
+	Authority.BindSoulCallbacks();
 }
 
-void PIENetThread::SetServerWorld(World* world)
+void PIENetThread::SetAuthorityWorld(World* world)
 {
-	Server.SetServerWorld(world);
+	Authority.SetAuthorityWorld(world);
 }
 
 void PIENetThread::SetReplicationSystem(ReplicationSystem* repl)
 {
-	Server.SetReplicationSystem(repl);
+	Authority.SetReplicationSystem(repl);
 }
 
 void PIENetThread::AddClient(HSteamNetConnection clientHandle, World* world)
@@ -27,12 +27,12 @@ void PIENetThread::AddClient(HSteamNetConnection clientHandle, World* world)
 	ClientEntry& entry = Clients.emplace_back();
 	entry.Handle       = clientHandle;
 	entry.OwnerID      = 0; // promoted to real OwnerID in UpdateClientOwnerID after handshake
-	entry.ClientWorld  = world;
-	entry.Handler      = std::make_unique<ClientNetThread>();
+	entry.OwnerWorld  = world;
+	entry.Handler      = std::make_unique<OwnerNetThread>();
 	entry.Handler->InitAsHandler(GNS, Config, ConnectionMgr);
 	// Register under slot 0 immediately so TravelNotify/ServerReady handlers can
 	// find the world before UpdateClientOwnerID promotes the real ownerID slot.
-	entry.Handler->SetClientWorld(0, world);
+	entry.Handler->SetOwnerWorld(0, world);
 }
 
 void PIENetThread::UpdateClientOwnerID(HSteamNetConnection clientHandle, uint8_t ownerID, World* world)
@@ -42,8 +42,8 @@ void PIENetThread::UpdateClientOwnerID(HSteamNetConnection clientHandle, uint8_t
 		if (entry.Handle == clientHandle)
 		{
 			entry.OwnerID     = ownerID;
-			entry.ClientWorld = world;
-			entry.Handler->SetClientWorld(ownerID, world);
+			entry.OwnerWorld = world;
+			entry.Handler->SetOwnerWorld(ownerID, world);
 			MapConnectionToWorld(ownerID, world);
 			LOG_ENG_INFO_F("[PIENet] Client handle %u promoted to OwnerID=%u", clientHandle, ownerID);
 			return;
@@ -67,7 +67,7 @@ void PIENetThread::ClearClients()
 
 void PIENetThread::TickReplication()
 {
-	Server.TickReplication();
+	Authority.TickReplication();
 
 	// Compute dt from SDL perf counter — same source as TrinyxEngine's Sentinel loop.
 	const uint64_t now = SDL_GetPerformanceCounter();
@@ -78,13 +78,13 @@ void PIENetThread::TickReplication()
 	LastFlowTickTime = now;
 
 	// Tick the server's FlowManager.
-	World* serverWorld = Server.GetServerWorld();
+	World* serverWorld = Authority.GetAuthorityWorld();
 	if (serverWorld) if (FlowManager* flow = serverWorld->GetFlowManager()) flow->Tick(dt);
 
 	// Tick each client's FlowManager and drain deferred replication work.
 	for (auto& entry : Clients)
 	{
-		if (entry.ClientWorld) if (FlowManager* flow = entry.ClientWorld->GetFlowManager()) flow->Tick(dt);
+		if (entry.OwnerWorld) if (FlowManager* flow = entry.OwnerWorld->GetFlowManager()) flow->Tick(dt);
 		entry.Handler->TickReplication();
 	}
 }
@@ -104,9 +104,9 @@ void PIENetThread::HandleMessage(const ReceivedMessage& msg)
 		return;
 	}
 
-	if (ci->bServerSide)
+	if (ci->bAuthoritySide)
 	{
-		Server.HandleMessage(msg);
+		Authority.HandleMessage(msg);
 	}
 	else
 	{

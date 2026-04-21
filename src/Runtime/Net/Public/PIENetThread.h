@@ -2,8 +2,8 @@
 #ifdef TNX_ENABLE_EDITOR
 
 #include "NetThreadBase.h"
-#include "ServerNetThread.h"
-#include "ClientNetThread.h"
+#include "AuthorityNetThread.h"
+#include "OwnerNetThread.h"
 
 #include <vector>
 
@@ -15,7 +15,7 @@ class World;
 //
 // PIE coordinator. Owns a single GNS transport (shared with children) and
 // is driven by the Sentinel thread. On each PumpMessages() call it routes
-// messages by bServerSide to the appropriate child handler. Children are pure
+// messages by bAuthoritySide to the appropriate child handler. Children are pure
 // message-handlers — they do NOT have their own threads and their Initialize()
 // is not called (they share this instance's ConnectionMgr).
 //
@@ -24,7 +24,7 @@ class World;
 //
 // Usage:
 //   pie.Initialize(gns, config);
-//   pie.SetServerWorld(serverWorld);
+//   pie.SetAuthorityWorld(serverWorld);
 //   pie.SetReplicationSystem(repl);
 //   pie.AddClient(ownerID, clientWorld);
 //   // Driven by Sentinel: PumpMessages(), TickInputSend(), Tick()
@@ -34,7 +34,7 @@ class PIENetThread : public NetThreadBase<PIENetThread>
 	friend class NetThreadBase<PIENetThread>;
 
 public:
-	void SetServerWorld(World* world);
+	void SetAuthorityWorld(World* world);
 	void SetReplicationSystem(ReplicationSystem* repl);
 
 	/// Register a client handler keyed by its GNS connection handle.
@@ -50,26 +50,26 @@ public:
 	void ClearClients();
 
 	/// Call after Initialize() to wire the Server child handler to the shared transport.
-	/// Must be called before SetServerWorld / AddClient.
+	/// Must be called before SetAuthorityWorld / AddClient.
 	void InitChildren();
 
-	ServerNetThread& GetServer() { return Server; }
+	AuthorityNetThread& GetAuthority() { return Authority; }
 
 	// Called by Sentinel — must be public.
-	void TickInputSend(); // delegates to each ClientNetThread handler
+	void TickInputSend(); // delegates to each OwnerNetThread handler
 
 private:
 	void HandleMessage(const ReceivedMessage& msg);
 	void TickReplication(); // also ticks all owned FlowManagers
 
-	ServerNetThread Server;
+	AuthorityNetThread Authority;
 
 	struct ClientEntry
 	{
 		HSteamNetConnection Handle = 0; // client-side GNS handle — used for routing before OwnerID is assigned
 		uint8_t OwnerID            = 0; // 0 = unassigned (handshake not yet complete)
-		World* ClientWorld         = nullptr; // non-owning — EditorContext owns the World via FlowManager
-		std::unique_ptr<ClientNetThread> Handler;
+		World* OwnerWorld         = nullptr; // non-owning — EditorContext owns the World via FlowManager
+		std::unique_ptr<OwnerNetThread> Handler;
 	};
 	std::vector<ClientEntry> Clients;
 

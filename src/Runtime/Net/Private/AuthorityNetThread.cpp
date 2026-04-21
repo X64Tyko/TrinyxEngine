@@ -1,4 +1,4 @@
-#include "ServerNetThread.h"
+#include "AuthorityNetThread.h"
 
 #include "EngineConfig.h"
 #include "FlowManager.h"
@@ -14,21 +14,21 @@
 #include <algorithm>
 #include <cstring>
 
-void ServerNetThread::BindSoulCallbacks()
+void AuthorityNetThread::BindSoulCallbacks()
 {
-	if (!ConnectionMgr || !ServerWorld) return;
+	if (!ConnectionMgr || !AuthorityWorld) return;
 
-	ConnectionMgr->OnClientDisconnected.Bind<ServerNetThread, &ServerNetThread::OnClientDisconnectedCB>(this);
+	ConnectionMgr->OnClientDisconnected.Bind<AuthorityNetThread, &AuthorityNetThread::OnClientDisconnectedCB>(this);
 }
 
-void ServerNetThread::OnClientDisconnectedCB(uint8_t ownerID)
+void AuthorityNetThread::OnClientDisconnectedCB(uint8_t ownerID)
 {
 	if (ownerID != 0 && ownerID < MaxOwnerIDs) InputLogs[ownerID].reset(); // free the log; slot becomes nullptr
 
-	if (FlowManager* flow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr) if (ownerID != 0) flow->OnClientDisconnected(ownerID);
+	if (FlowManager* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr) if (ownerID != 0) flow->OnClientDisconnected(ownerID);
 }
 
-void ServerNetThread::CreateInputLog(uint8_t ownerID)
+void AuthorityNetThread::CreateInputLog(uint8_t ownerID)
 {
 	if (ownerID == 0 || ownerID >= MaxOwnerIDs) return;
 
@@ -47,12 +47,12 @@ void ServerNetThread::CreateInputLog(uint8_t ownerID)
 }
 
 
-void ServerNetThread::WirePlayerInputInjector(World* world)
+void AuthorityNetThread::WirePlayerInputInjector(World* world)
 {
 	LogicThread* logic = world ? world->GetLogicThread() : nullptr;
 	if (!logic) return;
 
-	// Capture 'this' — ServerNetThread outlives the LogicThread (engine shutdown order).
+	// Capture 'this' — AuthorityNetThread outlives the LogicThread (engine shutdown order).
 	// Returns true if the sim should stall (at least one player's input hasn't arrived).
 	// Two-pass: stall check first so we never partially inject a frame.
 	logic->SetPlayerInputInjector([this, world, logic](uint32_t frameNumber) -> bool
@@ -218,7 +218,7 @@ void ServerNetThread::WirePlayerInputInjector(World* world)
 	});
 }
 
-void ServerNetThread::TickReplication()
+void AuthorityNetThread::TickReplication()
 {
 	if (Replicator) Replicator->Tick(ConnectionMgr);
 
@@ -228,7 +228,7 @@ void ServerNetThread::TickReplication()
 	if (!ConnectionMgr) return;
 	for (const auto& ci : ConnectionMgr->GetConnections())
 	{
-		if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
+		if (!ci.bConnected || !ci.bAuthoritySide || ci.OwnerID == 0) continue;
 		if (ci.RepState < ClientRepState::Playing) continue;
 		ConnectionInfo* mutableCi = ConnectionMgr->FindConnection(ci.Handle);
 		if (!mutableCi) continue;
@@ -236,7 +236,7 @@ void ServerNetThread::TickReplication()
 	}
 }
 
-void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
+void AuthorityNetThread::HandleMessage(const ReceivedMessage& msg)
 {
 	auto type = static_cast<NetMessageType>(msg.Header.Type);
 
@@ -311,10 +311,10 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 
 				ConnectionMgr->GenerateNetID(msg.Connection);
 
-				if (ServerWorld) ServerWorld->EnsurePlayerInputSlot(ci->OwnerID);
+				if (AuthorityWorld) AuthorityWorld->EnsurePlayerInputSlot(ci->OwnerID);
 
-				const uint32_t serverFrame = (ServerWorld && ServerWorld->GetLogicThread())
-												 ? ServerWorld->GetLogicThread()->GetLastCompletedFrame()
+				const uint32_t serverFrame = (AuthorityWorld && AuthorityWorld->GetLogicThread())
+												 ? AuthorityWorld->GetLogicThread()->GetLastCompletedFrame()
 												 : 0;
 				ci->ServerFrameAtHandshake = serverFrame;
 
@@ -332,8 +332,8 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 					NetMessageType::ConnectionHandshake, hsPay, /*reliable=*/true, serverFrame);
 
 				{
-					Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
-									 ? ServerWorld->GetFlowManager()->GetSoul(ci->OwnerID)
+					Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
+									 ? AuthorityWorld->GetFlowManager()->GetSoul(ci->OwnerID)
 									 : nullptr;
 					LOG_NET_INFO_F(soul, "[ServerNet] HandshakeAccept → OwnerID=%u frame=%u tickRate=%u",
 								   ci->OwnerID, serverFrame, hsPay.TickRate);
@@ -362,8 +362,8 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 				ci->ClientLocalFrameAtHandshake = req->LocalFrameAtHandshake;
 				if (PlayerInputLog* log = GetInputLog(ci->OwnerID)) log->FrameOffset = ci->GetFrameOffset();
 
-				const uint32_t serverFrame = (ServerWorld && ServerWorld->GetLogicThread())
-												 ? ServerWorld->GetLogicThread()->GetLastCompletedFrame()
+				const uint32_t serverFrame = (AuthorityWorld && AuthorityWorld->GetLogicThread())
+												 ? AuthorityWorld->GetLogicThread()->GetLastCompletedFrame()
 												 : 0;
 
 				ClockSyncPayload resp{};
@@ -373,8 +373,8 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 				NetChannel ch(ci, ConnectionMgr);
 				ch.Send(NetMessageType::ClockSync, resp, /*reliable=*/false, serverFrame);
 
-				const std::string localPath = (ServerWorld && ServerWorld->GetFlowManager())
-												  ? ServerWorld->GetFlowManager()->GetActiveLevelLocalPath()
+				const std::string localPath = (AuthorityWorld && AuthorityWorld->GetFlowManager())
+												  ? AuthorityWorld->GetFlowManager()->GetActiveLevelLocalPath()
 												  : std::string{};
 				if (!localPath.empty())
 				{
@@ -389,8 +389,8 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 
 					ci->RepState = ClientRepState::LevelLoading;
 					{
-						Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
-										 ? ServerWorld->GetFlowManager()->GetSoul(ci->OwnerID)
+						Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
+										 ? AuthorityWorld->GetFlowManager()->GetSoul(ci->OwnerID)
 										 : nullptr;
 						LOG_NET_INFO_F(soul, "[ServerNet] ClockSyncResponse + TravelNotify → LevelLoading (frame=%u, level=%s)",
 									   serverFrame, travelMsg.LevelPath);
@@ -400,8 +400,8 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 				{
 					ci->RepState = ClientRepState::Loading;
 					{
-						Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
-										 ? ServerWorld->GetFlowManager()->GetSoul(ci->OwnerID)
+						Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
+										 ? AuthorityWorld->GetFlowManager()->GetSoul(ci->OwnerID)
 										 : nullptr;
 						LOG_NET_INFO_F(soul, "[ServerNet] ClockSyncResponse → Loading (frame=%u) [no level loaded]", serverFrame);
 					}
@@ -417,11 +417,11 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 				if (ci->RepState == ClientRepState::LevelLoading)
 				{
 					ci->RepState = ClientRepState::LevelLoaded;
-					if (FlowManager* flow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr) flow->OnClientLoaded(ci->OwnerID);
+					if (FlowManager* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr) flow->OnClientLoaded(ci->OwnerID);
 
 					// Log after OnClientLoaded so the Soul exists and shows the correct role tag.
-					Soul* soul = (ServerWorld && ServerWorld->GetFlowManager())
-									 ? ServerWorld->GetFlowManager()->GetSoul(ci->OwnerID)
+					Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
+									 ? AuthorityWorld->GetFlowManager()->GetSoul(ci->OwnerID)
 									 : nullptr;
 					LOG_NET_INFO_F(soul, "[ServerNet] LevelReady received — client LevelLoaded (ownerID=%u)", ci->OwnerID);
 				}
@@ -466,7 +466,7 @@ void ServerNetThread::HandleMessage(const ReceivedMessage& msg)
 				}
 
 				{
-					if (FlowManager* flow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr)
+					if (FlowManager* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr)
 					{
 						if (Soul* soul = flow->GetSoul(ci->OwnerID))
 						{
