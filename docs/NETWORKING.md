@@ -273,7 +273,7 @@ Editor creates server + N client Worlds in the same process with loopback GNS co
 Each client World gets its own OwnerID, viewport, field slab, and InputBuffer.
 Server World runs headless (no renderer).
 Input routes to the focused viewport's World via `InputTargetWorld`.
-Both `ServerNetThread::HandleMessage` and `ClientNetThread::HandleMessage` run in the same process;
+Both `AuthorityNetThread::HandleMessage` and `OwnerNetThread::HandleMessage` run in the same process;
 `WorldMap[ownerID]` routes messages to the correct World.
 
 ---
@@ -297,10 +297,100 @@ Delta compression yields mostly zeros per tick. Far superior to AoS where mixed 
 
 ---
 
-## Known Gaps
+## Known Gaps / In Progress
 
 - No delta compression (full state every tick)
 - No interest management / relevancy culling
-- No entity destruction replication
 - `PlayerBeginRequest`/`PlayerBeginConfirm`/`PlayerBeginReject` spawn pipeline not yet fully wired
 - `ConstructHandle` not yet implemented
+
+---
+
+## Planned Refactor (Designed, Not Yet Implemented)
+
+### Vocabulary
+
+All networking code uses this vocabulary — never raw "server"/"client" as nouns:
+
+| Term | Meaning |
+|---|---|
+| `Authority` | Dedicated server or the authoritative sim side of a Host |
+| `Owner` | Local player; the Soul that owns input for an entity |
+| `Host` | Listen server — Soul with both `Authority + Owner` roles (`EngineMode::Host`) |
+| `Echo` | Non-owning entity stance on a client (remote player representation) |
+| `Solo` | Offline, no networking (`EngineMode::Standalone`) |
+| `AuthorityNetThread` | Authority-side net handler |
+| `OwnerNetThread` | Owner-side net handler |
+
+### `LogicThread<TSimMode>` — Sim Mode Refactor
+
+`LogicThread` is being templatized on a CRTP sim mode to eliminate all in-line Authority/Owner branching:
+
+```cpp
+template<typename TSimMode>
+class LogicThread : public SimModeBase<TSimMode> { ... };
+```
+
+**Three modes** — dead code never compiles in a given build:
+- **`AuthoritySim`** — `OnSimInput` injects per-player `PlayerInputLog` from the client's `ServerClientChannel`; `OnFramePublished` advances `CommittedFrameHorizon`, dispatches per-client replication jobs
+- **`OwnerSim`** — `OnSimInput` pushes to `InputAccumRing`; `OnFramePublished` is a no-op
+- **`SoloSim`** — both are no-ops
+
+Other removals from `LogicThread`: `std::function PlayerInputInjector` (inlined into sim mode), camera state (moved to `CameraManager`). `PhysicsDivizor` branch pre-calculated once per frame as `bPhysStepBegin`/`bPhysStepEnd`.
+
+### `ServerClientChannel` — Per-Client Replication State
+
+Replaces the single global `Replicated[]` bitvector. One per connected client, O(1) OwnerID lookup:
+
+```cpp
+struct ServerClientChannel {
+    NetChannel          Send;
+    std::vector<bool>   Replicated;         // per-entity replication tracking
+    PlayerInputLog      InputLog;           // inbound input frames from this client
+    TentativeDestroys_t TentativeDestroys;  // indexed by frame, pre-CommittedFrameHorizon
+    PendingNetDespawns  PendingNetDespawns; // post-commit, awaiting send
+    ClientRepState      RepState;
+    OwnerID_t           OwnerID;
+    bool                Active;
+};
+```
+
+`ReplicationSystem` holds `Clients[MaxOwnerIDs]` for O(1) lookup — no more `FindConnectionByOwnerID` in replication paths.
+
+**Lives inside the World it belongs to** — PIE worlds are naturally isolated; each World's `ReplicationSystem` has its own `Clients[]`. Eliminates the `bAuthoritySide` PIE disambiguation hack entirely.
+
+**Channel owns job creation and routing.** Sentinel does zero networking work beyond signalling `OnFramePublished`.
+
+### Gated Push Replication Model
+
+```
+PublishCompletedFrame → OnFramePublished → dispatch one read-only job per Loaded+ client
+```
+
+Each job owns its `ServerClientChannel` exclusively — zero contention. Replication state correction and spawn sends are read-only against the ECS slab; they run async alongside the render thread.
+
+**Flush queuing:** Changes from `OnFramePublished` are queued for the next net tick, not sent immediately. Logic rate (512Hz) and net rate (30Hz) are decoupled.
+
+**Late join / reconnect:** `SendSpawns` iterates ALL entities with a valid net handle — no relevancy filter, no distance gate. Full world state on connection. On reconnect the client tombstones all replicated entities, flushes its registry, and reconnects as a late joiner. Generation bumps on `GlobalEntityHandle` and `EntityNetHandle` prevent aliasing.
+
+### Four-Phase Networked Despawn
+
+Gated behind `CommittedFrameHorizon` (all player inputs confirmed for that frame):
+
+**Phase 0 — Tentative** (speculative sim, frame not committed)
+- Entity dies → recorded in `TentativeDestroys[frame]` per `ServerClientChannel`
+- Net index held. No packet sent. Rollback cancels this and revives the entity.
+
+**Phase 1 — Commit** (`CommittedFrameHorizon` passes the death frame)
+- Entry graduates to `PendingNetDespawns`. `Replicated[i]` cleared on the channel.
+- **Server cannot free the net slot before this transition.**
+
+**Phase 2 — Send** (Authority-side `SendDespawns()`)
+- Batches N × `uint32_t` net handle values, sent reliable.
+- `ConfirmNetRecycles()` fires after send. GNS reliable ordering makes explicit ACK unnecessary.
+
+**Phase 3 — Client Apply** (`OwnerNetThread` `EntityDestroy` handler)
+- Receives batch, looks up each via `NetToRecord`, calls `Destroy()` locally.
+- `ConfirmLocalRecycles` + `ConfirmNetRecycles` run normally.
+
+Wire format: `EntityDestroyPayload` = N × `uint32_t` (net handle values), count = `PayloadSize / 4`.

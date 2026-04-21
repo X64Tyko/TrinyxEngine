@@ -8,8 +8,8 @@
 ## Timeline Context
 
 **Project Start:** ~2026-02-01 (Week 1)
-**Current Date:** 2026-04-03
-**Phase:** Game Flow (Foundation Stage 3 — Construct/View + Networking proven, building gameplay layer)
+**Current Date:** 2026-04-21
+**Phase:** Networking Refactor (Foundation Stage 3 — Construct/View proven, networking architecture redesign in progress)
 
 ---
 
@@ -38,8 +38,8 @@ gameplay systems on top of the proven Construct/View foundation.
 **Hardening targets (non-exhaustive):**
 
 - ~~Wire cumulative dirty bit array to GPU upload~~ ✅ Implemented (2026-03-29)
-- Migrate `GetTemporalFieldWritePtr` from Archetype to TemporalComponentCache
-- Remove duplicated `TemporalFrameStride` from Archetype
+- ~~Migrate `GetTemporalFieldWritePtr` from Archetype to TemporalComponentCache~~ ✅ Done (2026-04-21) — `GetWriteFramePtr`/`GetReadFramePtr` on `ComponentCacheBase`
+- ~~Remove duplicated `TemporalFrameStride` from Archetype~~ ✅ Done (2026-04-21) — `BuildFieldArrayTable` moved out-of-line, queries cache directly
 - Fixed-point coordinate system (`Fixed32`, `SimFloat` alias, Jolt bridge validation)
 - Audit hot-path data structures for cache efficiency
 - Archetype field allocation and meta storage cleanup
@@ -316,8 +316,8 @@ in the long run.
 - [ ] **Presentation Reconciler** — Anti-Events (RapidFadeOut, SoftCancel, RapidDecay) for rollback-driven effect
   correction
 - [ ] **Audio** — SDL3 thin wrapper (handle-based for Anti-Event compatibility)
-- [ ] `GetTemporalFieldWritePtr` migration from Archetype to TemporalComponentCache
-- [ ] `TemporalFrameStride` removal from Archetype (duplicated from cache)
+- [ ] `GetTemporalFieldWritePtr` migration from Archetype to TemporalComponentCache ✅ Done (2026-04-21)
+- [ ] `TemporalFrameStride` removal from Archetype (duplicated from cache) ✅ Done (2026-04-21)
 
 ### Known Issues / Technical Debt
 
@@ -361,11 +361,9 @@ in the long run.
 
 #### ECS / Memory
 
-8. **`TemporalFrameStride` duplicated on Archetype.** Should call `cache->GetFrameStride()` instead.
-   Currently cached redundantly on every Archetype instance.
+8. ~~**`TemporalFrameStride` duplicated on Archetype.**~~ ✅ Fixed (2026-04-21) — `BuildFieldArrayTable` moved out-of-line to Archetype.cpp; queries `cache->GetFrameStride()` directly.
 
-9. **`GetTemporalFieldWritePtr` lives on Archetype, not TemporalComponentCache.** Logically belongs on the
-   cache. Moving it is mechanical but touches several call sites — deferred to hardening pass.
+9. ~~**`GetTemporalFieldWritePtr` lives on Archetype, not TemporalComponentCache.**~~ ✅ Fixed (2026-04-21) — `GetWriteFramePtr(void*)` and `GetReadFramePtr(void*)` added to `ComponentCacheBase`; all call sites updated.
 
 10. **Reflection system relies on static initialisation order.** `TNX_REGISTER_COMPONENT`,
     `TNX_TEMPORAL_FIELDS`, `TNX_REGISTER_SCHEMA` etc. are all driven by static constructors. Cross-TU
