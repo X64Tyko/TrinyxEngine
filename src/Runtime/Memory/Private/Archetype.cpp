@@ -41,7 +41,7 @@ Archetype::~Archetype()
 
 // Populates ArchetypeFieldLayout from the component list and computes TotalChunkDataSize.
 // For each field: queries its CacheTier from ComponentFieldRegistry, then records a FieldDescriptor
-// with the appropriate frame count and stride (cold fields get frameCount=1, frameStride=0).
+// with the appropriate cache tier (cold fields are CacheTier::None, stride queried from cache at use time).
 // Called exactly once per archetype by Registry::GetOrCreateArchetype / InitializeArchetypes.
 void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& components, SystemID inArchSystemID)
 {
@@ -90,8 +90,6 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& c
 													  field.ValueType,
 													  field.RefAssetType,
 													  field.Size,
-													  temporalCache ? temporalCache->GetTotalFrameCount() : 1, // 1 frame for cold — makes frame % 1 == 0, no branch needed
-													  temporalCache ? temporalCache->GetFrameStride() : 0,
 													  temporalCache ? true : false
 												  });
 		}
@@ -107,7 +105,60 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& c
 	assert(ArchetypeFieldLayout.count() <= Chunk::MAX_CHUNK_FIELDS);
 }
 
-// Returns the number of allocated slots in a specific chunk (includes tombstoned).
+// Build interleaved dual field array table (read T, write T+1) for FieldProxy::Bind().
+// Frame stride and count are queried from the cache once — not stored per-field.
+// Cold fields (tier == None): stride=0, count=1, so math degenerates to base+0.
+void Archetype::BuildFieldDualArrayTable(Chunk* chunk, void** outDualArrayTable,
+										 uint32_t absoluteFrame, uint32_t volatileAbsoluteFrame) const
+{
+	// Hoist cache queries outside the loop — all fields sharing a tier use the same stride/count.
+	const auto* tc    = Reg->GetCache(CacheTier::Temporal);
+	const auto* vc    = Reg->GetCache(CacheTier::Volatile);
+	const size_t tStr = tc ? tc->GetFrameStride() : 0;
+	const size_t vStr = vc ? vc->GetFrameStride() : 0;
+	const uint32_t tN = tc ? tc->GetTotalFrameCount() : 1;
+	const uint32_t vN = vc ? vc->GetTotalFrameCount() : 1;
+
+	for (const auto& [fkey, fdesc] : ArchetypeFieldLayout)
+	{
+		const size_t idx   = fdesc.fieldSlotIndex;
+		auto* base         = static_cast<uint8_t*>(chunk->Header.FieldPtrs[idx]);
+		const bool isTemporal = (fdesc.tier == CacheTier::Temporal);
+		const uint32_t frame  = isTemporal ? absoluteFrame : volatileAbsoluteFrame;
+		const size_t stride   = fdesc.bIsTemporal ? (isTemporal ? tStr : vStr) : 0;
+		const uint32_t count  = fdesc.bIsTemporal ? (isTemporal ? tN : vN) : 1;
+
+		outDualArrayTable[idx * 2]     = base + (frame % count) * stride;
+		outDualArrayTable[idx * 2 + 1] = base + ((frame + 1) % count) * stride;
+	}
+}
+
+// Build single field array table for a specific frame (update dispatch, serialization).
+// Cold fields resolve to base+0.
+void Archetype::BuildFieldArrayTable(Chunk* chunk, void** outFieldArrayTable,
+									 uint32_t absoluteFrame, uint32_t volatileAbsoluteFrame) const
+{
+	const auto* tc    = Reg->GetCache(CacheTier::Temporal);
+	const auto* vc    = Reg->GetCache(CacheTier::Volatile);
+	const size_t tStr = tc ? tc->GetFrameStride() : 0;
+	const size_t vStr = vc ? vc->GetFrameStride() : 0;
+	const uint32_t tN = tc ? tc->GetTotalFrameCount() : 1;
+	const uint32_t vN = vc ? vc->GetTotalFrameCount() : 1;
+
+	for (const auto& [fkey, fdesc] : ArchetypeFieldLayout)
+	{
+		const size_t idx      = fdesc.fieldSlotIndex;
+		auto* base            = static_cast<uint8_t*>(chunk->Header.FieldPtrs[idx]);
+		const bool isTemporal = (fdesc.tier == CacheTier::Temporal);
+		const uint32_t frame  = isTemporal ? absoluteFrame : volatileAbsoluteFrame;
+		const size_t stride   = fdesc.bIsTemporal ? (isTemporal ? tStr : vStr) : 0;
+		const uint32_t count  = fdesc.bIsTemporal ? (isTemporal ? tN : vN) : 1;
+
+		outFieldArrayTable[idx] = base + (frame % count) * stride;
+	}
+}
+
+
 // Use for iteration bounds — callers rely on bitplane/masked-store to skip dead slots.
 uint32_t Archetype::GetAllocatedChunkCount(size_t chunkIndex) const
 {
@@ -211,8 +262,8 @@ void Archetype::RemoveEntity(size_t chunkIndex, uint32_t localIndex, uint32_t ar
 		// Offset into the correct write frame for temporal/volatile fields
 		if (flagDesc->bIsTemporal)
 		{
-			uint32_t writeFrame = Reg->GetCache(flagDesc->tier)->GetActiveWriteFrame();
-			flagsBase           += writeFrame * flagDesc->fieldFrameStride;
+			auto* cache = Reg->GetCache(flagDesc->tier);
+			flagsBase   = static_cast<uint8_t*>(cache->GetWriteFramePtr(flagsBase));
 		}
 
 		auto* metaInfo = reinterpret_cast<uint32_t*>(flagsBase) + localIndex;

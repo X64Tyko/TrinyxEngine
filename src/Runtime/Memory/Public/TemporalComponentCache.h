@@ -123,6 +123,17 @@ public:
 	// Get the stride between frames (for calculating frame N from frame 0 pointer)
 	FORCE_INLINE size_t GetFrameStride() const { return sizeof(TemporalFrameHeader) + FrameDataCapacity; }
 
+	// Advance a frame-0 base pointer to the current write or read frame.
+	// Use these instead of manually computing base + frame * stride.
+	FORCE_INLINE void* GetWriteFramePtr(void* frame0Base) const
+	{
+		return static_cast<uint8_t*>(frame0Base) + ActiveWriteFrame * GetFrameStride();
+	}
+	FORCE_INLINE void* GetReadFramePtr(void* frame0Base) const
+	{
+		return static_cast<uint8_t*>(frame0Base) + LastWrittenFrame * GetFrameStride();
+	}
+
 	// Copy field data from fromFrame into toFrame before dispatch.
 	// Called once per logic tick so all FieldProxy writes start from the previous frame's state.
 	void PropagateFrameData(uint32_t fromFrame, uint32_t toFrame, TrinyxJobs::JobCounter& counter);

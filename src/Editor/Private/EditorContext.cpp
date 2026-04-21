@@ -345,8 +345,8 @@ void EditorContext::DrawGizmo()
 			auto* base = static_cast<uint8_t*>(State.SelectedChunk->GetFieldPtr(flagDesc->fieldSlotIndex));
 			if (base)
 			{
-				uint32_t writeFrame             = State.RegistryPtr->GetCache(flagDesc->tier)->GetActiveWriteFrame();
-				auto* flags                     = reinterpret_cast<int32_t*>(base + writeFrame * flagDesc->fieldFrameStride);
+				auto* flags = reinterpret_cast<int32_t*>(
+					State.RegistryPtr->GetCache(flagDesc->tier)->GetWriteFramePtr(base));
 				flags[State.SelectedLocalIndex] |= static_cast<int32_t>(TemporalFlagBits::Dirty);
 			}
 		}

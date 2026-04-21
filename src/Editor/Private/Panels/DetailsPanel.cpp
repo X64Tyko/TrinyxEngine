@@ -26,9 +26,9 @@ static void MarkEntityDirty(EditorState& state)
 	auto* base = static_cast<uint8_t*>(state.SelectedChunk->GetFieldPtr(flagDesc->fieldSlotIndex));
 	if (!base) return;
 
-	// CacheSlotMeta is always temporal tier — use the public accessor
-	uint32_t writeFrame             = state.RegistryPtr->GetTemporalCache()->GetActiveWriteFrame();
-	auto* flags                     = reinterpret_cast<int32_t*>(base + writeFrame * flagDesc->fieldFrameStride);
+	// CacheSlotMeta is always temporal tier — use the cache's write frame helper
+	auto* cache                     = state.RegistryPtr->GetTemporalCache();
+	auto* flags                     = reinterpret_cast<int32_t*>(cache->GetWriteFramePtr(base));
 	flags[state.SelectedLocalIndex] |= static_cast<int32_t>(TemporalFlagBits::Dirty);
 }
 
