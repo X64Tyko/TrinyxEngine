@@ -255,9 +255,10 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 
 		case NetMessageType::EntitySpawn:
 			{
-				if (msg.Payload.size() < sizeof(EntitySpawnPayload))
+				if (msg.Payload.size() < sizeof(EntitySpawnPayload) ||
+					msg.Payload.size() % sizeof(EntitySpawnPayload) != 0)
 				{
-					LOG_ENG_WARN_F("[ClientNet] EntitySpawn payload too small (%zu)", msg.Payload.size());
+					LOG_ENG_WARN_F("[ClientNet] EntitySpawn payload bad size (%zu)", msg.Payload.size());
 					break;
 				}
 
@@ -479,28 +480,32 @@ void ClientNetThread::FlushDeferredEntitySpawns()
 			continue;
 		}
 
-		if (it->Payload.size() < sizeof(EntitySpawnPayload))
+		const size_t payloadSize = it->Payload.size();
+		if (payloadSize < sizeof(EntitySpawnPayload) || payloadSize % sizeof(EntitySpawnPayload) != 0)
 		{
-			LOG_ENG_WARN_F("[ClientNet] Deferred EntitySpawn payload too small (%zu)", it->Payload.size());
+			LOG_ENG_WARN_F("[ClientNet] Deferred EntitySpawn payload bad size (%zu)", payloadSize);
 			it = DeferredEntitySpawns.erase(it);
 			continue;
 		}
 
-		EntitySpawnPayload spawnData = *reinterpret_cast<const EntitySpawnPayload*>(it->Payload.data());
-		Registry* spawnReg           = clientWorld->GetRegistry();
-		uint32_t& SpawnFrame         = it->ServerSpawnFrame;
-		clientWorld->SpawnAndWait([spawnReg, &spawnData, SpawnFrame](uint32_t)
+		const size_t count              = payloadSize / sizeof(EntitySpawnPayload);
+		const EntitySpawnPayload* batch = reinterpret_cast<const EntitySpawnPayload*>(it->Payload.data());
+		Registry* spawnReg              = clientWorld->GetRegistry();
+		const uint32_t spawnFrame       = it->ServerSpawnFrame;
+
+		clientWorld->SpawnAndWait([spawnReg, batch, count, spawnFrame](uint32_t)
 		{
-			ReplicationSystem::HandleEntitySpawn(spawnReg, spawnData, SpawnFrame);
+			for (size_t k = 0; k < count; ++k)
+				ReplicationSystem::HandleEntitySpawn(spawnReg, batch[k], spawnFrame);
 		});
 
-		// Request a rollback to the entity's server spawn frame so the entity is inserted
-		// at the correct historical ring slot. ReplayServerEventsAt will re-hydrate it.
+		// Request a rollback to the entity's server spawn frame so the entities are inserted
+		// at the correct historical ring slot. ReplayServerEventsAt will re-hydrate them.
 #ifdef TNX_ENABLE_ROLLBACK
 		LogicThread* logic = clientWorld->GetLogicThread();
-		if (logic && it->ServerSpawnFrame > 0)
+		if (logic && spawnFrame > 0)
 		{
-			logic->EnqueueSpawnRollback(it->ServerSpawnFrame);
+			logic->EnqueueSpawnRollback(spawnFrame);
 		}
 #endif
 

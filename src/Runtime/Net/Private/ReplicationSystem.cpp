@@ -309,63 +309,65 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 	const uint32_t maxEntities = temporalCache->GetMaxCachedEntityCount();
 	if (Replicated.size() < maxEntities) Replicated.resize(maxEntities, false);
 
-	// Helper: build and send one EntitySpawn for entity at index i.
-	// clientFrame must already be translated to the receiver's local frame space.
-	auto SendOneSpawn = [&](uint32_t i, HSteamNetConnection handle, bool bAliveOnly, uint32_t clientFrame)
+	// Helper: build one EntitySpawnPayload for entity at slab index i.
+	// Returns false if the entity has no valid record and should be skipped.
+	auto BuildSpawnEntry = [&](uint32_t i, bool bAliveOnly, EntitySpawnPayload& out) -> bool
 	{
 		GlobalEntityHandle gHandle = reg->GlobalEntityRegistry.LookupGlobalHandle(static_cast<EntityCacheHandle>(i));
 		EntityRecord* record       = reg->GlobalEntityRegistry.Records[gHandle.GetIndex()];
-		if (!record || !record->IsValid()) return;
+		if (!record || !record->IsValid()) return false;
 
 		EntityNetHandle netHandle = record->NetworkID;
 		if (netHandle.NetIndex == 0) netHandle = AssignNetHandle(reg, gHandle);
 
-		EntitySpawnPayload spawnMsg{};
-		spawnMsg.NetHandle = netHandle.Value;
-
 		EntityNetManifest manifest{};
 		manifest.ClassType = record->Arch ? record->Arch->ArchClassID : 0;
-		spawnMsg.Manifest  = manifest.Value;
 
-		// SpawnFlags: TemporalFlagBits in high 16 bits, generation in low 16 bits.
-		// Receiver writes GetFlags() directly to CacheSlotMeta — no translation needed.
 		const uint32_t flagBits = bAliveOnly
 									  ? static_cast<uint32_t>(TemporalFlagBits::Alive)
 									  : static_cast<uint32_t>(TemporalFlagBits::Active | TemporalFlagBits::Alive);
-		spawnMsg.SpawnFlags = EntitySpawnPayload::Pack(flagBits, record->GetGeneration());
 
-		spawnMsg.PosX  = posX ? posX[i] : 0.0f;
-		spawnMsg.PosY  = posY ? posY[i] : 0.0f;
-		spawnMsg.PosZ  = posZ ? posZ[i] : 0.0f;
-		spawnMsg.RotQx = rotQx ? rotQx[i] : 0.0f;
-		spawnMsg.RotQy = rotQy ? rotQy[i] : 0.0f;
-		spawnMsg.RotQz = rotQz ? rotQz[i] : 0.0f;
-		spawnMsg.RotQw = rotQw ? rotQw[i] : 1.0f;
+		out           = {};
+		out.NetHandle = netHandle.Value;
+		out.Manifest  = manifest.Value;
+		out.SpawnFlags = EntitySpawnPayload::Pack(flagBits, record->GetGeneration());
+		out.PosX  = posX  ? posX[i]  : 0.0f;
+		out.PosY  = posY  ? posY[i]  : 0.0f;
+		out.PosZ  = posZ  ? posZ[i]  : 0.0f;
+		out.RotQx = rotQx ? rotQx[i] : 0.0f;
+		out.RotQy = rotQy ? rotQy[i] : 0.0f;
+		out.RotQz = rotQz ? rotQz[i] : 0.0f;
+		out.RotQw = rotQw ? rotQw[i] : 1.0f;
+		out.ScaleX  = scX   ? scX[i]   : 1.0f;
+		out.ScaleY  = scY   ? scY[i]   : 1.0f;
+		out.ScaleZ  = scZ   ? scZ[i]   : 1.0f;
+		out.ColorR  = colR  ? colR[i]  : 1.0f;
+		out.ColorG  = colG  ? colG[i]  : 1.0f;
+		out.ColorB  = colB  ? colB[i]  : 1.0f;
+		out.ColorA  = colA  ? colA[i]  : 1.0f;
+		out.MeshID  = meshID ? meshID[i] : 0;
+		return true;
+	};
 
-		spawnMsg.ScaleX = scX ? scX[i] : 1.0f;
-		spawnMsg.ScaleY = scY ? scY[i] : 1.0f;
-		spawnMsg.ScaleZ = scZ ? scZ[i] : 1.0f;
-
-		spawnMsg.ColorR = colR ? colR[i] : 1.0f;
-		spawnMsg.ColorG = colG ? colG[i] : 1.0f;
-		spawnMsg.ColorB = colB ? colB[i] : 1.0f;
-		spawnMsg.ColorA = colA ? colA[i] : 1.0f;
-
-		spawnMsg.MeshID = meshID ? meshID[i] : 0;
-
-		PacketHeader spawnHeader{};
-		spawnHeader.Type        = static_cast<uint8_t>(NetMessageType::EntitySpawn);
-		spawnHeader.Flags       = PacketFlag::DefaultFlags;
-		spawnHeader.PayloadSize = sizeof(EntitySpawnPayload);
-		spawnHeader.FrameNumber = clientFrame;
-		spawnHeader.SenderID    = 0;
-		connMgr->Send(handle, spawnHeader, reinterpret_cast<const uint8_t*>(&spawnMsg), true);
+	// Helper: send a batch of spawn entries as a single EntitySpawn packet.
+	auto FlushSpawnBatch = [&](HSteamNetConnection handle, const std::vector<EntitySpawnPayload>& batch, uint32_t clientFrame)
+	{
+		if (batch.empty()) return;
+		PacketHeader hdr{};
+		hdr.Type        = static_cast<uint8_t>(NetMessageType::EntitySpawn);
+		hdr.Flags       = PacketFlag::DefaultFlags;
+		hdr.FrameNumber = clientFrame;
+		hdr.SenderID    = 0;
+		hdr.PayloadSize = static_cast<uint32_t>(batch.size() * sizeof(EntitySpawnPayload));
+		connMgr->Send(handle, hdr, reinterpret_cast<const uint8_t*>(batch.data()), true);
 	};
 
 	// --- Pass 1: Initial flush for newly LevelLoaded connections ---
-	// Send all active+replicated entities with Alive-only flag.
-	// After flushing, send ServerReady and advance RepState → Loaded.
+	// Collect all Alive+Replicated entities into one batch per connection, then send.
 	auto& connections = connMgr->GetConnections();
+	std::vector<EntitySpawnPayload> spawnBatch;
+	spawnBatch.reserve(64);
+
 	for (auto& ci : connections)
 	{
 		if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
@@ -373,15 +375,17 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 
 		const uint32_t ciClientFrame = ci.ToClientFrame(frameNumber);
 
-		int flushCount = 0;
+		spawnBatch.clear();
 		for (uint32_t i = 0; i < maxEntities; ++i)
 		{
 			if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Alive))) continue;
 			if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Replicated))) continue;
-			SendOneSpawn(i, ci.Handle, /*bAliveOnly=*/true, ciClientFrame);
-			flushCount++;
+			EntitySpawnPayload entry{};
+			if (BuildSpawnEntry(i, /*bAliveOnly=*/true, entry))
+				spawnBatch.push_back(entry);
 		}
 
+		FlushSpawnBatch(ci.Handle, spawnBatch, ciClientFrame);
 		ci.bInitialSpawnFlushed = true;
 
 		// Send ServerReady — client will sweep Alive→Active then send PlayerBeginRequest.
@@ -401,8 +405,8 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 		{
 			FlowManager* serverFlow = ServerWorld ? ServerWorld->GetFlowManager() : nullptr;
 			Soul* soul              = serverFlow ? serverFlow->GetSoul(ci.OwnerID) : nullptr;
-			LOG_NET_INFO_F(soul, "[Replication] Initial flush: %d entities → ownerID=%u, ServerReady sent → Loaded",
-						   flushCount, ci.OwnerID);
+			LOG_NET_INFO_F(soul, "[Replication] Initial flush: %zu entities → ownerID=%u, ServerReady sent → Loaded",
+						   spawnBatch.size(), ci.OwnerID);
 
 			const FlowState* activeState = serverFlow ? serverFlow->GetActiveState() : nullptr;
 			if (activeState && activeState->GetRequirements().SweepsAliveFlagsOnServerReady && ServerWorld)
@@ -418,30 +422,39 @@ void ReplicationSystem::SendSpawns(NetConnectionManager* connMgr, uint32_t frame
 	}
 
 	// --- Pass 2: Incremental spawns for fully loaded connections ---
-	// Send entities not yet in the global Replicated set to all Loaded+ connections.
-	int spawnCount = 0;
+	// Collect all new entities into one batch per connection, then send.
+	// Outer loop over entities so Replicated[] is marked exactly once.
+	// We need a per-connection batch — collect new indices first, then send per-connection.
+	std::vector<uint32_t> newEntityIndices;
 	for (uint32_t i = 0; i < maxEntities; ++i)
 	{
 		if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Alive))) continue;
 		if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Replicated))) continue;
 		if (Replicated[i]) continue;
+		newEntityIndices.push_back(i);
+		Replicated[i] = true;
+	}
 
+	if (!newEntityIndices.empty())
+	{
 		for (const auto& ci : connections)
 		{
 			if (!ci.bConnected || !ci.bServerSide || ci.OwnerID == 0) continue;
-			if (ci.RepState < ClientRepState::Loaded) continue; // Not ready yet
+			if (ci.RepState < ClientRepState::Loaded) continue;
 			if (!ci.bInitialSpawnFlushed) continue;
 
 			const uint32_t ciClientFrame = ci.ToClientFrame(frameNumber);
-			SendOneSpawn(i, ci.Handle, /*bAliveOnly=*/false, ciClientFrame);
+			spawnBatch.clear();
+			for (uint32_t i : newEntityIndices)
+			{
+				EntitySpawnPayload entry{};
+				if (BuildSpawnEntry(i, /*bAliveOnly=*/false, entry))
+					spawnBatch.push_back(entry);
+			}
+			FlushSpawnBatch(ci.Handle, spawnBatch, ciClientFrame);
 		}
-
-		Replicated[i] = true;
-		spawnCount++;
+		LOG_NET_DEBUG_F(nullptr, "[Replication] Sent %zu incremental EntitySpawn(s)", newEntityIndices.size());
 	}
-
-	if (spawnCount > 0)
-		LOG_NET_DEBUG_F(nullptr, "[Replication] Sent %d incremental EntitySpawn(s)", spawnCount);
 }
 
 // ---------------------------------------------------------------------------

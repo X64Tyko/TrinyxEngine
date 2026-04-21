@@ -181,12 +181,11 @@ struct BaseNetPayload
 // ---------------------------------------------------------------------------
 // EntitySpawnPayload — server tells client to create an entity.
 //
-// Sent reliable with NetMessageType::EntitySpawn. One entity per message.
+// Batched: one EntitySpawn message carries N entries.
+// Count = PacketHeader.PayloadSize / sizeof(EntitySpawnPayload).
+// Sent reliable with NetMessageType::EntitySpawn.
 // Client uses Manifest.ClassType to call CreateByClassID, then writes fields.
 // TODO: Replace ClassType-based spawning with PrefabID once the asset system supports it.
-// TODO: Batch spawns — one message per entity is significant overhead for initial world flush.
-//       Replace with a variable-length batch message (count + entity array) once the
-//       reliable send path can handle variable-size payloads efficiently.
 //
 // SpawnFlags layout (Generation_Bits = 16, so both halves are 16 bits):
 //
