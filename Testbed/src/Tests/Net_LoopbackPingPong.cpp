@@ -32,6 +32,7 @@ TEST(Net_LoopbackPingPong)
 	const uint64_t deadline = SDL_GetTicks() + 2000;
 	while (mgr.GetConnectionCount() < 2 && SDL_GetTicks() < deadline)
 	{
+		gnsLocal.Poll();
 		mgr.RunCallbacks();
 		SDL_Delay(10);
 	}
@@ -42,6 +43,7 @@ TEST(Net_LoopbackPingPong)
 		std::vector<ReceivedMessage> drain;
 		for (int i = 0; i < 10; ++i)
 		{
+			gnsLocal.Poll();
 			mgr.RunCallbacks();
 			mgr.PollIncoming(drain);
 			SDL_Delay(5);
@@ -73,6 +75,7 @@ TEST(Net_LoopbackPingPong)
 	const uint64_t recvDeadline = SDL_GetTicks() + 1000;
 	while (msgs.empty() && SDL_GetTicks() < recvDeadline)
 	{
+		gnsLocal.Poll();
 		mgr.RunCallbacks();
 		mgr.PollIncoming(msgs);
 		SDL_Delay(5);
@@ -99,6 +102,7 @@ TEST(Net_LoopbackPingPong)
 	const uint64_t pongDeadline = SDL_GetTicks() + 1000;
 	while (msgs.empty() && SDL_GetTicks() < pongDeadline)
 	{
+		gnsLocal.Poll();
 		mgr.RunCallbacks();
 		mgr.PollIncoming(msgs);
 		SDL_Delay(5);

@@ -230,8 +230,6 @@ void ClientNetThread::HandleMessage(const ReceivedMessage& msg)
 								LOG_NET_INFO_F(sweepSoul, "[Replication] ServerReady: swept %d Alive→Active", count);
 #ifdef TNX_ENABLE_ROLLBACK
 								reg->PushServerEvent({clientWorld->GetLogicThread()->GetLastCompletedFrame() + 1, [reg]() { reg->SweepAliveFlagsToActive(); }});
-#else
-								(void)frame;
 #endif
 							});
 						}
