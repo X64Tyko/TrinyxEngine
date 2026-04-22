@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include <algorithm>
 
-#include "Types.h" // EngineMode, SimFloat
+#include "Types.h"
 
 struct EngineConfig
 {
@@ -29,10 +29,6 @@ struct EngineConfig
 
 	// Replace remaining Unset/empty fields with compiled-in defaults.
 	void ApplyDefaults();
-
-	// Engine mode — determines which subsystems are initialized.
-	// Set via CLI args (--server, --client, --listen) or programmatically.
-	EngineMode Mode = EngineMode::Standalone;
 
 	// Headless mode: no window, no renderer, no GPU. Set via --headless CLI arg,
 	// TNX_HEADLESS compile-time define, or implied by TNX_NET_MODEL=Server.

@@ -19,11 +19,11 @@
 #include "Soul.h"
 #include "TemporalComponentCache.h"
 #include "CTransform.h"
-#include "World.h"
+#include "WorldBase.h"
 
 #include <cstring>
 
-void ReplicationSystem::Initialize(World* serverWorld)
+void ReplicationSystem::Initialize(WorldBase* serverWorld)
 {
 	AuthorityWorld = serverWorld;
 	for (auto& ch : Channels) ch.reset();

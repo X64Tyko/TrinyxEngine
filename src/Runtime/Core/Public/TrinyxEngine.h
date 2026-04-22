@@ -31,7 +31,7 @@ using NetThreadType = OwnerNet;
 class RenderThread;
 // Forward declarations
 class Registry;
-class LogicThread;
+class LogicThreadBase;
 class JoltPhysics;
 #ifdef TNX_ENABLE_NETWORK
 class NetConnectionManager;
@@ -93,7 +93,7 @@ public:
 	}
 
 	// --- World access ---
-	World* GetDefaultWorld() const { return DefaultWorld; }
+	WorldBase* GetDefaultWorld() const { return DefaultWorld; }
 	FlowManager* GetFlowManager() const { return Flow.get(); }
 
 	// Convenience: access the default world's registry.
@@ -129,16 +129,16 @@ public:
 
 	// Game-level PIE hooks — game code binds these in PostInitialize.
 	// EditorContext fires them during StartPIE/StopPIE and Play/Stop.
-	Callback<void, World*, NetConnectionManager*> OnPIEStarted;
+	Callback<void, WorldBase*, NetConnectionManager*> OnPIEStarted;
 	Callback<void, NetConnectionManager*> OnPIEStopped;
 #endif
 
-	Callback<void, World*> OnPlayStarted; // Fired when Play (Local) is clicked
+	Callback<void, WorldBase*> OnPlayStarted; // Fired when Play (Local) is clicked
 	Callback<void> OnPlayStopped;         // Fired when Stop (Local) is clicked
 
 	// Input routing — when set, PumpEvents writes to this world instead of DefaultWorld.
 	// EditorContext sets this during PIE/Play to route input to the active world.
-	World* InputTargetWorld = nullptr;
+	WorldBase* InputTargetWorld = nullptr;
 
 private:
 #ifdef TNX_ENABLE_EDITOR
@@ -191,7 +191,7 @@ private:
 	EngineConfig GameConfig; // Pure game config (no editor overrides) — used by PIE for server/client worlds
 
 	// --- World (owned by FlowManager, cached here for fast access) ---
-	World* DefaultWorld = nullptr;
+	WorldBase* DefaultWorld = nullptr;
 
 	// --- Lifecycle ---
 	std::atomic<bool> bIsRunning{false};

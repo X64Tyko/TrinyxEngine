@@ -17,7 +17,7 @@
 // Compare with: Spawn_PlayerConstruct (standalone, no replication)
 RUNTIME_TEST(Net_PlayerConstruct)
 {
-	World* world = Engine.GetDefaultWorld();
+	WorldBase* world = Engine.GetDefaultWorld();
 	ASSERT(world != nullptr);
 
 	ReplicationSystem* repl     = world->GetReplicationSystem();

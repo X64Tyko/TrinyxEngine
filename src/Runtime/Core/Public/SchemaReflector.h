@@ -469,7 +469,7 @@ FORCE_INLINE void ForEachField(Func&& func)
 //   };
 //
 // Requires the class to implement:
-//   void InitializeForReplication(World*, EntityHandle*, uint8_t viewCount)
+//   void InitializeForReplication(WorldBase*, EntityHandle*, uint8_t viewCount)
 // ---------------------------------------------------------------------------
 #define TNX_REGISTER_CONSTRUCT(ConstructClass) \
 private: \
@@ -478,10 +478,10 @@ private: \
             ReflectionRegistry::Get().RegisterConstruct( \
                 #ConstructClass, \
                 ReflectionRegistry::ConstructTypeHashFromName(#ConstructClass), \
-                [](ConstructRegistry* reg, World* w, EntityHandle* handles, uint8_t count, Soul* soul) -> void* { \
-                    static_assert(requires(ConstructClass& obj, World* w2, EntityHandle* h, uint8_t n) { \
+                [](ConstructRegistry* reg, WorldBase* w, EntityHandle* handles, uint8_t count, Soul* soul) -> void* { \
+                    static_assert(requires(ConstructClass& obj, WorldBase* w2, EntityHandle* h, uint8_t n) { \
                         obj.InitializeForReplication(w2, h, n); \
-                    }, #ConstructClass " must implement InitializeForReplication(World*, EntityHandle*, uint8_t)"); \
+                    }, #ConstructClass " must implement InitializeForReplication(WorldBase*, EntityHandle*, uint8_t)"); \
                     return reg->CreateForReplication<ConstructClass>(w, handles, count, soul); \
                 }); \
         } \

@@ -10,6 +10,7 @@
 #include "ReflectionRegistry.h"
 #include "Registry.h"
 #include "World.h"
+#include "Globals.h"
 
 #include <cstring>
 
@@ -187,7 +188,7 @@ void FlowManager::PopState()
 // World / Level operations
 // ---------------------------------------------------------------------------
 
-World* FlowManager::CreateWorld()
+WorldBase* FlowManager::CreateWorld()
 {
 	if (ActiveWorld)
 	{
@@ -195,8 +196,8 @@ World* FlowManager::CreateWorld()
 		return ActiveWorld.get();
 	}
 
-	ActiveWorld = std::make_unique<World>();
-	if (!ActiveWorld->Initialize(*Config, &ConstructReg, WindowWidth, WindowHeight))
+	ActiveWorld = std::make_unique<WorldType>();
+	if (!static_cast<WorldType*>(ActiveWorld.get())->Initialize(*Config, &ConstructReg, WindowWidth, WindowHeight))
 	{
 		LOG_ENG_ERROR("[FlowManager] World::Initialize failed");
 		ActiveWorld.reset();
@@ -450,7 +451,7 @@ FlowState* FlowManager::GetActiveState() const
 	return StateStack[StateStackCount - 1].get();
 }
 
-World* FlowManager::GetWorld() const
+WorldBase* FlowManager::GetWorld() const
 {
 	return ActiveWorld.get();
 }

@@ -1,9 +1,9 @@
 #pragma once
 
 #include "EntityRecord.h"
-#include "LogicThread.h"
+#include "LogicThreadBase.h"
 #include "Schema.h"
-#include "World.h"
+#include "WorldBase.h"
 
 class Soul;
 
@@ -71,7 +71,7 @@ public:
 		}
 	}
 	
-	void Initialize(World* InWorld)
+	void Initialize(WorldBase* InWorld)
 	{
 		OwnerWorld = InWorld;
 
@@ -85,7 +85,7 @@ public:
 		}
 
 		// Auto-register tick methods via concept detection
-		LogicThread* Logic = OwnerWorld->GetLogicThread();
+		LogicThreadBase* Logic = OwnerWorld->GetLogicThread();
 
 		if constexpr (HasPrePhysics<Derived>)
 		{
@@ -125,7 +125,7 @@ public:
 	{
 		if (!bInitialized) return;
 
-		LogicThread* Logic = OwnerWorld->GetLogicThread();
+		LogicThreadBase* Logic = OwnerWorld->GetLogicThread();
 		Logic->ScalarPrePhysicsBatch.Deregister(static_cast<Derived*>(this));
 		Logic->ScalarPostPhysicsBatch.Deregister(static_cast<Derived*>(this));
 		Logic->ScalarPhysicsStepBatch.Deregister(static_cast<Derived*>(this));
@@ -163,7 +163,7 @@ public:
 		}
 	}
 
-	World* GetWorld() const { return OwnerWorld; }
+	WorldBase* GetWorld() const { return OwnerWorld; }
 	Registry* GetRegistry() const { return OwnerWorld ? OwnerWorld->GetRegistry() : nullptr; }
 	bool IsInitialized() const { return bInitialized; }
 	uint32_t GetConstructID() const { return ConstructID; }
@@ -181,7 +181,7 @@ protected:
 	}
 
 private:
-	World* OwnerWorld    = nullptr;
+	WorldBase* OwnerWorld    = nullptr;
 	Soul* OwnerSoul      = nullptr;
 	uint32_t ConstructID = 0;
 	bool bInitialized    = false;

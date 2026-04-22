@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-class World;
+class WorldBase;
 class FlowManager;
 
 // ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ public:
 
 	/// Called when this state becomes active (pushed or transitioned to).
 	/// world may be nullptr if GetRequirements().NeedsWorld is false.
-	virtual void OnEnter(FlowManager& flow, World* world)
+	virtual void OnEnter(FlowManager& flow, WorldBase* world)
 	{
 		Flow = &flow;
 		(void)world;

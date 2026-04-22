@@ -10,7 +10,7 @@
 
 class GNSContext;
 class NetConnectionManager;
-class World;
+class WorldBase;
 struct EngineConfig;
 struct InputBuffer;
 struct ReceivedMessage;
@@ -61,7 +61,7 @@ public:
 
 	// Per-client world routing for input-frame send path.
 	// OwnerID 0 = server world. 1-255 = client connections.
-	void MapConnectionToWorld(uint8_t ownerID, World* world) { WorldMap[ownerID] = world; }
+	void MapConnectionToWorld(uint8_t ownerID, WorldBase* world) { WorldMap[ownerID] = world; }
 
 	// Default no-op — server inherits this; client and PIE override.
 	void TickInputSend()
@@ -80,7 +80,7 @@ protected:
 	NetConnectionManager* ConnectionMgr = nullptr;
 
 	// OwnerID → World for the input-send path (client legs only)
-	World* WorldMap[MaxOwnerIDs]{};
+	WorldBase* WorldMap[MaxOwnerIDs]{};
 
 private:
 	void TickClockSync(double nowSec);

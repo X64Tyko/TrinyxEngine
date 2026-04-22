@@ -18,7 +18,7 @@
 #include "Registry.h"
 #include "ReplicationSystem.h"
 #include "TemporalComponentCache.h"
-#include "World.h"
+#include "WorldBase.h"
 #include "Logger.h"
 
 #include <SDL3/SDL_timer.h>
@@ -174,7 +174,7 @@ void OwnerNet::HandleEntitySpawn(Registry* reg, const EntitySpawnPayload& payloa
 
 void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry* entries,
 									  uint32_t count, [[maybe_unused]] uint32_t clientFrame,
-									  [[maybe_unused]] LogicThread* logic, [[maybe_unused]] uint32_t LastAckedFrame)
+									  [[maybe_unused]] LogicThreadBase* logic, [[maybe_unused]] uint32_t LastAckedFrame)
 {
 #ifdef TNX_ENABLE_ROLLBACK
 	constexpr float kDivergenceThresholdSq = 0.01f * 0.01f;
@@ -382,7 +382,7 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 // ---------------------------------------------------------------------------
 
 bool OwnerNet::HandleConstructSpawn(ConstructRegistry* reg, Registry* entityReg,
-									World* clientWorld, const uint8_t* data, size_t len)
+									WorldBase* clientWorld, const uint8_t* data, size_t len)
 {
 	if (len < sizeof(ConstructSpawnPayload))
 	{
@@ -554,7 +554,7 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 
 					// Record our own frame so we can translate local frame numbers to
 					// server-relative frames when building InputFrame packets.
-					World* w                        = WorldMap[msg.Header.SenderID];
+					WorldBase* w                        = WorldMap[msg.Header.SenderID];
 					ci->ClientLocalFrameAtHandshake = (w && w->GetLogicThread())
 														  ? w->GetLogicThread()->GetLastCompletedFrame()
 														  : 0;
@@ -563,7 +563,7 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 				ci->RepState = ClientRepState::Synchronizing;
 
 				{
-					World* origWorld = WorldMap[msg.Header.SenderID];
+					WorldBase* origWorld = WorldMap[msg.Header.SenderID];
 					if (origWorld && origWorld->GetFlowManager()) origWorld->GetFlowManager()->OnLocalOwnerConnected(msg.Header.SenderID);
 					Soul* soul = (origWorld && origWorld->GetFlowManager()) ? origWorld->GetFlowManager()->GetSoul(msg.Header.SenderID) : nullptr;
 					LOG_NET_INFO_F(soul, "[ClientNet] HandshakeAccept received — OwnerID=%u serverFrame=%u",
@@ -595,14 +595,14 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 				if (ci->RepState == ClientRepState::Synchronizing)
 				{
 					ci->RepState     = ClientRepState::Loading;
-					World* origWorld = WorldMap[ci->OwnerID];
+					WorldBase* origWorld = WorldMap[ci->OwnerID];
 					Soul* soul       = (origWorld && origWorld->GetFlowManager()) ? origWorld->GetFlowManager()->GetSoul(ci->OwnerID) : nullptr;
 					LOG_NET_INFO_F(soul, "[ClientNet] ClockSync complete — InputLead=%u RTT=%.1fms → Loading",
 								   ci->InputLead, ci->RTT_ms);
 				}
 				else
 				{
-					World* origWorld = WorldMap[ci->OwnerID];
+					WorldBase* origWorld = WorldMap[ci->OwnerID];
 					Soul* soul       = (origWorld && origWorld->GetFlowManager()) ? origWorld->GetFlowManager()->GetSoul(ci->OwnerID) : nullptr;
 					LOG_NET_WARN_F(soul,
 								   "[ClientNet] ClockSync arrived late (RepState=%d, already past Synchronizing) — "
@@ -627,7 +627,7 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 				ci->RepState          = ClientRepState::LevelLoading;
 
 				{
-					World* clientWorld = WorldMap[ci->OwnerID];
+					WorldBase* clientWorld = WorldMap[ci->OwnerID];
 					FlowManager* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
 					Soul* soul         = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
 					LOG_NET_INFO_F(soul, "[ClientNet] TravelNotify received — loading level '%s'", travelMsg->LevelPath);
@@ -640,7 +640,7 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 
 				ci->RepState = ClientRepState::LevelLoaded;
 				{
-					World* clientWorld = WorldMap[ci->OwnerID];
+					WorldBase* clientWorld = WorldMap[ci->OwnerID];
 					FlowManager* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
 					Soul* soul         = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
 					LOG_NET_INFO(soul, "[ClientNet] LevelReady sent → client LevelLoaded");
@@ -661,7 +661,7 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 				if (!ci) break;
 
 				{
-					World* clientWorld = WorldMap[ci->OwnerID];
+					WorldBase* clientWorld = WorldMap[ci->OwnerID];
 					FlowManager* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
 					Soul* soul         = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
 
@@ -738,7 +738,7 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 
 				ConnectionInfo* ci    = ConnectionMgr->FindConnection(msg.Connection);
 				const uint8_t ownerID = ci ? ci->OwnerID : 0;
-				World* clientWorld    = WorldMap[ownerID];
+				WorldBase* clientWorld    = WorldMap[ownerID];
 				if (!clientWorld)
 				{
 					LOG_ENG_WARN_F("[ClientNet] ConstructSpawn but no client world for OwnerID %u", ownerID);
@@ -762,7 +762,7 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 
 				ConnectionInfo* ci    = ConnectionMgr->FindConnection(msg.Connection);
 				const uint8_t ownerID = ci ? ci->OwnerID : 0;
-				World* clientWorld    = WorldMap[ownerID];
+				WorldBase* clientWorld    = WorldMap[ownerID];
 				if (!clientWorld || !ci) break;
 
 				const uint32_t clientFrame = msg.Header.FrameNumber;
@@ -772,14 +772,14 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 				const auto* entries = reinterpret_cast<const StateCorrectionEntry*>(msg.Payload.data());
 
 				Registry* corrReg      = clientWorld->GetRegistry();
-				LogicThread* corrLogic = clientWorld->GetLogicThread();
+				LogicThreadBase* corrLogic = clientWorld->GetLogicThread();
 
 				// Heap-allocate so the fire-and-forget Post lambda can safely outlive this scope.
 				// The lambda owns the vector and deletes it after use.
 				struct CorrCapture
 				{
 					Registry* reg;
-					LogicThread* logic;
+					LogicThreadBase* logic;
 					std::vector<StateCorrectionEntry>* corrs;
 					uint32_t clientFrame;
 					uint32_t LastAckedFrame;
@@ -832,7 +832,7 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 				}
 
 				{
-					World* clientWorld = WorldMap[ci->OwnerID];
+					WorldBase* clientWorld = WorldMap[ci->OwnerID];
 					if (FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr)
 					{
 						if (Soul* soul = flow->GetSoul(ci->OwnerID))
@@ -888,7 +888,7 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 
 bool OwnerNet::TrySpawnDeferred(const DeferredConstructSpawn& entry)
 {
-	World* clientWorld = WorldMap[entry.OwnerID];
+	WorldBase* clientWorld = WorldMap[entry.OwnerID];
 	if (!clientWorld) return true; // World gone — drop it
 
 	ConstructRegistry* constructs = clientWorld->GetConstructRegistry();
@@ -910,7 +910,7 @@ bool OwnerNet::TrySpawnDeferred(const DeferredConstructSpawn& entry)
 #ifdef TNX_ENABLE_ROLLBACK
 	if (done && entry.ServerSpawnFrame > 0 && payload.size() >= sizeof(ConstructSpawnPayload))
 	{
-		LogicThread* logic = clientWorld->GetLogicThread();
+		LogicThreadBase* logic = clientWorld->GetLogicThread();
 		if (logic)
 		{
 			logic->EnqueueSpawnRollback(entry.ServerSpawnFrame);
@@ -925,7 +925,7 @@ void OwnerNet::FlushDeferredEntitySpawns()
 {
 	for (auto it = DeferredEntitySpawns.begin(); it != DeferredEntitySpawns.end();)
 	{
-		World* clientWorld = WorldMap[it->OwnerID];
+		WorldBase* clientWorld = WorldMap[it->OwnerID];
 		if (!clientWorld)
 		{
 			it = DeferredEntitySpawns.erase(it);
@@ -953,7 +953,7 @@ void OwnerNet::FlushDeferredEntitySpawns()
 		// Request a rollback to the entity's server spawn frame so the entities are inserted
 		// at the correct historical ring slot. ReplayServerEventsAt will re-hydrate them.
 #ifdef TNX_ENABLE_ROLLBACK
-		LogicThread* logic = clientWorld->GetLogicThread();
+		LogicThreadBase* logic = clientWorld->GetLogicThread();
 		if (logic && spawnFrame > 0)
 		{
 			logic->EnqueueSpawnRollback(spawnFrame);
@@ -977,7 +977,7 @@ void OwnerNet::TickReplication()
 		if (ci.PlayerBeginSentAt == 0) continue;
 		if (now - ci.PlayerBeginSentAt < RetryIntervalMs) continue;
 
-		World* world      = WorldMap[ci.OwnerID];
+		WorldBase* world      = WorldMap[ci.OwnerID];
 		FlowManager* flow = world ? world->GetFlowManager() : nullptr;
 		if (!flow) continue;
 
@@ -1030,7 +1030,7 @@ void OwnerNet::ExecuteInputSend()
 
 		if (ci->RepState < ClientRepState::Playing) continue;
 
-		World* world = WorldMap[ci->OwnerID];
+		WorldBase* world = WorldMap[ci->OwnerID];
 		if (!world) continue;
 
 		auto* consumer = world->GetInputAccumConsumer();

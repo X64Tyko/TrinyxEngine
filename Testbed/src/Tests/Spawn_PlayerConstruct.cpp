@@ -13,7 +13,7 @@
 // spawning is tested separately in Net_PlayerConstruct.
 RUNTIME_TEST(Spawn_PlayerConstruct)
 {
-	World* world = Engine.GetDefaultWorld();
+	WorldBase* world = Engine.GetDefaultWorld();
 	ASSERT(world != nullptr);
 
 	/*
@@ -24,7 +24,7 @@ RUNTIME_TEST(Spawn_PlayerConstruct)
 	 *
 	Engine.Spawn([](uint32_t)
 	{
-		World* w = TrinyxEngine::Get().GetDefaultWorld();
+		WorldBase* w = TrinyxEngine::Get().GetDefaultWorld();
 		w->GetConstructRegistry()->Create<PlayerConstruct>(w);
 	});
 	*/

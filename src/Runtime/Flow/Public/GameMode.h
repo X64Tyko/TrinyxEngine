@@ -4,7 +4,7 @@
 #include "WithSpawnManagement.h"
 #include "WithTeamAssignment.h"
 
-class World;
+class WorldBase;
 class Soul;
 struct PlayerBeginRequestPayload;
 
@@ -43,7 +43,7 @@ public:
 	virtual ~GameMode();
 
 	/// Called after the GameMode is created and the World is ready.
-	virtual void Initialize(World* world) { OwnerWorld = world; }
+	virtual void Initialize(WorldBase* world) { OwnerWorld = world; }
 
 	/// Called when a Soul requests to join this World.
 	/// Override to implement spawn logic (pick spawn point, create Body, etc.).
@@ -67,9 +67,9 @@ public:
 	/// Display name for debugging/logging.
 	virtual const char* GetModeName() const { return "GameMode"; }
 
-	World* GetWorld() const { return OwnerWorld; }
+	WorldBase* GetWorld() const { return OwnerWorld; }
 
 protected:
 	GameMode() = default;
-	World* OwnerWorld = nullptr;
+	WorldBase* OwnerWorld = nullptr;
 };

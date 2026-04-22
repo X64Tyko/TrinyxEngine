@@ -72,7 +72,7 @@ public:
 	}
 
 	/// Replication entry point — called by ConstructRegistry::CreateForReplication on the client.
-	void InitializeForReplication(World* world, EntityHandle* viewHandles, uint8_t viewCount)
+	void InitializeForReplication(WorldBase* world, EntityHandle* viewHandles, uint8_t viewCount)
 	{
 		bIsClientSide = true;
 		if (viewCount > 0) ReplicationEntityHandle = viewHandles[0];
@@ -226,10 +226,11 @@ private:
 	// ---------------------------------------------------------------------------
 	void InjectKey(SDL_Scancode key, bool down)
 	{
-		World* world          = GetWorld();
-		const EngineMode mode = world->GetConfig().Mode;
-		if (mode == EngineMode::Client) world->GetSimInput()->PushKey(key, down);
-		// Server/Host: do nothing — input arrives via the net path.
+#if defined(TNX_NET_MODEL_CLIENT)
+		GetWorld()->GetSimInput()->PushKey(key, down);
+#else
+		(void)key; (void)down; // Authority/Solo: input arrives via net path or not at all.
+#endif
 	}
 
 	// ---------------------------------------------------------------------------
@@ -324,7 +325,7 @@ private:
 class DeterminismMode : public GameMode
 {
 public:
-	void Initialize(World* world) override
+	void Initialize(WorldBase* world) override
 	{
 		GameMode::Initialize(world);
 

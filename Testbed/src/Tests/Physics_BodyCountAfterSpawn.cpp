@@ -21,8 +21,8 @@
 // This guarantees FlushPendingBodies has run at least once since the spawn.
 RUNTIME_TEST(Physics_BodyCountAfterSpawn)
 {
-	World* world       = Engine.GetDefaultWorld();
-	LogicThread* logic = world->GetLogicThread();
+	WorldBase* world       = Engine.GetDefaultWorld();
+	LogicThreadBase* logic = world->GetLogicThread();
 
 	static std::vector<CubeSetup> setups;
 	setups.clear();

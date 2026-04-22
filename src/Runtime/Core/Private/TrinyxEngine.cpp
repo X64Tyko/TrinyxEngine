@@ -63,19 +63,18 @@ void TrinyxEngine::ParseCommandLine(int argc, char* argv[])
 			Config.MaxFrames = atoi(argv[++i]);
 		}
 #ifdef TNX_ENABLE_NETWORK
-		else if (strcmp(argv[i], "--server") == 0)
+		// --server / --listen set the network role at runtime in the old model.
+		// Role is now baked in at compile time via TNX_NET_MODEL. These args are
+		// accepted and silently ignored so existing launch scripts don't break.
+		// --client <ip> is still valid: it sets the connect address.
+		else if (strcmp(argv[i], "--server") == 0 || strcmp(argv[i], "--listen") == 0)
 		{
-			Config.Mode = EngineMode::Server;
+			// No-op — role is compile-time (TNX_NET_MODEL).
 		}
 		else if (strcmp(argv[i], "--client") == 0 && i + 1 < argc)
 		{
-			Config.Mode = EngineMode::Client;
 			strncpy(Config.NetAddress, argv[++i], sizeof(Config.NetAddress) - 1);
 			Config.NetAddress[sizeof(Config.NetAddress) - 1] = '\0';
-		}
-		else if (strcmp(argv[i], "--listen") == 0)
-		{
-			Config.Mode = EngineMode::Host;
 		}
 		else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc)
 		{
@@ -205,26 +204,20 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	Flow->Initialize(this, &Config, width, height);
 
 	// ---- GNS + NetThread -------------------------------------------------
-#ifdef TNX_ENABLE_NETWORK
-	if (Config.Mode != EngineMode::Standalone)
+#if defined(TNX_ENABLE_NETWORK) && !defined(TNX_NET_MODEL_PIE)
+	// PIE manages its own GNS init inside EditorContext.
+	if (!GNS.Initialize())
 	{
-		if (!GNS.Initialize())
-		{
-			LOG_ENG_ERROR("GNSContext::Initialize failed — falling back to Standalone");
-			Config.Mode = EngineMode::Standalone;
-		}
-		else
-		{
-			Net = std::make_unique<NetThreadType>();
-			Net->Initialize(&GNS, &Config);
-#if defined(TNX_NET_MODEL_PIE)
-			Net->InitChildren();
-			// Server world wired below, after FlowManager::CreateWorld().
-#elif defined(TNX_NET_MODEL_SERVER)
-			// AuthorityNet resolves FlowManager via AuthorityWorld->GetFlowManager().
-			// SetAuthorityWorld() is called below after CreateWorld().
+		LOG_ENG_ERROR("GNSContext::Initialize failed — networking unavailable");
+	}
+	else
+	{
+		Net = std::make_unique<NetThreadType>();
+		Net->Initialize(&GNS, &Config);
+#if defined(TNX_NET_MODEL_SERVER)
+		// AuthorityNet resolves FlowManager via AuthorityWorld->GetFlowManager().
+		// SetAuthorityWorld() is called below after CreateWorld().
 #endif
-		}
 	}
 #endif
 
@@ -236,26 +229,17 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	}
 	DefaultWorld = Flow->GetWorld();
 
-#if defined(TNX_ENABLE_NETWORK) && !TNX_ENABLE_EDITOR
-	// Create ReplicationSystem for all server-role modes (including Standalone — Tick
-	// does nothing with zero connections, but RegisterConstruct works correctly).
-	if (Config.Mode != EngineMode::Client)
-	{
-		Replicator = std::make_unique<ReplicationSystem>();
-		Replicator->Initialize(DefaultWorld);
-		DefaultWorld->SetReplicationSystem(Replicator.get());
-#if defined(TNX_NET_MODEL_PIE) || defined(TNX_NET_MODEL_SERVER)
+#if defined(TNX_ENABLE_NETWORK) && !defined(TNX_ENABLE_EDITOR) && !defined(TNX_NET_MODEL_CLIENT)
+	// Authority and Solo builds create a ReplicationSystem. Tick is a no-op with
+	// zero connections, but RegisterConstruct works correctly in all cases.
+	Replicator = std::make_unique<ReplicationSystem>();
+	Replicator->Initialize(DefaultWorld);
+	DefaultWorld->SetReplicationSystem(Replicator.get());
+#if defined(TNX_NET_MODEL_SERVER)
 	if (Net) Net->SetReplicationSystem(Replicator.get());
-#endif
-#if defined(TNX_NET_MODEL_PIE)
 	if (Net) Net->SetAuthorityWorld(DefaultWorld);
-#elif defined(TNX_NET_MODEL_SERVER)
-	// Wire the per-player input injector into the server world's LogicThread.
-	// PIE wires this in EditorContext after SetAuthorityWorld() is called per-session.
-	if (Net) Net->SetAuthorityWorld(DefaultWorld);
-	if (Net) Net->WirePlayerInputInjector(DefaultWorld);
+	if (Net) Net->WireNetMode(DefaultWorld);
 #endif
-	}
 #endif
 
 #ifndef TNX_HEADLESS
@@ -506,10 +490,10 @@ void TrinyxEngine::PumpEvents()
 {
 	TNX_ZONE_N("Input_Poll");
 
-	World* targetWorld = InputTargetWorld ? InputTargetWorld : DefaultWorld;
+	WorldBase* targetWorld = InputTargetWorld ? InputTargetWorld : DefaultWorld;
 	auto inputTargets  = targetWorld->GetInputTargets();
 #ifdef TNX_ENABLE_ROLLBACK
-	LogicThread* Logic = targetWorld->GetLogicThread();
+	LogicThreadBase* Logic = targetWorld->GetLogicThread();
 #endif
 
 #if TNX_ENABLE_EDITOR

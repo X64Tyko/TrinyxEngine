@@ -69,7 +69,7 @@ static std::vector<uint32_t> ReadSPIRV(const char* path)
 
 template <typename Derived>
 void RendererCore<Derived>::Initialize(Registry* registry,
-									   LogicThread* logic,
+									   LogicThreadBase* logic,
 									   const EngineConfig* config,
 									   VulkanContext* vkCtx,
 									   VulkanMemory* vkMem,

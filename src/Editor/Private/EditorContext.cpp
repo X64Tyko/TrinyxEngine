@@ -7,12 +7,13 @@
 #include "JoltPhysics.h"
 #include "TrinyxEngine.h"
 #include "World.h"
+#include "WorldBase.h"
 #include "EditorRenderer.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "ImGuizmo.h"
 #include "Logger.h"
-#include "LogicThread.h"
+#include "LogicThreadBase.h"
 #include "AudioAsset.h"
 #include "AudioManager.h"
 #include "MeshAsset.h"
@@ -48,7 +49,7 @@ EditorContext::~EditorContext()
 	if (bPIEActive) StopPIE();
 }
 
-void EditorContext::Initialize(TrinyxEngine* engine, LogicThread* logic, MeshManager* meshMgr)
+void EditorContext::Initialize(TrinyxEngine* engine, LogicThreadBase* logic, MeshManager* meshMgr)
 {
 	EnginePtr = engine;
 	LogicPtr  = logic;
@@ -1281,8 +1282,7 @@ void EditorContext::StartPIE()
 	JsonValue sceneJson = EntityBuilder::SerializeScene(editorReg, "PIE");
 
 	// Build server and client configs from the game config (no editor overrides)
-	ServerConfig      = *EnginePtr->GetGameConfig();
-	ServerConfig.Mode = bServerVisible ? EngineMode::Host : EngineMode::Server;
+	ServerConfig = *EnginePtr->GetGameConfig();
 
 	// Create server flow (owns server world + constructs)
 	ServerFlow = std::make_unique<FlowManager>();
@@ -1293,7 +1293,7 @@ void EditorContext::StartPIE()
 		ServerFlow.reset();
 		return;
 	}
-	World* AuthorityWorld = ServerFlow->GetWorld();
+	WorldBase* AuthorityWorld = ServerFlow->GetWorld();
 
 	// Load scene into server world via spawn handshake
 	AuthorityWorld->SetJobsInitialized(true);
@@ -1313,8 +1313,7 @@ void EditorContext::StartPIE()
 	for (int ci = 0; ci < PIEClientCount; ++ci)
 	{
 		PIEClient client;
-		client.Config      = *EnginePtr->GetGameConfig();
-		client.Config.Mode = EngineMode::Client;
+		client.Config = *EnginePtr->GetGameConfig();
 		client.Flow        = std::make_unique<FlowManager>();
 		client.Flow->Initialize(EnginePtr, &client.Config, 960, 540);
 		if (!client.Flow->CreateWorld())
@@ -1336,7 +1335,7 @@ void EditorContext::StartPIE()
 			ServerFlow.reset();
 			return;
 		}
-		World* clientWorld = client.Flow->GetWorld();
+		WorldBase* clientWorld = client.Flow->GetWorld();
 		clientWorld->SetJobsInitialized(true);
 
 		client.Viewport              = std::make_unique<WorldViewport>();
@@ -1494,7 +1493,7 @@ void EditorContext::StartPIE()
 		}
 	}
 
-	net->GetAuthority().WirePlayerInputInjector(ServerFlow->GetWorld());
+	net->GetAuthority().WireNetMode(ServerFlow->GetWorld());
 
 	// PIENetThread is now driven by the Sentinel main loop — no Start() needed.
 

@@ -6,7 +6,7 @@
 // runtime tests execute. This is the baseline health check for all World-dependent tests.
 RUNTIME_TEST(World_IsInitialized)
 {
-	World* W = Engine.GetDefaultWorld();
+	WorldBase* W = Engine.GetDefaultWorld();
 	ASSERT(W != nullptr);
 	ASSERT(W->GetRegistry() != nullptr);
 	ASSERT(W->GetPhysics() != nullptr);

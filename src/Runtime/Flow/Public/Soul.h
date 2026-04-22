@@ -12,7 +12,7 @@
 
 class FlowManager;
 class Soul;
-class World;
+class WorldBase;
 
 // ---------------------------------------------------------------------------
 // SoulRole — bitmask flags describing a Soul's stance on a given machine.
@@ -104,8 +104,8 @@ public:
 	//   Authority only   → injected net buf  (GetPlayerSimInput(ownerID) / GetPlayerVizInput(ownerID))
 	//   Echo (0)         → nullptr
 	// -------------------------------------------------------------------------
-	InputBuffer* GetSimInput(World* world) const;
-	InputBuffer* GetVizInput(World* world) const;
+	InputBuffer* GetSimInput(WorldBase* world) const;
+	InputBuffer* GetVizInput(WorldBase* world) const;
 
 	/// Called by the GameMode (via WithSpawnManagement or directly) after the
 	/// server confirms a spawn. Stores the handle and fires OnBodyConfirmed().

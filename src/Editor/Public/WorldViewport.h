@@ -7,7 +7,7 @@
 #include "VulkanMemory.h"
 #include "RendererCore.h" // MaxFramesInFlight
 
-class World;
+class WorldBase;
 
 // -----------------------------------------------------------------------
 // WorldViewport — per-world GPU resource bundle for editor multi-viewport.
@@ -29,7 +29,7 @@ static constexpr int kViewportSlabCount = 5;
 
 struct WorldViewport
 {
-	World* TargetWorld = nullptr;
+	WorldBase* TargetWorld = nullptr;
 
 	// ── Offscreen render targets ────────────────────────────────────────
 	VulkanImage ColorTarget;                       // RGBA8, rendered scene

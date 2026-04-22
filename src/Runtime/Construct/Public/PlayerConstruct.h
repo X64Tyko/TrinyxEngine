@@ -109,7 +109,7 @@ public:
 		}
 	}
 
-	void InitializeForReplication(World* world, EntityHandle* viewHandles, uint8_t viewCount)
+	void InitializeForReplication(WorldBase* world, EntityHandle* viewHandles, uint8_t viewCount)
 	{
 		bIsClientSide = true;
 		if (viewCount > 0) ReplicationEntityHandle = viewHandles[0];

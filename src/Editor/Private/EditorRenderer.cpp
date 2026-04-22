@@ -17,7 +17,7 @@
 #include "GpuFrameData.h"
 #include "ImGuizmo.h"
 #include "Logger.h"
-#include "LogicThread.h"
+#include "LogicThreadBase.h"
 #include "CMeshRef.h"
 #include "Registry.h"
 #include "CScale.h"
@@ -572,7 +572,7 @@ void EditorRenderer::FillGpuFrameDataForViewport(WorldViewport* vp, FrameSync& f
 	data->MeshTableAddr         = Meshes.GetMeshTableAddr();
 	data->MeshCount             = Meshes.GetMeshCount();
 
-	LogicThread* logic   = vp->TargetWorld->GetLogicThread();
+	LogicThreadBase* logic = vp->TargetWorld->GetLogicThread();
 	data->Alpha          = logic ? static_cast<float>(std::clamp(logic->GetFixedAlpha(), 0.0, 1.0)) : 1.0f;
 	data->EntityCount    = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
 	data->OutFieldStride = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);

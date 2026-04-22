@@ -8,7 +8,7 @@
 #include <vector>
 
 class ReplicationSystem;
-class World;
+class WorldBase;
 
 // ---------------------------------------------------------------------------
 // PIENetThread
@@ -34,17 +34,17 @@ class PIENetThread : public NetThreadBase<PIENetThread>
 	friend class NetThreadBase<PIENetThread>;
 
 public:
-	void SetAuthorityWorld(World* world);
+	void SetAuthorityWorld(WorldBase* world);
 	void SetReplicationSystem(ReplicationSystem* repl);
 
 	/// Register a client handler keyed by its GNS connection handle.
 	/// Call this immediately after Connect(), before any PumpMessages() calls,
 	/// so the handler is in place to receive the handshake reply.
-	void AddClient(HSteamNetConnection clientHandle, World* world);
+	void AddClient(HSteamNetConnection clientHandle, WorldBase* world);
 
 	/// Promote an existing client entry from handle-based to OwnerID-based routing.
 	/// Call this after a PumpMessages() cycle once the server has assigned an OwnerID.
-	void UpdateClientOwnerID(HSteamNetConnection clientHandle, uint8_t ownerID, World* world);
+	void UpdateClientOwnerID(HSteamNetConnection clientHandle, uint8_t ownerID, WorldBase* world);
 
 	void RemoveClient(uint8_t ownerID);
 	void ClearClients();
@@ -68,7 +68,7 @@ private:
 	{
 		HSteamNetConnection Handle = 0; // client-side GNS handle — used for routing before OwnerID is assigned
 		uint8_t OwnerID            = 0; // 0 = unassigned (handshake not yet complete)
-		World* OwnerWorld         = nullptr; // non-owning — EditorContext owns the World via FlowManager
+		WorldBase* OwnerWorld      = nullptr; // non-owning — EditorContext owns the World via FlowManager
 		std::unique_ptr<OwnerNet> Handler;
 	};
 	std::vector<ClientEntry> Clients;

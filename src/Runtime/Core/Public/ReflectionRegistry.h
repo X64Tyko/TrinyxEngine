@@ -16,7 +16,7 @@
 class FlowState;
 class GameMode;
 class ConstructRegistry;
-class World;
+class WorldBase;
 class Soul;
 union EntityHandle;
 
@@ -246,7 +246,7 @@ public:
 	// HandleConstructSpawn calls FindConstructClientFactory(typeHash) to get the
 	// client-side factory for the type identified by ConstructNetManifest::PrefabIndex.
 
-	using ConstructClientFactory = void*(*)(ConstructRegistry*, World*, EntityHandle*, uint8_t viewCount, Soul* ownerSoul);
+	using ConstructClientFactory = void*(*)(ConstructRegistry*, WorldBase*, EntityHandle*, uint8_t viewCount, Soul* ownerSoul);
 
 	struct ConstructEntry
 	{

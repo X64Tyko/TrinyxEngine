@@ -70,7 +70,7 @@ private:
 
 	void SpawnPlayerBody(Soul& soul)
 	{
-		World* world            = GetWorld();
+		WorldBase* world            = GetWorld();
 		ConstructRegistry* reg  = world->GetConstructRegistry();
 		ReplicationSystem* repl = world->GetReplicationSystem();
 

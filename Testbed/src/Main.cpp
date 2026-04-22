@@ -39,7 +39,7 @@ public:
 		result.PosY = SpawnPoints[idx][1];
 		result.PosZ = SpawnPoints[idx][2];
 
-		World*             world    = GetWorld();
+		WorldBase* world    = GetWorld();
 		ReplicationSystem* repl     = world->GetReplicationSystem();
 		const uint16_t     typeHash = ReflectionRegistry::ConstructTypeHashFromName("PlayerConstruct");
 

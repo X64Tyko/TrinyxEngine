@@ -11,7 +11,7 @@ class AssetDatabase;
 class EditorContext;
 class MeshManager;
 class Registry;
-class LogicThread;
+class LogicThreadBase;
 class TrinyxEngine;
 struct Chunk;
 struct EngineConfig;
@@ -23,7 +23,7 @@ struct EditorState
 	// --- Engine pointers (set once at init, never null after that) ---
 	Registry* RegistryPtr         = nullptr;
 	const EngineConfig* ConfigPtr = nullptr;
-	LogicThread* LogicPtr         = nullptr;
+	LogicThreadBase* LogicPtr     = nullptr;
 
 	// --- Selection ---
 	enum class SelectionType : uint8_t { None, Archetype, Entity };

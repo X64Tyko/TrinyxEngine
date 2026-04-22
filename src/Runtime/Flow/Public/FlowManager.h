@@ -19,7 +19,7 @@ class GameMode;
 #ifdef TNX_ENABLE_NETWORK
 class NetChannel;
 #endif
-class World;
+class WorldBase;
 class TrinyxEngine;
 struct EngineConfig;
 
@@ -112,7 +112,7 @@ public:
 	/// Create a fresh World (Registry, Physics, Logic, Input).
 	/// Called automatically by TransitionTo when requirements demand it.
 	/// Can also be called manually for advanced flows.
-	World* CreateWorld();
+	WorldBase* CreateWorld();
 
 	/// Destroy the current World and everything scoped to it.
 	/// Destroys Level-lifetime and World-lifetime Constructs.
@@ -222,7 +222,7 @@ public:
 	// ----- Accessors -----
 
 	FlowState* GetActiveState() const;
-	World* GetWorld() const;
+	WorldBase* GetWorld() const;
 	bool HasWorld() const;
 	const EngineConfig* GetConfig() const { return Config; }
 	/// Update the stored config pointer after the owning struct has been relocated
@@ -271,7 +271,7 @@ private:
 	std::unique_ptr<Soul> Souls[MaxOwnerIDs];
 
 	// Active subsystems
-	std::unique_ptr<World> ActiveWorld;
+	std::unique_ptr<WorldBase> ActiveWorld;
 	std::unique_ptr<GameMode> ActiveMode;
 	std::string ActiveLevelPath;   // Path of currently loaded level (empty = none)
 	std::string PendingTravelPath; // Level path from last TravelNotify (read by FlowState in OnNetEvent)

@@ -11,7 +11,7 @@
 
 // Forward declarations
 class Registry;
-class LogicThread;
+class LogicThreadBase;
 struct EngineConfig;
 struct SDL_Window;
 
@@ -71,7 +71,7 @@ public:
 	RendererCore& operator=(const RendererCore&) = delete;
 
 	void Initialize(Registry* registry,
-					LogicThread* logic,
+					LogicThreadBase* logic,
 					const EngineConfig* config,
 					VulkanContext* vkCtx,
 					VulkanMemory* vkMem,
@@ -91,7 +91,7 @@ protected:
 
 	// ---- References (non-owning) ----
 	Registry* RegistryPtr         = nullptr;
-	LogicThread* LogicPtr         = nullptr;
+	LogicThreadBase* LogicPtr         = nullptr;
 	const EngineConfig* ConfigPtr = nullptr;
 	VulkanContext* VkCtx          = nullptr;
 	VulkanMemory* VkMem           = nullptr;

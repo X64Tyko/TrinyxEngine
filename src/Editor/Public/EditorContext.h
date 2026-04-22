@@ -17,11 +17,11 @@
 class AudioManager;
 class EditorPanel;
 class FlowManager;
-class LogicThread;
+class LogicThreadBase;
 class MeshManager;
 class ReplicationSystem;
 class TrinyxEngine;
-class World;
+class WorldBase;
 
 /// EditorContext — owns all editor UI state and panel drawing.
 ///
@@ -34,7 +34,7 @@ public:
 	EditorContext();
 	~EditorContext();
 
-	void Initialize(TrinyxEngine* engine, LogicThread* logic, MeshManager* meshMgr);
+	void Initialize(TrinyxEngine* engine, LogicThreadBase* logic, MeshManager* meshMgr);
 
 	/// Build the editor UI for this frame.  Called on the render thread
 	/// after ImGui::NewFrame(), before ImGui::Render().
@@ -86,7 +86,7 @@ private:
 	void ApplyDefaultLayout(unsigned int dockspaceID);
 
 	TrinyxEngine* EnginePtr = nullptr;
-	LogicThread* LogicPtr   = nullptr;
+	LogicThreadBase* LogicPtr   = nullptr;
 
 	EditorState State;
 	AssetDatabase AssetDB;

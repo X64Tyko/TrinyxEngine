@@ -12,7 +12,7 @@ void PIENetThread::InitChildren()
 	Authority.BindSoulCallbacks();
 }
 
-void PIENetThread::SetAuthorityWorld(World* world)
+void PIENetThread::SetAuthorityWorld(WorldBase* world)
 {
 	Authority.SetAuthorityWorld(world);
 }
@@ -22,7 +22,7 @@ void PIENetThread::SetReplicationSystem(ReplicationSystem* repl)
 	Authority.SetReplicationSystem(repl);
 }
 
-void PIENetThread::AddClient(HSteamNetConnection clientHandle, World* world)
+void PIENetThread::AddClient(HSteamNetConnection clientHandle, WorldBase* world)
 {
 	ClientEntry& entry = Clients.emplace_back();
 	entry.Handle       = clientHandle;
@@ -35,7 +35,7 @@ void PIENetThread::AddClient(HSteamNetConnection clientHandle, World* world)
 	entry.Handler->SetOwnerWorld(0, world);
 }
 
-void PIENetThread::UpdateClientOwnerID(HSteamNetConnection clientHandle, uint8_t ownerID, World* world)
+void PIENetThread::UpdateClientOwnerID(HSteamNetConnection clientHandle, uint8_t ownerID, WorldBase* world)
 {
 	for (auto& entry : Clients)
 	{

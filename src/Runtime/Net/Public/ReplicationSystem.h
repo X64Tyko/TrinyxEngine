@@ -11,11 +11,12 @@
 #include "EntityRecord.h"
 #include "Logger.h"
 #include "NetTypes.h"
+#include "Registry.h"
 #include "RegistryTypes.h"
 #include "ServerClientChannel.h"
 #include "TrinyxJobs.h"
 
-class World;
+class WorldBase;
 class Registry;
 class ConstructRegistry;
 class NetConnectionManager;
@@ -41,7 +42,7 @@ class ReplicationSystem
 public:
 	ReplicationSystem() = default;
 
-	void Initialize(World* serverWorld);
+	void Initialize(WorldBase* serverWorld);
 
 	/// Flush one network tick. Call from Sentinel at NetworkUpdateHz.
 	/// Stamps headers, dispatches build jobs, then dispatches drain+send jobs per channel.
@@ -119,7 +120,7 @@ public:
 	}
 
 	/// Record that the server resimulated ownerID's input from serverFrame.
-	/// Called from the LogicThread injector lambda when an input mismatch fires.
+	/// Called from AuthoritySim::OnSimInput when an input mismatch fires.
 	/// Thread-safe: atomic min-update so multiple dirty marks coalesce to the earliest.
 	void AddPendingResim(uint8_t ownerID, uint32_t serverFrame);
 
@@ -133,6 +134,20 @@ public:
 	/// Returns the channel if it is active, nullptr otherwise.
 	ServerClientChannel* GetChannelIfActive(uint8_t ownerID);
 
+	/// Advance the committed frame horizon to frameNumber (no-op if already past it).
+	/// Called by AuthoritySim::OnFramePublished once per fixed tick.
+	/// Step 7 (networked despawn) uses this to gate phase-1 graduation.
+	void AdvanceCommittedHorizon(uint32_t frameNumber)
+	{
+		if (frameNumber > CommittedFrameHorizon) CommittedFrameHorizon = frameNumber;
+	}
+
+	uint32_t GetCommittedFrameHorizon() const { return CommittedFrameHorizon; }
+
+	/// Ordered list of owner IDs with live channels — used by AuthoritySim to
+	/// iterate only connected players rather than the full MaxOwnerIDs range.
+	const std::vector<uint8_t>& GetActiveOwnerIDs() const { return ActiveOwnerIDs; }
+
 private:
 	void DispatchSpawnJobs(uint32_t frameNumber);
 	void DispatchConstructSpawnJobs(uint32_t frameNumber);
@@ -143,7 +158,12 @@ private:
 	/// Allocates a NetIndex, wires NetToRecord, sets the record's NetworkID.
 	EntityNetHandle AssignNetHandle(Registry* reg, GlobalEntityHandle gHandle, uint8_t ownerID = 0);
 
-	World* AuthorityWorld = nullptr;
+	WorldBase* AuthorityWorld = nullptr;
+
+	// The most recently published frame whose inputs are fully committed (no more rollback possible).
+	// Advanced by AuthoritySim::OnFramePublished each fixed tick.
+	// Step 7 (networked despawn) reads this to gate phase-1 graduation.
+	uint32_t CommittedFrameHorizon = 0;
 
 	// Per-Owner channels — created on connect, destroyed on disconnect.
 	// Slot 0 is never populated. ActiveOwnerIDs tracks which slots are live

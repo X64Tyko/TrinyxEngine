@@ -178,14 +178,15 @@ public:
 
 private:
 	friend class Archetype;
-	friend class LogicThread;
+	template <typename, typename, typename> friend class LogicThread;
+	friend struct RollbackSim;
 	friend class ReplicationSystem;
 	friend class OwnerNet;
 	friend struct EntityBuilder;
 	friend struct EntityRecord;
 	friend struct EntityArchive;
 	friend class TrinyxEngine;
-	friend class World;
+	friend class WorldBase;
 	friend class EditorContext;
 
 	void SetPhysics(JoltPhysics* physics) { PhysicsPtr = physics; }

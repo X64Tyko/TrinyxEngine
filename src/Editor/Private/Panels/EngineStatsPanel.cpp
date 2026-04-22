@@ -1,7 +1,7 @@
 #include "Panels/EngineStatsPanel.h"
 #include "EditorState.h"
 #include "EngineConfig.h"
-#include "LogicThread.h"
+#include "LogicThreadBase.h"
 #include "Registry.h"
 #include "imgui.h"
 

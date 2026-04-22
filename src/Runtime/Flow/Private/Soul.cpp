@@ -2,7 +2,7 @@
 
 #include "FlowManager.h"
 #include "LogicThread.h"
-#include "World.h"
+#include "WorldBase.h"
 #ifdef TNX_ENABLE_NETWORK
 #include "NetConnectionManager.h"
 #include "ReflectionRegistry.h"
@@ -14,7 +14,7 @@
 // Input routing
 // ---------------------------------------------------------------------------
 
-InputBuffer* Soul::GetSimInput(World* world) const
+InputBuffer* Soul::GetSimInput(WorldBase* world) const
 {
 	if (!world) return nullptr;
 	// Owner flag: local keyboard always wins (handles Owner-only and Owner|Authority).
@@ -23,7 +23,7 @@ InputBuffer* Soul::GetSimInput(World* world) const
 	return nullptr; // Echo
 }
 
-InputBuffer* Soul::GetVizInput(World* world) const
+InputBuffer* Soul::GetVizInput(WorldBase* world) const
 {
 	if (!world) return nullptr;
 	if (HasRole(SoulRole::Owner)) return world->GetVizInput();
@@ -88,8 +88,8 @@ TNX_IMPL_SERVER(Soul, PlayerBegin, PlayerBeginRequestPayload)
 
 	if (result.has_value())
 	{
-		const World* w            = FlowMgr ? FlowMgr->GetWorld() : nullptr;
-		const LogicThread* logic  = w ? w->GetLogicThread() : nullptr;
+		const WorldBase* w            = FlowMgr ? FlowMgr->GetWorld() : nullptr;
+		const LogicThreadBase* logic  = w ? w->GetLogicThread() : nullptr;
 		const uint32_t spawnFrame = logic ? logic->GetLastCompletedFrame() : 0;
 
 		const uint32_t clientSpawnFrame = ctx.CI ? ctx.CI->ToClientFrame(spawnFrame) : spawnFrame;
@@ -150,7 +150,7 @@ TNX_IMPL_CLIENT(Soul, PlayerBeginConfirm, PlayerBeginConfirmPayload)
 	}
 
 	// Open the input accumulator gate — no frames should be pushed before Playing.
-	if (FlowMgr) if (World* w = FlowMgr->GetWorld()) w->EnableInputAccum();
+	if (FlowMgr) if (WorldBase* w = FlowMgr->GetWorld()) w->EnableInputAccum();
 
 	if (FlowMgr)
 	{

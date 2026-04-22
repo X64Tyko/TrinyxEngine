@@ -17,7 +17,7 @@
 class DeterminismState : public FlowState
 {
 public:
-	void OnEnter(FlowManager& flow, World* world) override
+	void OnEnter(FlowManager& flow, WorldBase* world) override
 	{
 		FlowState::OnEnter(flow, world);
 

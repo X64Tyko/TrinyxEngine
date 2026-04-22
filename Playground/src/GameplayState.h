@@ -20,7 +20,7 @@
 class GameplayState : public FlowState
 {
 public:
-	void OnEnter(FlowManager& flow, World* world) override
+	void OnEnter(FlowManager& flow, WorldBase* world) override
 	{
 		FlowState::OnEnter(flow, world); // caches Flow
 
@@ -31,12 +31,11 @@ public:
 			return;
 		}
 
-		// Clients wait for TravelNotify; server/standalone load immediately.
-		if (cfg->Mode == EngineMode::Client)
-		{
-			LOG_INFO("[GameplayState] Client — deferring level load until TravelNotify");
-			return;
-		}
+		// Owner/clients wait for TravelNotify; authority/standalone load immediately.
+#if defined(TNX_NET_MODEL_CLIENT)
+		LOG_INFO("[GameplayState] Owner — deferring level load until TravelNotify");
+		return;
+#endif
 
 		// Activate ArenaMode on all server-role modes before any player joins.
 		Flow->SetGameMode("ArenaMode");
@@ -46,12 +45,11 @@ public:
 		if (dot != std::string::npos) sceneName = sceneName.substr(0, dot);
 		Flow->LoadLevelByName(sceneName.c_str());
 
-		if (cfg->Mode == EngineMode::Standalone || cfg->Mode == EngineMode::Host)
-		{
-			// Route through FlowManager → ArenaMode::OnPlayerJoined for the local player.
-			// OwnerID 0 is the standalone/listen-server-local player's Soul.
-			Flow->OnClientLoaded(0);
-		}
+#if !defined(TNX_NET_MODEL_CLIENT)
+		// Route through FlowManager → ArenaMode::OnPlayerJoined for the local player.
+		// OwnerID 0 is the standalone/listen-server-local player's Soul.
+		Flow->OnClientLoaded(0);
+#endif
 	}
 
 	void OnExit() override

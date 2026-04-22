@@ -4,7 +4,7 @@
 #include "AssetTypes.h"
 #include "CacheSlotMeta.h"
 #include "FieldMeta.h"
-#include "LogicThread.h"
+#include "LogicThreadBase.h"
 #include "MeshManager.h"
 #include "Registry.h"
 #include "imgui.h"
