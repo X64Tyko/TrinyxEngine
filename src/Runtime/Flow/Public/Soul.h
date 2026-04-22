@@ -4,6 +4,7 @@
 #include "Input.h"
 #include "Logger.h"
 #include "RegistryTypes.h"
+#include "CameraManager.h"
 #ifdef TNX_ENABLE_NETWORK
 #include "NetChannel.h"
 #include "RPC.h"
@@ -70,6 +71,15 @@ public:
 
 	uint8_t GetOwnerID() const { return OwnerID; }
 	uint32_t GetInputLead() const { return InputLead; }
+
+	CameraManager& GetCameraManager() { return CamManager; }
+
+	// Route an orientation delta through the camera layer stack.
+	// Called by Soul input layers (see CameraInputMix.h) — do not call directly.
+	void DispatchOrientationDelta(float dyaw, float dpitch)
+	{
+		CamManager.DispatchOrientationDelta(dyaw, dpitch);
+	}
 
 	SoulRole GetRole() const { return Role; }
 	void SetRole(SoulRole role) { Role = role; }
@@ -165,10 +175,11 @@ public:
 private:
 	friend class FlowManager;
 
-	uint8_t OwnerID                  = 0; // Assigned at connection — stable for session
-	uint32_t InputLead               = 0; // Frames client leads the server
+	uint8_t OwnerID                  = 0;
+	uint32_t InputLead               = 0;
 	SoulRole Role                    = SoulRole::Authority;
-	ConstructRef ConfirmedBodyHandle = {}; // Valid once ClaimBody() is called
+	ConstructRef ConfirmedBodyHandle = {};
+	CameraManager CamManager;
 
 #ifdef TNX_ENABLE_NETWORK
 	// Set by FlowManager at creation and refreshed on every RPC dispatch.

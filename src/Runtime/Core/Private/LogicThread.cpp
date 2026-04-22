@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include "CameraConstruct.h"
+#include "CameraManager.h"
 #include "ThreadPinning.h"
 #include "JoltPhysics.h"
 
@@ -393,26 +393,23 @@ void LogicThread::ProcessVizInput(SimFloat dt)
 {
 	VizInput->Swap();
 
-	// When a Construct owns the camera, it handles mouse look and positioning.
-	// Free-fly is the fallback for editor/debug when no Construct is active.
-	if (ActiveCamera) return;
+	if (LocalCameraManager) LocalCameraManager->Tick(dt);
 
-	// ── Mouse look ───────────────────────────────────────────────────────
+	// Free-fly fallback — skip when CameraManager has active layers.
+	if (LocalCameraManager && LocalCameraManager->HasActiveLayers()) return;
+
 	CamYaw   += VizInput->GetMouseDX() * CamMouseSens;
 	CamPitch -= VizInput->GetMouseDY() * CamMouseSens;
 
-	// Clamp pitch to avoid gimbal lock at poles
 	constexpr float MaxPitch = 1.5533f; // ~89 degrees
 	if (CamPitch > MaxPitch) CamPitch = MaxPitch;
 	if (CamPitch < -MaxPitch) CamPitch = -MaxPitch;
 
-	// ── WASD movement (camera-relative, flying) ──────────────────────────
 	float sinYaw   = std::sin(CamYaw);
 	float cosYaw   = std::cos(CamYaw);
 	float sinPitch = std::sin(CamPitch);
 	float cosPitch = std::cos(CamPitch);
 
-	// Forward = full camera direction including pitch
 	Vector3 forward{sinYaw * cosPitch, sinPitch, -cosYaw * cosPitch};
 	Vector3 right{cosYaw, 0.0f, sinYaw};
 	Vector3 up{0.0f, 1.0f, 0.0f};
@@ -426,37 +423,35 @@ void LogicThread::ProcessVizInput(SimFloat dt)
 	if (VizInput->IsActionDown(Action::MoveUp)) moveDir = moveDir + up;
 	if (VizInput->IsActionDown(Action::MoveDown)) moveDir = moveDir - up;
 
-	// Normalize to prevent diagonal speed boost, then scale
 	float moveLen = moveDir.Length();
 	if (moveLen > 0.001f)
-	{
 		CamPos = CamPos + moveDir * (static_cast<float>(dt) * CamMoveSpeed / moveLen);
-	}
 }
 
 void LogicThread::PublishCompletedFrame()
 {
 	TNX_ZONE_N("Logic_PublishFrame");
 
-	// Get the frame header we just wrote to
 	TemporalFrameHeader* header = TemporalCache->GetFrameHeader();
 
-	// Fill frame metadata
 	header->FrameNumber            = FrameNumber;
 	header->ActiveEntityCount      = static_cast<uint32_t>(RegistryPtr->GetTotalEntityCount());
 	header->TotalAllocatedEntities = static_cast<uint32_t>(RegistryPtr->GetTotalEntityCount());
 
-	// Resolve camera source — ActiveCamera overrides free-fly locals
 	float activeFOV   = 60.0f;
 	float activeYaw   = CamYaw, activePitch = CamPitch;
 	Vector3 activePos = CamPos;
 
-	if (ActiveCamera)
+	if (LocalCameraManager)
 	{
-		ActiveCamera->GetPosition(activePos.x, activePos.y, activePos.z);
-		activeYaw   = ActiveCamera->GetYaw();
-		activePitch = ActiveCamera->GetPitch();
-		activeFOV   = ActiveCamera->GetFOV();
+		WorldCameraState cs = LocalCameraManager->Resolve();
+		if (cs.Valid)
+		{
+			activePos   = cs.Position;
+			activeYaw   = cs.Yaw;
+			activePitch = cs.Pitch;
+			activeFOV   = cs.FOV;
+		}
 	}
 
 	// Fill ViewState (basic perspective camera)

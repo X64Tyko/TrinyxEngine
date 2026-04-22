@@ -15,6 +15,7 @@
 class ConstructRegistry;
 class Registry;
 class JoltPhysics;
+class CameraManager;
 struct EngineConfig;
 struct InputBuffer;
 
@@ -64,12 +65,11 @@ public:
 		PlayerInputInjector = std::move(injector);
 	}
 
-	// Active camera — when set, ProcessVizInput free-fly is disabled and
-	// PublishCompletedFrame reads position/yaw/pitch from this camera.
-	class CameraConstruct* GetActiveCamera() const { return ActiveCamera; }
-	void SetActiveCamera(class CameraConstruct* cam) { ActiveCamera = cam; }
+	// Camera manager for the local Owner Soul — when set and has active layers,
+	// overrides free-fly in PublishCompletedFrame.
+	void SetLocalCameraManager(CameraManager* mgr) { LocalCameraManager = mgr; }
 
-	/// Set the free-fly camera position/orientation (used when ActiveCamera is null).
+	/// Set the free-fly camera position/orientation (fallback when no camera layers are active).
 	void SetFreeFlyCamera(float x, float y, float z, float yaw, float pitch)
 	{
 		CamPos   = {x, y, z};
@@ -157,7 +157,7 @@ private:
 	JoltPhysics* PhysicsPtr                 = nullptr;
 	class ComponentCacheBase* TemporalCache = nullptr;
 	ConstructRegistry* ConstructsPtr        = nullptr;
-	CameraConstruct* ActiveCamera           = nullptr;
+	CameraManager* LocalCameraManager       = nullptr;
 	TrinyxJobs::WorldQueueHandle WQHandle   = TrinyxJobs::InvalidWorldQueue;
 	const std::atomic<bool>* JobsInitPtr    = nullptr;
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CameraConstruct.h"
+#include "CameraManager.h"
 #include "Construct.h"
 #include "ConstructView.h"
 #include "EngineConfig.h"
@@ -8,43 +8,44 @@
 #include "JoltCharacter.h"
 #include "JoltPhysics.h"
 #include "Logger.h"
-#include "Owned.h"
 #include "Soul.h"
 
 #include "EPlayer.h"
 
 #include <cmath>
 
-// ---------------------------------------------------------------------------
-// PlayerConstruct — Standard engine player with physics capsule and dual cameras.
-//
-// Owns a ConstructView<EPlayer> (capsule mesh, physics body) and two
-// CameraConstructs (first-person + third-person). V key toggles the active
-// camera. WASD drives kinematic velocity (set in PrePhysics, consumed by Jolt).
-// Mouse look and camera positioning happen in ScalarUpdate (after physics).
-//
-// Ownership: GetOwnerSoul() returns the Soul* set during replication
-// (or null in standalone/server). GetOwnerID() delegates to that Soul.
-// ---------------------------------------------------------------------------
+// Camera layer used by PlayerConstruct — writes eye/orbit position to WorldCameraState.
+struct PlayerCameraLayer : CameraLayer, CameraStateMix<PlayerCameraLayer>
+{
+	float PosX = 0.f, PosY  = 0.f, PosZ = 0.f;
+	float Yaw  = 0.f, Pitch = 0.f;
+	float FOV  = 60.f;
+
+	void ApplyState(WorldCameraState& state)
+	{
+		state.Position = {PosX, PosY, PosZ};
+		state.Yaw      = Yaw;
+		state.Pitch    = Pitch;
+		state.FOV      = FOV;
+		state.Valid    = true;
+	}
+};
+
+// PlayerConstruct — Player capsule with physics character controller and dual camera layers.
 class PlayerConstruct : public Construct<PlayerConstruct>
 {
 	TNX_REGISTER_CONSTRUCT(PlayerConstruct)
-	
+
 public:
 	TNX_CONSTRUCT_WORLD
 
 	ConstructView<EPlayer> Body;
-	Owned<CameraConstruct> FirstPersonCam;
-	Owned<CameraConstruct> ThirdPersonCam;
-
 	JoltCharacter CharacterController;
 
 	void InitializeViews()
 	{
 		if (bIsClientSide)
 		{
-			// Client-side: attach to the existing ECS entity delivered by ConstructSpawn,
-			// then read its authoritative position to seed the JoltCharacter correctly.
 			Body.Attach(this, ReplicationEntityHandle);
 			SpawnPosX = Body.Transform.PosX.Value();
 			SpawnPosY = Body.Transform.PosY.Value();
@@ -74,7 +75,7 @@ public:
 			col.A     = 1.0f;
 
 			auto& mesh  = Body.Mesh;
-			mesh.MeshID = 2u; // Capsule (slot 0=invalid, slot 1=Cube, slot 2=Capsule)
+			mesh.MeshID = 2u;
 
 			Body.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive | TemporalFlagBits::Replicated);
 		}
@@ -83,20 +84,31 @@ public:
 		CharacterController.Initialize(
 			phys->GetPhysicsSystem(),
 			JPH::RVec3(SpawnPosX, SpawnPosY, SpawnPosZ),
-			0.3f,  // capsule radius
-			0.7f); // capsule half height
+			0.3f,
+			0.7f);
 
-		// Initialize cameras (both paths)
-		FirstPersonCam->Initialize(GetWorld());
-		ThirdPersonCam->Initialize(GetWorld());
-
-		// Default to third-person (better for visualizing corrections)
-		ActiveCam = ThirdPersonCam.Get();
-		SetActiveCameraIfOwned(ActiveCam);
+		Soul* soul = GetOwnerSoul();
+		if (soul && soul->HasRole(SoulRole::Owner))
+		{
+			FPLayer.Active = false;
+			TPLayer.Active = true;
+			soul->GetCameraManager().AddLayer(CameraSlot::Gameplay, &FPLayer);
+			soul->GetCameraManager().AddLayer(CameraSlot::Gameplay, &TPLayer);
+			GetWorld()->GetLogicThread()->SetLocalCameraManager(&soul->GetCameraManager());
+		}
 	}
 
-	/// Replication entry point — called by ConstructRegistry::CreateForReplication.
-	/// Attaches to existing ECS entities instead of creating new ones.
+	~PlayerConstruct()
+	{
+		Soul* soul = GetOwnerSoul();
+		if (soul && soul->HasRole(SoulRole::Owner))
+		{
+			soul->GetCameraManager().RemoveLayer(CameraSlot::Gameplay, &FPLayer);
+			soul->GetCameraManager().RemoveLayer(CameraSlot::Gameplay, &TPLayer);
+			if (IsInitialized()) GetWorld()->GetLogicThread()->SetLocalCameraManager(nullptr);
+		}
+	}
+
 	void InitializeForReplication(World* world, EntityHandle* viewHandles, uint8_t viewCount)
 	{
 		bIsClientSide = true;
@@ -106,15 +118,6 @@ public:
 
 	void PhysicsStep(SimFloat dt)
 	{
-		// Two cases for client-side constructs:
-		//
-		// 1. Remote player (Echo) — server corrections are authoritative. Sync JoltCharacter
-		//    to the ECS position (so collision shape stays in the right place) and skip input.
-		//
-		// 2. Local player (Owner) — predict freely with local input. Server corrections are
-		//    stale by RTT; snapping to them every frame would undo the prediction. When
-		//    rollback is implemented, corrections trigger a resim from the corrected frame.
-		//    Until then, only snap on teleport-scale divergence (> 5 m).
 		if (bIsClientSide)
 		{
 			const float ecsPosX = Body.Transform.PosX.Value();
@@ -124,20 +127,11 @@ public:
 			Soul* soul = GetOwnerSoul();
 			if (!soul || soul->GetRole() == SoulRole::Echo)
 			{
-				// Remote player: drive position entirely from server-corrected ECS.
 				CharacterController.SetPosition(JPH::RVec3(ecsPosX, ecsPosY, ecsPosZ));
 				return;
 			}
 
-			// Local player: only teleport-snap for gross corrections (> 5 m).
-			// JPH::RVec3 joltPos = CharacterController.GetPosition();
-			// const float dx     = ecsPosX - static_cast<float>(joltPos.GetX());
-			// const float dy     = ecsPosY - static_cast<float>(joltPos.GetY());
-			// const float dz     = ecsPosZ - static_cast<float>(joltPos.GetZ());
-			// if (dx * dx + dy * dy + dz * dz > 25.0f)
-			{
-				CharacterController.SetPosition(JPH::RVec3(ecsPosX, ecsPosY, ecsPosZ));
-			}
+			CharacterController.SetPosition(JPH::RVec3(ecsPosX, ecsPosY, ecsPosZ));
 		}
 
 		CharacterController.Update(
@@ -157,14 +151,11 @@ public:
 
 	void PrePhysics(SimFloat /*dt*/)
 	{
-		// Route input through the Soul so Authority reads the injected net buffer
-		// and Owner reads the local keyboard — no raw World buffer access in gameplay.
-		// Standalone (no Soul, ownerID 0) falls back to the local sim buffer.
 		Soul* soul            = GetOwnerSoul();
 		InputBuffer* simInput = soul
 			? soul->GetSimInput(GetWorld())
-			: GetWorld()->GetSimInput(); // standalone fallback
-		if (!simInput) return; // Echo souls have no input
+			: GetWorld()->GetSimInput();
+		if (!simInput) return;
 
 		float sinYaw = std::sin(Yaw);
 		float cosYaw = std::cos(Yaw);
@@ -182,10 +173,6 @@ public:
 		float len = std::sqrt(moveX * moveX + moveZ * moveZ);
 		if (len > 0.001f)
 		{
-			// PrePhysics fires PhysicsDivizor times (8×) before PhysicsStep runs once.
-			// Each call contributes one 512Hz frame of movement intent. PhysicsStep
-			// consumes the accumulated sum and resets it to 0, so the character covers
-			// all 8 frames of intended movement in one Jolt solve.
 			DesiredVelX += moveX / len * MoveSpeed;
 			DesiredVelZ += moveZ / len * MoveSpeed;
 		}
@@ -198,44 +185,34 @@ public:
 
 		const bool bIsLocalPlayer = bIsClientSide
 										? (soul && soul->HasRole(SoulRole::Owner))
-										: (ownerID == 0); // standalone: ownerID 0 is local
+										: (ownerID == 0);
 
-		// Route through Soul when available; fall back to world buffers for
-		// standalone (no Soul) and server-side remote players on the viz path.
 		InputBuffer* vizInput = soul
 			? soul->GetVizInput(GetWorld())
 			: (bIsLocalPlayer ? GetWorld()->GetVizInput() : nullptr);
 
-		if (!vizInput) return; // Echo or server-side remote: no viz processing
+		if (!vizInput) return;
 
 		constexpr float MouseSens = 0.002f;
-		constexpr float MaxPitch  = 1.5533f; // ~89 degrees
+		constexpr float MaxPitch  = 1.5533f;
 
 		Yaw   += vizInput->GetMouseDX() * MouseSens;
 		Pitch -= vizInput->GetMouseDY() * MouseSens;
 		if (Pitch > MaxPitch) Pitch = MaxPitch;
 		if (Pitch < -MaxPitch) Pitch = -MaxPitch;
 
-		// Camera and camera-toggle are local-player-only operations.
-		// Remote player constructs on the server have no cameras.
 		if (!bIsLocalPlayer) return;
 
 		bool toggleDown = vizInput->IsActionDown(Action::ToggleCamera);
 		if (toggleDown && !bToggleHeld)
 		{
-			if (ActiveCam == FirstPersonCam.Get()) ActiveCam = ThirdPersonCam.Get();
-			else ActiveCam                                   = FirstPersonCam.Get();
-
-			SetActiveCameraIfOwned(ActiveCam);
+			FPLayer.Active = !FPLayer.Active;
+			TPLayer.Active = !TPLayer.Active;
 		}
 		bToggleHeld = toggleDown;
 
+		// Local player: use Jolt position to avoid camera rubber-banding.
 		SimFloat px, py, pz;
-		// Client-side local player: read from JoltCharacter (locally predicted position,
-		// not overwritten by state corrections) to avoid rubber-banding camera.
-		// Server-side / standalone: Body.Transform IS the authoritative source (PhysicsStep
-		// writes JoltCharacter→Body.Transform and state corrections never touch server state),
-		// so reading it directly is correct and avoids any potential Jolt vs. ECS sync gap.
 		if (bIsClientSide && bIsLocalPlayer)
 		{
 			JPH::RVec3 joltPos = CharacterController.GetPosition();
@@ -251,22 +228,24 @@ public:
 			pz       = tr.PosZ.Value();
 		}
 
-		float sinYaw = std::sin(Yaw);
-		float cosYaw = std::cos(Yaw);
-
-		FirstPersonCam->SetPosition(px, py + EyeHeight, pz);
-		FirstPersonCam->SetYawPitch(Yaw, Pitch);
-
-		float camDist  = 5.0f;
+		float sinYaw   = std::sin(Yaw);
+		float cosYaw   = std::cos(Yaw);
 		float cosPitch = std::cos(Pitch);
-		float tpX      = px - sinYaw * cosPitch * camDist;
-		float tpY      = py + EyeHeight + std::sin(Pitch) * camDist + 1.5f;
-		float tpZ      = pz + cosYaw * cosPitch * camDist;
-		ThirdPersonCam->SetPosition(tpX, tpY, tpZ);
-		ThirdPersonCam->SetYawPitch(Yaw, Pitch);
+
+		FPLayer.PosX  = px;
+		FPLayer.PosY  = py + EyeHeight;
+		FPLayer.PosZ  = pz;
+		FPLayer.Yaw   = Yaw;
+		FPLayer.Pitch = Pitch;
+
+		constexpr float CamDist = 5.0f;
+		TPLayer.PosX            = px - sinYaw * cosPitch * CamDist;
+		TPLayer.PosY            = py + EyeHeight + std::sin(Pitch) * CamDist + 1.5f;
+		TPLayer.PosZ            = pz + cosYaw * cosPitch * CamDist;
+		TPLayer.Yaw             = Yaw;
+		TPLayer.Pitch           = Pitch;
 	}
 
-	// Spawn position — set by game mode before Initialize is called.
 	float SpawnPosX = 0.0f;
 	float SpawnPosY = 5.0f;
 	float SpawnPosZ = 0.0f;
@@ -278,18 +257,8 @@ public:
 	}
 
 private:
-	/// Set the active camera only if this is the owning client (or standalone).
-	void SetActiveCameraIfOwned(CameraConstruct* cam)
-	{
-		if (GetWorld()->GetConfig().Mode == EngineMode::Server) return;
-		Soul* soul = GetOwnerSoul();
-		// Standalone (no soul): always owns the camera.
-		// Client: only the Owner soul gets the camera — not Echo, not pre-claim nulls.
-		if (!soul || !soul->HasRole(SoulRole::Owner)) return;
-		GetWorld()->GetLogicThread()->SetActiveCamera(cam);
-	}
-
-	CameraConstruct* ActiveCam = nullptr;
+	PlayerCameraLayer FPLayer; // first-person
+	PlayerCameraLayer TPLayer; // third-person, default active
 
 	bool bIsClientSide = false;
 	EntityHandle ReplicationEntityHandle{};
@@ -300,6 +269,6 @@ private:
 	float DesiredVelZ = 0.0f;
 	bool bToggleHeld  = false;
 
-	static constexpr float MoveSpeed = 1.0f;   // per-frame velocity contribution (m/s); effective speed = MoveSpeed × PhysicsDivizor (8× → 8 m/s at default ratio)
+	static constexpr float MoveSpeed = 1.0f;
 	static constexpr float EyeHeight = 1.5f;
 };

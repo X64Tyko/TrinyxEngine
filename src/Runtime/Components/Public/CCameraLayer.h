@@ -11,14 +11,13 @@ template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct CCameraLayer : ComponentView<CCameraLayer, WIDTH>
 {
 	TNX_REGISTER_FIELDS(CCameraLayer,
-		BlendAlpha, TransitionAlpha, TransitionSpeed,
-		FOV, ArmLength,
+						BlendAlpha, TransitionSpeed,
+						FOV, ArmLength,
 		OffsetX, OffsetY, OffsetZ,
 		SpringStiffness, SpringDamping,
 		OwnerHandle, TransitionCurveH)
 
 	FloatProxy<WIDTH> BlendAlpha{};      // target blend weight [0, 1]
-	FloatProxy<WIDTH> TransitionAlpha{}; // current animated value → BlendAlpha
 	FloatProxy<WIDTH> TransitionSpeed{};
 
 	FloatProxy<WIDTH> FOV{};       // degrees; 0 = slot default
