@@ -1,6 +1,10 @@
-#include "OwnerNetThread.h"
+#include "OwnerNet.h"
 
 #include "CacheSlotMeta.h"
+#include "CColor.h"
+#include "CMeshRef.h"
+#include "CScale.h"
+#include "CTransform.h"
 #include "ConstructRegistry.h"
 #include "EngineConfig.h"
 #include "FlowManager.h"
@@ -19,7 +23,455 @@
 
 #include <SDL3/SDL_timer.h>
 
-void OwnerNetThread::HandleMessage(const ReceivedMessage& msg)
+// ---------------------------------------------------------------------------
+// WriteEntitySpawnFields — write one EntitySpawnPayload into an entity's field arrays.
+// Called for both write and read frames so FieldProxy sees correct data immediately.
+// ---------------------------------------------------------------------------
+
+void OwnerNet::WriteEntitySpawnFields([[maybe_unused]] Registry* reg, EntityRecord* record,
+									  const EntitySpawnPayload& payload,
+									  uint32_t temporalFrame, uint32_t volatileFrame)
+{
+	Archetype* arch   = record->Arch;
+	Chunk* chunk      = record->TargetChunk;
+	uint32_t localIdx = record->LocalIndex;
+
+	void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+	arch->BuildFieldArrayTable(chunk, fieldArrayTable, temporalFrame, volatileFrame);
+
+	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
+	{
+		void* fieldBase = fieldArrayTable[fdesc.fieldSlotIndex];
+		if (!fieldBase) continue;
+
+		auto* floatArr = static_cast<float*>(fieldBase);
+		auto* intArr   = static_cast<int32_t*>(fieldBase);
+		auto* uintArr  = static_cast<uint32_t*>(fieldBase);
+
+		ComponentTypeID compID = fdesc.componentID;
+
+		if (compID == CacheSlotMeta<>::StaticTypeID())
+		{
+			if (fdesc.componentSlotIndex == 0) intArr[localIdx] = EntitySpawnPayload::GetFlags(payload.SpawnFlags);
+		}
+		else if (compID == CTransform<>::StaticTypeID())
+		{
+			switch (fdesc.componentSlotIndex)
+			{
+				case 0: floatArr[localIdx] = payload.PosX;
+					break;
+				case 1: floatArr[localIdx] = payload.PosY;
+					break;
+				case 2: floatArr[localIdx] = payload.PosZ;
+					break;
+				case 3: floatArr[localIdx] = payload.RotQx;
+					break;
+				case 4: floatArr[localIdx] = payload.RotQy;
+					break;
+				case 5: floatArr[localIdx] = payload.RotQz;
+					break;
+				case 6: floatArr[localIdx] = payload.RotQw;
+					break;
+				default: break;
+			}
+		}
+		else if (compID == CScale<>::StaticTypeID())
+		{
+			switch (fdesc.componentSlotIndex)
+			{
+				case 0: floatArr[localIdx] = payload.ScaleX;
+					break;
+				case 1: floatArr[localIdx] = payload.ScaleY;
+					break;
+				case 2: floatArr[localIdx] = payload.ScaleZ;
+					break;
+				default: break;
+			}
+		}
+		else if (compID == CColor<>::StaticTypeID())
+		{
+			switch (fdesc.componentSlotIndex)
+			{
+				case 0: floatArr[localIdx] = payload.ColorR;
+					break;
+				case 1: floatArr[localIdx] = payload.ColorG;
+					break;
+				case 2: floatArr[localIdx] = payload.ColorB;
+					break;
+				case 3: floatArr[localIdx] = payload.ColorA;
+					break;
+				default: break;
+			}
+		}
+		else if (compID == CMeshRef<>::StaticTypeID())
+		{
+			if (fdesc.componentSlotIndex == 0) uintArr[localIdx] = payload.MeshID;
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HandleEntitySpawn — create an entity on the client from a received payload.
+// ---------------------------------------------------------------------------
+
+void OwnerNet::HandleEntitySpawn(Registry* reg, const EntitySpawnPayload& payload, [[maybe_unused]] uint32_t frame)
+{
+	EntityNetHandle receivedNetHandle{};
+	receivedNetHandle.Value = payload.NetHandle;
+
+	EntityNetManifest manifest{};
+	manifest.Value    = payload.Manifest;
+	ClassID classType = static_cast<ClassID>(manifest.ClassType);
+
+	GlobalEntityHandle gHandle;
+	reg->CreateInternal(classType, {&gHandle, 1});
+	if (gHandle.GetIndex() == 0)
+	{
+		LOG_ENG_WARN_F("[Replication] Failed to create entity ClassID %u", classType);
+		return;
+	}
+
+	reg->GlobalEntityRegistry.NetToRecord.set(receivedNetHandle.GetHandleIndex(), gHandle);
+
+	EntityRecord* record = reg->GlobalEntityRegistry.Records[gHandle.GetIndex()];
+	if (!record || !record->IsValid())
+	{
+		LOG_ENG_WARN("[Replication] Entity created but record invalid");
+		return;
+	}
+	record->NetworkID = receivedNetHandle;
+
+	// Write into both write and read frames so FieldProxy reads see correct data immediately.
+	WriteEntitySpawnFields(reg, record, payload,
+						   reg->GetTemporalCache()->GetActiveWriteFrame(),
+						   reg->GetVolatileCache()->GetActiveWriteFrame());
+	WriteEntitySpawnFields(reg, record, payload,
+						   reg->GetTemporalCache()->GetActiveReadFrame(),
+						   reg->GetVolatileCache()->GetActiveReadFrame());
+
+#ifdef TNX_ENABLE_ROLLBACK
+	{
+		GlobalEntityHandle capturedGH      = gHandle;
+		EntitySpawnPayload capturedPayload = payload;
+		reg->PushServerEvent({
+			frame,
+			[capturedGH, capturedPayload, reg]()
+			{
+				EntityRecord* rec = reg->GlobalEntityRegistry.Records[capturedGH.GetIndex()];
+				if (!rec || !rec->IsValid()) return;
+				WriteEntitySpawnFields(reg, rec, capturedPayload,
+									   reg->GetTemporalCache()->GetActiveWriteFrame(),
+									   reg->GetVolatileCache()->GetActiveWriteFrame());
+			}
+		});
+	}
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// HandleStateCorrections — apply authoritative transforms on the client.
+// ---------------------------------------------------------------------------
+
+void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry* entries,
+									  uint32_t count, [[maybe_unused]] uint32_t clientFrame,
+									  [[maybe_unused]] LogicThread* logic, [[maybe_unused]] uint32_t LastAckedFrame)
+{
+#ifdef TNX_ENABLE_ROLLBACK
+	constexpr float kDivergenceThresholdSq = 0.01f * 0.01f;
+
+	const auto* temporal      = reg->GetTemporalCache();
+	const uint32_t ringSize   = temporal->GetTotalFrameCount();
+	const uint32_t currentF   = temporal->GetFrameHeader()->FrameNumber;
+	const uint32_t oldestSlab = (currentF >= ringSize - 1) ? (currentF - (ringSize - 1)) : 0u;
+
+	if (clientFrame < oldestSlab)
+	{
+		LOG_ENG_DEBUG_F("[Replication] Skipping stale StateCorrection: frame=%u (oldest=%u, ring depth=%u)",
+						clientFrame, oldestSlab, ringSize);
+		return;
+	}
+
+	std::vector<EntityTransformCorrection> corrections;
+	std::vector<EntityTransformCorrection> predictedCorrections;
+	const uint32_t volatileFrame = reg->GetVolatileCache()->GetActiveWriteFrame();
+	bool bPushCorrection         = false;
+
+	for (uint32_t i = 0; i < count; ++i)
+	{
+		bPushCorrection                   = false;
+		const StateCorrectionEntry& entry = entries[i];
+
+		EntityNetHandle netHandle{};
+		netHandle.Value = entry.NetHandle;
+
+		GlobalEntityHandle gHandle = reg->GlobalEntityRegistry.LookupGlobalHandle(netHandle);
+		if (gHandle.GetIndex() == 0) continue;
+
+		EntityRecord* record = reg->GlobalEntityRegistry.Records[gHandle.GetIndex()];
+		if (!record || !record->IsValid()) continue;
+
+		Archetype* arch   = record->Arch;
+		Chunk* chunk      = record->TargetChunk;
+		uint32_t localIdx = record->LocalIndex;
+
+		if (entry.ResimFrameDelta > 0 && clientFrame >= entry.ResimFrameDelta)
+		{
+			const uint32_t clientResimFrame = clientFrame - entry.ResimFrameDelta;
+			if (clientResimFrame >= oldestSlab)
+			{
+				void* resimFieldTable[MAX_FIELDS_PER_ARCHETYPE];
+				arch->BuildFieldArrayTable(chunk, resimFieldTable, clientResimFrame, volatileFrame);
+
+				float resimX = 0.f, resimY = 0.f, resimZ = 0.f;
+				for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
+				{
+					if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
+					void* base = resimFieldTable[fdesc.fieldSlotIndex];
+					if (!base) continue;
+					auto* fa = static_cast<float*>(base);
+					switch (fdesc.componentSlotIndex)
+					{
+						case 0: resimX = fa[localIdx];
+							break;
+						case 1: resimY = fa[localIdx];
+							break;
+						case 2: resimZ = fa[localIdx];
+							break;
+						default: break;
+					}
+				}
+
+				const float rdx = resimX - entry.ResimPosX;
+				const float rdy = resimY - entry.ResimPosY;
+				const float rdz = resimZ - entry.ResimPosZ;
+				if (rdx * rdx + rdy * rdy + rdz * rdz > kDivergenceThresholdSq)
+				{
+					LOG_ENG_WARN_F("[Replication] ResimRoot divergence: netHandle=%u resimFrame=%u dist=%.4fm",
+								   entry.NetHandle, clientResimFrame,
+								   std::sqrt(rdx * rdx + rdy * rdy + rdz * rdz));
+					bPushCorrection = true;
+				}
+			}
+		}
+
+		void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+		arch->BuildFieldArrayTable(chunk, fieldArrayTable, clientFrame, volatileFrame);
+
+		float predictedX = 0.f, predictedY = 0.f, predictedZ = 0.f;
+		for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
+		{
+			if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
+			void* base = fieldArrayTable[fdesc.fieldSlotIndex];
+			if (!base) continue;
+			auto* fa = static_cast<float*>(base);
+			switch (fdesc.componentSlotIndex)
+			{
+				case 0: predictedX = fa[localIdx];
+					break;
+				case 1: predictedY = fa[localIdx];
+					break;
+				case 2: predictedZ = fa[localIdx];
+					break;
+				default: break;
+			}
+		}
+
+		const float dx = predictedX - entry.PosX;
+		const float dy = predictedY - entry.PosY;
+		const float dz = predictedZ - entry.PosZ;
+		if (dx * dx + dy * dy + dz * dz > kDivergenceThresholdSq)
+		{
+			LOG_ENG_WARN_F("[Replication] Divergence: netHandle=%u frame=%u dist=%.4fm",
+						   entry.NetHandle, clientFrame, std::sqrt(dx * dx + dy * dy + dz * dz));
+			bPushCorrection = true;
+		}
+
+		if (bPushCorrection)
+		{
+			if (entry.ResimFrameDelta > 0)
+			{
+				corrections.push_back({
+					entry.NetHandle, clientFrame - entry.ResimFrameDelta,
+					entry.ResimPosX, entry.ResimPosY, entry.ResimPosZ,
+					entry.ResimRotQx, entry.ResimRotQy, entry.ResimRotQz, entry.ResimRotQw
+				});
+			}
+			else if (clientFrame < currentF)
+			{
+				corrections.push_back({
+					entry.NetHandle, clientFrame,
+					entry.PosX, entry.PosY, entry.PosZ,
+					entry.RotQx, entry.RotQy, entry.RotQz, entry.RotQw
+				});
+			}
+			else
+			{
+				predictedCorrections.push_back({
+					entry.NetHandle, clientFrame,
+					entry.PosX, entry.PosY, entry.PosZ,
+					entry.RotQx, entry.RotQy, entry.RotQz, entry.RotQw
+				});
+			}
+		}
+	}
+
+	if (!corrections.empty() && logic)
+	{
+		uint32_t earliest = UINT32_MAX;
+		for (const auto& c : corrections) earliest = std::min(earliest, c.ClientFrame);
+		logic->EnqueueCorrections(std::move(corrections), earliest);
+	}
+
+	if (!predictedCorrections.empty() && logic) logic->EnqueuePredictedCorrections(std::move(predictedCorrections));
+
+#else
+	for (uint32_t i = 0; i < count; ++i)
+	{
+		const StateCorrectionEntry& entry = entries[i];
+
+		EntityNetHandle netHandle{};
+		netHandle.Value = entry.NetHandle;
+
+		GlobalEntityHandle gHandle = reg->GlobalEntityRegistry.LookupGlobalHandle(netHandle);
+		if (gHandle.GetIndex() == 0) continue;
+
+		EntityRecord* record = reg->GlobalEntityRegistry.Records[gHandle.GetIndex()];
+		if (!record || !record->IsValid()) continue;
+
+		Archetype* arch   = record->Arch;
+		Chunk* chunk      = record->TargetChunk;
+		uint32_t localIdx = record->LocalIndex;
+
+		void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+		arch->BuildFieldArrayTable(chunk, fieldArrayTable,
+								   reg->GetTemporalCache()->GetActiveWriteFrame(),
+								   reg->GetVolatileCache()->GetActiveWriteFrame());
+
+		for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
+		{
+			if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
+			void* base = fieldArrayTable[fdesc.fieldSlotIndex];
+			if (!base) continue;
+			auto* fa = static_cast<float*>(base);
+			switch (fdesc.componentSlotIndex)
+			{
+				case 0: fa[localIdx] = entry.PosX;
+					break;
+				case 1: fa[localIdx] = entry.PosY;
+					break;
+				case 2: fa[localIdx] = entry.PosZ;
+					break;
+				case 3: fa[localIdx] = entry.RotQx;
+					break;
+				case 4: fa[localIdx] = entry.RotQy;
+					break;
+				case 5: fa[localIdx] = entry.RotQz;
+					break;
+				case 6: fa[localIdx] = entry.RotQw;
+					break;
+				default: break;
+			}
+		}
+	}
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// HandleConstructSpawn — create a client Construct from a received payload.
+// Returns false if any entity view is not yet in the client registry (defer + retry).
+// ---------------------------------------------------------------------------
+
+bool OwnerNet::HandleConstructSpawn(ConstructRegistry* reg, Registry* entityReg,
+									World* clientWorld, const uint8_t* data, size_t len)
+{
+	if (len < sizeof(ConstructSpawnPayload))
+	{
+		LOG_NET_WARN(nullptr, "[Replication] HandleConstructSpawn: payload too small");
+		return true;
+	}
+
+	const auto* header             = reinterpret_cast<const ConstructSpawnPayload*>(data);
+	const uint32_t* viewNetHandles = reinterpret_cast<const uint32_t*>(data + sizeof(ConstructSpawnPayload));
+
+	ConstructNetHandle netHandle{};
+	netHandle.Value = header->Handle;
+
+	ConstructNetManifest manifest{};
+	manifest.Value = header->Manifest;
+
+	const uint16_t typeHash = static_cast<uint16_t>(manifest.PrefabIndex);
+	const uint8_t ownerID   = netHandle.GetOwnerID();
+	const uint8_t viewCount = header->ViewCount;
+
+	FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr;
+	Soul* soul        = flow ? flow->GetSoul(ownerID) : nullptr;
+
+	constexpr uint8_t MaxViews = 8;
+	EntityHandle resolvedHandles[MaxViews];
+	uint8_t resolvedCount = 0;
+
+	for (uint8_t i = 0; i < viewCount && i < MaxViews; ++i)
+	{
+		EntityNetHandle enh{};
+		enh.Value = viewNetHandles[i];
+
+		GlobalEntityHandle gH = entityReg->GlobalEntityRegistry.NetToRecord.get(enh.GetHandleIndex());
+		if (gH.GetIndex() == 0)
+		{
+			LOG_NET_DEBUG_F(soul, "[Replication] HandleConstructSpawn: EntityNetHandle %u not yet available — deferring", enh.Value);
+			return false;
+		}
+
+		EntityRecord* entRec = entityReg->GlobalEntityRegistry.Records[gH.GetIndex()];
+		if (!entRec || !entRec->IsValid())
+		{
+			LOG_NET_DEBUG_F(soul, "[Replication] HandleConstructSpawn: EntityNetHandle %u record invalid — deferring", enh.Value);
+			return false;
+		}
+
+		resolvedHandles[resolvedCount] = entityReg->MakeEntityHandle(gH, entRec->Arch->ArchClassID);
+		resolvedCount++;
+	}
+
+	const ReflectionRegistry::ConstructClientFactory factory =
+		ReflectionRegistry::Get().FindConstructClientFactory(typeHash);
+
+	if (!factory)
+	{
+		LOG_NET_WARN_F(soul, "[Replication] HandleConstructSpawn: no factory for typeHash=%u", typeHash);
+		return true;
+	}
+
+	if (!soul && flow) soul = flow->EnsureEchoSoul(ownerID);
+
+	void* raw = factory(reg, clientWorld, resolvedHandles, resolvedCount, soul);
+	if (!raw)
+	{
+		LOG_NET_WARN(soul, "[Replication] HandleConstructSpawn: factory returned null");
+		return true;
+	}
+
+	ConstructNetHandle serverHandle{};
+	serverHandle.Value = header->Handle;
+
+	ConstructNetManifest wireManifest{};
+	wireManifest.PrefabIndex = typeHash;
+
+	ConstructRef ref = reg->WireNetRef(raw, serverHandle, wireManifest, typeHash, header->SpawnFrame);
+
+	if (soul)
+	{
+		soul->ClaimBody(ref);
+		LOG_NET_INFO_F(soul, "[Replication] HandleConstructSpawn: ClaimBody → Soul ownerID=%u role=%u", ownerID, static_cast<uint8_t>(soul->GetRole()));
+	}
+	else
+	{
+		LOG_NET_WARN_F(soul, "[Replication] HandleConstructSpawn: no Soul and no FlowManager for ownerID=%u", ownerID);
+	}
+	return true;
+}
+
+void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 {
 	// Every server-sent header carries the last client input frame it consumed.
 	// Advance LastServerAckedFrame so TickInputSend() widens from there, not from last send.
@@ -338,8 +790,8 @@ void OwnerNetThread::HandleMessage(const ReceivedMessage& msg)
 				CorrCapture cap{corrReg, corrLogic, corrHeap, clientFrame, ci->LastServerAckedFrame};
 				clientWorld->Post([cap](uint32_t)
 				{
-					ReplicationSystem::HandleStateCorrections(cap.reg, cap.corrs->data(),
-															  static_cast<uint32_t>(cap.corrs->size()), cap.clientFrame, cap.logic, cap.LastAckedFrame);
+					HandleStateCorrections(cap.reg, cap.corrs->data(),
+										   static_cast<uint32_t>(cap.corrs->size()), cap.clientFrame, cap.logic, cap.LastAckedFrame);
 					delete cap.corrs;
 				});
 				break;
@@ -434,7 +886,7 @@ void OwnerNetThread::HandleMessage(const ReceivedMessage& msg)
 
 // ---------------------------------------------------------------------------
 
-bool OwnerNetThread::TrySpawnDeferred(const DeferredConstructSpawn& entry)
+bool OwnerNet::TrySpawnDeferred(const DeferredConstructSpawn& entry)
 {
 	World* clientWorld = WorldMap[entry.OwnerID];
 	if (!clientWorld) return true; // World gone — drop it
@@ -449,7 +901,7 @@ bool OwnerNetThread::TrySpawnDeferred(const DeferredConstructSpawn& entry)
 	bool* pDone                = &done;
 	clientWorld->SpawnAndWait([constructs, entityReg, clientWorld, payloadData, payloadSize, pDone](uint32_t)
 	{
-		*pDone = ReplicationSystem::HandleConstructSpawn(
+		*pDone = HandleConstructSpawn(
 			constructs, entityReg, clientWorld, payloadData, payloadSize);
 	});
 
@@ -469,7 +921,7 @@ bool OwnerNetThread::TrySpawnDeferred(const DeferredConstructSpawn& entry)
 	return done;
 }
 
-void OwnerNetThread::FlushDeferredEntitySpawns()
+void OwnerNet::FlushDeferredEntitySpawns()
 {
 	for (auto it = DeferredEntitySpawns.begin(); it != DeferredEntitySpawns.end();)
 	{
@@ -495,8 +947,7 @@ void OwnerNetThread::FlushDeferredEntitySpawns()
 
 		clientWorld->SpawnAndWait([spawnReg, batch, count, spawnFrame](uint32_t)
 		{
-			for (size_t k = 0; k < count; ++k)
-				ReplicationSystem::HandleEntitySpawn(spawnReg, batch[k], spawnFrame);
+			for (size_t k = 0; k < count; ++k) HandleEntitySpawn(spawnReg, batch[k], spawnFrame);
 		});
 
 		// Request a rollback to the entity's server spawn frame so the entities are inserted
@@ -513,7 +964,7 @@ void OwnerNetThread::FlushDeferredEntitySpawns()
 	}
 }
 
-void OwnerNetThread::TickReplication()
+void OwnerNet::TickReplication()
 {
 	// Retry PlayerBeginRequest for connections stuck in Loaded state.
 	constexpr uint64_t RetryIntervalMs = 150;
@@ -553,7 +1004,7 @@ void OwnerNetThread::TickReplication()
 	}
 }
 
-void OwnerNetThread::TickInputSend()
+void OwnerNet::TickInputSend()
 {
 	if (!TrinyxJobs::IsRunning()) return;
 
@@ -561,17 +1012,16 @@ void OwnerNetThread::TickInputSend()
 	// can't safely be accessed by two jobs concurrently.
 	if (SendCounter.Value.load(std::memory_order_acquire) != 0) return;
 
-	OwnerNetThread* self = this;
+	OwnerNet* self = this;
 	TrinyxJobs::Dispatch([self](uint32_t) { self->ExecuteInputSend(); },
 						 &SendCounter, TrinyxJobs::Queue::General);
 }
 
-void OwnerNetThread::ExecuteInputSend()
+void OwnerNet::ExecuteInputSend()
 {
 	std::vector<HSteamNetConnection> clientHandles;
 	for (const auto& ci : ConnectionMgr->GetConnections())
-		if (ci.bOwnerInitiated && ci.bConnected && ci.OwnerID != 0)
-			clientHandles.push_back(ci.Handle);
+		if (ci.bOwnerInitiated && ci.bConnected && ci.OwnerID != 0) clientHandles.push_back(ci.Handle);
 
 	for (HSteamNetConnection handle : clientHandles)
 	{

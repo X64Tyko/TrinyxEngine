@@ -27,8 +27,8 @@ void PIENetThread::AddClient(HSteamNetConnection clientHandle, World* world)
 	ClientEntry& entry = Clients.emplace_back();
 	entry.Handle       = clientHandle;
 	entry.OwnerID      = 0; // promoted to real OwnerID in UpdateClientOwnerID after handshake
-	entry.OwnerWorld  = world;
-	entry.Handler      = std::make_unique<OwnerNetThread>();
+	entry.OwnerWorld   = world;
+	entry.Handler      = std::make_unique<OwnerNet>();
 	entry.Handler->InitAsHandler(GNS, Config, ConnectionMgr);
 	// Register under slot 0 immediately so TravelNotify/ServerReady handlers can
 	// find the world before UpdateClientOwnerID promotes the real ownerID slot.

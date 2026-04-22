@@ -1,6 +1,8 @@
 #pragma once
+#include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "Construct.h"
@@ -10,6 +12,8 @@
 #include "Logger.h"
 #include "NetTypes.h"
 #include "RegistryTypes.h"
+#include "ServerClientChannel.h"
+#include "TrinyxJobs.h"
 
 class World;
 class Registry;
@@ -39,9 +43,9 @@ public:
 
 	void Initialize(World* serverWorld);
 
-	/// Run one replication tick. Call from NetThread at NetworkUpdateHz.
-	/// Reads the authoritative frame number from the server's LogicThread.
-	void Tick(NetConnectionManager* connMgr);
+	/// Flush one network tick. Call from Sentinel at NetworkUpdateHz.
+	/// Stamps headers, dispatches build jobs, then dispatches drain+send jobs per channel.
+	void Flush(NetConnectionManager* connMgr);
 
 	/// Pre-register a server entity with a specific OwnerID. Allocates a NetIndex,
 	/// wires NetToRecord, and sets the record's NetworkID. SendSpawns will use the
@@ -114,36 +118,26 @@ public:
 		return ref;
 	}
 
-	/// Spawn an entity on the client Registry using a received EntitySpawnPayload.
-	/// Uses CreateInternal (GlobalEntityHandle), wires NetToRecord, writes field data,
-	/// and pushes a ServerEventEntry so rollback resim can re-hydrate the temporal slot.
-	static void HandleEntitySpawn(Registry* reg, const struct EntitySpawnPayload& payload, uint32_t frame);
-
-	/// Apply state corrections to client entities by looking up NetHandle → GlobalEntityHandle.
-	/// Under TNX_ENABLE_ROLLBACK: compares the predicted transform at clientFrame against the
-	/// server-authoritative values; divergent entities are queued for correction during resim
-	/// and a rollback is triggered. Without rollback: blind write to the current write frame.
-	static void HandleStateCorrections(Registry* reg, const struct StateCorrectionEntry* entries,
-									   uint32_t count, uint32_t clientFrame, class LogicThread* logic, uint32_t LastAckedFrame);
-
-	/// Create a client-side Construct from a received ConstructSpawn message.
-	/// Looks up the client factory from ReflectionRegistry via PrefabIndex (type hash),
-	/// resolves EntityNetHandles to local EntityHandles, calls CreateForReplication,
-	/// wires ConstructRecord, and calls Soul::ClaimBody via FlowManager.
-	/// Returns false if any required entity is not yet in the client registry — caller
-	/// should defer and retry next tick.
-	static bool HandleConstructSpawn(ConstructRegistry* reg, Registry* entityReg,
-									 World* clientWorld, const uint8_t* data, size_t len);
-
 	/// Record that the server resimulated ownerID's input from serverFrame.
 	/// Called from the LogicThread injector lambda when an input mismatch fires.
 	/// Thread-safe: atomic min-update so multiple dirty marks coalesce to the earliest.
 	void AddPendingResim(uint8_t ownerID, uint32_t serverFrame);
 
+	/// Open a channel for ownerID — initializes the input log and spawn tracking.
+	/// logDepth should be max(TemporalFrameCount, maxLead + 1).
+	void OpenChannel(uint8_t ownerID, uint32_t logDepth, ConnectionInfo* ci, NetConnectionManager* mgr);
+
+	/// Close and reset the channel for ownerID (called on disconnect).
+	void CloseChannel(uint8_t ownerID);
+
+	/// Returns the channel if it is active, nullptr otherwise.
+	ServerClientChannel* GetChannelIfActive(uint8_t ownerID);
+
 private:
-	void SendSpawns(NetConnectionManager* connMgr, uint32_t frameNumber);
-	void SendConstructSpawns(NetConnectionManager* connMgr, uint32_t frameNumber);
-	void SendStateCorrections(NetConnectionManager* connMgr, uint32_t frameNumber);
+	void DispatchSpawnJobs(uint32_t frameNumber);
+	void DispatchConstructSpawnJobs(uint32_t frameNumber);
+	void DispatchCorrectionJobs(uint32_t frameNumber);
+	void FlushSendQueues(NetConnectionManager* connMgr);
 
 	/// Assign an EntityNetHandle to a server entity that hasn't been replicated yet.
 	/// Allocates a NetIndex, wires NetToRecord, sets the record's NetworkID.
@@ -151,15 +145,47 @@ private:
 
 	World* AuthorityWorld = nullptr;
 
-	// Track which cache indices have been replicated (spawned on clients).
-	std::vector<bool> Replicated;
+	// Per-Owner channels — created on connect, destroyed on disconnect.
+	// Slot 0 is never populated. ActiveOwnerIDs tracks which slots are live
+	// so dispatch loops avoid iterating all MaxOwnerIDs slots each flush.
+	std::array<std::unique_ptr<ServerClientChannel>, MaxOwnerIDs> Channels{};
+	std::vector<uint8_t> ActiveOwnerIDs;
 
-	// Pre-built ConstructSpawn payloads pending send to all loaded clients.
-	// Payloads include resolved EntityNetHandles — built at RegisterConstruct time.
+	// Pre-built ConstructSpawn payloads pending dispatch to all loaded clients.
+	// Built at RegisterConstruct time with resolved EntityNetHandles.
 	std::vector<std::vector<uint8_t>> PendingConstructSpawns;
 
+	// Dirty entity cache — rebuilt on Sentinel each Flush(), read-only by correction build jobs.
+	struct DirtyEntityInfo
+	{
+		uint32_t slabIndex;
+		uint32_t netHandleValue;
+		uint32_t ownerID;
+	};
+
+	std::vector<DirtyEntityInfo> DirtyCache;
+
+	// Per-ownerID resim frame snapshot — rebuilt on Sentinel each Flush(), read-only by correction build jobs.
+	struct ResimSnapshot
+	{
+		const float* posX  = nullptr;
+		const float* posY  = nullptr;
+		const float* posZ  = nullptr;
+		const float* rotQx = nullptr;
+		const float* rotQy = nullptr;
+		const float* rotQz = nullptr;
+		const float* rotQw = nullptr;
+		uint32_t delta     = 0;
+	};
+
+	ResimSnapshot ResimCache[MaxOwnerIDs]{};
+
 	// Per-ownerID pending resim server frame. Written from the LogicThread injector
-	// (input mismatch); drained by SendStateCorrections on the net thread.
+	// (input mismatch); drained by correction build jobs.
 	// UINT32_MAX = nothing pending. Min-updated atomically to coalesce dirty marks.
 	std::atomic<uint32_t> PendingResimFrames[MaxOwnerIDs];
+
+	// Job counter for all build jobs dispatched in one Flush(). Drain jobs are
+	// dispatched immediately after — no wait needed since they check SendQueue::IsEmpty.
+	TrinyxJobs::JobCounter BuildCounter;
 };

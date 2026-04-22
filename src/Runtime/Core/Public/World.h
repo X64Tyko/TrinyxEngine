@@ -156,7 +156,7 @@ public:
 	uint8_t LocalOwnerID = 0; // This world's owner (0 = server, 1-255 = client)
 
 	/// Offset to add to a local logic frame number to get the equivalent server frame.
-	/// 0 on the server (local IS server). Set by OwnerNetThread at handshake.
+	/// 0 on the server (local IS server). Set by OwnerNet at handshake.
 	uint32_t GetServerFrameOffset() const { return ServerFrameOffset; }
 	void SetServerFrameOffset(uint32_t offset) { ServerFrameOffset = offset; }
 
@@ -187,7 +187,7 @@ private:
 	ConstructRegistry* Constructs = nullptr; // Non-owning — FlowManager owns the registry
 	ReplicationSystem* Replicator = nullptr; // Non-owning — TrinyxEngine or EditorContext owns it
 	FlowManager* FlowMgr          = nullptr; // Non-owning — set by FlowManager::CreateWorld
-	uint32_t ServerFrameOffset    = 0;       // Local→server frame delta; set by OwnerNetThread at handshake
+	uint32_t ServerFrameOffset    = 0;       // Local→server frame delta; set by OwnerNet at handshake
 	std::atomic<bool> bJobsInitialized{false};
 	std::atomic<bool> bInputAccumEnabled{false}; // Gated to true at PlayerBeginConfirm (client-side only)
 };

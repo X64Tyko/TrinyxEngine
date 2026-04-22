@@ -2,8 +2,8 @@
 #ifdef TNX_ENABLE_EDITOR
 
 #include "NetThreadBase.h"
-#include "AuthorityNetThread.h"
-#include "OwnerNetThread.h"
+#include "AuthorityNet.h"
+#include "OwnerNet.h"
 
 #include <vector>
 
@@ -53,23 +53,23 @@ public:
 	/// Must be called before SetAuthorityWorld / AddClient.
 	void InitChildren();
 
-	AuthorityNetThread& GetAuthority() { return Authority; }
+	AuthorityNet& GetAuthority() { return Authority; }
 
 	// Called by Sentinel — must be public.
-	void TickInputSend(); // delegates to each OwnerNetThread handler
+	void TickInputSend(); // delegates to each OwnerNet handler
 
 private:
 	void HandleMessage(const ReceivedMessage& msg);
 	void TickReplication(); // also ticks all owned FlowManagers
 
-	AuthorityNetThread Authority;
+	AuthorityNet Authority;
 
 	struct ClientEntry
 	{
 		HSteamNetConnection Handle = 0; // client-side GNS handle — used for routing before OwnerID is assigned
 		uint8_t OwnerID            = 0; // 0 = unassigned (handshake not yet complete)
 		World* OwnerWorld         = nullptr; // non-owning — EditorContext owns the World via FlowManager
-		std::unique_ptr<OwnerNetThread> Handler;
+		std::unique_ptr<OwnerNet> Handler;
 	};
 	std::vector<ClientEntry> Clients;
 

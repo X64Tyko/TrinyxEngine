@@ -146,18 +146,18 @@ public:
 
 	// ----- Soul lifecycle -----
 
-	/// Called by AuthorityNetThread when a client's RepState reaches Loaded.
+	/// Called by AuthorityNet when a client's RepState reaches Loaded.
 	/// Creates a Soul for ownerID, calls GameMode::OnPlayerJoined.
 	/// Also called on the client for its own ownerID after PlayerBeginConfirm.
 	void OnClientLoaded(uint8_t ownerID);
 
-	/// Called by OwnerNetThread at HandshakeAccept — the earliest point the
+	/// Called by OwnerNet at HandshakeAccept — the earliest point the
 	/// client knows its OwnerID. Creates the local player's Soul with Owner role
 	/// so all subsequent LOG_NET_* calls show [OWNER] instead of [NULL].
 	/// Idempotent: does nothing if the Soul already exists.
 	void OnLocalOwnerConnected(uint8_t ownerID);
 
-	/// Called by AuthorityNetThread when a client disconnects.
+	/// Called by AuthorityNet when a client disconnects.
 	/// Calls GameMode::OnPlayerLeft, destroys the Soul.
 	void OnClientDisconnected(uint8_t ownerID);
 
@@ -187,18 +187,18 @@ public:
 	GameMode* GetGameMode() const { return ActiveMode.get(); }
 
 #ifdef TNX_ENABLE_NETWORK
-	/// Called from AuthorityNetThread when a PlayerBeginRequest arrives for ownerID.
+	/// Called from AuthorityNet when a PlayerBeginRequest arrives for ownerID.
 	/// Delegates to GameMode::OnPlayerBeginRequest for all game decisions.
 	/// Returns the PlayerBeginResult on accept, nullopt on reject.
 	std::optional<PlayerBeginResult> HandlePlayerBeginRequest(Soul* soul, const PlayerBeginRequestPayload& req);
 
-	/// Called from OwnerNetThread after the Alive→Active sweep on ServerReady.
+	/// Called from OwnerNet after the Alive→Active sweep on ServerReady.
 	/// Creates the client-side Soul for ownerID (derived from channel) if absent,
 	/// sets its channel + FlowMgr, then fires the PlayerBegin RPC to the server.
 	void SendPlayerBeginRequest(NetChannel channel, uint32_t frameNumber, PredictionLedger& ledger);
 #endif
 
-	// ----- RPC dispatch (called from AuthorityNetThread / OwnerNetThread) -----
+	// ----- RPC dispatch (called from AuthorityNet / OwnerNet) -----
 
 	/// Called from any thread (e.g., NetThread) when a net flow event arrives.
 	/// The active FlowState's OnNetEvent hook is dispatched on the next Tick.

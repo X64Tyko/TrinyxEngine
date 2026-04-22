@@ -14,11 +14,11 @@
 #include "PIENetThread.h"
 using NetThreadType = PIENetThread;
 #elif defined(TNX_NET_MODEL_SERVER)
-#include "AuthorityNetThread.h"
-using NetThreadType = AuthorityNetThread;
+#include "AuthorityNet.h"
+using NetThreadType = AuthorityNet;
 #else
-#include "OwnerNetThread.h"
-using NetThreadType = OwnerNetThread;
+#include "OwnerNet.h"
+using NetThreadType = OwnerNet;
 #endif
 #endif
 #ifndef TNX_HEADLESS

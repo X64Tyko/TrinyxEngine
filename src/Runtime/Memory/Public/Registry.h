@@ -180,6 +180,7 @@ private:
 	friend class Archetype;
 	friend class LogicThread;
 	friend class ReplicationSystem;
+	friend class OwnerNet;
 	friend struct EntityBuilder;
 	friend struct EntityRecord;
 	friend struct EntityArchive;

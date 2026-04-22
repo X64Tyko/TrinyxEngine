@@ -3,7 +3,7 @@
 #include "TestFramework.h"
 #include "EngineConfig.h"
 #include "GNSContext.h"
-#include "OwnerNetThread.h"
+#include "OwnerNet.h"
 #include "Logger.h"
 
 #include <SDL3/SDL_timer.h>
@@ -14,7 +14,7 @@
 
 // Two-process loopback: CLIENT side.
 //
-// Drives OwnerNetThread from a local poll thread (mirroring how Sentinel drives
+// Drives OwnerNet from a local poll thread (mirroring how Sentinel drives
 // PumpMessages in production — no dedicated net thread in NetThreadBase anymore).
 //
 // Flow tested:
@@ -47,7 +47,7 @@ TEST(Net_Loopback_Client)
 	EngineConfig config{};
 	config.ApplyDefaults();
 
-	auto clientThread = std::make_unique<OwnerNetThread>();
+	auto clientThread = std::make_unique<OwnerNet>();
 	clientThread->Initialize(&gns, &config);
 
 	// Spin a local poll thread to drive PumpMessages — mirrors Sentinel in production.
@@ -80,7 +80,7 @@ TEST(Net_Loopback_Client)
 	LOG_ENG_ALWAYS("[Net_Loopback_Client] Connecting to 127.0.0.1:27020...");
 
 	// Poll until the full handshake completes — GetLocalOwnerID() is atomic,
-	// safe to read from test thread while OwnerNetThread::ThreadMain runs.
+	// safe to read from test thread while OwnerNet::ThreadMain runs.
 	// Flow: GNS Connected → auto-sends ConnectionHandshake → server GenerateNetID
 	//       → server HandshakeAccept → our HandleMessage → AssignOwnerID → LocalOwnerID set.
 	const uint64_t handshakeDeadline = SDL_GetTicks() + 5000;

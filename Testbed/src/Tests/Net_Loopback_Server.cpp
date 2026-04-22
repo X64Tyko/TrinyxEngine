@@ -55,7 +55,7 @@ TEST(Net_Loopback_Server)
 
 	// The client's auto-sent ConnectionHandshake triggers HandleMessage in AuthorityNetThread
 	// which calls GenerateNetID and assigns an OwnerID. Poll until that happens.
-	const HSteamNetConnection clientHandle = serverThread.GetConnectionManager()->GetConnections()[0].Handle;
+	const HSteamNetConnection clientHandle = serverThread.GetConnectionManager()->GetConnections().front().Handle;
 	const uint64_t handshakeDeadline       = SDL_GetTicks() + 5000;
 	while (SDL_GetTicks() < handshakeDeadline)
 	{

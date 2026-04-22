@@ -1405,6 +1405,13 @@ void EditorContext::StartPIE()
 	// processing (EnsurePlayerInputSlot) finds a valid AuthorityWorld.
 	net->SetAuthorityWorld(ServerFlow->GetWorld());
 
+	// ReplicationSystem must exist before the pump loop — HandshakeRequest → GenerateNetID
+	// → CreateInputLog → Replicator->OpenChannel fires during the pump, not after.
+	Replicator = std::make_unique<ReplicationSystem>();
+	Replicator->Initialize(ServerFlow->GetWorld());
+	ServerFlow->GetWorld()->SetReplicationSystem(Replicator.get());
+	net->SetReplicationSystem(Replicator.get());
+
 	// Connect each client via loopback and discover server-side handles
 	std::vector<uint32_t> knownHandles;
 	for (const auto& ci : connMgr->GetConnections()) knownHandles.push_back(ci.Handle);
@@ -1488,11 +1495,6 @@ void EditorContext::StartPIE()
 	}
 
 	net->GetAuthority().WirePlayerInputInjector(ServerFlow->GetWorld());
-
-	Replicator = std::make_unique<ReplicationSystem>();
-	Replicator->Initialize(ServerFlow->GetWorld());
-	ServerFlow->GetWorld()->SetReplicationSystem(Replicator.get());
-	net->SetReplicationSystem(Replicator.get());
 
 	// PIENetThread is now driven by the Sentinel main loop — no Start() needed.
 

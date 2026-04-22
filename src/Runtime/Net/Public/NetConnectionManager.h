@@ -1,6 +1,7 @@
 #pragma once
 #include <atomic>
 #include <cstdint>
+#include <list>
 #include <vector>
 #include <algorithm>
 #include <cstring>
@@ -201,8 +202,8 @@ public:
 	}
 
 	/// Get all active connections.
-	const std::vector<ConnectionInfo>& GetConnections() const { return Connections; }
-	std::vector<ConnectionInfo>& GetConnections() { return Connections; }
+	const std::list<ConnectionInfo>& GetConnections() const { return Connections; }
+	std::list<ConnectionInfo>& GetConnections() { return Connections; }
 
 	/// Number of active connections.
 	int GetConnectionCount() const { return static_cast<int>(Connections.size()); }
@@ -247,7 +248,7 @@ private:
 	int  SendRateMin    = -1; // -1 = use GNS default
 	int SendRateMax     = -1;
 
-	std::vector<ConnectionInfo> Connections;
+	std::list<ConnectionInfo> Connections;
 
 	/// Atomically updated when AssignOwnerID is called on a client-initiated connection.
 	/// Readable from any thread — used by tests and the editor to observe handshake completion.

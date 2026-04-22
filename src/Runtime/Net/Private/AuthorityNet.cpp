@@ -1,4 +1,4 @@
-#include "AuthorityNetThread.h"
+#include "AuthorityNet.h"
 
 #include "EngineConfig.h"
 #include "FlowManager.h"
@@ -14,45 +14,42 @@
 #include <algorithm>
 #include <cstring>
 
-void AuthorityNetThread::BindSoulCallbacks()
+void AuthorityNet::BindSoulCallbacks()
 {
 	if (!ConnectionMgr || !AuthorityWorld) return;
 
-	ConnectionMgr->OnClientDisconnected.Bind<AuthorityNetThread, &AuthorityNetThread::OnClientDisconnectedCB>(this);
+	ConnectionMgr->OnClientDisconnected.Bind<AuthorityNet, &AuthorityNet::OnClientDisconnectedCB>(this);
 }
 
-void AuthorityNetThread::OnClientDisconnectedCB(uint8_t ownerID)
+void AuthorityNet::OnClientDisconnectedCB(uint8_t ownerID)
 {
-	if (ownerID != 0 && ownerID < MaxOwnerIDs) InputLogs[ownerID].reset(); // free the log; slot becomes nullptr
+	if (ownerID != 0 && ownerID < MaxOwnerIDs && Replicator) Replicator->CloseChannel(ownerID);
 
 	if (FlowManager* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr) if (ownerID != 0) flow->OnClientDisconnected(ownerID);
 }
 
-void AuthorityNetThread::CreateInputLog(uint8_t ownerID)
+void AuthorityNet::CreateInputLog(uint8_t ownerID)
 {
-	if (ownerID == 0 || ownerID >= MaxOwnerIDs) return;
+	if (ownerID == 0 || ownerID >= MaxOwnerIDs || !Replicator) return;
 
 	const uint32_t temporalFrameCount = (Config && Config->TemporalFrameCount != EngineConfig::Unset)
 											? static_cast<uint32_t>(Config->TemporalFrameCount)
 											: 32u;
 
-	// The log must be deep enough to cover the full lead window. If maxLead > Depth,
-	// the backward search in ConsumeFrame can't reach real data when the server is near
-	// the lead limit, and predictions fall back to zeros. Use the larger of the two.
 	const uint32_t maxLead  = static_cast<uint32_t>(Config ? Config->MaxClientInputLead : 16);
 	const uint32_t logDepth = std::max(temporalFrameCount, maxLead + 1);
 
-	InputLogs[ownerID] = std::make_unique<PlayerInputLog>();
-	InputLogs[ownerID]->Initialize(logDepth);
+	ConnectionInfo* ci = ConnectionMgr ? ConnectionMgr->FindConnectionByOwnerID(ownerID, /*requireServerSide=*/true) : nullptr;
+	Replicator->OpenChannel(ownerID, logDepth, ci, ConnectionMgr);
 }
 
 
-void AuthorityNetThread::WirePlayerInputInjector(World* world)
+void AuthorityNet::WirePlayerInputInjector(World* world)
 {
 	LogicThread* logic = world ? world->GetLogicThread() : nullptr;
 	if (!logic) return;
 
-	// Capture 'this' — AuthorityNetThread outlives the LogicThread (engine shutdown order).
+	// Capture 'this' — AuthorityNet outlives the LogicThread (engine shutdown order).
 	// Returns true if the sim should stall (at least one player's input hasn't arrived).
 	// Two-pass: stall check first so we never partially inject a frame.
 	logic->SetPlayerInputInjector([this, world, logic](uint32_t frameNumber) -> bool
@@ -84,7 +81,7 @@ void AuthorityNetThread::WirePlayerInputInjector(World* world)
 			// which can never advance LastReceivedFrame and permanently deadlocks the stall.
 			for (uint32_t ownerID = 1; ownerID < MaxOwnerIDs; ++ownerID)
 			{
-				const PlayerInputLog* log = InputLogs[ownerID].get();
+				const PlayerInputLog* log = Replicator ? GetInputLog(static_cast<uint8_t>(ownerID)) : nullptr;
 				if (!log || !log->bActive) continue;
 				if (ConnectionInfo* ci = ConnectionMgr ? ConnectionMgr->FindConnectionByOwnerID(static_cast<uint8_t>(ownerID), /*requireServerSide=*/true) : nullptr)
 				{
@@ -94,7 +91,7 @@ void AuthorityNetThread::WirePlayerInputInjector(World* world)
 
 			for (uint32_t ownerID = 1; ownerID < MaxOwnerIDs; ++ownerID)
 			{
-				PlayerInputLog* log = InputLogs[ownerID].get();
+				PlayerInputLog* log = Replicator ? GetInputLog(static_cast<uint8_t>(ownerID)) : nullptr;
 				if (!log || !log->bActive) continue;
 
 				if (frameNumber > log->LastReceivedFrame + static_cast<uint32_t>(maxLead))
@@ -118,7 +115,7 @@ void AuthorityNetThread::WirePlayerInputInjector(World* world)
 		// Pass 2 — injection: all players are within the lead window.
 		for (uint32_t ownerID = 1; ownerID < MaxOwnerIDs; ++ownerID)
 		{
-			PlayerInputLog* log = InputLogs[ownerID].get();
+			PlayerInputLog* log = Replicator ? GetInputLog(static_cast<uint8_t>(ownerID)) : nullptr;
 			if (!log || !log->bActive) continue;
 
 			InputBuffer* buf = world->GetPlayerSimInput(static_cast<uint8_t>(ownerID));
@@ -218,9 +215,9 @@ void AuthorityNetThread::WirePlayerInputInjector(World* world)
 	});
 }
 
-void AuthorityNetThread::TickReplication()
+void AuthorityNet::TickReplication()
 {
-	if (Replicator) Replicator->Tick(ConnectionMgr);
+	if (Replicator) Replicator->Flush(ConnectionMgr);
 
 	// Heartbeat ping to each Playing client so AckedClientFrame propagates even during
 	// quiet frames (no corrections or spawns). NetChannel::MakeHeader stamps LastAckedClientFrame
@@ -236,7 +233,7 @@ void AuthorityNetThread::TickReplication()
 	}
 }
 
-void AuthorityNetThread::HandleMessage(const ReceivedMessage& msg)
+void AuthorityNet::HandleMessage(const ReceivedMessage& msg)
 {
 	auto type = static_cast<NetMessageType>(msg.Header.Type);
 

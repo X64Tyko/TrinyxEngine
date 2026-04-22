@@ -57,7 +57,7 @@ public:
 
 	/// Server-side hook: inject per-player input from PlayerInputLog into each player's
 	/// InputBuffer before gameplay logic runs. Called each fixed tick inside ProcessSimInput.
-	/// Wire up after both LogicThread and AuthorityNetThread are initialized.
+	/// Wire up after both LogicThread and AuthorityNet are initialized.
 	/// Returns true if the sim should stall (at least one player's input window hasn't arrived).
 	/// Signature: bool(uint32_t frameNumber)
 	void SetPlayerInputInjector(std::function<bool(uint32_t)> injector)
@@ -162,8 +162,8 @@ private:
 	const std::atomic<bool>* JobsInitPtr    = nullptr;
 
 	// Input
-	InputBuffer* SimInput = nullptr;
-	InputBuffer* VizInput = nullptr;
+	InputBuffer* SimInput                         = nullptr;
+	InputBuffer* VizInput                         = nullptr;
 	TrinyxMPSCRing<NetInputFrame>* InputAccumRing = nullptr; // non-owning; client-side only
 	const std::atomic<bool>* InputAccumEnabled    = nullptr; // gated at PlayerBeginConfirm
 
@@ -228,10 +228,10 @@ private:
 	TrinyxMPMCRing<EntityTransformCorrection> IncomingPredictedCorrections;
 	std::queue<EntityTransformCorrection> PendingPredictedCorrections; // Logic-thread-only
 
-	void ExecuteRollback(uint32_t targetFrame);   // Production rewind+resim — no test scaffolding
-	void ExecuteRollbackTest();                    // Test wrapper: save → ExecuteRollback → compare → restore
-	void RecordFrameInput();                       // Copy SimInput into current frame header
-	void InjectFrameInput(uint32_t frameNum);      // Restore from frame header into SimInput
+	void ExecuteRollback(uint32_t targetFrame); // Production rewind+resim — no test scaffolding
+	void ExecuteRollbackTest();                 // Test wrapper: save → ExecuteRollback → compare → restore
+	void RecordFrameInput();                    // Copy SimInput into current frame header
+	void InjectFrameInput(uint32_t frameNum);   // Restore from frame header into SimInput
 
 #ifdef TNX_TESTING
 	// Pre-allocated backup buffers for determinism validation (test harness only)

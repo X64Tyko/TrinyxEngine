@@ -31,7 +31,7 @@ RUNTIME_TEST(Net_PlayerConstruct)
 	 * replicates to a client and produces a matching ConstructRef on both sides.
 	 *
 	 * Steps (once PIE loopback session management is stable):
-	 *   1. Start a loopback PIE session (AuthorityNetThread + OwnerNetThread in-process).
+	 *   1. Start a loopback PIE session (AuthorityNet + OwnerNet in-process).
 	 *   2. Fire a PlayerBeginRequest from the client soul.
 	 *   3. Server's TestNetGameMode::OnPlayerBeginRequest runs:
 	 *      - Creates PlayerConstruct at (2, 5, 0)

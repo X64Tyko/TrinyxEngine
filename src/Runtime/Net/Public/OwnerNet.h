@@ -5,9 +5,15 @@
 #include <vector>
 
 class World;
+class Registry;
+class ConstructRegistry;
+class LogicThread;
+struct EntityRecord;
+struct EntitySpawnPayload;
+struct StateCorrectionEntry;
 
 // ---------------------------------------------------------------------------
-// OwnerNetThread
+// OwnerNet
 //
 // Handles all client-side message routing:
 //   ConnectionHandshake (client receive)  Ping/Pong  Pong
@@ -17,9 +23,9 @@ class World;
 // FlowManager is resolved from the client World (world->GetFlowManager()) so
 // there is no separate FlowMgr pointer to keep in sync.
 // ---------------------------------------------------------------------------
-class OwnerNetThread : public NetThreadBase<OwnerNetThread>
+class OwnerNet : public NetThreadBase<OwnerNet>
 {
-	friend class NetThreadBase<OwnerNetThread>;
+	friend class NetThreadBase<OwnerNet>;
 
 public:
 	/// Non-owning. Required for EntitySpawn and StateCorrection routing.
@@ -35,6 +41,15 @@ public:
 	void HandleMessage(const ReceivedMessage& msg);
 
 private:
+	static void WriteEntitySpawnFields(Registry* reg, EntityRecord* record,
+									   const EntitySpawnPayload& payload,
+									   uint32_t temporalFrame, uint32_t volatileFrame);
+	static void HandleEntitySpawn(Registry* reg, const EntitySpawnPayload& payload, uint32_t frame);
+	static void HandleStateCorrections(Registry* reg, const StateCorrectionEntry* entries,
+									   uint32_t count, uint32_t clientFrame,
+									   LogicThread* logic, uint32_t lastAckedFrame);
+	static bool HandleConstructSpawn(ConstructRegistry* reg, Registry* entityReg,
+									 World* clientWorld, const uint8_t* data, size_t len);
 	/// Hot-path payload — runs on a worker thread. Owns the actual packet build + send.
 	void ExecuteInputSend();
 

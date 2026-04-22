@@ -221,8 +221,8 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 			Net->InitChildren();
 			// Server world wired below, after FlowManager::CreateWorld().
 #elif defined(TNX_NET_MODEL_SERVER)
-	// AuthorityNetThread resolves FlowManager via AuthorityWorld->GetFlowManager().
-	// SetAuthorityWorld() is called below after CreateWorld().
+			// AuthorityNet resolves FlowManager via AuthorityWorld->GetFlowManager().
+			// SetAuthorityWorld() is called below after CreateWorld().
 #endif
 		}
 	}
@@ -316,7 +316,7 @@ bool TrinyxEngine::EnsureNetworking()
 	Net->InitChildren();
 	if (DefaultWorld) Net->SetAuthorityWorld(DefaultWorld);
 #elif defined(TNX_NET_MODEL_SERVER)
-// AuthorityNetThread resolves FlowManager via AuthorityWorld->GetFlowManager().
+	// AuthorityNet resolves FlowManager via AuthorityWorld->GetFlowManager().
 #endif
 	return true;
 }

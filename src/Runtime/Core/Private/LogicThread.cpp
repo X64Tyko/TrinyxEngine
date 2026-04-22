@@ -228,8 +228,8 @@ void LogicThread::PhysicsLoop(const SimFloat fixedStepTime)
 		{
 			corr = PendingPredictedCorrections.front();
 			PendingPredictedCorrections.pop();
-			if (IncomingPredictedCorrections.TryPush(corr))
-				LOG_ENG_WARN_F("[Rollback] Discarding stale predicted correction (frame %u)", corr.ClientFrame);
+			if (!IncomingPredictedCorrections.TryPush(corr))
+			LOG_ENG_WARN_F("[Rollback] Discarding stale predicted correction (frame %u)", corr.ClientFrame);
 		}
 	}
 #endif
