@@ -7,6 +7,7 @@
 #include "GNSContext.h"
 #include "NetConnectionManager.h"
 #include "AuthorityNet.h"
+#include "ReplicationSystem.h"
 #include "PlayerInputLog.h"
 #include "EngineConfig.h"
 
@@ -69,6 +70,12 @@ TEST(Net_InputFrameRouting)
 	}
 	ASSERT(serverSideConn != 0);
 	mgr->AssignOwnerID(serverSideConn, 1);
+
+	// CreateInputLog now goes through ReplicationSystem::OpenChannel.
+	// Wire a minimal ReplicationSystem (no World — this test has no sim) before calling it.
+	ReplicationSystem repl;
+	repl.Initialize(nullptr);
+	net.SetReplicationSystem(&repl);
 
 	// Allocate the PlayerInputLog for ownerID=1 (normally created by GenerateNetID after
 	// the full handshake; we call it directly here since we bypassed the handshake).
