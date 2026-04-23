@@ -64,21 +64,36 @@ void ReplicationSystem::AddPendingResim(uint8_t ownerID, uint32_t serverFrame)
 }
 
 // ---------------------------------------------------------------------------
-// Flush — called from Sentinel at NetworkUpdateHz
+// DispatchFrameJobs — called from Sentinel on every loop tick.
+// Fires spawn/correction build jobs for each newly published logic frame.
+// Only does work when LastPublishedFrame has advanced past LastDispatchedFrame.
+// ---------------------------------------------------------------------------
+
+void ReplicationSystem::DispatchFrameJobs()
+{
+	if (!AuthorityWorld) return;
+
+	LogicThreadBase* logic = AuthorityWorld->GetLogicThread();
+	if (!logic) return;
+
+	const uint32_t published = logic->GetLastCompletedFrame();
+	if (published == LastDispatchedFrame) return;
+
+	DispatchSpawnJobs(published);
+	DispatchConstructSpawnJobs(published);
+	DispatchCorrectionJobs(published);
+
+	LastDispatchedFrame = published;
+}
+
+// ---------------------------------------------------------------------------
+// Flush — called from Sentinel at NetworkUpdateHz.
+// Drains each channel's send queue to the wire.
 // ---------------------------------------------------------------------------
 
 void ReplicationSystem::Flush(NetConnectionManager* connMgr)
 {
 	if (!AuthorityWorld || !connMgr) return;
-	if (connMgr->GetConnectionCount() == 0) return;
-
-	const uint32_t frameNumber = AuthorityWorld->GetLogicThread()
-									 ? AuthorityWorld->GetLogicThread()->GetLastCompletedFrame()
-									 : 0;
-
-	DispatchSpawnJobs(frameNumber);
-	DispatchConstructSpawnJobs(frameNumber);
-	DispatchCorrectionJobs(frameNumber);
 	FlushSendQueues(connMgr);
 }
 

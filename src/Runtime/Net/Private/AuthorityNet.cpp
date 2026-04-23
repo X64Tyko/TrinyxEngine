@@ -196,6 +196,11 @@ void AuthorityNet::WireNetMode(WorldBase* world)
 	if (world) world->BindAuthorityNet(this, ConnectionMgr);
 }
 
+void AuthorityNet::TickDispatch()
+{
+	if (Replicator) Replicator->DispatchFrameJobs();
+}
+
 void AuthorityNet::TickReplication()
 {
 if (Replicator) Replicator->Flush(ConnectionMgr);

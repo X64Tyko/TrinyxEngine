@@ -44,8 +44,11 @@ public:
 
 	void Initialize(WorldBase* serverWorld);
 
-	/// Flush one network tick. Call from Sentinel at NetworkUpdateHz.
-	/// Stamps headers, dispatches build jobs, then dispatches drain+send jobs per channel.
+	/// Check for newly published logic frames and dispatch spawn/correction build jobs.
+	/// Call from Sentinel on every loop tick — no-ops if no new frame is available.
+	void DispatchFrameJobs();
+
+	/// Drain each channel's send queue to the wire. Call from Sentinel at NetworkUpdateHz.
 	void Flush(NetConnectionManager* connMgr);
 
 	/// Pre-register a server entity with a specific OwnerID. Allocates a NetIndex,
@@ -175,7 +178,7 @@ private:
 	// Built at RegisterConstruct time with resolved EntityNetHandles.
 	std::vector<std::vector<uint8_t>> PendingConstructSpawns;
 
-	// Dirty entity cache — rebuilt on Sentinel each Flush(), read-only by correction build jobs.
+	// Dirty entity cache — rebuilt on Sentinel each DispatchFrameJobs(), read-only by correction build jobs.
 	struct DirtyEntityInfo
 	{
 		uint32_t slabIndex;
@@ -185,7 +188,7 @@ private:
 
 	std::vector<DirtyEntityInfo> DirtyCache;
 
-	// Per-ownerID resim frame snapshot — rebuilt on Sentinel each Flush(), read-only by correction build jobs.
+	// Per-ownerID resim frame snapshot — rebuilt on Sentinel each DispatchFrameJobs(), read-only by correction build jobs.
 	struct ResimSnapshot
 	{
 		const float* posX  = nullptr;
@@ -205,7 +208,11 @@ private:
 	// UINT32_MAX = nothing pending. Min-updated atomically to coalesce dirty marks.
 	std::atomic<uint32_t> PendingResimFrames[MaxOwnerIDs];
 
-	// Job counter for all build jobs dispatched in one Flush(). Drain jobs are
+	// Job counter for all build jobs dispatched in one DispatchFrameJobs(). Drain jobs are
 	// dispatched immediately after — no wait needed since they check SendQueue::IsEmpty.
 	TrinyxJobs::JobCounter BuildCounter;
+
+	// Last frame number for which spawn/correction jobs were dispatched.
+	// Sentinel-only — no atomics needed.
+	uint32_t LastDispatchedFrame = 0;
 };

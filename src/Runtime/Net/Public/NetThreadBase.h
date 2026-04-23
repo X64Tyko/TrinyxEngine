@@ -28,8 +28,9 @@ struct ReceivedMessage;
 //
 // All instances run in the same mode:
 //   Sentinel calls PumpMessages() each 1ms tick (Poll + recv + HandleMessage).
+//   Sentinel calls TickDispatch() each 1ms tick — fires spawn/correction jobs when a new frame is ready.
 //   Sentinel calls TickInputSend() gated at InputNetHz (128Hz).
-//   Sentinel calls Tick() gated at NetworkUpdateHz (30Hz) — replication + clock sync.
+//   Sentinel calls Tick() gated at NetworkUpdateHz (30Hz) — wire flush + clock sync.
 // ---------------------------------------------------------------------------
 
 template <typename Derived>
@@ -65,6 +66,11 @@ public:
 
 	// Default no-op — server inherits this; client and PIE override.
 	void TickInputSend()
+	{
+	}
+
+	// Default no-op — AuthorityNet and PIE override.
+	void TickDispatch()
 	{
 	}
 

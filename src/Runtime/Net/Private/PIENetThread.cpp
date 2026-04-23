@@ -89,6 +89,11 @@ void PIENetThread::TickReplication()
 	}
 }
 
+void PIENetThread::TickDispatch()
+{
+	Authority.TickDispatch();
+}
+
 void PIENetThread::TickInputSend()
 {
 	for (auto& entry : Clients) entry.Handler->TickInputSend();

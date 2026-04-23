@@ -47,6 +47,9 @@ return ch ? &ch->InputLog : nullptr;
 void WireNetMode(WorldBase* world);
 
 void HandleMessage(const ReceivedMessage& msg);
+/// Dispatch spawn/correction build jobs for any newly published logic frames.
+/// Called from Sentinel on every loop tick (ungated).
+void TickDispatch();
 void TickReplication();
 
 /// Opens a ServerClientChannel for ownerID, sized to match the temporal slab.

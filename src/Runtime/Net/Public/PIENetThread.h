@@ -57,6 +57,7 @@ public:
 
 	// Called by Sentinel — must be public.
 	void TickInputSend(); // delegates to each OwnerNet handler
+	void TickDispatch();  // delegates to Authority
 
 private:
 	void HandleMessage(const ReceivedMessage& msg);

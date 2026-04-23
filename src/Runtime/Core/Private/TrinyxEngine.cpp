@@ -387,6 +387,7 @@ void TrinyxEngine::RunMainLoop()
 		{
 			// PumpMessages every sentinel tick: Poll(0) + recv + HandleMessage (may dispatch jobs).
 			Net->PumpMessages();
+			Net->TickDispatch();
 
 			netInputAccum += static_cast<double>(dt);
 			netTickAccum  += static_cast<double>(dt);
