@@ -135,7 +135,7 @@ uint32_t AudioManager::LoadSound(const char* path, const std::string& name, Asse
 	SoundAsset* asset = ::LoadSound(path);
 	if (!asset)
 	{
-		LOG_ENG_ERROR_F("[Audio] LoadSound: failed to decode '%s'", path ? path : "(null)");
+		LOG_ENG_WARN_F("[Audio] LoadSound: failed to decode '%s'", path ? path : "(null)");
 		return UINT32_MAX;
 	}
 

@@ -218,7 +218,7 @@ SoundAsset* LoadSound(const char* path)
 
 		if (!SDL_LoadWAV(path, &spec, &buf, &len))
 		{
-			LOG_ENG_ERROR_F("[Audio] SDL_LoadWAV failed for '%s': %s", path, SDL_GetError());
+			LOG_ENG_WARN_F("[Audio] SDL_LoadWAV failed for '%s': %s", path, SDL_GetError());
 			return nullptr;
 		}
 
