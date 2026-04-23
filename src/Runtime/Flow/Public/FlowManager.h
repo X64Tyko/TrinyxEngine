@@ -89,7 +89,9 @@ void FlowManager<TNet, TRollback, TFrame>::LoadLevel(const char* levelPath, bool
 			size_t count = EntityBuilder::SpawnFromFileTracked(reg, pathCStr, bBackground, spawnedHandles);
 			LOG_NET_INFO_F(soul, "[FlowManager] LoadLevel: spawned %zu entities from %s%s at frame %u",
 						   count, pathCStr, bBackground ? " (Alive-only)" : "", spawnFrame);
+#ifdef TNX_ENABLE_ROLLBACK
 			for (GlobalEntityHandle gh : spawnedHandles) reg->PushEntityReinitEvent(gh, spawnFrame);
+#endif
 		});
 	}
 	else

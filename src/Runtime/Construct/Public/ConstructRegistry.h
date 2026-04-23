@@ -186,6 +186,61 @@ public:
 		PendingDestructions.push_back(id);
 	}
 
+	/// Destroy a Construct by its network handle. Searches Entry buckets for the
+	/// matching pointer (same pattern as SetNetDestroyHook). Safe to call on Logic thread.
+	void DestroyByNetHandle(ConstructNetHandle handle)
+	{
+		const GlobalConstructHandle& gH = LookupGlobalHandle(handle);
+		if (gH.GetIndex() == 0) return;
+		const ConstructRecord* rec = Records.try_get_ptr(gH.GetIndex());
+		if (!rec || !rec->ConstructPtr) return;
+		void* target = rec->ConstructPtr;
+		for (auto& bucket : Buckets)
+		{
+			for (auto& entry : bucket)
+			{
+				if (entry.Ptr == target)
+				{
+					Destroy(entry.ID);
+					return;
+				}
+			}
+		}
+	}
+
+	/// Called by ReplicationSystem after RegisterConstruct to auto-deregister on destruction.
+	void SetNetDestroyHook(void* ptr, ConstructNetHandle handle,
+						   void (*fn)(void*, ConstructNetHandle), void* ctx)
+	{
+		for (auto& bucket : Buckets)
+		{
+			for (auto& entry : bucket)
+			{
+				if (entry.Ptr == ptr)
+				{
+					entry.NetHandle     = handle;
+					entry.NetDestroyFn  = fn;
+					entry.NetDestroyCtx = ctx;
+					return;
+				}
+			}
+		}
+	}
+
+	/// Clear all net destroy hooks — called by ReplicationSystem on destruction
+	/// to prevent stale callbacks after the system is torn down.
+	void ClearNetDestroyHooks()
+	{
+		for (auto& bucket : Buckets)
+		{
+			for (auto& entry : bucket)
+			{
+				entry.NetDestroyFn  = nullptr;
+				entry.NetDestroyCtx = nullptr;
+			}
+		}
+	}
+
 	/// Process deferred destructions. Called by LogicThread at frame top.
 	void ProcessDeferredDestructions()
 	{
@@ -200,6 +255,7 @@ public:
 				{
 					if (bucket[i].ID == id)
 					{
+						if (bucket[i].NetDestroyFn) bucket[i].NetDestroyFn(bucket[i].NetDestroyCtx, bucket[i].NetHandle);
 						if (i != bucket.size() - 1) bucket[i] = std::move(bucket.back());
 						bucket.pop_back();
 						found = true;
@@ -219,7 +275,8 @@ public:
 	{
 		for (uint8_t i = 0; i < static_cast<uint8_t>(minSurviving); ++i)
 		{
-			Buckets[i].clear(); // unique_ptr destructors call ~TypedStorage → ~Construct → Shutdown
+			for (auto& entry : Buckets[i]) if (entry.NetDestroyFn) entry.NetDestroyFn(entry.NetDestroyCtx, entry.NetHandle);
+			Buckets[i].clear();
 		}
 	}
 
@@ -253,7 +310,11 @@ public:
 	/// Destroy everything.
 	void DestroyAll()
 	{
-		for (auto& bucket : Buckets) bucket.clear();
+		for (auto& bucket : Buckets)
+		{
+			for (auto& entry : bucket) if (entry.NetDestroyFn) entry.NetDestroyFn(entry.NetDestroyCtx, entry.NetHandle);
+			bucket.clear();
+		}
 		PendingDestructions.clear();
 	}
 
@@ -350,6 +411,12 @@ private:
 		InitializedFn OnInitialized = nullptr;
 		ShutdownFn ShutdownPtr      = nullptr;
 		ReinitFn ReinitPtr          = nullptr;
+
+		// Net destroy hook — set by ReplicationSystem::RegisterConstruct.
+		// Fires before the Entry is erased so ReplicationSystem can queue ConstructDestroy.
+		ConstructNetHandle NetHandle{};
+		void (*NetDestroyFn)(void* ctx, ConstructNetHandle handle) = nullptr;
+		void* NetDestroyCtx                                        = nullptr;
 	};
 
 	static constexpr uint8_t BucketCount = 4; // Level, World, Session, Persistent

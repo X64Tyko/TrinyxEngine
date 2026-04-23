@@ -89,6 +89,11 @@ struct ServerClientChannel
 		Replicated[index] = true;
 	}
 
+	void ClearReplicated(uint32_t index)
+	{
+		if (index < Replicated.size()) Replicated[index] = false;
+	}
+
 	void EnsureCapacity(uint32_t count)
 	{
 		if (Replicated.size() < count) Replicated.resize(count, false);

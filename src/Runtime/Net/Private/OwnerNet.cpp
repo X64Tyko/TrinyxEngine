@@ -799,8 +799,66 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 			}
 
 		case NetMessageType::EntityDestroy:
-			// TODO
-			break;
+			{
+				const uint32_t count = static_cast<uint32_t>(msg.Payload.size() / sizeof(uint32_t));
+				if (count == 0) break;
+
+				ConnectionInfo* ci     = ConnectionMgr->FindConnection(msg.Connection);
+				const uint8_t ownerID  = ci ? ci->OwnerID : 0;
+				WorldBase* clientWorld = WorldMap[ownerID];
+				if (!clientWorld) break;
+
+				Registry* entityReg = clientWorld->GetRegistry();
+
+				// Copy handles for the Post lambda — payload lifetime is not guaranteed.
+				auto* handlesCopy = new std::vector<uint32_t>(
+					reinterpret_cast<const uint32_t*>(msg.Payload.data()),
+					reinterpret_cast<const uint32_t*>(msg.Payload.data()) + count);
+
+				clientWorld->Post([entityReg, handlesCopy](uint32_t)
+				{
+					for (uint32_t val : *handlesCopy)
+					{
+						EntityNetHandle nh{};
+						nh.Value              = val;
+						GlobalEntityHandle gH = entityReg->GlobalEntityRegistry.LookupGlobalHandle(nh);
+						if (gH.GetIndex() == 0) continue;
+						entityReg->DestroyByGlobalHandle(gH);
+					}
+					delete handlesCopy;
+				});
+				break;
+			}
+
+		case NetMessageType::ConstructDestroy:
+			{
+				const uint32_t count = static_cast<uint32_t>(msg.Payload.size() / sizeof(uint32_t));
+				if (count == 0) break;
+
+				ConnectionInfo* ci     = ConnectionMgr->FindConnection(msg.Connection);
+				const uint8_t ownerID  = ci ? ci->OwnerID : 0;
+				WorldBase* clientWorld = WorldMap[ownerID];
+				if (!clientWorld) break;
+
+				ConstructRegistry* constructs = clientWorld->GetConstructRegistry();
+				if (!constructs) break;
+
+				auto* handlesCopy = new std::vector<uint32_t>(
+					reinterpret_cast<const uint32_t*>(msg.Payload.data()),
+					reinterpret_cast<const uint32_t*>(msg.Payload.data()) + count);
+
+				clientWorld->Post([constructs, handlesCopy](uint32_t)
+				{
+					for (uint32_t val : *handlesCopy)
+					{
+						ConstructNetHandle nh{};
+						nh.Value = val;
+						constructs->DestroyByNetHandle(nh);
+					}
+					delete handlesCopy;
+				});
+				break;
+			}
 
 		case NetMessageType::SoulRPC:
 			{

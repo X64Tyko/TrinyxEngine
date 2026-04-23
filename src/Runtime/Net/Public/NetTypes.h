@@ -29,8 +29,9 @@ enum class NetMessageType : uint8_t
 	ClientModeManifest  = 15, // Client->Server: optional reply to a GameModeManifest (preferences, loadout, etc.)
 	SoulRPC             = 16, // Bidirectional: Soul-layer RPC (RPCHeader + TParams bytes). One type forever.
 	ConstructSpawn      = 17, // Server->Client: new Construct creation command (header + trailing EntityNetHandle[])
-	Custom              = 18, // Game-defined: first slot for user-extended message types
-	Unknown             = 19, // Sentinel: unrecognised message type — receiver must drop
+	ConstructDestroy    = 18, // Server->Client: Construct destruction command (N × uint32_t ConstructNetHandle values, count = PayloadSize / 4)
+	Custom              = 19, // Game-defined: first slot for user-extended message types
+	Unknown             = 20, // Sentinel: unrecognised message type — receiver must drop
 	Count
 };
 
@@ -41,9 +42,9 @@ inline const char* NetMessageTypeName(uint8_t type)
 		"EntityDestroy", "Ping", "Pong", "FlowEvent",
 		"PlayerBeginRequest", "PlayerBeginConfirm", "PlayerBeginReject", "ClockSync",
 		"TravelNotify", "LevelReady", "GameModeManifest", "ClientModeManifest",
-		"SoulRPC", "ConstructSpawn", "Custom", "Unknown",
+		"SoulRPC", "ConstructSpawn", "ConstructDestroy", "Custom", "Unknown",
 	};
-	static_assert(static_cast<size_t>(NetMessageType::Count) == 20,
+	static_assert(static_cast<size_t>(NetMessageType::Count) == 21,
 				  "NetMessageTypeName table out of sync with NetMessageType enum");
 	return type < static_cast<uint8_t>(NetMessageType::Count) ? kNames[type] : "???";
 }

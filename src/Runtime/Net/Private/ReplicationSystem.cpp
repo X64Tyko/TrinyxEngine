@@ -81,6 +81,7 @@ void ReplicationSystem::DispatchFrameJobs()
 
 	DispatchSpawnJobs(published);
 	DispatchConstructSpawnJobs(published);
+	DispatchConstructDestroyJobs(published);
 	DispatchCorrectionJobs(published);
 
 	LastDispatchedFrame = published;
@@ -239,8 +240,9 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 	if (!flags || !posX) return;
 
 	const uint32_t maxEntities = temporalCache->GetMaxCachedEntityCount();
+	const uint32_t horizon     = CommittedFrameHorizon;
 
-	// Sentinel pre-scan: assign net handles (registry mutation) and collect all alive+replicated entities.
+	// Sentinel pre-scan: assign net handles (registry mutation) and collect candidates.
 	// IsReplicated/MarkReplicated run per-connection inside each job.
 	struct SpawnCandidate
 	{
@@ -250,28 +252,75 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 		uint8_t generation;
 	};
 
+	struct DestroyCandidate
+	{
+		uint32_t slabIndex;
+		uint32_t netHandleValue;
+	};
+
 	std::vector<SpawnCandidate> allCandidates;
+	std::vector<DestroyCandidate> allDestroys;
 	allCandidates.reserve(64);
+
+	const int32_t Alive         = static_cast<int32_t>(TemporalFlagBits::Alive);
+	const int32_t Replicated    = static_cast<int32_t>(TemporalFlagBits::Replicated);
+	const int32_t ConfirmedDead = static_cast<int32_t>(TemporalFlagBits::NetConfirmedDead);
 
 	for (uint32_t i = 0; i < maxEntities; ++i)
 	{
-		if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Alive))) continue;
-		if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Replicated))) continue;
+		const int32_t f = flags[i];
 
-		GlobalEntityHandle gH = reg->GlobalEntityRegistry.LookupGlobalHandle(static_cast<EntityCacheHandle>(i));
-		EntityRecord* record  = reg->GlobalEntityRegistry.Records[gH.GetIndex()];
-		if (!record || !record->IsValid()) continue;
+		if (f & Alive)
+		{
+			if (!(f & Replicated)) continue;
 
-		EntityNetHandle nh = record->NetworkID;
-		if (nh.NetIndex == 0) nh = AssignNetHandle(reg, gH);
+			GlobalEntityHandle gH = reg->GlobalEntityRegistry.LookupGlobalHandle(static_cast<EntityCacheHandle>(i));
+			EntityRecord* record  = reg->GlobalEntityRegistry.Records[gH.GetIndex()];
+			if (!record || !record->IsValid()) continue;
 
-		EntityNetManifest manifest{};
-		manifest.ClassType = record->Arch ? record->Arch->ArchClassID : 0;
+			EntityNetHandle nh = record->NetworkID;
+			if (nh.NetIndex == 0) nh = AssignNetHandle(reg, gH);
 
-		allCandidates.push_back({i, nh, manifest, static_cast<uint8_t>(record->GetGeneration())});
+			EntityNetManifest manifest{};
+			manifest.ClassType = record->Arch ? record->Arch->ArchClassID : 0;
+
+			allCandidates.push_back({i, nh, manifest, static_cast<uint8_t>(record->GetGeneration())});
+		}
+		else if (f & Replicated)
+		{
+			if (!(f & ConfirmedDead))
+			{
+				// Tombstone not yet confirmed — post a world queue job to stamp
+				// NetConfirmedDead once CommittedFrameHorizon has passed this frame.
+				// The flag will be visible in the next published frame.
+				if (horizon >= frameNumber)
+				{
+					// Already past horizon — stamp immediately via Logic.
+					const uint32_t slotIdx = i;
+					AuthorityWorld->Post([reg, slotIdx](uint32_t)
+					{
+						ComponentCacheBase* cache   = reg->GetTemporalCache();
+						TemporalFrameHeader* hdr    = cache->GetFrameHeader(cache->GetActiveWriteFrame());
+						const ComponentTypeID fSlot = CacheSlotMeta<>::StaticTemporalIndex();
+						auto* wFlags                = static_cast<int32_t*>(cache->GetFieldData(hdr, fSlot, 0));
+						if (wFlags) wFlags[slotIdx] |= static_cast<int32_t>(TemporalFlagBits::NetConfirmedDead);
+					});
+				}
+				// else: horizon hasn't passed yet — will be picked up next tick
+			}
+			else
+			{
+				// Confirmed dead — collect for EntityDestroy this pass.
+				GlobalEntityHandle gH = reg->GlobalEntityRegistry.LookupGlobalHandle(static_cast<EntityCacheHandle>(i));
+				EntityRecord* record  = reg->GlobalEntityRegistry.Records[gH.GetIndex()];
+				if (!record) continue;
+
+				allDestroys.push_back({i, record->NetworkID.Value});
+			}
+		}
 	}
 
-	if (allCandidates.empty()) return;
+	if (allCandidates.empty() && allDestroys.empty()) return;
 
 	// Per-connection: stamp state transitions + headers on Sentinel, then dispatch the build job.
 	// Each job is the sole writer to its channel's Replicated[] bitfield.
@@ -279,8 +328,10 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 	{
 		ServerClientChannel* Channel;
 		PacketHeader SpawnHeader;
+		PacketHeader DestroyHeader;
 		PacketHeader ReadyHeader;
 		std::vector<SpawnCandidate> Candidates;
+		std::vector<DestroyCandidate> Destroys;
 		bool bPass1;
 		const int32_t* flags;
 		const float* posX;
@@ -314,7 +365,8 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 		ch->EnsureCapacity(maxEntities);
 		const uint32_t clientFrame = ch->CI->ToClientFrame(frameNumber);
 
-		PacketHeader spawnHdr = ch->Channel.PrepareHeader(NetMessageType::EntitySpawn, 0, clientFrame);
+		PacketHeader spawnHdr   = ch->Channel.PrepareHeader(NetMessageType::EntitySpawn, 0, clientFrame);
+		PacketHeader destroyHdr = ch->Channel.PrepareHeader(NetMessageType::EntityDestroy, 0, clientFrame);
 		PacketHeader readyHdr{};
 
 		if (bPass1)
@@ -338,7 +390,7 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 		}
 
 		auto* cap = new SpawnCapture{
-			ch, spawnHdr, readyHdr, allCandidates, bPass1,
+			ch, spawnHdr, destroyHdr, readyHdr, allCandidates, allDestroys, bPass1,
 			flags, posX, posY, posZ, rotQx, rotQy, rotQz, rotQw,
 			scX, scY, scZ, colR, colG, colB, colA, meshID
 		};
@@ -395,6 +447,31 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 								batch.size(), cap->bPass1 ? "initial" : "incremental");
 			}
 
+			// EntityDestroy — send for any confirmed-dead entities this client knew about.
+			{
+				std::vector<uint32_t> destroyBatch;
+				destroyBatch.reserve(cap->Destroys.size());
+				for (const auto& d : cap->Destroys)
+				{
+					if (!cap->Channel->IsReplicated(d.slabIndex)) continue;
+					cap->Channel->ClearReplicated(d.slabIndex);
+					destroyBatch.push_back(d.netHandleValue);
+				}
+				if (!destroyBatch.empty())
+				{
+					PendingPacket pkt;
+					pkt.Header = cap->DestroyHeader;
+					pkt.Payload.resize(destroyBatch.size() * sizeof(uint32_t));
+					pkt.Header.PayloadSize = static_cast<uint16_t>(pkt.Payload.size());
+					std::memcpy(pkt.Payload.data(), destroyBatch.data(), pkt.Payload.size());
+					pkt.Reliable = true;
+					cap->Channel->SendQueue.Push(std::move(pkt));
+
+					LOG_NET_DEBUG_F(nullptr, "[Replication] %zu EntityDestroy(s) queued",
+									destroyBatch.size());
+				}
+			}
+
 			if (cap->bPass1)
 			{
 				FlowEventPayload serverReadyMsg{};
@@ -411,10 +488,63 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 			delete cap;
 		}, &BuildCounter, TrinyxJobs::Queue::General);
 	}
+
+	// Net slot recycles are safe once destroy packets are queued — GNS reliable ordering
+	// ensures clients receive EntityDestroy before any spawn that reuses the net index.
+	if (!allDestroys.empty()) reg->ConfirmNetRecycles();
 }
 
 // ---------------------------------------------------------------------------
-// DispatchCorrectionJobs — pre-scan dirty entities on Sentinel, dispatch one
+// DispatchConstructDestroyJobs — drain PendingConstructDestroys (pushed by
+// OnConstructDestroyed hook on the Logic thread) and send ConstructDestroy
+// packets to all loaded Owners.
+// ---------------------------------------------------------------------------
+
+void ReplicationSystem::DispatchConstructDestroyJobs(uint32_t frameNumber)
+{
+	if (!TrinyxJobs::IsRunning()) return;
+
+	std::vector<uint32_t> handles;
+	handles.reserve(8);
+	PendingConstructDestroys.Drain(handles);
+	if (handles.empty()) return;
+
+	for (uint8_t oid : ActiveOwnerIDs)
+	{
+		ServerClientChannel* ch = GetChannelIfActive(oid);
+		if (!ch || !ch->CI) continue;
+		if (ch->CI->RepState < ClientRepState::Loaded) continue;
+
+		const uint32_t clientFrame = ch->CI->ToClientFrame(frameNumber);
+		PacketHeader hdr           = ch->Channel.PrepareHeader(
+			NetMessageType::ConstructDestroy,
+			static_cast<uint16_t>(handles.size() * sizeof(uint32_t)),
+			clientFrame);
+
+		struct Capture
+		{
+			ServerClientChannel* Channel;
+			PacketHeader Header;
+			std::vector<uint32_t> Handles;
+		};
+		auto* cap = new Capture{ch, hdr, handles};
+
+		TrinyxJobs::Dispatch([cap](uint32_t)
+		{
+			PendingPacket pkt;
+			pkt.Header             = cap->Header;
+			pkt.Header.PayloadSize = static_cast<uint16_t>(cap->Handles.size() * sizeof(uint32_t));
+			pkt.Payload.resize(cap->Handles.size() * sizeof(uint32_t));
+			std::memcpy(pkt.Payload.data(), cap->Handles.data(), pkt.Payload.size());
+			pkt.Reliable = true;
+			cap->Channel->SendQueue.Push(std::move(pkt));
+
+			LOG_NET_DEBUG_F(nullptr, "[Replication] %zu ConstructDestroy(s) queued", cap->Handles.size());
+			delete cap;
+		}, &BuildCounter, TrinyxJobs::Queue::General);
+	}
+}
+
 // build job per active channel. Jobs filter by per-client Replicated[] and push
 // the correction packet to the channel's send queue.
 // ---------------------------------------------------------------------------
@@ -467,20 +597,20 @@ void ReplicationSystem::DispatchCorrectionJobs(uint32_t frameNumber)
 	DirtyCache.clear();
 	DirtyCache.reserve(128);
 
-	constexpr int32_t kActive = static_cast<int32_t>(TemporalFlagBits::Active);
-	constexpr int32_t kDirty  = static_cast<int32_t>(TemporalFlagBits::Dirty);
+	constexpr int32_t Active = static_cast<int32_t>(TemporalFlagBits::Active);
+	constexpr int32_t Dirty  = static_cast<int32_t>(TemporalFlagBits::Dirty);
 
 	for (uint32_t i = 0; i < maxEntities; ++i)
 	{
 		if (!(flags[i] & static_cast<int32_t>(TemporalFlagBits::Replicated))) continue;
-		if (!(flags[i] & kActive)) continue;
+		if (!(flags[i] & Active)) continue;
 
 		GlobalEntityHandle gHandle = reg->GlobalEntityRegistry.LookupGlobalHandle(static_cast<EntityCacheHandle>(i));
 		EntityRecord* record       = reg->GlobalEntityRegistry.Records[gHandle.GetIndex()];
 		if (!record || !record->IsValid()) continue;
 
 		const uint32_t oid     = record->NetworkID.GetOwnerID();
-		const bool bDirty      = (flags[i] & kDirty) != 0;
+		const bool bDirty      = (flags[i] & Dirty) != 0;
 		const bool bOwnerResim = (oid > 0 && oid < MaxOwnerIDs && ResimCache[oid].delta > 0);
 
 		if (!bDirty && !bOwnerResim) continue;

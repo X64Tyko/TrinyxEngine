@@ -4,20 +4,21 @@
 
 enum class TemporalFlagBits : int32_t
 {
-	Active       = static_cast<int32_t>(1u << 31), ///< Entity ticks and renders — GPU predicate reads this
-	Dirty        = static_cast<int32_t>(1u << 30), ///< Entity data changed — accumulates until render clears
-	DirtiedFrame = static_cast<int32_t>(1u << 29), ///< Entity dirtied THIS frame — cleared at frame start, used for per-frame logic reset
-	Replicated   = static_cast<int32_t>(1u << 28), ///< This entity replicates
-	Alive        = static_cast<int32_t>(1u << 27), ///< Entity exists in the world — data is valid, StateCorrections apply. Set on spawn, cleared on destroy. Active implies Alive.
+	Active           = static_cast<int32_t>(1u << 31), ///< Entity ticks and renders — GPU predicate reads this
+	Dirty            = static_cast<int32_t>(1u << 30), ///< Entity data changed — accumulates until render clears
+	DirtiedFrame     = static_cast<int32_t>(1u << 29), ///< Entity dirtied THIS frame — cleared at frame start, used for per-frame logic reset
+	Replicated       = static_cast<int32_t>(1u << 28), ///< This entity replicates
+	Alive            = static_cast<int32_t>(1u << 27), ///< Entity exists in the world — data is valid, StateCorrections apply. Set on spawn, cleared on destroy. Active implies Alive.
+	NetConfirmedDead = static_cast<int32_t>(1u << 26), ///< Set by Replication via world Post() when CommittedFrameHorizon passes this entity's death. Cleared when the slot is recycled.
 
-	depthMask = 0xF << 24, ///< 4 bits for attachment depth
+	depthMask = 0xF << 22, ///< 4 bits for attachment depth (bits 25..22)
 
 	// Used for ConstructView bound entities
-	PrePhysSkip  = static_cast<int32_t>(1u << 23), ///< if 1 Disable PrePhysics sweep
-	PostPhysSkip = static_cast<int32_t>(1u << 22), ///< if 1 Disable PostPhysics sweep
-	ScalarSkip   = static_cast<int32_t>(1u << 21), ///< if 1 Disable ScalarUpdate sweep
-	ASleep       = static_cast<int32_t>(1u << 20), ///< if 1 Disable in Jolt
-	// Bits 19..0 available for game-layer flags
+	PrePhysSkip  = static_cast<int32_t>(1u << 21), ///< if 1 Disable PrePhysics sweep
+	PostPhysSkip = static_cast<int32_t>(1u << 20), ///< if 1 Disable PostPhysics sweep
+	ScalarSkip   = static_cast<int32_t>(1u << 19), ///< if 1 Disable ScalarUpdate sweep
+	ASleep       = static_cast<int32_t>(1u << 18), ///< if 1 Disable in Jolt
+	// Bits 17..0 available for game-layer flags
 };
 
 FORCE_INLINE TemporalFlagBits operator|(TemporalFlagBits lhs, TemporalFlagBits rhs)

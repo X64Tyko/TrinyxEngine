@@ -15,6 +15,7 @@
 #include "RegistryTypes.h"
 #include "ServerClientChannel.h"
 #include "TrinyxJobs.h"
+#include "TrinyxMPSCRing.h"
 
 class WorldBase;
 class Registry;
@@ -41,6 +42,11 @@ class ReplicationSystem
 {
 public:
 	ReplicationSystem() = default;
+
+	~ReplicationSystem()
+	{
+		if (ConstructReg) ConstructReg->ClearNetDestroyHooks();
+	}
 
 	void Initialize(WorldBase* serverWorld);
 
@@ -117,6 +123,12 @@ public:
 
 		PendingConstructSpawns.push_back(std::move(buf));
 
+		// Install the net destroy hook so the ConstructRegistry fires us when this
+		// Construct is destroyed (any lifetime bucket). We queue a ConstructDestroy
+		// to all connected Owners on the next DispatchFrameJobs.
+		reg->SetNetDestroyHook(ptr, ref.Handle, &ReplicationSystem::OnConstructDestroyed, this);
+		ConstructReg = reg;
+
 		LOG_ENG_INFO_F("[Replication] RegisterConstruct: ownerID=%u typeHash=%u netIndex=%u views=%u",
 					   ownerID, typeHash, ref.Handle.NetIndex, viewCount);
 		return ref;
@@ -154,6 +166,7 @@ public:
 private:
 	void DispatchSpawnJobs(uint32_t frameNumber);
 	void DispatchConstructSpawnJobs(uint32_t frameNumber);
+	void DispatchConstructDestroyJobs(uint32_t frameNumber);
 	void DispatchCorrectionJobs(uint32_t frameNumber);
 	void FlushSendQueues(NetConnectionManager* connMgr);
 
@@ -161,7 +174,66 @@ private:
 	/// Allocates a NetIndex, wires NetToRecord, sets the record's NetworkID.
 	EntityNetHandle AssignNetHandle(Registry* reg, GlobalEntityHandle gHandle, uint8_t ownerID = 0);
 
-	WorldBase* AuthorityWorld = nullptr;
+	/// Static hook registered with ConstructRegistry::SetNetDestroyHook.
+	/// Fires on the Logic thread when a Construct is destroyed. Pushes the handle
+	/// into PendingConstructDestroys for Sentinel to drain on the next DispatchFrameJobs.
+	static void OnConstructDestroyed(void* ctx, ConstructNetHandle handle)
+	{
+		auto* self = static_cast<ReplicationSystem*>(ctx);
+		self->PendingConstructDestroys.Push(handle.Value);
+	}
+
+	// ---------------------------------------------------------------------------
+	// Minimal MPSC queue for ConstructNetHandle.Value (uint32_t).
+	// Logic thread pushes; Sentinel drains in DispatchFrameJobs.
+	// ---------------------------------------------------------------------------
+	struct ConstructDestroyQueue
+	{
+		struct Node
+		{
+			uint32_t Value;
+			Node* Next = nullptr;
+		};
+
+		void Push(uint32_t value)
+		{
+			Node* node = new Node{value, nullptr};
+			Node* prev = Head.load(std::memory_order_relaxed);
+			do { node->Next = prev; } while (!Head.compare_exchange_weak(prev, node,
+																		 std::memory_order_release, std::memory_order_relaxed));
+		}
+
+		// Drain into out (caller owns the values). Returns the count drained.
+		uint32_t Drain(std::vector<uint32_t>& out)
+		{
+			Node* list     = Head.exchange(nullptr, std::memory_order_acquire);
+			Node* reversed = nullptr;
+			while (list)
+			{
+				Node* next = list->Next;
+				list->Next = reversed;
+				reversed   = list;
+				list       = next;
+			}
+			uint32_t count = 0;
+			while (reversed)
+			{
+				out.push_back(reversed->Value);
+				Node* next = reversed->Next;
+				delete reversed;
+				reversed = next;
+				++count;
+			}
+			return count;
+		}
+
+		std::atomic<Node*> Head{nullptr};
+	};
+
+	ConstructDestroyQueue PendingConstructDestroys;
+
+	WorldBase* AuthorityWorld       = nullptr;
+	ConstructRegistry* ConstructReg = nullptr; // Non-owning; set in RegisterConstruct, cleared in destructor
 
 	// The most recently published frame whose inputs are fully committed (no more rollback possible).
 	// Advanced by AuthoritySim::OnFramePublished each fixed tick.
