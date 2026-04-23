@@ -12,6 +12,9 @@
 #include "TrinyxMPSCRing.h"
 #include "Types.h"
 
+template <typename, typename, typename>
+class World;
+
 // Headers needed by LogicThread.cpp method bodies (pulled in via this header
 // since explicit instantiations in LogicThread.cpp include LogicThread.h):
 #include "CameraManager.h"
@@ -53,64 +56,62 @@ template <typename TNet, typename TRollback, typename TFrame>
 class LogicThread : public LogicThreadBase
 {
 public:
-LogicThread()           = default;
-~LogicThread() override = default;
+	LogicThread()           = default;
+	~LogicThread() override = default;
 
-void Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
-                InputBuffer* simInput, InputBuffer* vizInput,
-                TrinyxJobs::WorldQueueHandle worldQueue,
-                const std::atomic<bool>*     jobsInitialized,
-                int windowWidth, int windowHeight) override;
+	void Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
+					InputBuffer* simInput, InputBuffer* vizInput,
+					TrinyxJobs::WorldQueueHandle worldQueue,
+					const std::atomic<bool>* jobsInitialized,
+					int windowWidth, int windowHeight) override;
 
-void Start() override;
-void Stop()  override;
-void Join()  override;
+	void Start() override;
+	void Stop() override;
+	void Join() override;
 
-/// Accessor used by AuthorityNet::WireNetMode / OwnerNet::WireNetMode to
-/// initialize the net policy after world creation.
-TNet& GetNetMode() { return NetMode; }
+	/// Accessor used by AuthorityNet::WireNetMode / OwnerNet::WireNetMode to
+	/// initialize the net policy after world creation.
+	TNet& GetNetMode() { return NetMode; }
 
-uint32_t GetPhysicsDivizor() const { return PhysicsDivizor; }
-
-// --- Virtual overrides for rollback queuing (OwnerNet calls via base ptr) ---
-void EnqueueCorrections(std::vector<EntityTransformCorrection> corrections,
-                        uint32_t earliestClientFrame) override
-{
-    Rollback.EnqueueCorrections(std::move(corrections), earliestClientFrame);
-}
-void EnqueuePredictedCorrections(std::vector<EntityTransformCorrection> corrections) override
-{
-    Rollback.EnqueuePredictedCorrections(std::move(corrections));
-}
-void EnqueueSpawnRollback(uint32_t clientFrame) override
-{
-    Rollback.EnqueueSpawnRollback(*this, clientFrame);
-}
+	uint32_t GetPhysicsDivizor() const { return PhysicsDivizor; }
 
 private:
-friend struct RollbackSim;
+	friend struct RollbackSim;
+	template <typename, typename, typename>
+	friend class World;
 
-void ThreadMain();
-void ProcessVizInput(SimFloat dt);
-bool ProcessSimInput(SimFloat dt);
-void ScalarUpdate(SimFloat dt);
-void PrePhysics(SimFloat dt);
-void PostPhysics(SimFloat dt);
+	void ThreadMain();
+	void ProcessVizInput(SimFloat dt);
+	bool ProcessSimInput(SimFloat dt);
+	void ScalarUpdate(SimFloat dt);
+	void PrePhysics(SimFloat dt);
+	void PostPhysics(SimFloat dt);
 
-void PublishCompletedFrame();
-void WaitForTiming(uint64_t frameStart, uint64_t perfFrequency);
-void TrackFPS();
-bool TickPause(uint64_t perfFrequency, uint64_t frameStartCounter, double dt);
+	void PublishCompletedFrame();
+	void WaitForTiming(uint64_t frameStart, uint64_t perfFrequency);
+	void TrackFPS();
+	bool TickPause(uint64_t perfFrequency, uint64_t frameStartCounter, double dt);
 
-void PhysicsLoop(SimFloat fixedStepTime);
-bool FixedUpdate(uint64_t perfFrequency, SimFloat fixedStepTime, int maxPhysSubSteps,
-                 uint64_t frameStartCounter);
+	void PhysicsLoop(SimFloat fixedStepTime);
+	bool FixedUpdate(uint64_t perfFrequency, SimFloat fixedStepTime, int maxPhysSubSteps,
+					 uint64_t frameStartCounter);
 
-[[no_unique_address]] TNet      NetMode;
-[[no_unique_address]] TRollback Rollback;
-[[no_unique_address]] TFrame    FrameMode;
+	[[no_unique_address]] TNet NetMode;
+	[[no_unique_address]] TRollback Rollback;
+	[[no_unique_address]] TFrame FrameMode;
 };
 
 #ifdef TNX_ENABLE_ROLLBACK
 #include "Policies/RollbackImpl.h"
+#endif
+
+// Explicit instantiations live in LogicThread.cpp. Suppress implicit
+// instantiation in all other TUs so the LogicThread<> vtable has exactly one home.
+extern template class LogicThread<SoloSim, NoRollback, GameFrame>;
+extern template class LogicThread<AuthoritySim, NoRollback, GameFrame>;
+extern template class LogicThread<OwnerSim, NoRollback, GameFrame>;
+#ifdef TNX_ENABLE_ROLLBACK
+extern template class LogicThread<SoloSim, RollbackSim, GameFrame>;
+extern template class LogicThread<AuthoritySim, RollbackSim, GameFrame>;
+extern template class LogicThread<OwnerSim, RollbackSim, GameFrame>;
 #endif

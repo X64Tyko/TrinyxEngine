@@ -4,16 +4,14 @@
 #include "Archetype.h"
 #include "CacheSlotMeta.h"
 #include "CColor.h"
-#include "Construct.h"
 #include "ConstructRegistry.h"
-#include "FlowManager.h"
+#include "FlowManagerBase.h"
 #include "FlowState.h"
 #include "Logger.h"
 #include "LogicThread.h"
 #include "CMeshRef.h"
 #include "NetConnectionManager.h"
 #include "NetTypes.h"
-#include "ReflectionRegistry.h"
 #include "Registry.h"
 #include "CScale.h"
 #include "Soul.h"
@@ -287,7 +285,7 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 		const uint32_t* meshID;
 	};
 
-	FlowManager* serverFlow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr;
+	FlowManagerBase* serverFlow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr;
 
 	for (uint8_t oid : ActiveOwnerIDs)
 	{

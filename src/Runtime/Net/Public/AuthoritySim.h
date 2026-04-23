@@ -2,7 +2,6 @@
 #include <cstdint>
 
 #include "EngineConfig.h"
-#include "FlowManager.h"
 #include "Input.h"
 #include "Logger.h"
 #include "NetConnectionManager.h"
@@ -44,9 +43,17 @@ struct AuthoritySim
 	template <typename TLogic>
 	void OnFramePublished(uint32_t frameNumber, TLogic& logic);
 
-	// Called by AuthorityNet::WireNetMode(WorldBase*) once after world init.
-	void Initialize(ReplicationSystem* replicator, NetConnectionManager* connMgr,
-					const EngineConfig* config, WorldBase* world);
+	/// Called by AuthorityNet::WireNetMode(WorldBase*) once after world init.
+	/// Takes the typed World by reference so no static_cast is needed at the call site.
+	template <typename TWorld>
+	void Bind(TWorld& world, NetConnectionManager* connMgr)
+	{
+		Replicator             = world.GetReplicationSystem();
+		ConnMgr                = connMgr;
+		Config                 = &world.GetConfig();
+		NetWorld               = &world;
+		PendingInputResimFrame = UINT32_MAX;
+	}
 
 private:
 	// Non-template core: all logic that doesn't need TLogic.
@@ -69,9 +76,7 @@ private:
 	WorldBase* NetWorld               = nullptr;
 
 	// Coalesced rollback target: the earliest input-mismatch frame seen during
-	// Pass 2 injection this tick. Fired as one RequestRollback at the top of
-	// the next non-resim OnSimInput call instead of calling RequestRollback
-	// inside the injection loop (which would trigger recursive rollbacks).
+	// Pass 2 injection this tick.
 	uint32_t PendingInputResimFrame = UINT32_MAX;
 };
 
@@ -79,8 +84,8 @@ private:
 template <typename TLogic>
 void AuthoritySim::OnFramePublished(uint32_t frameNumber, TLogic& /*logic*/)
 {
-	// Advance the committed frame horizon so Step 7 (networked despawn) can gate
-	// phase-1 graduation: a dead entity's net slot is not freed until all players
-	// have inputs confirmed past the death frame.
+	// Advance the committed frame horizon so phase-1 networked despawn graduation
+	// can gate: a dead entity's net slot is not freed until all player inputs past
+	// the death frame are confirmed.
 	if (Replicator) Replicator->AdvanceCommittedHorizon(frameNumber);
 }

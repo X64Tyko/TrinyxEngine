@@ -7,7 +7,7 @@
 #include "CTransform.h"
 #include "ConstructRegistry.h"
 #include "EngineConfig.h"
-#include "FlowManager.h"
+#include "FlowManagerBase.h"
 #include "FlowState.h"
 #include "Input.h"
 #include "LogicThread.h"
@@ -174,7 +174,7 @@ void OwnerNet::HandleEntitySpawn(Registry* reg, const EntitySpawnPayload& payloa
 
 void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry* entries,
 									  uint32_t count, [[maybe_unused]] uint32_t clientFrame,
-									  [[maybe_unused]] LogicThreadBase* logic, [[maybe_unused]] uint32_t LastAckedFrame)
+									  [[maybe_unused]] WorldBase* world, [[maybe_unused]] uint32_t LastAckedFrame)
 {
 #ifdef TNX_ENABLE_ROLLBACK
 	constexpr float kDivergenceThresholdSq = 0.01f * 0.01f;
@@ -315,14 +315,14 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 		}
 	}
 
-	if (!corrections.empty() && logic)
+	if (!corrections.empty() && world)
 	{
 		uint32_t earliest = UINT32_MAX;
 		for (const auto& c : corrections) earliest = std::min(earliest, c.ClientFrame);
-		logic->EnqueueCorrections(std::move(corrections), earliest);
+		world->EnqueueCorrections(std::move(corrections), earliest);
 	}
 
-	if (!predictedCorrections.empty() && logic) logic->EnqueuePredictedCorrections(std::move(predictedCorrections));
+	if (!predictedCorrections.empty() && world) world->EnqueuePredictedCorrections(std::move(predictedCorrections));
 
 #else
 	for (uint32_t i = 0; i < count; ++i)
@@ -403,8 +403,8 @@ bool OwnerNet::HandleConstructSpawn(ConstructRegistry* reg, Registry* entityReg,
 	const uint8_t ownerID   = netHandle.GetOwnerID();
 	const uint8_t viewCount = header->ViewCount;
 
-	FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr;
-	Soul* soul        = flow ? flow->GetSoul(ownerID) : nullptr;
+	FlowManagerBase* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr;
+	Soul* soul            = flow ? flow->GetSoul(ownerID) : nullptr;
 
 	constexpr uint8_t MaxViews = 8;
 	EntityHandle resolvedHandles[MaxViews];
@@ -545,6 +545,8 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 				// PIENetThread::AddClient) to the real ownerID slot so subsequent handlers
 				// (TravelNotify, FlowEvent/ServerReady) can find it before
 				// PIENetThread::UpdateClientOwnerID is called from the startup loop.
+				// PIE serializes connections so this is race-free. Concurrent production
+				// connections are not safe here — addressed when GNS multi-connection support lands.
 				if (WorldMap[msg.Header.SenderID] == nullptr && WorldMap[0] != nullptr) WorldMap[msg.Header.SenderID] = WorldMap[0];
 
 				if (msg.Payload.size() >= sizeof(HandshakePayload))
@@ -628,8 +630,8 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 
 				{
 					WorldBase* clientWorld = WorldMap[ci->OwnerID];
-					FlowManager* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
-					Soul* soul         = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
+					FlowManagerBase* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
+					Soul* soul             = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
 					LOG_NET_INFO_F(soul, "[ClientNet] TravelNotify received — loading level '%s'", travelMsg->LevelPath);
 					if (flow) flow->PostTravelNotify(travelMsg->LevelPath);
 				}
@@ -641,8 +643,8 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 				ci->RepState = ClientRepState::LevelLoaded;
 				{
 					WorldBase* clientWorld = WorldMap[ci->OwnerID];
-					FlowManager* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
-					Soul* soul         = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
+					FlowManagerBase* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
+					Soul* soul             = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
 					LOG_NET_INFO(soul, "[ClientNet] LevelReady sent → client LevelLoaded");
 				}
 				break;
@@ -662,8 +664,8 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 
 				{
 					WorldBase* clientWorld = WorldMap[ci->OwnerID];
-					FlowManager* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
-					Soul* soul         = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
+					FlowManagerBase* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
+					Soul* soul             = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
 
 					if (ci->RepState == ClientRepState::LevelLoaded
 						&& ev->EventID == static_cast<uint8_t>(FlowEventID::ServerReady))
@@ -771,15 +773,14 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 					msg.Payload.size() / sizeof(StateCorrectionEntry));
 				const auto* entries = reinterpret_cast<const StateCorrectionEntry*>(msg.Payload.data());
 
-				Registry* corrReg      = clientWorld->GetRegistry();
-				LogicThreadBase* corrLogic = clientWorld->GetLogicThread();
+				Registry* corrReg = clientWorld->GetRegistry();
 
 				// Heap-allocate so the fire-and-forget Post lambda can safely outlive this scope.
 				// The lambda owns the vector and deletes it after use.
 				struct CorrCapture
 				{
 					Registry* reg;
-					LogicThreadBase* logic;
+					WorldBase* world;
 					std::vector<StateCorrectionEntry>* corrs;
 					uint32_t clientFrame;
 					uint32_t LastAckedFrame;
@@ -787,13 +788,13 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 				static_assert(sizeof(CorrCapture) <= 48, "CorrCapture exceeds job payload limit");
 
 				auto* corrHeap = new std::vector<StateCorrectionEntry>(entries, entries + entryCount);
-				CorrCapture cap{corrReg, corrLogic, corrHeap, clientFrame, ci->LastServerAckedFrame};
+				CorrCapture cap{corrReg, clientWorld, corrHeap, clientFrame, ci->LastServerAckedFrame};
 				clientWorld->Post([cap](uint32_t)
 				{
 					HandleStateCorrections(cap.reg, cap.corrs->data(),
-										   static_cast<uint32_t>(cap.corrs->size()), cap.clientFrame, cap.logic, cap.LastAckedFrame);
+										   static_cast<uint32_t>(cap.corrs->size()), cap.clientFrame, cap.world, cap.LastAckedFrame);
 					delete cap.corrs;
-				});
+			});
 				break;
 			}
 
@@ -833,7 +834,7 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 
 				{
 					WorldBase* clientWorld = WorldMap[ci->OwnerID];
-					if (FlowManager* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr)
+					if (FlowManagerBase* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr)
 					{
 						if (Soul* soul = flow->GetSoul(ci->OwnerID))
 						{
@@ -910,11 +911,7 @@ bool OwnerNet::TrySpawnDeferred(const DeferredConstructSpawn& entry)
 #ifdef TNX_ENABLE_ROLLBACK
 	if (done && entry.ServerSpawnFrame > 0 && payload.size() >= sizeof(ConstructSpawnPayload))
 	{
-		LogicThreadBase* logic = clientWorld->GetLogicThread();
-		if (logic)
-		{
-			logic->EnqueueSpawnRollback(entry.ServerSpawnFrame);
-		}
+		if (clientWorld) clientWorld->EnqueueSpawnRollback(entry.ServerSpawnFrame);
 	}
 #endif
 
@@ -953,11 +950,7 @@ void OwnerNet::FlushDeferredEntitySpawns()
 		// Request a rollback to the entity's server spawn frame so the entities are inserted
 		// at the correct historical ring slot. ReplayServerEventsAt will re-hydrate them.
 #ifdef TNX_ENABLE_ROLLBACK
-		LogicThreadBase* logic = clientWorld->GetLogicThread();
-		if (logic && spawnFrame > 0)
-		{
-			logic->EnqueueSpawnRollback(spawnFrame);
-		}
+		if (spawnFrame > 0) clientWorld->EnqueueSpawnRollback(spawnFrame);
 #endif
 
 		it = DeferredEntitySpawns.erase(it);
@@ -978,7 +971,7 @@ void OwnerNet::TickReplication()
 		if (now - ci.PlayerBeginSentAt < RetryIntervalMs) continue;
 
 		WorldBase* world      = WorldMap[ci.OwnerID];
-		FlowManager* flow = world ? world->GetFlowManager() : nullptr;
+		FlowManagerBase* flow = world ? world->GetFlowManager() : nullptr;
 		if (!flow) continue;
 
 		LOG_ENG_WARN_F("[ClientNet] PlayerBeginRequest retry (ownerID=%u, %.0fms since last send)",

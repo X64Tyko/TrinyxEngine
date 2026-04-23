@@ -5,7 +5,7 @@
 
 #include "EngineConfig.h"
 #include "Events.h"
-#include "FlowManager.h"
+#include "FlowManagerBase.h"
 #include "TrinyxJobs.h"
 #include "World.h"
 #ifdef TNX_ENABLE_NETWORK
@@ -94,7 +94,7 @@ public:
 
 	// --- World access ---
 	WorldBase* GetDefaultWorld() const { return DefaultWorld; }
-	FlowManager* GetFlowManager() const { return Flow.get(); }
+	FlowManagerBase* GetFlowManager() const { return Flow.get(); }
 
 	// Convenience: access the default world's registry.
 	Registry* GetRegistry() const;
@@ -196,7 +196,7 @@ private:
 	// --- Lifecycle ---
 	std::atomic<bool> bIsRunning{false};
 	std::atomic<bool> bJobsInitialized{false};
-	std::unique_ptr<FlowManager> Flow;
+	std::unique_ptr<FlowManagerBase> Flow;
 
 	// --- Frame timing ---
 	uint64_t LastFrameCounter = 0; // SDL performance counter from previous frame
@@ -211,11 +211,8 @@ void TrinyxEngine::Run(GameClass& game)
 	StartThreadsAndJobs(); // Pin Logic/Render, init workers
 	game.PostStart(*this); // Spawns via Engine.Spawn() — syncs with Brain
 
-	// Auto-load the default flow state if configured.
-	// World already exists (created in Initialize), so EnforceRequirements is a no-op
-	// for NeedsWorld states. The state's OnEnter drives level loading and mode activation.
-	// In editor builds the EditorContext drives flow/level loading — skip the auto-load
-	// here to prevent a double load into the editor DefaultWorld.
+	// Editor builds skip the auto-load — EditorContext drives flow/level startup
+	// and would double-load into the editor DefaultWorld.
 #if !TNX_ENABLE_EDITOR
 	if (Config.DefaultState[0] != '\0')
 	{

@@ -1,297 +1,106 @@
 #pragma once
 
-#include <atomic>
-#include <cstdint>
-#include <functional>
-#include <memory>
-#include <optional>
-#include <string>
-
-#include "AssetRegistry.h"
-#include "ConstructRegistry.h"
-#include "NetTypes.h"
-#include "RegistryTypes.h"
-#include "Soul.h"
-#include "Types.h"
-
-class FlowState;
-class GameMode;
-#ifdef TNX_ENABLE_NETWORK
-class NetChannel;
-#endif
-class WorldBase;
-class TrinyxEngine;
-struct EngineConfig;
+#include "FlowManagerBase.h"
+#include "World.h"
+#include "EntityBuilder.h"
+#include "LogicThreadBase.h"
+#include "Logger.h"
 
 // ---------------------------------------------------------------------------
-// FlowManager — Manages game flow state stack and travel primitives.
+// FlowManager<TNet, TRollback, TFrame> — Concrete typed flow manager.
 //
-// The FlowManager is owned by TrinyxEngine and drives the application-level
-// state machine. It manages:
-//   - A stack of FlowStates (menu, loading, in-game, pause overlay, etc.)
-//   - World lifetime (create/destroy based on state requirements)
-//   - GameMode lifetime (one per World, set by the active state)
-//   - ConstructRegistry (lives here so Session-lifetime Constructs survive)
-//   - Level loading/unloading
+// Small header-only template class derived from FlowManagerBase.
+// The ONLY things here are:
+//   - CreateWorldImpl(): creates World<TNet,TRollback,TFrame>
+//   - LoadLevel(const char*, bool): replaces #ifdef with if constexpr
+//   - GetTypedWorld(): typed accessor
 //
-// Travel is not a single policy — it's a set of orthogonal tools:
-//
-//   Lever A — Domain lifetime (what survives?):
-//     - Keep World, Swap Level (fast travel, seamless, same server)
-//     - Reset World (fresh sim, new GameMode)
-//     - Keep nothing (full reset)
-//
-//   Lever B — Construct lifetime (what survives?):
-//     - Persistent Constructs survive World resets via reinitialization
-//     - World-scoped Constructs are destroyed with the World
-//     - Level-scoped Constructs are destroyed on level change
-//
-//   Lever C — Network continuity:
-//     - Keep NetSession (same server)
-//     - Swap NetSession (server handoff)
-//
-// Bootstrap contract:
-//   Engine initializes → FlowManager::Initialize(engine)
-//   → game registers states in PostInitialize
-//   → LoadDefaultState("name") enters the first state
-//   → from there, user project code owns the entire flow graph.
-//
-// Vocabulary:
-//   State — flow state, drives the app (menu, loading, gameplay)
-//   Mode  — rules runtime, drives the match (server authority)
-//   Level — content chunk (.tnxscene)
-//
-// Thread safety: all FlowManager methods run on the Sentinel thread.
-// World creation/destruction is synchronized via the spawn handshake.
+// All data and public API live in FlowManagerBase.
 // ---------------------------------------------------------------------------
-class FlowManager
+template <typename TNet, typename TRollback, typename TFrame>
+class FlowManager : public FlowManagerBase
 {
 public:
-	FlowManager();
-	~FlowManager();
+	using WorldT = World<TNet, TRollback, TFrame>;
 
-	FlowManager(const FlowManager&)            = delete;
-	FlowManager& operator=(const FlowManager&) = delete;
+	WorldT* GetTypedWorld() const { return TypedWorld; }
 
-	/// Called once by TrinyxEngine after construction.
-	/// Stores engine back-pointer for World creation (config, window size).
-	void Initialize(TrinyxEngine* engine, const EngineConfig* config,
-					int windowWidth, int windowHeight);
-
-	// ----- State registration (code-driven, call in PostInitialize) -----
-
-	using StateFactory = std::function<std::unique_ptr<FlowState>()>;
-	using ModeFactory  = std::function<std::unique_ptr<GameMode>()>;
-
-	/// Register a named state factory. Name is used by LoadState/TransitionTo.
-	void RegisterState(const char* name, StateFactory factory);
-
-	/// Register a named mode factory. Name is used by SetGameMode.
-	void RegisterMode(const char* name, ModeFactory factory);
-
-	// ----- State stack operations -----
-
-	/// Replace the entire state stack with a single new state.
-	/// This is the primary transition: menu → gameplay, gameplay → results, etc.
-	/// Enforces requirements: destroys World if the new state doesn't need one,
-	/// creates World if it does.
-	void TransitionTo(const char* stateName);
-
-	/// Push an overlay state (pause menu, inventory screen).
-	/// The underlying state remains alive but stops receiving Tick().
-	void PushState(const char* stateName);
-
-	/// Pop the top overlay state, returning control to the state below.
-	void PopState();
-
-	/// Load the default state. Called once during engine bootstrap.
-	void LoadDefaultState(const char* stateName);
-
-	// ----- World / Level operations -----
-
-	/// Create a fresh World (Registry, Physics, Logic, Input).
-	/// Called automatically by TransitionTo when requirements demand it.
-	/// Can also be called manually for advanced flows.
-	WorldBase* CreateWorld();
-
-	/// Destroy the current World and everything scoped to it.
-	/// Destroys Level-lifetime and World-lifetime Constructs.
-	/// Session-lifetime Constructs survive.
-	void DestroyWorld();
-
-	/// Start the World's LogicThread (call after jobs are initialized).
-	void StartWorld();
-
-	/// Signal the World's LogicThread to stop.
-	void StopWorld();
-
-	/// Join the World's LogicThread.
-	void JoinWorld();
-
-	/// Load a level (.tnxscene) into the current World.
-	/// bBackground: entities spawn as Alive-only (not ticking/rendering) until an
-	/// explicit Alive→Active sweep. Used for client loads where the server drives
-	/// activation via ServerReady. File I/O is still synchronous on the Logic thread.
-	void LoadLevel(const char* levelPath, bool bBackground = false);
-
-	/// Load a level by AssetID — resolves path via AssetRegistry.
-	void LoadLevel(const AssetID& id, bool bBackground = false);
-
-	/// Load a level by display name (looks up in AssetRegistry, then loads).
-	/// The name is the stem of the scene file, e.g. "Arena" for Arena.tnxscene.
-	void LoadLevelByName(const char* name, bool bBackground = false);
-
-	/// Unload the current level (despawn all level-scoped entities).
-	void UnloadLevel();
-
-	// ----- Soul lifecycle -----
-
-	/// Called by AuthorityNet when a client's RepState reaches Loaded.
-	/// Creates a Soul for ownerID, calls GameMode::OnPlayerJoined.
-	/// Also called on the client for its own ownerID after PlayerBeginConfirm.
-	void OnClientLoaded(uint8_t ownerID);
-
-	/// Called by OwnerNet at HandshakeAccept — the earliest point the
-	/// client knows its OwnerID. Creates the local player's Soul with Owner role
-	/// so all subsequent LOG_NET_* calls show [OWNER] instead of [NULL].
-	/// Idempotent: does nothing if the Soul already exists.
-	void OnLocalOwnerConnected(uint8_t ownerID);
-
-	/// Called by AuthorityNet when a client disconnects.
-	/// Calls GameMode::OnPlayerLeft, destroys the Soul.
-	void OnClientDisconnected(uint8_t ownerID);
-
-	/// Returns the Soul for a given ownerID, or nullptr if not present.
-	Soul* GetSoul(uint8_t ownerID) const { return Souls[ownerID].get(); }
-
-	/// Create an Echo Soul for ownerID if none exists. Used by the replication system
-	/// when a Construct arrives from a remote peer whose Soul hasn't been created yet
-	/// (e.g., the server's own player construct received on the client).
-	Soul* EnsureEchoSoul(uint8_t ownerID)
-	{
-		if (!Souls[ownerID])
-		{
-			Souls[ownerID]          = std::make_unique<Soul>(ownerID);
-			Souls[ownerID]->FlowMgr = this;
-			Souls[ownerID]->SetRole(SoulRole::Echo);
-		}
-		return Souls[ownerID].get();
-	}
-
-	// ----- GameMode -----
-
-	/// Set the active GameMode for the current World.
-	/// Previous mode is destroyed. Pass nullptr name to clear.
-	void SetGameMode(const char* modeName);
-
-	GameMode* GetGameMode() const { return ActiveMode.get(); }
-
-#ifdef TNX_ENABLE_NETWORK
-	/// Called from AuthorityNet when a PlayerBeginRequest arrives for ownerID.
-	/// Delegates to GameMode::OnPlayerBeginRequest for all game decisions.
-	/// Returns the PlayerBeginResult on accept, nullopt on reject.
-	std::optional<PlayerBeginResult> HandlePlayerBeginRequest(Soul* soul, const PlayerBeginRequestPayload& req);
-
-	/// Called from OwnerNet after the Alive→Active sweep on ServerReady.
-	/// Creates the client-side Soul for ownerID (derived from channel) if absent,
-	/// sets its channel + FlowMgr, then fires the PlayerBegin RPC to the server.
-	void SendPlayerBeginRequest(NetChannel channel, uint32_t frameNumber, PredictionLedger& ledger);
-#endif
-
-	// ----- RPC dispatch (called from AuthorityNet / OwnerNet) -----
-
-	/// Called from any thread (e.g., NetThread) when a net flow event arrives.
-	/// The active FlowState's OnNetEvent hook is dispatched on the next Tick.
-	void PostNetEvent(uint8_t eventID);
-
-	/// Called from NetThread when a TravelNotify arrives.
-	void PostTravelNotify(const char* levelPath);
-
-	/// Called from NetThread when a PlayerBeginConfirm arrives.
-	void PostPlayerBeginConfirm(const PlayerBeginConfirmPayload& payload);
-
-	/// Payload from the last PlayerBeginConfirm.
-	PlayerBeginConfirmPayload GetPendingPlayerBeginConfirm() const { return PendingPlayerBeginConfirm; }
-
-	/// Path sent in the last TravelNotify.
-	const std::string& GetPendingTravelPath() const { return PendingTravelPath; }
-
-	// ----- Tick (called by Sentinel each frame) -----
-
-	void Tick(float dt);
-	// ----- Accessors -----
-
-	FlowState* GetActiveState() const;
-	WorldBase* GetWorld() const;
-	bool HasWorld() const;
-	const EngineConfig* GetConfig() const { return Config; }
-	/// Update the stored config pointer after the owning struct has been relocated
-	/// (e.g. after move into a vector). PIE only — do not call in other contexts.
-	void RewireConfig(const EngineConfig* newConfig) { Config = newConfig; }
-	ConstructRegistry* GetConstructRegistry() { return &ConstructReg; }
-	const std::string& GetActiveLevelPath() const { return ActiveLevelPath; }
-
-	/// Returns the content-relative level path (e.g. "Arena.tnxscene") — safe to send over the
-	/// network. Strips the ProjectDir+"/content/" prefix from ActiveLevelPath. Falls back to
-	/// the full path if the prefix doesn't match (e.g. path was set manually).
-	std::string GetActiveLevelLocalPath() const;
+protected:
+	WorldBase* CreateWorldImpl() override;
+	void LoadLevel(const char* levelPath, bool bBackground = false) override;
 
 private:
-	static constexpr uint32_t MaxStateStack       = 8;
-	static constexpr uint32_t MaxRegisteredStates = 32;
-	static constexpr uint32_t MaxRegisteredModes  = 16;
-
-	// State stack (index 0 = bottom, StateStackCount-1 = top/active)
-	std::unique_ptr<FlowState> StateStack[MaxStateStack];
-	uint32_t StateStackCount = 0;
-
-	// Registered factories
-	struct NamedStateFactory
-	{
-		const char* Name = nullptr;
-		StateFactory Factory;
-	};
-
-	struct NamedModeFactory
-	{
-		const char* Name = nullptr;
-		ModeFactory Factory;
-	};
-
-	NamedStateFactory RegisteredStates[MaxRegisteredStates];
-	uint32_t RegisteredStateCount = 0;
-
-	NamedModeFactory RegisteredModes[MaxRegisteredModes];
-	uint32_t RegisteredModeCount = 0;
-
-	// Construct Registry — lives here so Session-lifetime Constructs survive World reset
-	ConstructRegistry ConstructReg;
-
-	// Souls — one per connected OwnerID (index = OwnerID). Server-side index 0 is unused.
-	std::unique_ptr<Soul> Souls[MaxOwnerIDs];
-
-	// Active subsystems
-	std::unique_ptr<WorldBase> ActiveWorld;
-	std::unique_ptr<GameMode> ActiveMode;
-	std::string ActiveLevelPath;   // Path of currently loaded level (empty = none)
-	std::string PendingTravelPath; // Level path from last TravelNotify (read by FlowState in OnNetEvent)
-	PlayerBeginConfirmPayload PendingPlayerBeginConfirm{}; // Payload from last PlayerBeginConfirm (read by FlowState in OnNetEvent)
-
-	// Engine back-pointer (for World creation parameters)
-	TrinyxEngine* Engine       = nullptr;
-	const EngineConfig* Config = nullptr;
-	int WindowWidth            = 1920;
-	int WindowHeight           = 1080;
-
-	// Lock-free net event queue — NetThread ORs bits in, Sentinel swaps to zero in Tick.
-	// Bit N = FlowEventID N is pending. Supports up to 32 distinct FlowEventIDs.
-	std::atomic<uint32_t> PendingNetEvents{0};
-
-	// Internal helpers
-	StateFactory FindStateFactory(const char* name) const;
-	ModeFactory FindModeFactory(const char* name) const;
-
-	/// Compare current vs next state requirements and create/destroy
-	/// World and NetSession as needed.
-	void EnforceRequirements(FlowState* currentState, FlowState* nextState);
+	WorldT* TypedWorld = nullptr; // non-owning alias; FlowManagerBase::ActiveWorld owns
 };
+
+// ---------------------------------------------------------------------------
+// Template method bodies
+// ---------------------------------------------------------------------------
+
+template <typename TNet, typename TRollback, typename TFrame>
+WorldBase* FlowManager<TNet, TRollback, TFrame>::CreateWorldImpl()
+{
+	auto typed  = std::make_unique<WorldT>();
+	TypedWorld  = typed.get();
+	ActiveWorld = std::move(typed);
+
+	if (!TypedWorld->Initialize(*Config, &ConstructReg, WindowWidth, WindowHeight))
+	{
+		LOG_ENG_ERROR("[FlowManager] World::Initialize failed");
+		ActiveWorld.reset();
+		TypedWorld = nullptr;
+		return nullptr;
+	}
+
+	ActiveWorld->SetFlowManager(this);
+	LOG_ENG_INFO("[FlowManager] World created");
+	return ActiveWorld.get();
+}
+
+template <typename TNet, typename TRollback, typename TFrame>
+void FlowManager<TNet, TRollback, TFrame>::LoadLevel(const char* levelPath, bool bBackground)
+{
+	if (!ActiveWorld)
+	{
+		LOG_ENG_ERROR("[FlowManager] LoadLevel called with no active World");
+		return;
+	}
+
+	if (!levelPath || levelPath[0] == '\0')
+	{
+		LOG_ENG_ERROR("[FlowManager] LoadLevel called with empty path");
+		return;
+	}
+
+	ActiveLevelPath = levelPath;
+
+	Registry* reg        = ActiveWorld->GetRegistry();
+	const char* pathCStr = ActiveLevelPath.c_str();
+
+	if constexpr (TRollback::Enabled)
+	{
+		const uint32_t spawnFrame = ActiveWorld->GetLogicThread()->GetLastCompletedFrame() + 1;
+		// SpawnAndWait is synchronous — soul lifetime is not a concern here.
+		// If this ever becomes async, the raw capture must be replaced.
+		Soul* soul = GetSoul(ActiveWorld->GetLocalOwnerID());
+		ActiveWorld->SpawnAndWait([reg, pathCStr, bBackground, spawnFrame, soul](uint32_t)
+		{
+			std::vector<GlobalEntityHandle> spawnedHandles;
+			size_t count = EntityBuilder::SpawnFromFileTracked(reg, pathCStr, bBackground, spawnedHandles);
+			LOG_NET_INFO_F(soul, "[FlowManager] LoadLevel: spawned %zu entities from %s%s at frame %u",
+						   count, pathCStr, bBackground ? " (Alive-only)" : "", spawnFrame);
+			for (GlobalEntityHandle gh : spawnedHandles) reg->PushEntityReinitEvent(gh, spawnFrame);
+		});
+	}
+	else
+	{
+		ActiveWorld->SpawnAndWait([reg, pathCStr, bBackground](uint32_t)
+		{
+			size_t count = EntityBuilder::SpawnFromFile(reg, pathCStr, bBackground);
+			LOG_NET_INFO_F(nullptr, "[FlowManager] LoadLevel: spawned %zu entities from %s%s",
+						   count, pathCStr, bBackground ? " (Alive-only)" : "");
+		});
+	}
+
+	LOG_NET_INFO_F(nullptr, "[FlowManager] Level loaded: %s", levelPath);
+}

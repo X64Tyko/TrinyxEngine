@@ -1,7 +1,7 @@
 #pragma once
 
 #include "FlowState.h"
-#include "FlowManager.h"
+#include "FlowManagerBase.h"
 #include "EngineConfig.h"
 #include "Logger.h"
 #include "SchemaReflector.h"
@@ -17,7 +17,7 @@
 class DeterminismState : public FlowState
 {
 public:
-	void OnEnter(FlowManager& flow, WorldBase* world) override
+	void OnEnter(FlowManagerBase& flow, WorldBase* world) override
 	{
 		FlowState::OnEnter(flow, world);
 

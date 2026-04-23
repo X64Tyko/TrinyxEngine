@@ -19,48 +19,46 @@ class World : public WorldBase
 public:
 using LogicType = LogicThread<TNet, TRollback, TFrame>;
 
+// Declared here; defined in World.cpp alongside explicit instantiations.
+// NOT inline — ensures the vtable for LogicThread<> is only emitted by
+// LogicThread.cpp, not by every TU that includes World.h.
 bool Initialize(const EngineConfig& config, ConstructRegistry* constructRegistry,
                 int windowWidth = 1920, int windowHeight = 1080);
 
 LogicType* GetTypedLogicThread() const { return TypedLogic; }
 
+void EnqueueCorrections(std::vector<EntityTransformCorrection> corrections,
+						uint32_t earliestClientFrame) override
+{
+	if constexpr (TRollback::Enabled) TypedLogic->Rollback.EnqueueCorrections(std::move(corrections), earliestClientFrame);
+}
+
+void EnqueuePredictedCorrections(std::vector<EntityTransformCorrection> corrections) override
+{
+	if constexpr (TRollback::Enabled) TypedLogic->Rollback.EnqueuePredictedCorrections(std::move(corrections));
+}
+
+void EnqueueSpawnRollback(uint32_t clientFrame) override
+{
+	if constexpr (TRollback::Enabled) TypedLogic->Rollback.EnqueueSpawnRollback(*TypedLogic, clientFrame);
+}
+
+void BindAuthorityNet(AuthorityNet* net, NetConnectionManager* connMgr) override
+{
+	if constexpr (std::is_same_v<TNet, AuthoritySim>) TypedLogic->GetNetMode().Bind(*this, connMgr);
+}
+
 private:
 LogicType* TypedLogic = nullptr; // non-owning alias; WorldBase::Logic owns
 };
 
-// ---------------------------------------------------------------------------
-// Template method bodies
-// ---------------------------------------------------------------------------
-
-template <typename TNet, typename TRollback, typename TFrame>
-bool World<TNet, TRollback, TFrame>::Initialize(
-    const EngineConfig& config, ConstructRegistry* constructRegistry,
-    int windowWidth, int windowHeight)
-{
-if (!InitBase(config, constructRegistry, windowWidth, windowHeight))
-return false;
-
-auto typedLogic = std::make_unique<LogicType>();
-TypedLogic = typedLogic.get();
-Logic      = std::move(typedLogic);
-
-Logic->Initialize(RegistryPtr.get(), &Config, Physics.get(),
-                  &SimInput, &VizInput,
-                  WQHandle, &bJobsInitialized,
-                  windowWidth, windowHeight);
-Logic->SetConstructRegistry(Constructs);
-
-if constexpr (std::is_same_v<TNet, OwnerSim>)
-{
-if (!InputAccumRing.Initialize(256))
-{
-LOG_ENG_ERROR("[World] Failed to initialize InputAccumRing");
-return false;
-}
-InputAccumConsumer.emplace(InputAccumRing.MakeConsumer());
-TypedLogic->GetNetMode().Initialize(&InputAccumRing, &bInputAccumEnabled, &SimInput);
-}
-
-LOG_ENG_INFO("[World] Initialized");
-return true;
-}
+// Explicit instantiations live in World.cpp. Suppress implicit instantiation
+// in all other TUs so the World<> vtable has exactly one home.
+extern template class World<SoloSim,      NoRollback,  GameFrame>;
+extern template class World<AuthoritySim, NoRollback,  GameFrame>;
+extern template class World<OwnerSim,     NoRollback,  GameFrame>;
+#ifdef TNX_ENABLE_ROLLBACK
+extern template class World<SoloSim,      RollbackSim, GameFrame>;
+extern template class World<AuthoritySim, RollbackSim, GameFrame>;
+extern template class World<OwnerSim,     RollbackSim, GameFrame>;
+#endif

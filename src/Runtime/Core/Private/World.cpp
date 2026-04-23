@@ -11,9 +11,8 @@ bool WorldBase::IsLogicRunning() const { return Logic && Logic->IsRunning(); }
 
 WorldBase::~WorldBase()
 {
-// If not already shut down, clean up gracefully.
-if (Logic && Logic->IsRunning())
-{
+	if (Logic && Logic->IsRunning())
+	{
 Stop();
 Join();
 }
@@ -98,3 +97,54 @@ void WorldBase::ConfirmLocalRecycles() const
 {
 if (RegistryPtr) RegistryPtr->ConfirmLocalRecycles();
 }
+
+// ---------------------------------------------------------------------------
+// World<TNet, TRollback, TFrame>::Initialize
+//
+// Lives here (not inline in World.h) so that constructing a LogicThread<>
+// only happens in this TU. LogicThread<> has extern template declarations in
+// LogicThread.h, so World.cpp.o emits references to the LogicThread<> vtable
+// (not definitions). The definitions come from LogicThread.cpp.o.
+// ---------------------------------------------------------------------------
+#include "World.h"
+
+template <typename TNet, typename TRollback, typename TFrame>
+bool World<TNet, TRollback, TFrame>::Initialize(
+	const EngineConfig& config, ConstructRegistry* constructRegistry,
+	int windowWidth, int windowHeight)
+{
+	if (!InitBase(config, constructRegistry, windowWidth, windowHeight)) return false;
+
+	auto typedLogic = std::make_unique<LogicType>();
+	TypedLogic      = typedLogic.get();
+	Logic           = std::move(typedLogic);
+
+	Logic->Initialize(RegistryPtr.get(), &Config, Physics.get(),
+					  &SimInput, &VizInput,
+					  WQHandle, &bJobsInitialized,
+					  windowWidth, windowHeight);
+	Logic->SetConstructRegistry(Constructs);
+
+	if constexpr (std::is_same_v<TNet, OwnerSim>)
+	{
+		if (!InputAccumRing.Initialize(256))
+		{
+			LOG_ENG_ERROR("[World] Failed to initialize InputAccumRing");
+			return false;
+		}
+		InputAccumConsumer.emplace(InputAccumRing.MakeConsumer());
+		TypedLogic->GetNetMode().Initialize(&InputAccumRing, &bInputAccumEnabled, &SimInput);
+	}
+
+	LOG_ENG_INFO("[World] Initialized");
+	return true;
+}
+
+template class World<SoloSim, NoRollback, GameFrame>;
+template class World<AuthoritySim, NoRollback, GameFrame>;
+template class World<OwnerSim, NoRollback, GameFrame>;
+#ifdef TNX_ENABLE_ROLLBACK
+template class World<SoloSim, RollbackSim, GameFrame>;
+template class World<AuthoritySim, RollbackSim, GameFrame>;
+template class World<OwnerSim, RollbackSim, GameFrame>;
+#endif

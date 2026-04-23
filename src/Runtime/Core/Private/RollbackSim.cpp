@@ -7,6 +7,7 @@
 #include "Registry.h"
 #include "Input.h"
 #include "Logger.h"
+
 void RollbackSim::InitializeRings()
 {
     IncomingCorrections.Initialize(256);
@@ -85,7 +86,19 @@ void RollbackSim::EnqueuePredictedCorrections(std::vector<EntityTransformCorrect
 
 void RollbackSim::EnqueueSpawnRollback(LogicThreadBase& logic, uint32_t clientFrame)
 {
-    uint32_t current = logic.PendingRollbackFrame.load(std::memory_order_relaxed);
+	// Warn and skip — ring can't reach that far back.
+	if (logic.TemporalCache && logic.FrameNumber > logic.TemporalCache->GetTotalFrameCount())
+	{
+		const uint32_t oldestFrame = logic.FrameNumber - logic.TemporalCache->GetTotalFrameCount();
+		if (clientFrame < oldestFrame)
+		{
+			LOG_WARN_F("[RollbackSim] EnqueueSpawnRollback: target frame %u is outside ring buffer (oldest=%u) — spawn replay skipped",
+					   clientFrame, oldestFrame);
+			return;
+		}
+	}
+
+	uint32_t current = logic.PendingRollbackFrame.load(std::memory_order_relaxed);
     while (clientFrame < current)
     {
         if (logic.PendingRollbackFrame.compare_exchange_weak(current, clientFrame,

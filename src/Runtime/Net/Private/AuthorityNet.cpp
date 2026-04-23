@@ -1,33 +1,20 @@
 #include "AuthorityNet.h"
 
 #include "EngineConfig.h"
-#include "FlowManager.h"
+#include "FlowManagerBase.h"
 #include "LogicThread.h"
 #include "NetChannel.h"
 #include "NetConnectionManager.h"
 #include "NetTypes.h"
 #include "RPC.h"
 #include "ReplicationSystem.h"
+#include "World.h"
 #include "WorldBase.h"
 #include "Logger.h"
 
 #include <SDL3/SDL_timer.h>
 #include <algorithm>
 #include <cstring>
-
-// ---------------------------------------------------------------------------
-// AuthoritySim::Initialize (non-template method)
-// ---------------------------------------------------------------------------
-
-void AuthoritySim::Initialize(ReplicationSystem* replicator, NetConnectionManager* connMgr,
-                               const EngineConfig* config, WorldBase* world)
-{
-Replicator = replicator;
-ConnMgr    = connMgr;
-Config     = config;
-NetWorld   = world;
-PendingInputResimFrame = UINT32_MAX;
-}
 
 // ---------------------------------------------------------------------------
 // AuthoritySim::RunSimInput — non-template core of the input injection pass.
@@ -79,7 +66,7 @@ bool AuthoritySim::RunSimInput(uint32_t frameNumber, bool isResimulating,
 				if (shouldLog)
 				{
 					log->LastStallLogFrame = frameNumber;
-					FlowManager* flow      = NetWorld ? NetWorld->GetFlowManager() : nullptr;
+					FlowManagerBase* flow  = NetWorld ? NetWorld->GetFlowManager() : nullptr;
 					Soul* soul             = flow ? flow->GetSoul(ownerID) : nullptr;
 					LOG_NET_WARN_F(soul, "[ServerNet] Stalling sim for ownerID %u: frame %u, lastReceived %u, lastConsumed %u, lead %d",
 								   ownerID, frameNumber, log->LastReceivedFrame, log->LastConsumedFrame, maxLead);
@@ -131,8 +118,8 @@ bool AuthoritySim::RunSimInput(uint32_t frameNumber, bool isResimulating,
 		}
 		else if (result.Reason == InputMissReason::LateOrAliased)
 		{
-			FlowManager* flow = NetWorld ? NetWorld->GetFlowManager() : nullptr;
-			Soul* soul        = flow ? flow->GetSoul(ownerID) : nullptr;
+			FlowManagerBase* flow = NetWorld ? NetWorld->GetFlowManager() : nullptr;
+			Soul* soul            = flow ? flow->GetSoul(ownerID) : nullptr;
 			LOG_NET_WARN_F(soul, "[ServerNet] Input data loss for ownerID %u at frame %u", ownerID, frameNumber);
 		}
 
@@ -151,8 +138,8 @@ bool AuthoritySim::RunSimInput(uint32_t frameNumber, bool isResimulating,
 
 			if (inWindow)
 			{
-				FlowManager* flow = NetWorld ? NetWorld->GetFlowManager() : nullptr;
-				Soul* soul        = flow ? flow->GetSoul(ownerID) : nullptr;
+				FlowManagerBase* flow = NetWorld ? NetWorld->GetFlowManager() : nullptr;
+				Soul* soul            = flow ? flow->GetSoul(ownerID) : nullptr;
 				LOG_NET_INFO_F(soul, "[ServerNet] Input mismatch for ownerID %u, queuing resim from frame %u", ownerID, resimFrom);
 
 				if (resimFrom < PendingInputResimFrame) PendingInputResimFrame = resimFrom;
@@ -160,8 +147,8 @@ bool AuthoritySim::RunSimInput(uint32_t frameNumber, bool isResimulating,
 			}
 			else
 			{
-				FlowManager* flow = NetWorld ? NetWorld->GetFlowManager() : nullptr;
-				Soul* soul        = flow ? flow->GetSoul(ownerID) : nullptr;
+				FlowManagerBase* flow = NetWorld ? NetWorld->GetFlowManager() : nullptr;
+				Soul* soul            = flow ? flow->GetSoul(ownerID) : nullptr;
 				LOG_NET_WARN_F(soul, "[ServerNet] Input correction for ownerID %u too old (frame %u, window [%u..%u]) — accepting divergence",
 							   ownerID, resimFrom, lastCompleted >= ringDepth ? lastCompleted - ringDepth : 0u, lastCompleted);
 			}
@@ -186,7 +173,7 @@ void AuthorityNet::OnClientDisconnectedCB(uint8_t ownerID)
 {
 if (ownerID != 0 && ownerID < MaxOwnerIDs && Replicator) Replicator->CloseChannel(ownerID);
 
-if (FlowManager* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr) if (ownerID != 0) flow->OnClientDisconnected(ownerID);
+if (FlowManagerBase* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr) if (ownerID != 0) flow->OnClientDisconnected(ownerID);
 }
 
 void AuthorityNet::CreateInputLog(uint8_t ownerID)
@@ -206,10 +193,7 @@ Replicator->OpenChannel(ownerID, logDepth, ci, ConnectionMgr);
 
 void AuthorityNet::WireNetMode(WorldBase* world)
 {
-using TLogic = LogicThread<AuthoritySim, NoRollback, GameFrame>;
-TLogic* logic = world ? static_cast<TLogic*>(world->GetLogicThread()) : nullptr;
-if (!logic) return;
-logic->GetNetMode().Initialize(Replicator, ConnectionMgr, Config, world);
+	if (world) world->BindAuthorityNet(this, ConnectionMgr);
 }
 
 void AuthorityNet::TickReplication()
@@ -402,7 +386,7 @@ if (!ci) break;
 if (ci->RepState == ClientRepState::LevelLoading)
 {
 ci->RepState = ClientRepState::LevelLoaded;
-if (FlowManager* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr) flow->OnClientLoaded(ci->OwnerID);
+if (FlowManagerBase* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr) flow->OnClientLoaded(ci->OwnerID);
 
 Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
  ? AuthorityWorld->GetFlowManager()->GetSoul(ci->OwnerID)
@@ -448,7 +432,7 @@ break;
 }
 
 {
-if (FlowManager* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr)
+	if (FlowManagerBase* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr)
 {
 if (Soul* soul = flow->GetSoul(ci->OwnerID))
 {

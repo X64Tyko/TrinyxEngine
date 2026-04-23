@@ -11,6 +11,7 @@
 #include "AssetRegistry.h"
 #include "EngineConfig.h"
 #include "FlowManager.h"
+#include "Globals.h"
 #include "ReflectionRegistry.h"
 #include "Logger.h"
 #include "LogicThread.h"
@@ -200,7 +201,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	if (Config.ProjectDir[0] != '\0')
 		AssetRegistry::Get().SetContentRoot(std::string(Config.ProjectDir) + "/content");
 
-	Flow = std::make_unique<FlowManager>();
+	Flow = std::make_unique<FlowManagerType>();
 	Flow->Initialize(this, &Config, width, height);
 
 	// ---- GNS + NetThread -------------------------------------------------

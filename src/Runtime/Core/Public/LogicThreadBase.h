@@ -10,7 +10,6 @@
 #include "TrinyxJobs.h"
 #include "Types.h"
 
-// Forward declarations
 class ConstructRegistry;
 class Registry;
 class JoltPhysics;
@@ -100,17 +99,6 @@ float GetLogicFPS() const     { return LogicFPS.load(std::memory_order_relaxed);
 float GetLogicFrameMs() const { return LogicFrameMs.load(std::memory_order_relaxed); }
 float GetFixedFPS() const     { return FixedFPS.load(std::memory_order_relaxed); }
 float GetFixedFrameMs() const { return FixedFrameMs.load(std::memory_order_relaxed); }
-
-// -------------------------------------------------------------------------
-// Virtual methods — called from OwnerNet, which currently holds LogicThreadBase*.
-// These are de-virtualized in step 8 when OwnerNet is templated on WorldType.
-// LogicThread<..., RollbackSim, ...> overrides them; all other instantiations
-// inherit the no-op defaults here.
-// -------------------------------------------------------------------------
-virtual void EnqueueCorrections(std::vector<EntityTransformCorrection> /*corrections*/,
-                                uint32_t /*earliestClientFrame*/) {}
-virtual void EnqueuePredictedCorrections(std::vector<EntityTransformCorrection> /*corrections*/) {}
-virtual void EnqueueSpawnRollback(uint32_t /*clientFrame*/) {}
 
 // --- ConstructBatch --- public so Constructs can register themselves
 ConstructBatch ScalarPrePhysicsBatch;

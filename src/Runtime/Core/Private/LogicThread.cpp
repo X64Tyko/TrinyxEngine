@@ -493,13 +493,16 @@ void LogicThread::TrackFPS()
 // code paths are dead — NoRollback avoids instantiating the rollback-specific
 // API (InputKeyState, SetActiveWriteFrame, Jolt snapshots) that are also
 // gated by TNX_ENABLE_ROLLBACK in the engine headers.
+// Explicit instantiations for LogicThread — must come after #undef to avoid
+// the macro expanding ::LogicThread into the wrong token sequence.
 #undef TMPL
 #undef LogicThread
 
 template class ::LogicThread<SoloSim,      NoRollback,  GameFrame>;
 template class ::LogicThread<AuthoritySim, NoRollback,  GameFrame>;
+template class ::LogicThread<OwnerSim, NoRollback, GameFrame>;
 #ifdef TNX_ENABLE_ROLLBACK
+template class ::LogicThread<SoloSim, RollbackSim, GameFrame>;
+template class ::LogicThread<AuthoritySim, RollbackSim, GameFrame>;
 template class ::LogicThread<OwnerSim, RollbackSim, GameFrame>;
-#else
-template class ::LogicThread<OwnerSim, NoRollback,  GameFrame>;
 #endif

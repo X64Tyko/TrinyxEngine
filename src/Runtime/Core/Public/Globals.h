@@ -6,21 +6,17 @@
 // Entity counts, tick rates, and network addresses remain runtime fields on
 // EngineConfig so projects can tune them without a rebuild.
 //
-// What lives here: the WorldType alias that wires together the three policy
-// axes at standalone build time. PIE (EditorContext) always instantiates each
-// world with an explicit type and does not use WorldType.
+// Three axes, fully independent:
+//   Net      — Solo / Authority / Owner  (TNX_NET_MODEL_* CMake define)
+//   Rollback — NoRollback / RollbackSim  (TNX_ENABLE_ROLLBACK CMake define)
+//   Frame    — GameFrame                 (always, for now)
 //
-// Axes:
-//   DefaultNet      — driven by TNX_NET_MODEL_* CMake define
-//   DefaultRollback — NoRollback by default; RollbackSim when TNX_ENABLE_ROLLBACK=ON and Owner role
-//   DefaultFrame    — GameFrame for all standalone/server/client builds
-//
-// Include order note: forward-declare policies only. Full types come from
-// the policy headers included by LogicThread.h and World.h.
+// When TNX_ENABLE_EDITOR is defined, additional PIE aliases are declared so
+// EditorContext.cpp can name its world types without spelling out template
+// arguments. The instantiation lists in World.cpp and LogicThread.cpp add the
+// matching explicit instantiations.
 // ---------------------------------------------------------------------------
 
-// Forward-declared so callers can name the alias without pulling in full
-// policy headers. Use WorldType for instantiation sites only.
 struct SoloSim;
 struct AuthoritySim;
 struct OwnerSim;
@@ -28,28 +24,45 @@ struct NoRollback;
 struct RollbackSim;
 struct GameFrame;
 
+// --- Net axis ---------------------------------------------------------------
 #if defined(TNX_NET_MODEL_SERVER)
-    using DefaultNet      = AuthoritySim;
-    using DefaultRollback = NoRollback;
+using DefaultNet = AuthoritySim;
 #elif defined(TNX_NET_MODEL_CLIENT)
-    using DefaultNet      = OwnerSim;
-    #ifdef TNX_ENABLE_ROLLBACK
-        using DefaultRollback = RollbackSim;
-    #else
-        using DefaultRollback = NoRollback;
-    #endif
+using DefaultNet = OwnerSim;
 #else
-    // Solo (no TNX_ENABLE_NETWORK) or PIE host process — world type selection
-    // is explicit in EditorContext; this alias is used only by TrinyxEngine.
-    using DefaultNet      = SoloSim;
-    using DefaultRollback = NoRollback;
+using DefaultNet = SoloSim;
+#endif
+
+// --- Rollback axis (orthogonal to net model) --------------------------------
+#ifdef TNX_ENABLE_ROLLBACK
+using DefaultRollback = RollbackSim;
+#else
+using DefaultRollback = NoRollback;
 #endif
 
 using DefaultFrame = GameFrame;
 
-// WorldType — the concrete World specialization for this build target.
-// Defined after World.h is included (World.h includes Globals.h for the aliases).
-// Usage:  std::make_unique<WorldType>()
-// Callers that need only a base pointer hold WorldBase*.
-template <typename, typename, typename> class World;
+// --- Standalone / server / client world type --------------------------------
+template <typename, typename, typename>
+class World;
 using WorldType = World<DefaultNet, DefaultRollback, DefaultFrame>;
+
+template <typename, typename, typename>
+class FlowManager;
+using FlowManagerType = FlowManager<DefaultNet, DefaultRollback, DefaultFrame>;
+
+// --- PIE world types (editor builds only) -----------------------------------
+// PIEServerWorld: Authority sim + rollback (server-side reconciliation requires it).
+//   TNX_ENABLE_EDITOR forces TNX_ENABLE_ROLLBACK=ON so RollbackSim always exists here.
+// PIEClientWorld: Owner sim, follows the build's rollback setting (DefaultRollback).
+#ifdef TNX_ENABLE_EDITOR
+using PIEServerNet      = AuthoritySim;
+using PIEServerRollback = RollbackSim;
+using PIEClientNet      = OwnerSim;
+using PIEClientRollback = DefaultRollback;
+
+using PIEServerWorld = World<PIEServerNet, PIEServerRollback, DefaultFrame>;
+using PIEClientWorld = World<PIEClientNet, PIEClientRollback, DefaultFrame>;
+using PIEServerFlow  = FlowManager<PIEServerNet, PIEServerRollback, DefaultFrame>;
+using PIEClientFlow  = FlowManager<PIEClientNet, PIEClientRollback, DefaultFrame>;
+#endif

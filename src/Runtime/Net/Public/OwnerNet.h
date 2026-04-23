@@ -47,7 +47,7 @@ private:
 	static void HandleEntitySpawn(Registry* reg, const EntitySpawnPayload& payload, uint32_t frame);
 	static void HandleStateCorrections(Registry* reg, const StateCorrectionEntry* entries,
 									   uint32_t count, uint32_t clientFrame,
-									   LogicThreadBase* logic, uint32_t lastAckedFrame);
+									   WorldBase* world, uint32_t lastAckedFrame);
 	static bool HandleConstructSpawn(ConstructRegistry* reg, Registry* entityReg,
 									 WorldBase* clientWorld, const uint8_t* data, size_t len);
 	/// Hot-path payload — runs on a worker thread. Owns the actual packet build + send.

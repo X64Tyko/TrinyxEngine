@@ -76,6 +76,11 @@ if (TNX_ENABLE_EDITOR)
     message(STATUS "Editor UI: ENABLED (ImGui)")
     # Editor always implies PIE networking model
     set(TNX_NET_MODEL "PIE" CACHE STRING "" FORCE)
+    # PIE server always runs with rollback for server-side reconciliation.
+    if (NOT TNX_ENABLE_ROLLBACK)
+        message(STATUS "TNX_ENABLE_EDITOR forces TNX_ENABLE_ROLLBACK=ON (PIE server requires rollback)")
+        set(TNX_ENABLE_ROLLBACK ON CACHE BOOL "" FORCE)
+    endif ()
 else ()
     message(STATUS "Editor UI: DISABLED")
 endif ()

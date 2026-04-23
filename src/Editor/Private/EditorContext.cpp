@@ -2,6 +2,7 @@
 #include "EditorPanel.h"
 #include "EntityBuilder.h"
 #include "FlowManager.h"
+#include "Globals.h"
 #include "Json.h"
 #include "ReflectionRegistry.h"
 #include "JoltPhysics.h"
@@ -1285,7 +1286,7 @@ void EditorContext::StartPIE()
 	ServerConfig = *EnginePtr->GetGameConfig();
 
 	// Create server flow (owns server world + constructs)
-	ServerFlow = std::make_unique<FlowManager>();
+	ServerFlow = std::make_unique<PIEServerFlow>();
 	ServerFlow->Initialize(EnginePtr, &ServerConfig, 960, 540);
 	if (!ServerFlow->CreateWorld())
 	{
@@ -1314,7 +1315,7 @@ void EditorContext::StartPIE()
 	{
 		PIEClient client;
 		client.Config = *EnginePtr->GetGameConfig();
-		client.Flow        = std::make_unique<FlowManager>();
+		client.Flow   = std::make_unique<PIEClientFlow>();
 		client.Flow->Initialize(EnginePtr, &client.Config, 960, 540);
 		if (!client.Flow->CreateWorld())
 		{
@@ -1488,7 +1489,7 @@ void EditorContext::StartPIE()
 				LOG_ENG_WARN_F("[PIE] OwnerID never assigned for client %zu server handle %u", i, serverHandle);
 
 			// Promote client entry: wire world to the now-known OwnerID.
-			PIEClients[i].Flow->GetWorld()->LocalOwnerID = ownerID;
+			PIEClients[i].Flow->GetWorld()->SetLocalOwnerID(ownerID);
 			net->UpdateClientOwnerID(clientHandle, ownerID, PIEClients[i].Flow->GetWorld());
 		}
 	}

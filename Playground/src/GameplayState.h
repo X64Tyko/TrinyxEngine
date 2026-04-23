@@ -1,7 +1,7 @@
 #pragma once
 
 #include "FlowState.h"
-#include "FlowManager.h"
+#include "FlowManagerBase.h"
 #include "EngineConfig.h"
 #include "Logger.h"
 #include "NetTypes.h"
@@ -20,7 +20,7 @@
 class GameplayState : public FlowState
 {
 public:
-	void OnEnter(FlowManager& flow, WorldBase* world) override
+	void OnEnter(FlowManagerBase& flow, WorldBase* world) override
 	{
 		FlowState::OnEnter(flow, world); // caches Flow
 
@@ -31,11 +31,13 @@ public:
 			return;
 		}
 
-		// Owner/clients wait for TravelNotify; authority/standalone load immediately.
-#if defined(TNX_NET_MODEL_CLIENT)
-		LOG_INFO("[GameplayState] Owner — deferring level load until TravelNotify");
-		return;
-#endif
+		// Owner worlds wait for TravelNotify before loading — the server controls level timing.
+		// In PIE, client worlds have LocalOwnerID != 0 (assigned before LoadDefaultState fires).
+		if (world && world->GetLocalOwnerID() != 0)
+		{
+			LOG_INFO("[GameplayState] Client world — deferring level load until TravelNotify");
+			return;
+		}
 
 		// Activate ArenaMode on all server-role modes before any player joins.
 		Flow->SetGameMode("ArenaMode");
@@ -48,7 +50,9 @@ public:
 #if !defined(TNX_NET_MODEL_CLIENT)
 		// Route through FlowManager → ArenaMode::OnPlayerJoined for the local player.
 		// OwnerID 0 is the standalone/listen-server-local player's Soul.
-		Flow->OnClientLoaded(0);
+		// In PIE, client worlds have LocalOwnerID != 0 (set before LoadDefaultState) —
+		// they receive the spawn via ConstructSpawn replication, not this direct call.
+		if (!world || world->GetLocalOwnerID() == 0) Flow->OnClientLoaded(0);
 #endif
 	}
 

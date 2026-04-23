@@ -229,7 +229,9 @@ private:
 #if defined(TNX_NET_MODEL_CLIENT)
 		GetWorld()->GetSimInput()->PushKey(key, down);
 #else
-		(void)key; (void)down; // Authority/Solo: input arrives via net path or not at all.
+		// In PIE the model is TNX_NET_MODEL_PIE — use runtime role instead.
+		// A PIE client world has LocalOwnerID != 0; solo/server worlds have 0.
+		if (GetWorld() && GetWorld()->GetLocalOwnerID() != 0) GetWorld()->GetSimInput()->PushKey(key, down);
 #endif
 	}
 

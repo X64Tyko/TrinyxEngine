@@ -58,7 +58,9 @@ static bool JoltAssertFailedImpl(const char* inExpression, const char* inMessage
 #endif
 
 // Using the Table implementations — no virtual overrides needed, just a lookup table.
-// These must outlive the PhysicsSystem, so they're file-static singletons initialized in Initialize().
+// These must outlive the PhysicsSystem, so they're file-static and manually managed.
+// Lifetime: Initialize() allocates, Shutdown() frees. No re-entrant use across worlds.
+// TODO: wrap in unique_ptr once Jolt backend is swappable (Stage 2 hardening).
 static JPH::BroadPhaseLayerInterfaceTable* s_BPLayerInterface   = nullptr;
 static JPH::ObjectVsBroadPhaseLayerFilterTable* s_ObjVsBPFilter = nullptr;
 static JPH::ObjectLayerPairFilterTable* s_ObjPairFilter         = nullptr;

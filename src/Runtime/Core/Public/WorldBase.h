@@ -4,6 +4,7 @@
 #include <optional>
 #include <span>
 #include <vector>
+#include <cassert>
 
 #include "EngineConfig.h"
 #include "Input.h"
@@ -16,7 +17,9 @@ class LogicThreadBase;
 class JoltPhysics;
 class ConstructRegistry;
 class ReplicationSystem;
-class FlowManager;
+class FlowManagerBase;
+class AuthorityNet;
+class NetConnectionManager;
 
 // ---------------------------------------------------------------------------
 // WorldBase — Non-template base for all simulation instances.
@@ -138,16 +141,43 @@ public:
 	ReplicationSystem* GetReplicationSystem() const { return Replicator; }
 	void SetReplicationSystem(ReplicationSystem* repl) { Replicator = repl; }
 
-	/// The FlowManager that owns this World. Set automatically in FlowManager::CreateWorld.
-	FlowManager* GetFlowManager() const { return FlowMgr; }
-	void SetFlowManager(FlowManager* flow) { FlowMgr = flow; }
+	// Rollback queuing — overridden by World<..., RollbackSim, ...> when rollback is enabled.
+	virtual void EnqueueCorrections(std::vector<EntityTransformCorrection> /*corrections*/,
+									uint32_t /*earliestClientFrame*/)
+	{
+	}
+
+	virtual void EnqueuePredictedCorrections(std::vector<EntityTransformCorrection> /*corrections*/)
+	{
+	}
+
+	virtual void EnqueueSpawnRollback(uint32_t /*clientFrame*/)
+	{
+	}
+
+	/// Net binding — overridden by World<AuthoritySim, ...> to call AuthoritySim::Bind
+	/// without an external static_cast to a hard-coded policy specialization.
+	virtual void BindAuthorityNet(AuthorityNet* /*net*/, NetConnectionManager* /*connMgr*/)
+	{
+	}
+
+	/// The FlowManagerBase that owns this World. Set automatically in FlowManager::CreateWorld.
+	FlowManagerBase* GetFlowManager() const { return FlowMgr; }
+	void SetFlowManager(FlowManagerBase* flow) { FlowMgr = flow; }
 
 	/// Set by engine after jobs are initialized. LogicThread polls this.
 	void SetJobsInitialized(bool v) { bJobsInitialized.store(v, std::memory_order_release); }
 	bool GetJobsInitialized() const { return bJobsInitialized.load(std::memory_order_relaxed); }
 
 	// --- Network ownership ---
-	uint8_t LocalOwnerID = 0; // This world's owner (0 = server, 1-255 = client)
+	uint8_t GetLocalOwnerID() const { return LocalOwnerID; }
+
+	// Set once at handshake. Asserts on double-assignment to a different value.
+	void SetLocalOwnerID(uint8_t id)
+	{
+		assert((LocalOwnerID == 0 || LocalOwnerID == id) && "LocalOwnerID assigned twice with different values");
+		LocalOwnerID = id;
+	}
 
 	/// Offset to add to a local logic frame number to get the equivalent server frame.
 	/// 0 on the server (local IS server). Set by OwnerNet at handshake.
@@ -160,7 +190,6 @@ public:
 
 protected:
 	/// Initialize owned subsystems except the LogicThread (created by World<>).
-	/// Config copy, ConstructRegistry cache, Registry init, Physics init, WQHandle create.
 	bool InitBase(const EngineConfig& config, ConstructRegistry* constructRegistry,
 	              int windowWidth, int windowHeight);
 
@@ -183,11 +212,12 @@ protected:
 
 	ConstructRegistry* Constructs = nullptr; // Non-owning — FlowManager owns the registry
 	ReplicationSystem* Replicator = nullptr; // Non-owning — TrinyxEngine or EditorContext owns it
-	FlowManager* FlowMgr          = nullptr; // Non-owning — set by FlowManager::CreateWorld
+	FlowManagerBase* FlowMgr      = nullptr; // Non-owning — set by FlowManagerBase::CreateWorld
 	uint32_t ServerFrameOffset    = 0;       // Local→server frame delta; set by OwnerNet at handshake
 	std::atomic<bool> bJobsInitialized{false};
 	std::atomic<bool> bInputAccumEnabled{false}; // Gated to true at PlayerBeginConfirm (client-side only)
 
 private:
+	uint8_t LocalOwnerID = 0; // 0 = server/solo, 1–255 = client. Set once via SetLocalOwnerID.
 	bool IsLogicRunning() const;
 };

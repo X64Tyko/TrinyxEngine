@@ -10,7 +10,7 @@
 #include "RPC.h"
 #endif
 
-class FlowManager;
+class FlowManagerBase;
 class Soul;
 class WorldBase;
 
@@ -158,7 +158,7 @@ public:
 	NetChannel& GetNetChannel() { return Channel; }
 #endif
 
-	FlowManager* GetFlowManager() { return FlowMgr; }
+	FlowManagerBase* GetFlowManager() { return FlowMgr; }
 
 	// -------------------------------------------------------------------------
 	// Engine-reserved Soul RPCs — PlayerBegin lifecycle.
@@ -173,7 +173,7 @@ public:
 #endif
 
 private:
-	friend class FlowManager;
+	friend class FlowManagerBase;
 
 	uint8_t OwnerID                  = 0;
 	uint32_t InputLead               = 0;
@@ -185,7 +185,7 @@ private:
 	// Set by FlowManager at creation and refreshed on every RPC dispatch.
 	NetChannel Channel   = {};
 #endif
-	FlowManager* FlowMgr = nullptr;
+	FlowManagerBase* FlowMgr = nullptr;
 };
 
 // ---------------------------------------------------------------------------

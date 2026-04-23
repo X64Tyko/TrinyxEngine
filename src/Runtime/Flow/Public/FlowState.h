@@ -3,7 +3,7 @@
 #include <cstdint>
 
 class WorldBase;
-class FlowManager;
+class FlowManagerBase;
 
 // ---------------------------------------------------------------------------
 // StateRequirements — Declares what engine subsystems a state needs.
@@ -54,7 +54,7 @@ public:
 
 	/// Called when this state becomes active (pushed or transitioned to).
 	/// world may be nullptr if GetRequirements().NeedsWorld is false.
-	virtual void OnEnter(FlowManager& flow, WorldBase* world)
+	virtual void OnEnter(FlowManagerBase& flow, WorldBase* world)
 	{
 		Flow = &flow;
 		(void)world;
@@ -80,5 +80,5 @@ public:
 
 protected:
 	FlowState() = default;
-	FlowManager* Flow = nullptr; // Set on OnEnter — always the owning FlowManager.
+	FlowManagerBase* Flow = nullptr; // Set on OnEnter — always the owning FlowManager.
 };

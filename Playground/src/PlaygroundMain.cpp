@@ -1,6 +1,6 @@
 #include "TrinyxEngine.h"
 #include "GameManager.h"
-#include "FlowManager.h"
+#include "FlowManagerBase.h"
 #include "Logger.h"
 
 #include "GameplayState.h" // Pulls in TNX_REGISTER_STATE(GameplayState) via static init

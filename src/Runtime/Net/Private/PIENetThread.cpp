@@ -1,7 +1,7 @@
 #ifdef TNX_ENABLE_EDITOR
 #include "PIENetThread.h"
 
-#include "FlowManager.h"
+#include "FlowManagerBase.h"
 #include "NetConnectionManager.h"
 #include "Logger.h"
 #include <SDL3/SDL_timer.h>
@@ -78,13 +78,13 @@ void PIENetThread::TickReplication()
 	LastFlowTickTime = now;
 
 	// Tick the server's FlowManager.
-	World* serverWorld = Authority.GetAuthorityWorld();
-	if (serverWorld) if (FlowManager* flow = serverWorld->GetFlowManager()) flow->Tick(dt);
+	WorldBase* serverWorld = Authority.GetAuthorityWorld();
+	if (serverWorld) if (FlowManagerBase* flow = serverWorld->GetFlowManager()) flow->Tick(dt);
 
 	// Tick each client's FlowManager and drain deferred replication work.
 	for (auto& entry : Clients)
 	{
-		if (entry.OwnerWorld) if (FlowManager* flow = entry.OwnerWorld->GetFlowManager()) flow->Tick(dt);
+		if (entry.OwnerWorld) if (FlowManagerBase* flow = entry.OwnerWorld->GetFlowManager()) flow->Tick(dt);
 		entry.Handler->TickReplication();
 	}
 }
