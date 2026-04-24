@@ -1,11 +1,11 @@
 #pragma once
-#include "AssetTypes.h"
-#include "TnxName.h"
-#include "Events.h"
-
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "AssetTypes.h"
+#include "TnxName.h"
+#include "Events.h"
 
 // -----------------------------------------------------------------------
 // AssetRegistry — Runtime asset resolution
@@ -42,12 +42,12 @@ struct AssetEntry
 	// One-shot per load event: cleared after firing so stale listeners
 	// never accumulate. Bindings with the same context object are safe
 	// to add again after re-checkout.
-	FixedMultiCallback<void, 32, uint32_t> OnLoaded;
+	MultiCallback<void, true, 32, uint32_t> OnLoaded;
 
 	// Fired just before an asset is evicted from its slot.
 	// Persistent: survives load/reload cycles. Owners use this to
 	// invalidate cached slot indices and request a new checkout.
-	FixedMultiCallback<void, 64> OnEvicted;
+	MultiCallback<void, true, 64> OnEvicted;
 };
 
 // -----------------------------------------------------------------------

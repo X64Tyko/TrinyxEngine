@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <type_traits>
 #include <immintrin.h>
+#include <vector>
 
 #include "Logger.h"
 #include "SchemaValidation.h"

@@ -80,9 +80,11 @@ public:
 			Body.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive | TemporalFlagBits::Replicated);
 		}
 
-		auto* phys = GetWorld()->GetPhysics();
+		auto* phys          = GetWorld()->GetPhysics();
+		EntityRecord Record = GetWorld()->GetRegistry()->GetRecord(Body.GetEntityHandle());
 		CharacterController.Initialize(
-			phys->GetPhysicsSystem(),
+			phys,
+			Record.CacheEntityIndex,
 			JPH::RVec3(SpawnPosX, SpawnPosY, SpawnPosZ),
 			0.3f,
 			0.7f);

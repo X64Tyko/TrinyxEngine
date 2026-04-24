@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <type_traits>
+#include <vector>
 
 #include "RegistryTypes.h"
 #include "Events.h"

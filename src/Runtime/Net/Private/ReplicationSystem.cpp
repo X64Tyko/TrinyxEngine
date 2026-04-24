@@ -264,30 +264,19 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 
 	const int32_t Alive         = static_cast<int32_t>(TemporalFlagBits::Alive);
 	const int32_t Replicated    = static_cast<int32_t>(TemporalFlagBits::Replicated);
+	const int32_t Tombstoned    = static_cast<int32_t>(TemporalFlagBits::Tombstone);
 	const int32_t ConfirmedDead = static_cast<int32_t>(TemporalFlagBits::NetConfirmedDead);
 
 	for (uint32_t i = 0; i < maxEntities; ++i)
 	{
 		const int32_t f = flags[i];
 
-		if (f & Alive)
+		if (!(f & Replicated)) continue;
+
+		if (f & Tombstoned)
 		{
-			if (!(f & Replicated)) continue;
-
-			GlobalEntityHandle gH = reg->GlobalEntityRegistry.LookupGlobalHandle(static_cast<EntityCacheHandle>(i));
-			EntityRecord* record  = reg->GlobalEntityRegistry.Records[gH.GetIndex()];
-			if (!record || !record->IsValid()) continue;
-
-			EntityNetHandle nh = record->NetworkID;
-			if (nh.NetIndex == 0) nh = AssignNetHandle(reg, gH);
-
-			EntityNetManifest manifest{};
-			manifest.ClassType = record->Arch ? record->Arch->ArchClassID : 0;
-
-			allCandidates.push_back({i, nh, manifest, static_cast<uint8_t>(record->GetGeneration())});
-		}
-		else if (f & Replicated)
-		{
+			// Tombstoned entities enter the net destruction cycle regardless of Alive state.
+			// Alive is still set until deferred destroy reclaims the slot.
 			if (!(f & ConfirmedDead))
 			{
 				// Tombstone not yet confirmed — post a world queue job to stamp
@@ -304,6 +293,7 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 						const ComponentTypeID fSlot = CacheSlotMeta<>::StaticTemporalIndex();
 						auto* wFlags                = static_cast<int32_t*>(cache->GetFieldData(hdr, fSlot, 0));
 						if (wFlags) wFlags[slotIdx] |= static_cast<int32_t>(TemporalFlagBits::NetConfirmedDead);
+						reg->ConfirmTombstone(slotIdx);
 					});
 				}
 				// else: horizon hasn't passed yet — will be picked up next tick
@@ -317,6 +307,21 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 
 				allDestroys.push_back({i, record->NetworkID.Value});
 			}
+		}
+		else if (f & Alive)
+		{
+			// Live replicated entity — collect for spawn/state replication.
+			GlobalEntityHandle gH = reg->GlobalEntityRegistry.LookupGlobalHandle(static_cast<EntityCacheHandle>(i));
+			EntityRecord* record  = reg->GlobalEntityRegistry.Records[gH.GetIndex()];
+			if (!record || !record->IsValid()) continue;
+
+			EntityNetHandle nh = record->NetworkID;
+			if (nh.NetIndex == 0) nh = AssignNetHandle(reg, gH);
+
+			EntityNetManifest manifest{};
+			manifest.ClassType = record->Arch ? record->Arch->ArchClassID : 0;
+
+			allCandidates.push_back({i, nh, manifest, static_cast<uint8_t>(record->GetGeneration())});
 		}
 	}
 

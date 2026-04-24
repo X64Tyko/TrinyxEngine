@@ -54,3 +54,4 @@ shaders/**/*.spv
 # Runtime-generated files
 imgui.ini
 temp_*.txt
+.aider*

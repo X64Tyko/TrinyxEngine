@@ -1,10 +1,11 @@
 #pragma once
-#include "Types.h"
-#include "Signature.h"
-#include "Chunk.h"
+#include <cstdint>
 #include <span>
 #include <unordered_map>
 #include <vector>
+#include "Types.h"
+#include "Signature.h"
+#include "Chunk.h"
 #include "ComponentView.h"
 #include "FieldMeta.h"
 #include "FlatMap.h"

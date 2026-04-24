@@ -1,7 +1,9 @@
 #pragma once
 
+#include "EntityMeta.h"
 #include "EntityRecord.h"
 #include "LogicThreadBase.h"
+#include "PhysicsTypes.h"
 #include "Schema.h"
 #include "WorldBase.h"
 
@@ -111,6 +113,23 @@ public:
 				static_cast<Derived*>(this));
 		}
 
+		// Auto-bind contact callbacks for all registered Views.
+		// Implement OnHit / OnOverlapBegin / OnOverlapEnd → get the callback. Don't implement → pay nothing.
+		if constexpr (HasOnHit<Derived> || HasOnOverlapBegin<Derived> || HasOnOverlapEnd<Derived>)
+		{
+			JoltPhysics* Phys = OwnerWorld->GetPhysics();
+			Registry* Reg     = OwnerWorld->GetRegistry();
+			Derived* Self     = static_cast<Derived*>(this);
+			for (uint32_t i = 0; i < ViewCount; ++i)
+			{
+				if (!Views[i].GetHandleFn) continue;
+				EntityHandle handle = Views[i].GetHandleFn(Views[i].View);
+				if constexpr (HasOnHit<Derived>) Phys->BindOnHit<Derived, &Derived::OnHit>(handle, Reg, Self);
+				if constexpr (HasOnOverlapBegin<Derived>) Phys->BindOnOverlapBegin<Derived, &Derived::OnOverlapBegin>(handle, Reg, Self);
+				if constexpr (HasOnOverlapEnd<Derived>) Phys->BindOnOverlapEnd<Derived, &Derived::OnOverlapEnd>(handle, Reg, Self);
+			}
+		}
+
 		bInitialized = true;
 
 		// Called once after views are hydrated and ticks are registered.
@@ -124,6 +143,19 @@ public:
 	void Shutdown()
 	{
 		if (!bInitialized) return;
+
+		// Unbind contact callbacks before deregistering ticks
+		if constexpr (HasOnHit<Derived> || HasOnOverlapBegin<Derived> || HasOnOverlapEnd<Derived>)
+		{
+			JoltPhysics* Phys = OwnerWorld->GetPhysics();
+			Registry* Reg     = OwnerWorld->GetRegistry();
+			for (uint32_t i = 0; i < ViewCount; ++i)
+			{
+				if (!Views[i].GetHandleFn) continue;
+				EntityHandle handle = Views[i].GetHandleFn(Views[i].View);
+				Phys->UnbindContacts(handle, Reg, static_cast<Derived*>(this));
+			}
+		}
 
 		LogicThreadBase* Logic = OwnerWorld->GetLogicThread();
 		Logic->ScalarPrePhysicsBatch.Deregister(static_cast<Derived*>(this));

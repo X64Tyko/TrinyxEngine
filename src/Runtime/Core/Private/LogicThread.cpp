@@ -108,6 +108,7 @@ void LogicThread::PhysicsLoop(const SimFloat fixedStepTime)
 	if (FrameNumber % PhysicsDivizor == PhysicsDivizor - 1) [[unlikely]]
 	{
 		PhysicsPtr->PullActiveTransforms(RegistryPtr);
+		PhysicsPtr->ProcessContacts(RegistryPtr);
 		Rollback.SaveSnapshot(*this);
 	}
 

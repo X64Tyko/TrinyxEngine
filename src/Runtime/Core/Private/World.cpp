@@ -125,6 +125,14 @@ bool World<TNet, TRollback, TFrame>::Initialize(
 					  windowWidth, windowHeight);
 	Logic->SetConstructRegistry(Constructs);
 
+	// Initialize the audio command ring (any thread → Sentinel drain).
+	if (!AudioCmdRing.Initialize(64))
+	{
+		LOG_ENG_ERROR("[World] Failed to initialize AudioCmdRing");
+		return false;
+	}
+	AudioCmdConsumer.emplace(AudioCmdRing.MakeConsumer());
+
 	if constexpr (std::is_same_v<TNet, OwnerSim>)
 	{
 		if (!InputAccumRing.Initialize(256))

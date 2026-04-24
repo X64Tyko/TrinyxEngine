@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <queue>
 #include <span>
@@ -74,7 +75,12 @@ public:
 
 	void Destroy(EntityHandle lHandle);
 	void DestroyByGlobalHandle(GlobalEntityHandle gHandle);
+	void ForceDestroyByGlobalHandle(GlobalEntityHandle gHandle);
 	void ProcessDeferredDestructions();
+
+	// --- Tombstone API ---
+	void ConfirmTombstone(uint32_t recordIndex);
+	bool IsTombstoned(uint32_t recordIndex) const;
 
 	// --- Component access ---
 
@@ -176,6 +182,13 @@ public:
 	uint32_t LastPublishedFrame = 0;
 	bool RenderHasAcked         = false; // false until render publishes its first ack
 
+	// Track if we should auto-confirm deat entities.
+#ifdef TNX_ENABLE_NETWORK
+	bool ReplicationActive = true;
+#else
+	bool ReplicationActive = false;
+#endif
+
 private:
 	friend class Archetype;
 	template <typename, typename, typename> friend class LogicThread;
@@ -274,7 +287,12 @@ private:
 	std::vector<uint32_t> PendingNetRecycles;
 
 	FlatMap<Archetype::ArchetypeKey, Archetype*> Archetypes;
-	std::vector<GlobalEntityHandle> PendingDestructions;
+
+	// Tombstoned record indices (not yet confirmed for destruction)
+	std::vector<uint32_t> TombstoneRecordIndices;
+
+	// Confirmed destructions (moved from TombstoneRecordIndices)
+	std::vector<GlobalEntityHandle> PendingConfirmedDestructions;
 
 #ifdef TNX_ENABLE_ROLLBACK
 	TemporalComponentCache HistorySlab;

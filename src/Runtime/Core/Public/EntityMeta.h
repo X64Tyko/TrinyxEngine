@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Types.h"
+#include "PhysicsTypes.h"
 
 // ---------------------------------------------------------------------------
 // Concept detection for entity lifecycle hooks.
@@ -14,9 +15,11 @@ template <typename T> concept HasScalarUpdate = requires(T t, SimFloat dt) { t.S
 template <typename T> concept HasPrePhysics   = requires(T t, SimFloat dt) { t.PrePhysics(dt); };
 template <typename T> concept HasPostPhysics  = requires(T t, SimFloat dt) { t.PostPhysics(dt); };
 template <typename T> concept HasPhysicsStep  = requires(T t, SimFloat dt) { t.PhysicsStep(dt); };
-template <typename T> concept HasOnActivate   = requires(T t) { t.OnActivate(); };
+template <typename T> concept HasOnActivate = requires(T t) { t.OnActivate(); };
 template <typename T> concept HasOnDeactivate = requires(T t) { t.OnDeactivate(); };
-template <typename T> concept HasOnCollide    = requires(T t) { t.OnCollide(); };
+template <typename T> concept HasOnHit = requires(T t, PhysicsOnHitData d) { t.OnHit(d); };
+template <typename T> concept HasOnOverlapBegin = requires(T t, PhysicsOverlapData d) { t.OnOverlapBegin(d); };
+template <typename T> concept HasOnOverlapEnd = requires(T t, PhysicsOverlapData d) { t.OnOverlapEnd(d); };
 template <typename T> concept HasDefineSchema = requires(T t) { t.DefineSchema(); };
 template <typename T> concept HasDefineFields = requires(T t) { t.DefineFields(); };
 

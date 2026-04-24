@@ -951,9 +951,24 @@ class ContactListener : public JPH::ContactListener {
 };
 ```
 
-After Pull, Brain drains the contact buffers and dispatches `OnCollision` events to entity update
-functions. Contacts are mapped back to entity IDs via a `BodyID → EntityID` lookup table maintained
-during Push (body creation/destruction).
+After Pull, Brain drains the contact buffers via `ProcessContacts()`. Contacts are resolved from
+`BodyID → EntityCacheHandle → EntityHandle` and dispatched to per-body callbacks (`BodyToOnHit`,
+`BodyToOverlap`) mapped by `BodyID.GetIndex()`.
+
+**Two dispatch paths:**
+
+- **Constructs:** direct typed callbacks via `BodyToOnHit`/`BodyToOverlap`. Auto-bound via concept
+  detection (`HasOnHit`, `HasOnOverlapBegin`, `HasOnOverlapEnd`) during `Construct<T>::Initialize`.
+  Callbacks receive `PhysicsOnHitData` (EntityHandle + normal + penetration) or `PhysicsOverlapData`
+  (EntityHandle). Currently implemented.
+
+- **Entities (designed, not yet implemented):** `ContactSystem<T>` — one CRTP instance per entity type
+  that implements contact methods. Pre-hydrated EntityView that repoints its FieldProxy cursor to the
+  contacted entity's cache index during `ProcessContacts`. No per-entity allocation, no dynamic View
+  hydration. Multi-hit handled naturally (each contact invokes the function, logic accumulates). Only
+  instantiated for entity types that implement `OnHit`/`OnOverlapBegin`. Types without contact methods
+  pay nothing. Determinism preserved since `ProcessContacts` runs at a fixed point in the frame
+  (after `PullActiveTransforms`, before `PostPhysics`).
 
 ## Body Lifecycle
 

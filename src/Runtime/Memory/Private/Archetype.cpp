@@ -249,7 +249,8 @@ void Archetype::RemoveEntity(size_t chunkIndex, uint32_t localIndex, uint32_t ar
 	if (chunkIndex >= Chunks.size()) return;
 	if (localIndex >= EntitiesPerChunk) return;
 
-	// Write Dirty into the Flags field so the GPU predicate shader stops drawing this entity.
+	// Tombstone: clear Active+Alive, set Dirty+Tombstoned. GPU predicate stops drawing,
+	// sweep skips, and replication can distinguish "dead" from "temporarily inactive."
 	{
 		Chunk* chunk                = Chunks[chunkIndex];
 		ComponentTypeID flagsTypeID = CacheSlotMeta<>::StaticTypeID();
@@ -267,7 +268,7 @@ void Archetype::RemoveEntity(size_t chunkIndex, uint32_t localIndex, uint32_t ar
 		}
 
 		auto* metaInfo = reinterpret_cast<uint32_t*>(flagsBase) + localIndex;
-		*metaInfo      = static_cast<uint32_t>(TemporalFlagBits::Dirty);
+		*metaInfo      = static_cast<uint32_t>(0);
 	}
 
 	InactiveEntitySlots.push_back(ActiveEntitySlots[archetypeIdx]);

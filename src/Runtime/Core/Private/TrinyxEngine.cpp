@@ -373,6 +373,15 @@ void TrinyxEngine::RunMainLoop()
 			const double audioStep = 1.0 / std::max(1, Config.AudioUpdateHz);
 			while (audioAccum >= audioStep)
 			{
+				// Drain Logic→Sentinel audio commands before processing audio.
+				if (DefaultWorld)
+				{
+					if (auto* consumer = DefaultWorld->GetAudioCmdConsumer())
+					{
+						AudioCommand cmd;
+						while (consumer->TryPop(cmd)) Audio->Trigger(cmd.Name, {cmd.Volume, cmd.Pitch, cmd.Loop});
+					}
+				}
 				Audio->Update(static_cast<float>(audioStep));
 				audioAccum -= audioStep;
 			}

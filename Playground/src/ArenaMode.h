@@ -10,6 +10,8 @@
 #include "Soul.h"
 #include "WithSpawnManagement.h"
 #include "World.h"
+#include "TriggerVolume.h"
+#include "CubeEntity.h"
 
 // ---------------------------------------------------------------------------
 // ArenaMode — Playground game mode.
@@ -24,6 +26,54 @@
 class ArenaMode : public GameMode, public WithSpawnManagement
 {
 public:
+	void Initialize(WorldBase* world) override
+	{
+		GameMode::Initialize(world);
+
+		world->SpawnAndWait([this, world](uint32_t)
+		{
+			Registry* reg         = world->GetRegistry();
+			ConstructRegistry* cr = world->GetConstructRegistry();
+
+			// Spawn the target cube at (5, 1, 0).
+			TargetCube = reg->Create<CubeEntity<>>([](CubeEntity<>& v)
+			{
+				v.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive | TemporalFlagBits::Replicated);
+				v.transform.PosX = 5.0f;
+				v.transform.PosY = 1.0f;
+				v.transform.PosZ = -6.0f;
+				v.transform.Rotation.SetIdentity();
+				v.scale.ScaleX         = 1.0f;
+				v.scale.ScaleY         = 1.0f;
+				v.scale.ScaleZ         = 1.0f;
+				v.color.R              = 1.0f;
+				v.color.G              = 0.3f;
+				v.color.B              = 0.1f;
+				v.color.A              = 1.0f;
+				v.mesh.MeshID          = 1u;
+				v.physBody.Shape       = JoltShapeType::Box;
+				v.physBody.HalfExtentX = 0.5f;
+				v.physBody.HalfExtentY = 0.5f;
+				v.physBody.HalfExtentZ = 0.5f;
+				v.physBody.Motion      = JoltMotion::Dynamic;
+				v.physBody.Mass        = 10.0f;
+			});
+
+			// Spawn the trigger volume centered at (5, 1, 0), slightly larger than the cube.
+			cr->Create<TriggerVolume>(world, [this](TriggerVolume* tv)
+			{
+				tv->PosX  = -5.0f;
+				tv->PosY  = 3.0f;
+				tv->PosZ  = -6.0f;
+				tv->HalfX = 1.5f;
+				tv->HalfY = 1.5f;
+				tv->HalfZ = 1.5f;
+
+				tv->OnEnter.Bind<ArenaMode, &ArenaMode::OnTriggerOverlap>(this);
+			});
+		});
+	}
+
 	int64_t GetCharacterPrefab(const Soul& /*soul*/) const override
 	{
 		const AssetEntry* entry = AssetRegistry::Get().FindByName("DefaultCharacter");
@@ -67,6 +117,20 @@ public:
 
 private:
 	int SpawnCounter = 0;
+	EntityHandle TargetCube{};
+
+	void OnTriggerOverlap(PhysicsOverlapData /*data*/)
+	{
+		if (!TargetCube.IsValid()) return;
+		WorldBase* world = GetWorld();
+		if (!world) return;
+
+		world->GetRegistry()->Destroy(TargetCube);
+		TargetCube = {};
+
+		world->TriggerAudio(TNX_NAME("trigger_hit"));
+		LOG_INFO("[ArenaMode] Trigger fired — cube destroyed");
+	}
 
 	void SpawnPlayerBody(Soul& soul)
 	{
@@ -111,3 +175,4 @@ private:
 				   soul.GetOwnerID(), spawnX, repl ? "yes" : "no");
 	}
 };
+

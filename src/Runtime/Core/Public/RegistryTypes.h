@@ -1,5 +1,5 @@
 #pragma once
-#include "PagedMap.h"
+#include <cstdint>
 
 // Disable MSVC warning for anonymous structs in unions (C++11 standard feature)
 #ifdef _MSC_VER

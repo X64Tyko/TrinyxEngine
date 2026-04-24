@@ -7,8 +7,12 @@
 #include <cassert>
 
 #include "EngineConfig.h"
+#include "Events.h"
 #include "Input.h"
+#include "JoltPhysics.h"
 #include "NetTypes.h"
+#include "PhysicsEvents.h"
+#include "TnxName.h"
 #include "TrinyxJobs.h"
 #include "TrinyxMPSCRing.h"
 
@@ -20,6 +24,18 @@ class ReplicationSystem;
 class FlowManagerBase;
 class AuthorityNet;
 class NetConnectionManager;
+
+// Dispatched by the Logic thread after PullActiveTransforms. Listeners are called on the Logic thread.
+DEFINE_FIXED_MULTICALLBACK(ContactEventFn, 8, const PhysicsContactEvent&)
+
+// Command posted by any thread; drained by Sentinel before AudioManager::Update.
+struct AudioCommand
+{
+	TnxName Name;
+	float Volume = 1.f;
+	float Pitch  = 1.f;
+	bool Loop    = false;
+};
 
 // ---------------------------------------------------------------------------
 // WorldBase — Non-template base for all simulation instances.
@@ -93,6 +109,7 @@ public:
 		InputBuffer* buf = GetPlayerSimInput(ownerID);
 		return buf ? buf : &SimInput;
 	}
+
 	/// Engine-internal: returns the correct viz input buffer for a player by ownerID.
 	/// Gameplay code must use Soul::GetVizInput(world) — it applies SoulRole routing.
 	InputBuffer* GetVizInputForPlayer(uint8_t ownerID)
@@ -101,6 +118,7 @@ public:
 		InputBuffer* buf = GetPlayerVizInput(ownerID);
 		return buf ? buf : &VizInput;
 	}
+
 	/// Engine-internal: returns the injected net sim buffer for a remote player slot,
 	/// or nullptr if the slot is unallocated. Use EnsurePlayerInputSlot() first.
 	InputBuffer* GetPlayerSimInput(uint8_t ownerID)
@@ -108,11 +126,13 @@ public:
 		if (ownerID == 0 || ownerID > PlayerSimInputs.size()) return nullptr;
 		return PlayerSimInputs[ownerID - 1].get();
 	}
+
 	InputBuffer* GetPlayerVizInput(uint8_t ownerID)
 	{
 		if (ownerID == 0 || ownerID > PlayerVizInputs.size()) return nullptr;
 		return PlayerVizInputs[ownerID - 1].get();
 	}
+
 	void EnsurePlayerInputSlot(uint8_t ownerID)
 	{
 		if (ownerID == 0) return;
@@ -169,7 +189,27 @@ public:
 	void SetJobsInitialized(bool v) { bJobsInitialized.store(v, std::memory_order_release); }
 	bool GetJobsInitialized() const { return bJobsInitialized.load(std::memory_order_relaxed); }
 
-	// --- Network ownership ---
+	// --- Contact events ---
+	// Listeners added here are called on the Logic thread after PullActiveTransforms.
+	// Use this to react to physics sensor overlaps, collisions, etc.
+	ContactEventFn OnContactEvent;
+
+	// --- Audio command queue ---
+	// Thread-safe: any thread may call TriggerAudio; Sentinel drains before AudioManager::Update.
+	void TriggerAudio(TnxName name, float volume = 1.f, float pitch = 1.f, bool loop = false)
+	{
+		AudioCommand cmd;
+		cmd.Name   = name;
+		cmd.Volume = volume;
+		cmd.Pitch  = pitch;
+		cmd.Loop   = loop;
+		AudioCmdRing.TryPush(cmd);
+	}
+
+	TrinyxMPSCRing<AudioCommand>::Consumer* GetAudioCmdConsumer()
+	{
+		return AudioCmdConsumer.has_value() ? &AudioCmdConsumer.value() : nullptr;
+	} // --- Network ownership ---
 	uint8_t GetLocalOwnerID() const { return LocalOwnerID; }
 
 	// Set once at handshake. Asserts on double-assignment to a different value.
@@ -191,7 +231,7 @@ public:
 protected:
 	/// Initialize owned subsystems except the LogicThread (created by World<>).
 	bool InitBase(const EngineConfig& config, ConstructRegistry* constructRegistry,
-	              int windowWidth, int windowHeight);
+				  int windowWidth, int windowHeight);
 
 	EngineConfig Config;
 
@@ -209,6 +249,10 @@ protected:
 	// Client-side outbound input accumulator — logic thread produces, net thread consumes.
 	TrinyxMPSCRing<NetInputFrame> InputAccumRing;
 	std::optional<TrinyxMPSCRing<NetInputFrame>::Consumer> InputAccumConsumer;
+
+	// Audio command queue — any thread produces, Sentinel drains.
+	TrinyxMPSCRing<AudioCommand> AudioCmdRing;
+	std::optional<TrinyxMPSCRing<AudioCommand>::Consumer> AudioCmdConsumer;
 
 	ConstructRegistry* Constructs = nullptr; // Non-owning — FlowManager owns the registry
 	ReplicationSystem* Replicator = nullptr; // Non-owning — TrinyxEngine or EditorContext owns it

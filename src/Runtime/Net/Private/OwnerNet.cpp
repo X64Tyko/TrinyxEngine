@@ -820,10 +820,10 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 					for (uint32_t val : *handlesCopy)
 					{
 						EntityNetHandle nh{};
-						nh.Value              = val;
-						GlobalEntityHandle gH = entityReg->GlobalEntityRegistry.LookupGlobalHandle(nh);
-						if (gH.GetIndex() == 0) continue;
-						entityReg->DestroyByGlobalHandle(gH);
+						nh.Value             = val;
+						EntityRecord* Record = entityReg->GlobalEntityRegistry.GetRecordPtr(nh);
+						if (!Record) continue;
+						entityReg->DestroyRecord(*Record);
 					}
 					delete handlesCopy;
 				});

@@ -4,8 +4,14 @@
 #include "FieldProxy.h"
 #include "JoltPhysics.h"
 #include "Profiler.h"
+#include <algorithm>
 #include <cassert>
+#include <cstdint>
+#include <functional>
 #include <immintrin.h>
+#include <queue>
+#include <span>
+#include <vector>
 #include "Archetype.h"
 
 #include "CTransform.h"
@@ -203,6 +209,16 @@ void Registry::FreeGlobalHandle(GlobalEntityHandle gHandle)
 		return;
 	}
 
+	// Clear Tombstone flag if still set
+	ComponentCacheBase* cache  = GetTemporalCache();
+	TemporalFrameHeader* hdr   = cache->GetFrameHeader();
+	const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
+	auto* flags                = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
+	if (flags)
+	{
+		flags[record->CacheEntityIndex] &= ~static_cast<int32_t>(TemporalFlagBits::Tombstone);
+	}
+
 	// Defer local/net index recycling — they stay in pending until confirmed safe
 	if (record->LHandle.IsValid()) RequestLocalRecycle(record->LHandle.GetHandleIndex());
 	if (record->NetworkID.GetHandleIndex() > 0) RequestNetRecycle(record->NetworkID.GetHandleIndex());
@@ -237,6 +253,50 @@ void Registry::ConfirmLocalRecycles()
 {
 	for (uint32_t Index : PendingLocalRecycles) FreeLocalIndices.push(Index);
 	PendingLocalRecycles.clear();
+}
+
+void Registry::ConfirmTombstone(uint32_t recordIndex)
+{
+	// Find the recordIndex in TombstoneRecordIndices and move it to PendingConfirmedDestructions
+	auto it = std::find(TombstoneRecordIndices.begin(), TombstoneRecordIndices.end(), recordIndex);
+	if (it == TombstoneRecordIndices.end())
+	{
+		LOG_ENG_WARN_F("ConfirmTombstone: record index %u not found in tombstone list", recordIndex);
+		return;
+	}
+
+	// Build a GlobalEntityHandle from the record
+	EntityRecord* record = GlobalEntityRegistry.Records[recordIndex];
+	if (!record || !record->IsValid())
+	{
+		LOG_ENG_WARN_F("ConfirmTombstone: record at index %u is invalid", recordIndex);
+		TombstoneRecordIndices.erase(it);
+		return;
+	}
+
+	// Clear Tombstone flag in the cache slab
+	ComponentCacheBase* cache  = GetTemporalCache();
+	TemporalFrameHeader* hdr   = cache->GetFrameHeader();
+	const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
+	auto* flags                = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
+	if (flags)
+	{
+		flags[record->CacheEntityIndex] &= ~static_cast<int32_t>(TemporalFlagBits::Tombstone);
+		flags[record->CacheEntityIndex] |= static_cast<int32_t>(TemporalFlagBits::Dirty | TemporalFlagBits::DirtiedFrame);
+	}
+
+	GlobalEntityHandle gHandle;
+	gHandle.Index      = recordIndex;
+	gHandle.Generation = record->GetGeneration();
+
+	PendingConfirmedDestructions.push_back(gHandle);
+	TombstoneRecordIndices.erase(it);
+}
+
+bool Registry::IsTombstoned(uint32_t recordIndex) const
+{
+	return std::find(TombstoneRecordIndices.begin(), TombstoneRecordIndices.end(), recordIndex)
+		!= TombstoneRecordIndices.end();
 }
 
 // --- Net handle index allocation ---
@@ -302,6 +362,7 @@ void Registry::CreateInternal(ClassID classID, std::span<GlobalEntityHandle> out
 		Record.ArchIndex             = Slot.ArchIndex;
 		Record.LocalIndex            = Slot.LocalIndex;
 		Record.ChunkIndex            = Slot.ChunkIndex;
+		Record.CacheEntityIndex      = Slot.CacheIndex;
 		Record.EntityInfo.Generation = GHandle.GetGeneration();
 		Record.EntityInfo.ValidBit   = true;
 
@@ -312,20 +373,65 @@ void Registry::CreateInternal(ClassID classID, std::span<GlobalEntityHandle> out
 	}
 }
 
-// Resolves LHandle → GHandle via LocalToRecord, then defers destruction.
-// Actual cleanup happens in ProcessDeferredDestructions at end of frame.
+// Resolves LHandle → GHandle via LocalToRecord, then marks the entity as tombstoned.
+// Actual cleanup happens after ConfirmTombstone + ProcessDeferredDestructions.
 void Registry::Destroy(EntityHandle lHandle)
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
 	GlobalEntityHandle gHandle = GlobalEntityRegistry.LookupGlobalHandle(lHandle);
-	PendingDestructions.push_back(gHandle);
+	uint32_t index             = gHandle.GetIndex();
+	if (index == 0) return;
+
+	EntityRecord* record = GlobalEntityRegistry.Records[index];
+	if (!record || !record->IsValid()) return;
+
+	// Set Tombstone flag in the cache slab
+	ComponentCacheBase* cache  = GetTemporalCache();
+	TemporalFrameHeader* hdr   = cache->GetFrameHeader();
+	const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
+	auto* flags                = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
+	if (flags)
+	{
+		flags[record->CacheEntityIndex] |= static_cast<int32_t>(TemporalFlagBits::Tombstone | TemporalFlagBits::Dirty | TemporalFlagBits::DirtiedFrame);
+		flags[record->CacheEntityIndex] &= ~static_cast<int32_t>(TemporalFlagBits::Active);
+	}
+
+	TombstoneRecordIndices.push_back(index);
 }
 
 void Registry::DestroyByGlobalHandle(GlobalEntityHandle gHandle)
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
-	PendingDestructions.push_back(gHandle);
+	uint32_t index = gHandle.GetIndex();
+	if (index == 0) return;
+
+	EntityRecord* record = GlobalEntityRegistry.Records[index];
+	if (!record || !record->IsValid()) return;
+
+	// Set Tombstone flag in the cache slab
+	ComponentCacheBase* cache  = GetTemporalCache();
+	TemporalFrameHeader* hdr   = cache->GetFrameHeader();
+	const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
+	auto* flags                = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
+	if (flags)
+	{
+		flags[record->CacheEntityIndex] |= static_cast<int32_t>(TemporalFlagBits::Tombstone | TemporalFlagBits::Dirty | TemporalFlagBits::DirtiedFrame);
+	}
+
+	TombstoneRecordIndices.push_back(index);
+}
+
+void Registry::ForceDestroyByGlobalHandle(GlobalEntityHandle gHandle)
+{
+	TNX_ZONE_C(TNX_COLOR_MEMORY);
+	uint32_t index = gHandle.GetIndex();
+	if (index == 0) return;
+
+	EntityRecord* record = GlobalEntityRegistry.Records[index];
+	if (!record || !record->IsValid()) return;
+
+	PendingConfirmedDestructions.push_back(gHandle);
 }
 
 bool Registry::DestroyRecord(GlobalEntityHandle& gHandle)
@@ -357,17 +463,62 @@ bool Registry::DestroyRecord(EntityRecord& record)
 	return true;
 }
 
-// Processes all deferred destructions queued by Destroy().
+// Processes all confirmed destructions (moved from TombstoneRecordIndices via ConfirmTombstone).
 // Generation check prevents double-free if the same GHandle was queued twice
 // or the slot was already recycled by a prior frame's destruction.
 void Registry::ProcessDeferredDestructions()
 {
 	TNX_ZONE_C(TNX_COLOR_MEMORY);
 
-	if (PendingDestructions.empty()) [[likely]]
+	// Confirm all pending tombstones (needed for single-player/co-op where replication system doesn't run)
+	{
+		std::vector<uint32_t> tombstones = std::move(TombstoneRecordIndices);
+		TombstoneRecordIndices.clear();
+		for (uint32_t recordIndex : tombstones)
+		{
+			EntityRecord* record = GlobalEntityRegistry.Records[recordIndex];
+			if (!record || !record->IsValid())
+			{
+				LOG_ENG_WARN_F("ProcessDeferredDestructions: record at index %u is invalid", recordIndex);
+				continue;
+			}
+
+			// Check if this entity is replicated — if so, leave it for the ReplicationSystem
+			ComponentCacheBase* cache  = GetTemporalCache();
+			TemporalFrameHeader* hdr   = cache->GetFrameHeader();
+			const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
+			auto* flags                = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
+			if (flags)
+			{
+				// If replication is active, leave replicated entities for the ReplicationSystem           
+				if (ReplicationActive)
+				{
+					const bool isReplicated = (flags[record->CacheEntityIndex] & static_cast<int32_t>(TemporalFlagBits::Replicated)) != 0;
+					if (isReplicated)
+					{
+						// Put it back into TombstoneRecordIndices for the ReplicationSystem to handle
+						TombstoneRecordIndices.push_back(recordIndex);
+						continue;
+					}
+				}
+
+				// Clear Tombstone flag in the cache slab
+				flags[record->CacheEntityIndex] &= ~static_cast<int32_t>(TemporalFlagBits::Tombstone);
+				flags[record->CacheEntityIndex] |= static_cast<int32_t>(TemporalFlagBits::Dirty | TemporalFlagBits::DirtiedFrame);
+			}
+
+			GlobalEntityHandle gHandle;
+			gHandle.Index      = recordIndex;
+			gHandle.Generation = record->GetGeneration();
+
+			PendingConfirmedDestructions.push_back(gHandle);
+		}
+	}
+
+	if (PendingConfirmedDestructions.empty()) [[likely]]
 		return;
 
-	for (GlobalEntityHandle GHandle : PendingDestructions)
+	for (GlobalEntityHandle GHandle : PendingConfirmedDestructions)
 	{
 		EntityRecord* Record = GlobalEntityRegistry.Records[GHandle.GetIndex()];
 
@@ -400,7 +551,7 @@ void Registry::ProcessDeferredDestructions()
 		}
 	}
 
-	PendingDestructions.clear();
+	PendingConfirmedDestructions.clear();
 }
 
 EntityRecord Registry::GetRecordByCache(EntityCacheHandle cacheHandle) const
@@ -521,7 +672,8 @@ void Registry::ResetRegistry()
 	while (!FreeNetIndices.empty()) FreeNetIndices.pop();
 	PendingLocalRecycles.clear();
 	PendingNetRecycles.clear();
-	PendingDestructions.clear();
+	TombstoneRecordIndices.clear();
+	PendingConfirmedDestructions.clear();
 
 	NextRecordIndex = 1;
 	NextLocalIndex  = 1;
@@ -548,26 +700,37 @@ int Registry::SweepAliveFlagsToActive()
 	auto* flags                = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
 	if (!flags) return 0;
 
-	const uint32_t max         = cache->GetMaxCachedEntityCount();
-	const uint32_t aliveBit    = static_cast<uint32_t>(TemporalFlagBits::Alive);
-	const uint32_t activeBit   = static_cast<uint32_t>(TemporalFlagBits::Active);
-	const uint32_t aliveShift  = TNX_CTZ32(aliveBit);
-	const uint32_t activeShift = TNX_CTZ32(activeBit);
+	const uint32_t max             = cache->GetMaxCachedEntityCount();
+	const uint32_t aliveBit        = static_cast<uint32_t>(TemporalFlagBits::Alive);
+	const uint32_t activeBit       = static_cast<uint32_t>(TemporalFlagBits::Active);
+	const uint32_t tombstoneBit    = static_cast<uint32_t>(TemporalFlagBits::Tombstone);
+	const uint32_t dirtyBit        = static_cast<uint32_t>(TemporalFlagBits::Dirty);
+	const uint32_t dirtiedFrameBit = static_cast<uint32_t>(TemporalFlagBits::DirtiedFrame);
+	const uint32_t aliveShift      = TNX_CTZ32(aliveBit);
+	const uint32_t activeShift     = TNX_CTZ32(activeBit);
+	const uint32_t tombstoneShift  = TNX_CTZ32(tombstoneBit);
 
-	using Traits          = SIMDTraits<int32_t, FieldWidth::Wide>;
-	const __m256i vAlive  = _mm256_set1_epi32(static_cast<int32_t>(aliveBit));
-	const __m256i vActive = _mm256_set1_epi32(static_cast<int32_t>(activeBit));
-	const __m256i vZero   = _mm256_setzero_si256();
+	using Traits               = SIMDTraits<int32_t, FieldWidth::Wide>;
+	const __m256i vAlive       = _mm256_set1_epi32(static_cast<int32_t>(aliveBit));
+	const __m256i vActiveDirty = _mm256_set1_epi32(static_cast<int32_t>(activeBit | dirtyBit |
+		dirtiedFrameBit));
+	const __m256i vZero = _mm256_setzero_si256();
 
-	__m256i vCount         = vZero;
-	const uint32_t wideMax = max & ~7u;
+	const __m256i vTombstone = _mm256_set1_epi32(static_cast<int32_t>(tombstoneBit));
+	__m256i vCount           = vZero;
+	const uint32_t wideMax   = max & ~7u;
 	for (uint32_t i = 0; i < wideMax; i += 8)
 	{
-		__m256i f     = Traits::load(flags + i);
-		__m256i shift = _mm256_srli_epi32(_mm256_and_si256(f, vAlive), aliveShift); // 0 or 1
-		__m256i neg   = _mm256_sub_epi32(vZero, shift);                             // 0 or 0xFFFFFFFF
-		__m256i toSet = _mm256_and_si256(vActive, neg);                             // activeBit or 0
-		vCount        = _mm256_add_epi32(vCount, _mm256_srli_epi32(_mm256_andnot_si256(f, toSet), activeShift));
+		__m256i f = Traits::load(flags + i);
+		// Skip tombstoned entities                                                                        
+		__m256i isTombstone = _mm256_srli_epi32(_mm256_and_si256(f, vTombstone), tombstoneShift);
+		__m256i shift       = _mm256_srli_epi32(_mm256_and_si256(f, vAlive), aliveShift); // 0 or 1              
+		__m256i neg         = _mm256_sub_epi32(vZero, shift);                             // 0 or 0xFFFFFFFF     
+		__m256i toSet       = _mm256_and_si256(vActiveDirty, neg);                        // activeBit | dirtyBit | dirtiedFrameBit or 0
+		// Only set active if not tombstoned                                                               
+		toSet  = _mm256_andnot_si256(isTombstone, toSet);
+		vCount = _mm256_add_epi32(vCount, _mm256_srli_epi32(_mm256_andnot_si256(f, toSet),
+															activeShift));
 		Traits::store(flags + i, vZero, _mm256_or_si256(f, toSet));
 	}
 
@@ -575,14 +738,21 @@ int Registry::SweepAliveFlagsToActive()
 	__m128i hi     = _mm256_extracti128_si256(vCount, 1);
 	__m128i sum128 = _mm_add_epi32(lo, hi);
 	__m128i sum64  = _mm_add_epi32(sum128, _mm_shuffle_epi32(sum128, _MM_SHUFFLE(1, 0, 3, 2)));
-	int sweepCount = _mm_cvtsi128_si32(_mm_add_epi32(sum64, _mm_shuffle_epi32(sum64, _MM_SHUFFLE(0, 1, 0, 1))));
+	int sweepCount = _mm_cvtsi128_si32(_mm_add_epi32(sum64, _mm_shuffle_epi32(sum64, _MM_SHUFFLE(0, 1, 0,
+																				  1))));
 
 	for (uint32_t i = wideMax; i < max; ++i)
 	{
 		const uint32_t f    = static_cast<uint32_t>(flags[i]);
 		const uint32_t mask = -((f & aliveBit) >> aliveShift);
-		sweepCount          += static_cast<int>((activeBit & mask & ~f) >> activeShift);
-		flags[i]            = static_cast<int32_t>(f | (activeBit & mask));
+		// Skip tombstoned entities                                                                        
+		const bool isTombstone = (f & tombstoneBit) != 0;
+		if (!isTombstone)
+		{
+			sweepCount += static_cast<int>((activeBit & mask & ~f) >> activeShift);
+			flags[i]   = static_cast<int32_t>(f | ((activeBit | dirtyBit | dirtiedFrameBit) &
+				mask));
+		}
 	}
 
 	return sweepCount;
@@ -747,8 +917,7 @@ void Registry::PushServerEvent(ServerEventEntry entry)
 
 void Registry::ReplayServerEventsAt(uint32_t frame)
 {
-	for (auto& ev : ServerEvents)
-		if (ev.Frame == frame && ev.Replay) ev.Replay();
+	for (auto& ev : ServerEvents) if (ev.Frame == frame && ev.Replay) ev.Replay();
 }
 
 void Registry::PruneServerEvents(uint32_t oldestFrame)

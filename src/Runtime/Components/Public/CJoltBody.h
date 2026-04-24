@@ -37,7 +37,7 @@ template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct CJoltBody : ComponentView<CJoltBody, WIDTH>
 {
 	TNX_VOLATILE_FIELDS(CJoltBody, Physics, Shape, HalfExtentX, HalfExtentY, HalfExtentZ,
-						Motion, Mass, Friction, Restitution)
+						Motion, Mass, Friction, Restitution, IsSensor)
 
 	// Shape geometry
 	UIntProxy<WIDTH> Shape;        // JoltShapeType:: constant
@@ -50,6 +50,7 @@ struct CJoltBody : ComponentView<CJoltBody, WIDTH>
 	FloatProxy<WIDTH> Mass;
 	FloatProxy<WIDTH> Friction;
 	FloatProxy<WIDTH> Restitution;
+	UIntProxy<WIDTH> IsSensor; // 0 = solid body, nonzero = sensor (overlap-only, no collision response)
 };
 
 TNX_REGISTER_COMPONENT(CJoltBody)

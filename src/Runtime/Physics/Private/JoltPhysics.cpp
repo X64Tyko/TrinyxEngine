@@ -7,6 +7,7 @@
 #include "TrinyxJobs.h"
 
 #include <cstdarg>
+#include <algorithm>
 
 #include <Jolt/Jolt.h>
 #include <Jolt/RegisterTypes.h>
@@ -103,6 +104,66 @@ static JPH::RefConst<JPH::Shape> CreateShapeFromSettings(
 }
 
 // ---------------------------------------------------------------------------
+// JoltContactListener — pushes contact events to JoltPhysics::ContactEventRing.
+// Called from Jolt worker threads (multi-producer safe via MPEnqueue CAS).
+// ---------------------------------------------------------------------------
+
+class JoltContactListener : public JPH::ContactListener
+{
+public:
+	explicit JoltContactListener(TrinyxMPSCRing<PhysicsContactEvent>& ring)
+		: Ring(ring)
+	{
+	}
+
+	JPH::ValidateResult OnContactValidate(
+		[[maybe_unused]] const JPH::Body& inBody1, [[maybe_unused]] const JPH::Body& inBody2,
+		[[maybe_unused]] JPH::RVec3Arg inBaseOffset, [[maybe_unused]] const JPH::CollideShapeResult& inCollisionResult) override
+	{
+		return JPH::ValidateResult::AcceptAllContactsForThisBodyPair;
+	}
+
+	void OnContactAdded(
+		const JPH::Body& inBody1, const JPH::Body& inBody2,
+		const JPH::ContactManifold& inManifold,
+		JPH::ContactSettings& /*ioSettings*/) override
+	{
+		PhysicsContactEvent ev;
+		ev.Body1 = inBody1.GetID();
+		ev.Body2 = inBody2.GetID();
+		if (inBody1.IsSensor() || inBody2.IsSensor())
+		{
+			ev.Type = PhysicsContactEventType::OnOverlapBegin;
+		}
+		else
+		{
+			ev.Type        = PhysicsContactEventType::OnHit;
+			ev.ContactInfo = SimpleContactManifold(inManifold);
+		}
+		Ring.TryPush(ev);
+	}
+
+	void OnContactPersisted(
+		[[maybe_unused]] const JPH::Body& inBody1, [[maybe_unused]] const JPH::Body& inBody2,
+		[[maybe_unused]] const JPH::ContactManifold& inManifold, [[maybe_unused]] JPH::ContactSettings& ioSettings) override
+	{
+		/* Do nothing */
+	}
+
+	void OnContactRemoved(const JPH::SubShapeIDPair& inSubShapePair) override
+	{
+		PhysicsContactEvent ev;
+		ev.Body1 = inSubShapePair.GetBody1ID();
+		ev.Body2 = inSubShapePair.GetBody2ID();
+		ev.Type  = PhysicsContactEventType::Removed;
+		Ring.TryPush(ev);
+	}
+
+private:
+	TrinyxMPSCRing<PhysicsContactEvent>& Ring;
+};
+
+// ---------------------------------------------------------------------------
 // JoltPhysics implementation
 // ---------------------------------------------------------------------------
 
@@ -167,13 +228,19 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 
 	PhysSystem->SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f));
 
+	// --- Contact event ring + listener ---
+	ContactEventRing.Initialize(512);
+	ContactListener = std::make_unique<JoltContactListener>(ContactEventRing);
+	PhysSystem->SetContactListener(ContactListener.get());
+	ContactConsumer.emplace(ContactEventRing.MakeConsumer());
+
 	// --- Entity ↔ Body mapping ---
 	EntityToBody.resize(config->MAX_JOLT_BODIES, JPH::BodyID());
 	BodyToEntity.resize(config->MAX_JOLT_BODIES, InvalidEntityIndex);
 
 	LOG_ENG_INFO_F("[JoltPhysics] Initialized — maxBodies=%u, tempAlloc=%uMB, maxConcurrency=%d",
 				   cMaxBodies, (2048 * config->MAX_JOLT_BODIES) / (1024 * 1024),
-			   JobSystem->GetMaxConcurrency());
+				   JobSystem->GetMaxConcurrency());
 
 	for (auto& vec : fieldScratch)
 	{
@@ -197,6 +264,8 @@ void JoltPhysics::Shutdown()
 {
 	if (!PhysSystem) return;
 
+	// Unregister listener before destroying PhysSystem
+	ContactListener.reset();
 	PhysSystem.reset();
 	JobSystem.reset();
 	TempAllocator.reset();
@@ -233,6 +302,16 @@ void JoltPhysics::Step(float dt)
 
 // ---------------------------------------------------------------------------
 // Body management
+//
+// Body ownership model:
+//   Every Jolt body must resolve to an owning entity via RegisterBody /
+//   GetBodyOwner. FlushPendingBodies is one driver — specifically, the
+//   CJoltBody driver — that materializes bodies for entities carrying a
+//   CJoltBody component, registering each against its own cache index.
+//   Other drivers (JoltCharacter, future Vehicle/Ragdoll wrappers) create
+//   bodies their own way but funnel through the same RegisterBody gateway
+//   and anchor against whichever owned view represents them. CJoltBody
+//   is not privileged — it's just the SoA batch path for the horde case.
 // ---------------------------------------------------------------------------
 
 void JoltPhysics::FlushPendingBodies(Registry* reg)
@@ -264,15 +343,19 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 	auto* slabMass         = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 5));
 	auto* slabFriction     = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 6));
 	auto* slabRestit       = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 7));
+	auto* slabIsSensor     = static_cast<uint32_t*>(VC->GetFieldData(volHeader, bodySlot, 8));
 
 	const uint8_t transSlot = CTransform<>::StaticTemporalIndex();
 	auto* slabPosX          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 0));
-	auto* slabPosY          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 1));
+	auto* slabPosY          = static_cast<float*>(TC->GetFrameHeader() ? TC->GetFieldData(tmpHeader, transSlot, 1) : nullptr); // Safety
 	auto* slabPosZ          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 2));
 	auto* slabRotX          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 3));
 	auto* slabRotY          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 4));
 	auto* slabRotZ          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 5));
 	auto* slabRotW          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 6));
+
+	// Re-get slabPosY correctly
+	slabPosY = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 1));
 
 	if (!slabShape || !slabPosX) return; // Fields not allocated yet
 
@@ -323,15 +406,27 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 		// Create shape
 		JPH::RefConst<JPH::Shape> shape = CreateShapeFromSettings(shapeType, hx, hy, hz);
 
+		// Sensors are promoted to Kinematic regardless of component motion. Per Jolt's
+		// Body::SetIsSensor docs, a Static sensor only detects active counterparties —
+		// a sleeping character sitting inside the volume would be missed. Kinematic
+		// sensors stay active and detect both active and sleeping bodies.
+		const bool bIsSensor     = slabIsSensor && slabIsSensor[idx] != 0;
+		const uint32_t effMotion = bIsSensor ? 1u : motion;
+
 		// Build body creation settings
 		JPH::BodyCreationSettings settings(
 			shape, pos, rot,
-			ToJoltMotionType(motion),
-			ToJoltLayer(motion));
+			ToJoltMotionType(effMotion),
+			ToJoltLayer(effMotion));
 
 		settings.mFriction    = friction;
 		settings.mRestitution = restitution;
-		if (motion == 2) // Dynamic
+		if (bIsSensor)
+		{
+			settings.mIsSensor                     = true;
+			settings.mCollideKinematicVsNonDynamic = true; // also detect static world geometry
+		}
+		if (effMotion == 2) // Dynamic
 		{
 			settings.mOverrideMassProperties       = JPH::EOverrideMassProperties::CalculateInertia;
 			settings.mMassPropertiesOverride.mMass = mass;
@@ -345,40 +440,36 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 			bodyInterface.AddBody(bodyID, JPH::EActivation::Activate);
 
 			// Store mapping
-			if (idx >= EntityToBody.size()) EntityToBody.resize(idx + 1024, JPH::BodyID());
-			EntityToBody[idx] = bodyID;
-
-			uint32_t bodyIdx = bodyID.GetIndex();
-			if (bodyIdx >= BodyToEntity.size()) BodyToEntity.resize(bodyIdx + 1024, InvalidEntityIndex);
-			BodyToEntity[bodyIdx] = idx;
+			RegisterBody(bodyID, idx);
 
 			bodiesCreated++;
 		}
 	}
 
-	// Destroy orphaned Jolt bodies — any mapped body whose entity isn't in the physics range.
-	// Entities outside [physStart, physEnd) have unset bits, so their bodies get cleaned up.
-	uint32_t bodiesDestroyed = 0;
-	for (size_t word = 0; word < bitplaneWords; ++word)
+	// Destroy orphaned Jolt bodies — only scan the physics partition. Bodies
+	// registered for entities OUTSIDE [physStart, physEnd) belong to other drivers
+	// (e.g. JoltCharacter's inner body, anchored against an EPlayer cache index that
+	// lives in the render partition). Those drivers own their own lifecycle.
+	uint32_t bodiesDestroyed   = 0;
+	const size_t physStartWord = physStart / 64;
+	const size_t physEndWord   = (physEnd + 63) / 64;
+	for (size_t word = physStartWord; word < physEndWord && word < bitplaneWords; ++word)
 	{
-		// Invert: bits that are 0 in liveBits are candidates for orphan cleanup.
-		// Scan 64 entities at a time — skip entire words where all entities are alive.
 		uint64_t deadMask = ~LiveEntityBits[word];
 		while (deadMask)
 		{
 			uint32_t bit = TNX_CTZ64(deadMask);
 			uint32_t idx = static_cast<uint32_t>(word * 64 + bit);
-			deadMask     &= deadMask - 1; // clear lowest set bit
+			deadMask     &= deadMask - 1;
 
+			if (idx < physStart || idx >= physEnd) continue;
 			if (idx >= EntityToBody.size()) break;
 			if (EntityToBody[idx].IsInvalid()) continue;
 
-			bodyInterface.RemoveBody(EntityToBody[idx]);
-			bodyInterface.DestroyBody(EntityToBody[idx]);
-
-			uint32_t bodyIdx = EntityToBody[idx].GetIndex();
-			if (bodyIdx < BodyToEntity.size()) BodyToEntity[bodyIdx] = InvalidEntityIndex;
-			EntityToBody[idx] = JPH::BodyID();
+			JPH::BodyID bid = EntityToBody[idx];
+			bodyInterface.RemoveBody(bid);
+			bodyInterface.DestroyBody(bid);
+			UnregisterBody(bid);
 			bodiesDestroyed++;
 		}
 	}
@@ -441,7 +532,7 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 
 	for (int32_t i = 0; i < activeCount; ++i)
 	{
-		syncList[i] = {activeIDs[i], BodyToEntity[activeIDs[i].GetIndex()]};
+		syncList[i] = {activeIDs[i], GetBodyOwner(activeIDs[i])};
 	}
 
 	// Sort by offset for strictly ascending memory writes later!
@@ -516,6 +607,11 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 			int idx         = 0;
 			for (auto& Entity : syncList)
 			{
+				if (Entity.offset == InvalidEntityIndex)
+				{
+					idx++;
+					continue;
+				}
 				float* field = fieldArr + Entity.offset;
 				*field       = fieldPtr[idx++];
 			}
@@ -533,7 +629,7 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 	{
 		for (const auto& entity : syncList)
 		{
-			flags[entity.offset] |= dirtyMask;
+			if (entity.offset != InvalidEntityIndex) flags[entity.offset] |= dirtyMask;
 		}
 	}
 
@@ -552,9 +648,7 @@ void JoltPhysics::DestroyBody(uint32_t entityIndex)
 	bodyInterface.DestroyBody(bodyID);
 
 	// Clear mapping
-	uint32_t bodyIdx = bodyID.GetIndex();
-	if (bodyIdx < BodyToEntity.size()) BodyToEntity[bodyIdx] = InvalidEntityIndex;
-	EntityToBody[entityIndex] = JPH::BodyID();
+	UnregisterBody(bodyID);
 }
 
 void JoltPhysics::ResetAllBodies()
@@ -568,13 +662,12 @@ void JoltPhysics::ResetAllBodies()
 	{
 		if (EntityToBody[idx].IsInvalid()) continue;
 
-		bodyInterface.RemoveBody(EntityToBody[idx]);
-		bodyInterface.DestroyBody(EntityToBody[idx]);
+		JPH::BodyID bid = EntityToBody[idx];
+		bodyInterface.RemoveBody(bid);
+		bodyInterface.DestroyBody(bid);
+		UnregisterBody(bid);
 		bodiesDestroyed++;
 	}
-
-	std::fill(EntityToBody.begin(), EntityToBody.end(), JPH::BodyID());
-	std::fill(BodyToEntity.begin(), BodyToEntity.end(), InvalidEntityIndex);
 
 	if (bodiesDestroyed > 0)
 	{
@@ -586,20 +679,49 @@ void JoltPhysics::ResetAllBodies()
 // Mapping accessors
 // ---------------------------------------------------------------------------
 
-JPH::BodyID JoltPhysics::GetBodyID(uint32_t entityIndex) const
+void JoltPhysics::RegisterBody(JPH::BodyID id, EntityCacheHandle owner)
+{
+	if (owner == InvalidEntityIndex) return;
+
+	// Store mapping
+	if (owner >= EntityToBody.size()) EntityToBody.resize(owner + 1024, JPH::BodyID());
+	EntityToBody[owner] = id;
+
+	uint32_t bodyIdx = id.GetIndex();
+	if (bodyIdx >= BodyToEntity.size()) BodyToEntity.resize(bodyIdx + 1024, InvalidEntityIndex);
+	BodyToEntity[bodyIdx] = owner;
+}
+
+void JoltPhysics::UnregisterBody(JPH::BodyID id)
+{
+	if (id.IsInvalid()) return;
+
+	uint32_t bodyIdx = id.GetIndex();
+	if (bodyIdx < BodyToEntity.size())
+	{
+		uint32_t entityIdx = BodyToEntity[bodyIdx];
+		if (entityIdx < EntityToBody.size())
+		{
+			EntityToBody[entityIdx] = JPH::BodyID();
+		}
+		BodyToEntity[bodyIdx] = InvalidEntityIndex;
+	}
+}
+
+EntityCacheHandle JoltPhysics::GetBodyOwner(JPH::BodyID id) const
+{
+	uint32_t idx = id.GetIndex();
+	if (idx >= BodyToEntity.size()) return InvalidEntityIndex;
+	return BodyToEntity[idx];
+}
+
+JPH::BodyID JoltPhysics::GetBodyID(EntityCacheHandle entityIndex) const
 {
 	if (entityIndex >= EntityToBody.size()) return JPH::BodyID();
 	return EntityToBody[entityIndex];
 }
 
-uint32_t JoltPhysics::GetEntityIndex(JPH::BodyID bodyID) const
-{
-	uint32_t idx = bodyID.GetIndex();
-	if (idx >= BodyToEntity.size()) return InvalidEntityIndex;
-	return BodyToEntity[idx];
-}
-
-bool JoltPhysics::HasBody(uint32_t entityIndex) const
+bool JoltPhysics::HasBody(EntityCacheHandle entityIndex) const
 {
 	return entityIndex < EntityToBody.size() && !EntityToBody[entityIndex].IsInvalid();
 }
@@ -615,6 +737,38 @@ const JPH::BodyInterface& JoltPhysics::GetBodyInterfaceNoLock() const
 }
 
 // ---------------------------------------------------------------------------
+// Contact event dispatch — drains the MPSC ring and routes to per-entity callbacks
+// ---------------------------------------------------------------------------
+
+void JoltPhysics::ProcessContacts(const Registry* Reg)
+{
+	PhysicsContactEvent cevent;
+	while (ContactConsumer->TryPop(cevent))
+	{
+		const uint32_t ci1 = GetBodyOwner(cevent.Body1);
+		const uint32_t ci2 = GetBodyOwner(cevent.Body2);
+		if (ci1 == InvalidEntityIndex || ci2 == InvalidEntityIndex) continue;
+
+		const EntityHandle e1 = Reg->GetRecordByCache(ci1).LHandle;
+		const EntityHandle e2 = Reg->GetRecordByCache(ci2).LHandle;
+
+		switch (cevent.Type)
+		{
+			case PhysicsContactEventType::OnHit: if (ci1 < OnHitCallbacks.size()) OnHitCallbacks[ci1](PhysicsOnHitData{e2, cevent.ContactInfo.WorldSpaceNormal, cevent.ContactInfo.PenetrationDepth});
+				if (ci2 < OnHitCallbacks.size()) OnHitCallbacks[ci2](PhysicsOnHitData{e1, -cevent.ContactInfo.WorldSpaceNormal, cevent.ContactInfo.PenetrationDepth});
+				break;
+			case PhysicsContactEventType::OnOverlapBegin: if (ci1 < OnOverlapBeginCallbacks.size()) OnOverlapBeginCallbacks[ci1](PhysicsOverlapData{e2});
+				if (ci2 < OnOverlapBeginCallbacks.size()) OnOverlapBeginCallbacks[ci2](PhysicsOverlapData{e1});
+				break;
+			case PhysicsContactEventType::OnOverlapEnded: if (ci1 < OnOverlapEndCallbacks.size()) OnOverlapEndCallbacks[ci1](PhysicsOverlapData{e2});
+				if (ci2 < OnOverlapEndCallbacks.size()) OnOverlapEndCallbacks[ci2](PhysicsOverlapData{e1});
+				break;
+			default: break;
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Rollback snapshot ring buffer
 // ---------------------------------------------------------------------------
 
@@ -623,8 +777,8 @@ const JPH::BodyInterface& JoltPhysics::GetBodyInterfaceNoLock() const
 void JoltPhysics::SaveSnapshot(uint32_t frameNumber)
 {
 	const uint32_t physStep = frameNumber / static_cast<uint32_t>(ConfigPtr->PhysicsUpdateInterval);
-	auto& slot       = SnapshotRing[physStep % SnapshotCapacity];
-	slot.FrameNumber = frameNumber;
+	auto& slot              = SnapshotRing[physStep % SnapshotCapacity];
+	slot.FrameNumber        = frameNumber;
 
 	JPH::StateRecorderImpl recorder;
 	PhysSystem->SaveState(recorder, JPH::EStateRecorderState::All);
@@ -634,7 +788,7 @@ void JoltPhysics::SaveSnapshot(uint32_t frameNumber)
 bool JoltPhysics::RestoreSnapshot(uint32_t frameNumber)
 {
 	const uint32_t physStep = frameNumber / static_cast<uint32_t>(ConfigPtr->PhysicsUpdateInterval);
-	auto& slot = SnapshotRing[physStep % SnapshotCapacity];
+	auto& slot              = SnapshotRing[physStep % SnapshotCapacity];
 	if (slot.FrameNumber != frameNumber)
 	{
 		LOG_ENG_WARN_F("[JoltPhysics] Snapshot for frame %u not found (slot has frame %u)",
@@ -652,8 +806,7 @@ bool JoltPhysics::RestoreSnapshot(uint32_t frameNumber)
 uint32_t JoltPhysics::GetOldestSnapshotFrame() const
 {
 	uint32_t oldest = UINT32_MAX;
-	for (const auto& slot : SnapshotRing)
-		if (slot.FrameNumber != UINT32_MAX && slot.FrameNumber < oldest) oldest = slot.FrameNumber;
+	for (const auto& slot : SnapshotRing) if (slot.FrameNumber != UINT32_MAX && slot.FrameNumber < oldest) oldest = slot.FrameNumber;
 	return oldest;
 }
 
