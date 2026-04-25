@@ -107,11 +107,17 @@ private:
 
 // Explicit instantiations live in LogicThread.cpp. Suppress implicit
 // instantiation in all other TUs so the LogicThread<> vtable has exactly one home.
+// AuthoritySim/OwnerSim variants depend on Net/Private symbols and only exist
+// when networking is enabled.
 extern template class LogicThread<SoloSim, NoRollback, GameFrame>;
+#ifdef TNX_ENABLE_NETWORK
 extern template class LogicThread<AuthoritySim, NoRollback, GameFrame>;
 extern template class LogicThread<OwnerSim, NoRollback, GameFrame>;
+#endif
 #ifdef TNX_ENABLE_ROLLBACK
 extern template class LogicThread<SoloSim, RollbackSim, GameFrame>;
+#ifdef TNX_ENABLE_NETWORK
 extern template class LogicThread<AuthoritySim, RollbackSim, GameFrame>;
 extern template class LogicThread<OwnerSim, RollbackSim, GameFrame>;
+#endif
 #endif

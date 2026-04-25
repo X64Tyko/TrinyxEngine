@@ -149,10 +149,14 @@ bool World<TNet, TRollback, TFrame>::Initialize(
 }
 
 template class World<SoloSim, NoRollback, GameFrame>;
+#ifdef TNX_ENABLE_NETWORK
 template class World<AuthoritySim, NoRollback, GameFrame>;
 template class World<OwnerSim, NoRollback, GameFrame>;
+#endif
 #ifdef TNX_ENABLE_ROLLBACK
 template class World<SoloSim, RollbackSim, GameFrame>;
+#ifdef TNX_ENABLE_NETWORK
 template class World<AuthoritySim, RollbackSim, GameFrame>;
 template class World<OwnerSim, RollbackSim, GameFrame>;
+#endif
 #endif

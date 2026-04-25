@@ -500,10 +500,14 @@ void LogicThread::TrackFPS()
 #undef LogicThread
 
 template class ::LogicThread<SoloSim,      NoRollback,  GameFrame>;
+#ifdef TNX_ENABLE_NETWORK
 template class ::LogicThread<AuthoritySim, NoRollback,  GameFrame>;
 template class ::LogicThread<OwnerSim, NoRollback, GameFrame>;
+#endif
 #ifdef TNX_ENABLE_ROLLBACK
 template class ::LogicThread<SoloSim, RollbackSim, GameFrame>;
+#ifdef TNX_ENABLE_NETWORK
 template class ::LogicThread<AuthoritySim, RollbackSim, GameFrame>;
 template class ::LogicThread<OwnerSim, RollbackSim, GameFrame>;
+#endif
 #endif

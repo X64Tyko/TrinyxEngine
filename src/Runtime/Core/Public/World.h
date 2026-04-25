@@ -53,12 +53,17 @@ LogicType* TypedLogic = nullptr; // non-owning alias; WorldBase::Logic owns
 };
 
 // Explicit instantiations live in World.cpp. Suppress implicit instantiation
-// in all other TUs so the World<> vtable has exactly one home.
+// in all other TUs so the World<> vtable has exactly one home. AuthoritySim/OwnerSim
+// variants depend on Net/Private symbols and only exist when networking is enabled.
 extern template class World<SoloSim,      NoRollback,  GameFrame>;
+#ifdef TNX_ENABLE_NETWORK
 extern template class World<AuthoritySim, NoRollback,  GameFrame>;
 extern template class World<OwnerSim,     NoRollback,  GameFrame>;
+#endif
 #ifdef TNX_ENABLE_ROLLBACK
 extern template class World<SoloSim,      RollbackSim, GameFrame>;
+#ifdef TNX_ENABLE_NETWORK
 extern template class World<AuthoritySim, RollbackSim, GameFrame>;
 extern template class World<OwnerSim,     RollbackSim, GameFrame>;
+#endif
 #endif
