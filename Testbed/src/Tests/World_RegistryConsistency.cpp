@@ -7,9 +7,13 @@
 // and all spawn/query calls that use the engine shortcut would operate on the wrong one.
 RUNTIME_TEST(World_RegistryConsistency)
 {
+	WorldBase* W = Engine.GetDefaultWorld();
+	ASSERT(W != nullptr);
+
 	Registry* EngineReg = Engine.GetRegistry();
-	Registry* WorldReg  = Engine.GetDefaultWorld()->GetRegistry();
+	Registry* WorldReg  = W->GetRegistry();
 
 	ASSERT(EngineReg != nullptr);
+	ASSERT(WorldReg != nullptr);
 	ASSERT(EngineReg == WorldReg);
 }
