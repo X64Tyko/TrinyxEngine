@@ -1,5 +1,14 @@
 #pragma once
 
+#include <cstdint>
+
+// ---------------------------------------------------------------------------
+// World units. 1 unit = 0.1mm. 10,000 units = 1m. int32 range = ±214km.
+// Used by Fixed32 (deterministic sim) and any code converting between sim
+// space and meters (Jolt bridge, render upload, scene I/O).
+// ---------------------------------------------------------------------------
+inline constexpr int32_t FixedUnitsPerMeter = 10000;
+
 // ---------------------------------------------------------------------------
 // Globals.h — compile-time world type aliases.
 //
