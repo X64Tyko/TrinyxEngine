@@ -157,10 +157,10 @@ set(GNS_PATH "${CMAKE_SOURCE_DIR}/libs/gns")
 # Nothing in the engine links it yet; the target exists so rendering code can
 # do: target_link_libraries(MyTarget PRIVATE Slang::Compiler)
 add_library(Slang::Compiler SHARED IMPORTED GLOBAL
-        src/Runtime/Core/Public/TrinyxJobs.h
-        src/Runtime/Core/Public/ThreadPinning.h
-        src/Runtime/Core/Public/TrinyxRingBuffer.h
-        src/Runtime/Core/Public/RegistryTypes.h
+        src/Runtime/Threading/Public/TrinyxJobs.h
+        src/Runtime/Threading/Public/ThreadPinning.h
+        src/Runtime/Containers/Public/TrinyxRingBase.h
+        src/Runtime/ECS/Public/RegistryTypes.h
         src/Runtime/Core/Public/Events.h
         src/Runtime/Entities/Public/EInstanced.h
         src/Runtime/Entities/Public/EPoint.h

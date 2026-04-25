@@ -72,8 +72,8 @@ add_library(${PROJECT_NAME} STATIC
     ${TRACY_SOURCES}
     ${VOLK_SOURCES}
         ${IMGUI_SOURCES}
-        ../src/Runtime/Core/Public/ComponentView.h
-        ../src/Runtime/Core/Public/TrinyxJobs.h
+        ../src/Runtime/ECS/Public/ComponentView.h
+        ../src/Runtime/Threading/Public/TrinyxJobs.h
 )
 
 # Suppress all warnings from Tracy (third-party, not our code)
@@ -121,6 +121,13 @@ endif()
 target_include_directories(${PROJECT_NAME} PUBLIC
     "${CMAKE_SOURCE_DIR}/src/Runtime/Core/Public"
     "${CMAKE_SOURCE_DIR}/src/Runtime/Memory/Public"
+        "${CMAKE_SOURCE_DIR}/src/Runtime/Math/Public"
+        "${CMAKE_SOURCE_DIR}/src/Runtime/Containers/Public"
+        "${CMAKE_SOURCE_DIR}/src/Runtime/Threading/Public"
+        "${CMAKE_SOURCE_DIR}/src/Runtime/Reflection/Public"
+        "${CMAKE_SOURCE_DIR}/src/Runtime/ECS/Public"
+        "${CMAKE_SOURCE_DIR}/src/Runtime/Camera/Public"
+        "${CMAKE_SOURCE_DIR}/src/Runtime/Serialization/Public"
     "${CMAKE_SOURCE_DIR}/src/Runtime/Rendering/Public"
     "${CMAKE_SOURCE_DIR}/src/Runtime/Profiling/Public"
     "${CMAKE_SOURCE_DIR}/src/Runtime/Logging/Public"

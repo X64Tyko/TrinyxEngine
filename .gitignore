@@ -55,3 +55,6 @@ shaders/**/*.spv
 imgui.ini
 temp_*.txt
 .aider*
+
+# Claude Code per-project config (settings, allowlists, hooks)
+.claude/
