@@ -16,6 +16,23 @@ struct SteamNetConnectionStatusChangedCallback_t;
 /// Passed into Initialize so GNS can route callbacks to the engine.
 using GNSStatusChangedFn = void(*)(SteamNetConnectionStatusChangedCallback_t*);
 
+struct SocketHandle
+{
+	bool bIsInitialized              = false;
+	ISteamNetworkingSockets* Sockets = nullptr;
+
+	ISteamNetworkingSockets* operator->() const { return bIsInitialized ? Sockets : nullptr; }
+	bool operator==(const SocketHandle& rhs) const { return bIsInitialized == rhs.bIsInitialized; }
+
+	explicit operator bool() const { return bIsInitialized && Sockets != nullptr; }
+	
+	static SocketHandle& Invalid()
+	{
+		static SocketHandle handle;
+		return handle;
+	}
+};
+
 class GNSContext
 {
 public:
@@ -36,11 +53,12 @@ public:
 	void Poll(int msWait = 0);
 
 	/// Returns the GNS interface pointer. nullptr if not initialized.
-	ISteamNetworkingSockets* GetInterface() const { return SocketsInterface; }
+	const SocketHandle& GetInterface() const { return SocketsHandle; }
 
 	bool IsInitialized() const { return bInitialized; }
 
 private:
+	SocketHandle SocketsHandle;
 	ISteamNetworkingSockets* SocketsInterface = nullptr;
 	bool bInitialized                         = false;
 };

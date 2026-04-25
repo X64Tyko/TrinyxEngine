@@ -43,6 +43,9 @@ bool GNSContext::Initialize(GNSStatusChangedFn statusFn)
 		return false;
 	}
 
+	SocketsHandle.Sockets        = SocketsInterface;
+	SocketsHandle.bIsInitialized = true;
+
 	// Register global connection status callback if provided
 	if (statusFn)
 	{
@@ -63,6 +66,9 @@ void GNSContext::Shutdown()
 {
 	if (!bInitialized) return;
 
+	SocketsHandle.Sockets        = nullptr;
+	SocketsHandle.bIsInitialized = false;
+	
 	SocketsInterface = nullptr;
 	GameNetworkingSockets_Kill();
 	bInitialized = false;

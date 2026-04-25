@@ -7,12 +7,10 @@
 #include <cstring>
 
 #include "Events.h"
+#include "GNSContext.h"
 #include "NetTypes.h"
 
 // Forward declarations — avoid pulling GNS headers into every consumer
-class ISteamNetworkingSockets;
-class GNSContext;
-struct SteamNetConnectionStatusChangedCallback_t;
 typedef uint32_t HSteamNetConnection;
 typedef uint32_t HSteamListenSocket;
 typedef uint32_t HSteamNetPollGroup;
@@ -240,9 +238,9 @@ private:
 	/// Remove a connection from bookkeeping.
 	void RemoveConnection(HSteamNetConnection conn);
 
-	ISteamNetworkingSockets* Sockets = nullptr; // Borrowed from GNSContext
-	HSteamListenSocket ListenSocket  = 0;
-	HSteamNetPollGroup PollGroup     = 0;
+	SocketHandle& Sockets           = SocketHandle::Invalid(); // Borrowed from GNSContext
+	HSteamListenSocket ListenSocket = 0;
+	HSteamNetPollGroup PollGroup    = 0;
 
 	bool bGlobalNoNagle = false;
 	int  SendRateMin    = -1; // -1 = use GNS default

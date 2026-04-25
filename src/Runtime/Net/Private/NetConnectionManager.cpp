@@ -66,7 +66,7 @@ void NetConnectionManager::Shutdown()
 	// Close all active connections
 	for (auto& ci : Connections)
 	{
-		if (ci.Handle != 0)
+		if (ci.Handle != 0 && Sockets)
 		{
 			Sockets->CloseConnection(ci.Handle, 0, "Shutdown", false);
 		}
@@ -81,7 +81,7 @@ void NetConnectionManager::Shutdown()
 
 	if (s_Instance == this) s_Instance = nullptr;
 
-	Sockets = nullptr;
+	Sockets = SocketHandle::Invalid();
 	LOG_ENG_INFO("[NetConnectionManager] Shutdown");
 }
 
@@ -147,6 +147,7 @@ void NetConnectionManager::AcceptConnection(HSteamNetConnection conn)
 	{
 		Sockets->SetConnectionPollGroup(conn, PollGroup);
 	}
+
 
 	AddConnection(conn);
 	if (ConnectionInfo* ci = FindConnection(conn)) ci->bAuthoritySide = true;
