@@ -86,6 +86,138 @@ struct SIMDTraits
 	using VecType = T;
 };
 
+// --- Specializations for SimFloatImpl<T> (delegate to underlying type) -----
+
+template <FieldWidth WIDTH>
+struct SIMDTraits<SimFloatImpl<float>, WIDTH>
+{
+	using Underlying = SIMDTraits<float, WIDTH>;
+	using VecType    = typename Underlying::VecType;
+
+	static FORCE_INLINE VecType load(const SimFloatImpl<float>* ptr)
+	{
+		return Underlying::load(reinterpret_cast<const float*>(ptr));
+	}
+
+	static FORCE_INLINE void store(SimFloatImpl<float>* ptr, VecType mask, VecType val)
+	{
+		Underlying::store(reinterpret_cast<float*>(ptr), mask, val);
+	}
+
+	static FORCE_INLINE void stream(SimFloatImpl<float>* ptr, VecType mask, VecType val)
+	{
+		Underlying::stream(reinterpret_cast<float*>(ptr), mask, val);
+	}
+
+	static FORCE_INLINE VecType set1(SimFloatImpl<float> val) { return Underlying::set1(val.value); }
+	static FORCE_INLINE VecType add(VecType a, VecType b) { return Underlying::add(a, b); }
+	static FORCE_INLINE VecType sub(VecType a, VecType b) { return Underlying::sub(a, b); }
+	static FORCE_INLINE VecType mul(VecType a, VecType b) { return Underlying::mul(a, b); }
+	static FORCE_INLINE VecType div(VecType a, VecType b) { return Underlying::div(a, b); }
+
+	static FORCE_INLINE FieldMask<SimFloatImpl<float>, VecType, WIDTH> GT(VecType a, VecType b)
+	{
+		return {Underlying::GT(a, b).mask};
+	}
+
+	static FORCE_INLINE FieldMask<SimFloatImpl<float>, VecType, WIDTH> LT(VecType a, VecType b)
+	{
+		return {Underlying::LT(a, b).mask};
+	}
+
+	static FORCE_INLINE FieldMask<SimFloatImpl<float>, VecType, WIDTH> EQ(VecType a, VecType b)
+	{
+		return {Underlying::EQ(a, b).mask};
+	}
+
+	static FORCE_INLINE FieldMask<SimFloatImpl<float>, VecType, WIDTH> NEQ(VecType a, VecType b)
+	{
+		return {Underlying::NEQ(a, b).mask};
+	}
+
+	static FORCE_INLINE FieldMask<SimFloatImpl<float>, VecType, WIDTH> GE(VecType a, VecType b)
+	{
+		return {Underlying::GE(a, b).mask};
+	}
+
+	static FORCE_INLINE FieldMask<SimFloatImpl<float>, VecType, WIDTH> LE(VecType a, VecType b)
+	{
+		return {Underlying::LE(a, b).mask};
+	}
+
+	static FORCE_INLINE VecType Blend(VecType a, VecType b) { return Underlying::Blend(a, b); }
+	static FORCE_INLINE VecType min(VecType a, VecType b) { return Underlying::min(a, b); }
+	static FORCE_INLINE VecType max(VecType a, VecType b) { return Underlying::max(a, b); }
+	static FORCE_INLINE VecType abs(VecType a) { return Underlying::abs(a); }
+	static FORCE_INLINE __m256i GenerateCountMask(int32_t count) { return Underlying::GenerateCountMask(count); }
+	static FORCE_INLINE void StoreFlagsOr(int32_t* flagsPtr, int32_t value) { Underlying::StoreFlagsOr(flagsPtr, value); }
+};
+
+template <FieldWidth WIDTH>
+struct SIMDTraits<SimFloatImpl<Fixed32>, WIDTH>
+{
+	using Underlying = SIMDTraits<Fixed32, WIDTH>;
+	using VecType    = typename Underlying::VecType;
+
+	static FORCE_INLINE VecType load(const SimFloatImpl<Fixed32>* ptr)
+	{
+		return Underlying::load(reinterpret_cast<const Fixed32*>(ptr));
+	}
+
+	static FORCE_INLINE void store(SimFloatImpl<Fixed32>* ptr, VecType mask, VecType val)
+	{
+		Underlying::store(reinterpret_cast<Fixed32*>(ptr), mask, val);
+	}
+
+	static FORCE_INLINE void stream(SimFloatImpl<Fixed32>* ptr, VecType mask, VecType val)
+	{
+		Underlying::stream(reinterpret_cast<Fixed32*>(ptr), mask, val);
+	}
+
+	static FORCE_INLINE VecType set1(SimFloatImpl<Fixed32> val) { return Underlying::set1(val.value); }
+	static FORCE_INLINE VecType add(VecType a, VecType b) { return Underlying::add(a, b); }
+	static FORCE_INLINE VecType sub(VecType a, VecType b) { return Underlying::sub(a, b); }
+	static FORCE_INLINE VecType mul(VecType a, VecType b) { return Underlying::mul(a, b); }
+	static FORCE_INLINE VecType div(VecType a, VecType b) { return Underlying::div(a, b); }
+
+	static FORCE_INLINE FieldMask<SimFloatImpl<Fixed32>, VecType, WIDTH> GT(VecType a, VecType b)
+	{
+		return {Underlying::GT(a, b).mask};
+	}
+
+	static FORCE_INLINE FieldMask<SimFloatImpl<Fixed32>, VecType, WIDTH> LT(VecType a, VecType b)
+	{
+		return {Underlying::LT(a, b).mask};
+	}
+
+	static FORCE_INLINE FieldMask<SimFloatImpl<Fixed32>, VecType, WIDTH> EQ(VecType a, VecType b)
+	{
+		return {Underlying::EQ(a, b).mask};
+	}
+
+	static FORCE_INLINE FieldMask<SimFloatImpl<Fixed32>, VecType, WIDTH> NEQ(VecType a, VecType b)
+	{
+		return {Underlying::NEQ(a, b).mask};
+	}
+
+	static FORCE_INLINE FieldMask<SimFloatImpl<Fixed32>, VecType, WIDTH> GE(VecType a, VecType b)
+	{
+		return {Underlying::GE(a, b).mask};
+	}
+
+	static FORCE_INLINE FieldMask<SimFloatImpl<Fixed32>, VecType, WIDTH> LE(VecType a, VecType b)
+	{
+		return {Underlying::LE(a, b).mask};
+	}
+
+	// Blend is not available for Fixed32 (int vector) – omit.
+	static FORCE_INLINE VecType min(VecType a, VecType b) { return Underlying::min(a, b); }
+	static FORCE_INLINE VecType max(VecType a, VecType b) { return Underlying::max(a, b); }
+	static FORCE_INLINE VecType abs(VecType a) { return Underlying::abs(a); }
+	static FORCE_INLINE __m256i GenerateCountMask(int32_t count) { return Underlying::GenerateCountMask(count); }
+	static FORCE_INLINE void StoreFlagsOr(int32_t* flagsPtr, int32_t value) { Underlying::StoreFlagsOr(flagsPtr, value); }
+};
+
 // ===========================================================================
 // AVX2 backend (8 lanes / 32-bit element)
 // ===========================================================================

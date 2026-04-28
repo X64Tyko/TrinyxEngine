@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FieldProxy.h"
+#include "FastTrig.h"
 #include <cmath>
 
 // QuatMath — quaternion operations on FieldProxy<float, WIDTH>.
@@ -104,7 +105,7 @@ FORCE_INLINE void RotateAxisAngle(
 		float ax, float ay, float az, float angle)
 	{
 		const float half = angle * 0.5f;
-		const float s    = std::sin(half), c = std::cos(half);
+		const float s    = FastSin(half), c = FastCos(half);
 		auto q           = Load<WIDTH>(qx, qy, qz, qw);
 		auto r           = Multiply<WIDTH>(q, ax * s, ay * s, az * s, c);
 		Store<WIDTH>(qx, qy, qz, qw, r);
@@ -139,10 +140,10 @@ FORCE_INLINE void RotateZ(FloatProxy<WIDTH>& qx, FloatProxy<WIDTH>& qy,
 FORCE_INLINE void SetIdentity(FloatProxy<WIDTH>& qx, FloatProxy<WIDTH>& qy,
 							  FloatProxy<WIDTH>& qz, FloatProxy<WIDTH>& qw)
 	{
-		qx = 0.0f;
-		qy = 0.0f;
-		qz = 0.0f;
-		qw = 1.0f;
+		qx = SimFloat(0.0f);
+		qy = SimFloat(0.0f);
+		qz = SimFloat(0.0f);
+		qw = SimFloat(1.0f);
 	}
 } // namespace QuatMath
 
@@ -172,11 +173,11 @@ struct QuatAccessor
 	FORCE_INLINE void Store(const QL& q) { QuatMath::Store<WIDTH>(qx, qy, qz, qw, q); }
 
 	// ── Rotations ──
-	FORCE_INLINE void RotateX(float angle) { QuatMath::RotateX<WIDTH>(qx, qy, qz, qw, angle); }
-	FORCE_INLINE void RotateY(float angle) { QuatMath::RotateY<WIDTH>(qx, qy, qz, qw, angle); }
-	FORCE_INLINE void RotateZ(float angle) { QuatMath::RotateZ<WIDTH>(qx, qy, qz, qw, angle); }
+	FORCE_INLINE void RotateX(SimFloat angle) { QuatMath::RotateX<WIDTH>(qx, qy, qz, qw, angle); }
+	FORCE_INLINE void RotateY(SimFloat angle) { QuatMath::RotateY<WIDTH>(qx, qy, qz, qw, angle); }
+	FORCE_INLINE void RotateZ(SimFloat angle) { QuatMath::RotateZ<WIDTH>(qx, qy, qz, qw, angle); }
 
-	FORCE_INLINE void RotateAxisAngle(float ax, float ay, float az, float angle)
+	FORCE_INLINE void RotateAxisAngle(SimFloat ax, SimFloat ay, SimFloat az, SimFloat angle)
 	{
 		QuatMath::RotateAxisAngle<WIDTH>(qx, qy, qz, qw, ax, ay, az, angle);
 	}
@@ -185,7 +186,7 @@ struct QuatAccessor
 	FORCE_INLINE void SetIdentity() { QuatMath::SetIdentity<WIDTH>(qx, qy, qz, qw); }
 
 	// ── Multiply by uniform delta quaternion ──
-	FORCE_INLINE void Multiply(float bx, float by, float bz, float bw)
+	FORCE_INLINE void Multiply(SimFloat bx, SimFloat by, SimFloat bz, SimFloat bw)
 	{
 		auto q = Load();
 		auto r = QuatMath::Multiply<WIDTH>(q, bx, by, bz, bw);

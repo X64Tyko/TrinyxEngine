@@ -20,10 +20,32 @@ static constexpr uint8_t CameraSlotCount = 5;
 struct WorldCameraState
 {
 	Vector3 Position{};
+	SimFloat Yaw   = 0.0f;
+	SimFloat Pitch = 0.0f;
+	SimFloat FOV   = 60.0f;
+	bool Valid     = false;
+};
+
+// Float‑based camera state used exclusively by the render pipeline.
+// Constructed from a WorldCameraState via the explicit constructor.
+struct CameraRenderState
+{
+	Vector3f Position{}; // TVector3<float>
 	float Yaw   = 0.0f;
 	float Pitch = 0.0f;
 	float FOV   = 60.0f;
 	bool Valid  = false;
+
+	CameraRenderState() = default;
+
+	CameraRenderState(const WorldCameraState& gs)
+		: Position(gs.Position.ToFloat())
+		, Yaw(gs.Yaw.ToFloat())
+		, Pitch(gs.Pitch.ToFloat())
+		, FOV(gs.FOV.ToFloat())
+		, Valid(gs.Valid)
+	{
+	}
 };
 
 // Whether an orientation dispatch consumes or falls through.
@@ -44,18 +66,18 @@ struct CameraLayer
 {
 	uint32_t     OwnerHandle     = 0;
 	CameraSlot   Slot            = CameraSlot::World;
-	float        TransitionAlpha = 0.0f; // animated → BlendAlpha by Tick
-	float        BlendAlpha      = 1.0f; // target weight
-	float        TransitionSpeed = 4.0f; // alpha units/sec
+	SimFloat TransitionAlpha = 0.0f; // animated → BlendAlpha by Tick
+	SimFloat BlendAlpha      = 1.0f; // target weight
+	SimFloat TransitionSpeed = 4.0f; // alpha units/sec
 	CurveHandle  TransitionCurve{};      // 0 = linear
 	ConsumeScope Consume         = ConsumeScope::Stack;
 	bool         Active          = true;
 
 	// Wired by AddLayer<T> — do not set manually.
 	void  (*StateFn)(void*, WorldCameraState&)        = nullptr;
-	void  (*BlendFn)(void*, float, WorldCameraState&) = nullptr;
-	float (*BlendWeightFn)(void*)                     = nullptr;
-	void  (*OrientationFn)(void*, float, float)       = nullptr;
+	void (*BlendFn)(void*, SimFloat, WorldCameraState&) = nullptr;
+	SimFloat (*BlendWeightFn)(void*)                    = nullptr;
+	void (*OrientationFn)(void*, SimFloat, SimFloat)    = nullptr;
 };
 
 // ─── Mixins ──────────────────────────────────────────────────────────────────
@@ -73,15 +95,15 @@ template <typename Derived>
 struct CameraBlendMix
 {
 	// Participates in the weighted blend pass within each slot.
-	// void  ApplyBlend(float alpha, WorldCameraState& state);
-	// float GetBlendWeight() const;
+	// void  ApplyBlend(SimFloat alpha, WorldCameraState& state);
+	// SimFloat GetBlendWeight() const;
 };
 
 template <typename Derived>
 struct CameraOrientationMix
 {
 	// Receives dyaw/dpitch dispatches. ConsumeScope on the CameraLayer controls fallthrough.
-	// void ApplyOrientationDelta(float dyaw, float dpitch);
+	// void ApplyOrientationDelta(SimFloat dyaw, SimFloat dpitch);
 };
 
 // ─── CameraManager ───────────────────────────────────────────────────────────
@@ -136,16 +158,15 @@ void CameraManager::AddLayer(CameraSlot slot, T* layer)
 		layer->StateFn = [](void* self, WorldCameraState& st)
 			{ static_cast<T*>(self)->ApplyState(st); };
 
-	if constexpr (requires(T* d, float a, WorldCameraState& st) { d->ApplyBlend(a, st); d->GetBlendWeight(); })
+	if constexpr (requires(T* d, SimFloat a, WorldCameraState& st) { d->ApplyBlend(a, st); d->GetBlendWeight(); })
 	{
-		layer->BlendFn       = [](void* self, float a, WorldCameraState& st)
+		layer->BlendFn = [](void* self, SimFloat a, WorldCameraState& st)
 			{ static_cast<T*>(self)->ApplyBlend(a, st); };
-		layer->BlendWeightFn = [](void* self) -> float
-			{ return static_cast<T*>(self)->GetBlendWeight(); };
+		layer->BlendWeightFn = [](void* self) -> SimFloat { return static_cast<T*>(self)->GetBlendWeight(); };
 	}
 
-	if constexpr (requires(T* d) { d->ApplyOrientationDelta(0.0f, 0.0f); })
-		layer->OrientationFn = [](void* self, float dy, float dp)
+	if constexpr (requires(T* d) { d->ApplyOrientationDelta(SimFloat(0.0f), SimFloat(0.0f)); })
+		layer->OrientationFn = [](void* self, SimFloat dy, SimFloat dp)
 			{ static_cast<T*>(self)->ApplyOrientationDelta(dy, dp); };
 
 	AddLayerRaw(slot, layer);

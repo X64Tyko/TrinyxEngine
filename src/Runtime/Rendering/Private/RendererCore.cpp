@@ -30,14 +30,15 @@
 // Helpers
 // -----------------------------------------------------------------------
 
-static void MultMat4(float* out, const float* A, const float* B)
+// Simfloat to float for GPU push.
+static void MultMat4(float* out, const SimFloat* A, const SimFloat* B)
 {
 	for (int col = 0; col < 4; ++col)
 	{
 		for (int row = 0; row < 4; ++row)
 		{
 			float sum = 0.0f;
-			for (int k = 0; k < 4; ++k) sum += A[k * 4 + row] * B[col * 4 + k];
+			for (int k = 0; k < 4; ++k) sum += (A[k * 4 + row] * B[col * 4 + k]).ToFloat();
 			out[col * 4 + row] = sum;
 		}
 	}
@@ -401,8 +402,8 @@ int RendererCore<Derived>::RenderFrame()
 		LatencyAccumMs += totalMs;
 		++LatencySamples;
 #if TNX_DEV_METRICS_DETAILED
-	LOG_ENG_DEBUG_F("[Latency] Pipeline: %.2fms | Scanout: %.2fms | Total: %.2fms",
-					pipelineMs, DisplayRefreshMs, totalMs);
+		LOG_ENG_DEBUG_F("[Latency] Pipeline: %.2fms | Scanout: %.2fms | Total: %.2fms",
+						pipelineMs, DisplayRefreshMs, totalMs);
 #endif
 	}
 #endif
@@ -438,9 +439,9 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 	int logicalW = 0, physicalW = 0;
 	SDL_GetWindowSize(WindowPtr, &logicalW, nullptr);
 	SDL_GetWindowSizeInPixels(WindowPtr, &physicalW, nullptr);
-	const float dpiScale = (logicalW > 0) ? static_cast<float>(physicalW) / static_cast<float>(logicalW) : 1.0f;
-	const int32_t pickX  = static_cast<int32_t>(mx * dpiScale);
-	const int32_t pickY  = static_cast<int32_t>(my * dpiScale);
+	const SimFloat dpiScale = (logicalW > 0) ? static_cast<SimFloat>(physicalW) / static_cast<float>(logicalW) : 1.0f;
+	const int32_t pickX     = static_cast<int32_t>((mx * dpiScale).ToFloat());
+	const int32_t pickY     = static_cast<int32_t>((my * dpiScale).ToFloat());
 
 	// Debug logging (every 60 frames to avoid spam)
 	static uint32_t pickDebugFrameCounter = 0;
@@ -966,8 +967,8 @@ bool RendererCore<Derived>::CreateFrameSync()
 		// DrawArgs: one VkDrawIndexedIndirectCommand per mesh slot (256 max × 20 bytes = 5120 bytes)
 		constexpr VkDeviceSize DrawArgsSize = MaxMeshSlots * sizeof(VkDrawIndexedIndirectCommand);
 		Frames[i].DrawArgsBuffer            = VkMem->AllocateBuffer(DrawArgsSize,
-														 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
-														 GpuMemoryDomain::PersistentMapped, /*requestDeviceAddress=*/ true);
+																	VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+																	GpuMemoryDomain::PersistentMapped, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].DrawArgsBuffer.IsValid())
 		{
 			LOG_ENG_ERROR_F("[Renderer] DrawArgsBuffer alloc failed (slot %d)", i);
@@ -1002,8 +1003,8 @@ bool RendererCore<Derived>::CreateFrameSync()
 		// Mesh histogram + write index buffers (256 uint32 each = 1 KB)
 		constexpr VkDeviceSize HistSize = MaxMeshSlots * sizeof(uint32_t);
 		Frames[i].MeshHistogramBuffer   = VkMem->AllocateBuffer(HistSize,
-															  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-															  GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+																VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+																GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
 		if (!Frames[i].MeshHistogramBuffer.IsValid())
 		{
 			LOG_ENG_ERROR_F("[Renderer] MeshHistogramBuffer alloc failed (slot %d)", i);
@@ -1277,6 +1278,29 @@ void RendererCore<Derived>::FillGpuFrameData(FrameSync& frame)
 #endif
 }
 
+void UploadSimFloatBuffer(const void* cpuData, void* gpuBuffer, size_t count)
+{
+	if constexpr (std::is_same_v<SimFloat, SimFloatImpl<float>>)
+	{
+		if (cpuData) memcpy(gpuBuffer, cpuData, count);
+		else memset(gpuBuffer, 0, count);
+	}
+	else // Fixed32
+	{
+		if (cpuData)
+		{
+			const Fixed32* src       = static_cast<const Fixed32*>(cpuData);
+			float* dst               = static_cast<float*>(gpuBuffer);
+			const size_t numElements = count / sizeof(Fixed32);
+			for (size_t i = 0; i < numElements; ++i) dst[i] = src[i].ToFloat();
+		}
+		else
+		{
+			memset(gpuBuffer, 0, count);
+		}
+	}
+}
+
 template <typename Derived>
 void RendererCore<Derived>::WriteToFrameSlab()
 {
@@ -1387,7 +1411,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 
 	TrinyxJobs::JobCounter GPUTransferCounter;
 
-	if (fullCopy)
+	if (fullCopy) [[unlikely]]
 	{
 		// First time writing to this slab — full copy, all fields
 		for (uint32_t f = 0; f < GpuOutFieldCount; ++f)
@@ -1397,8 +1421,9 @@ void RendererCore<Derived>::WriteToFrameSlab()
 			uint8_t* dst               = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
 			TrinyxJobs::Dispatch([src, dst, fieldStride](uint32_t)
 			{
-				if (src) std::memcpy(dst, src, static_cast<size_t>(fieldStride));
-				else std::memset(dst, 0, static_cast<size_t>(fieldStride));
+				UploadSimFloatBuffer(src, dst, fieldStride);
+				//if (src) std::memcpy(dst, src, static_cast<size_t>(fieldStride));
+				//else std::memset(dst, 0, static_cast<size_t>(fieldStride));
 			}, &GPUTransferCounter, TrinyxJobs::Queue::Render);
 		}
 		FirstSlabWrite[nextSlab] = false;
@@ -1423,11 +1448,16 @@ void RendererCore<Derived>::WriteToFrameSlab()
 				for (uint32_t w = 0; w < wordCount; ++w)
 				{
 					uint64_t bits = dirtyPlane[w];
+
+					// SimFloat == float: simple memcpy per entity
+					float* fdst          = reinterpret_cast<float*>(dst);
+					const SimFloat* ssrc = static_cast<const SimFloat*>(static_cast<const void*>(src));
 					while (bits)
 					{
-						uint32_t bit = TNX_CTZ64(bits);
-						uint32_t idx = w * 64 + bit;
-						std::memcpy(dst + idx * sizeof(float), src + idx * sizeof(float), sizeof(float));
+						uint32_t bit     = TNX_CTZ64(bits);
+						uint32_t idx     = w * 64 + bit;
+						const float fsrc = ssrc[idx].ToFloat();
+						memcpy(&fdst[idx], &fsrc, sizeof(float));
 						bits &= bits - 1;
 					}
 				}
@@ -1629,14 +1659,14 @@ void RendererCore<Derived>::TrackFPS()
 		double avgLatencyMs = (LatencySamples > 0) ? (LatencyAccumMs / LatencySamples) : 0.0;
 		LOG_ENG_DEBUG_F("Render FPS: %d | Frame: %.2fms | Input→Photon: %.2fms",
 						static_cast<int>(RenderFrameCount / RenderFpsTimer),
-					(RenderFpsTimer / RenderFrameCount) * 1000.0,
-					avgLatencyMs);
+						(RenderFpsTimer / RenderFrameCount) * 1000.0,
+						avgLatencyMs);
 		LatencyAccumMs = 0.0;
 		LatencySamples = 0;
 #else
 		LOG_ENG_DEBUG_F("Render FPS: %d | Frame: %.2fms",
 						static_cast<int>(RenderFrameCount / RenderFpsTimer),
-					(RenderFpsTimer / RenderFrameCount) * 1000.0);
+						(RenderFpsTimer / RenderFrameCount) * 1000.0);
 #endif
 		RenderFrameCount = 0;
 		RenderFpsTimer   = 0.0;

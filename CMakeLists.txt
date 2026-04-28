@@ -30,6 +30,9 @@ option(GENERATE_ASSEMBLY "Generate assembly listings (.cod files)" OFF)
 option(VECTORIZATION_REPORTS "Enable compiler vectorization reports" OFF)
 option(ENABLE_AVX2 "Enable AVX2 instruction set" ON)
 option(TNX_ALIGN_64 "Use 64-byte alignment for field arrays (zero cache line splits, more memory)" OFF)
+option(TNX_FIXED_IMPLICIT_FLOAT
+        "Enable implicit float/double constructors for Fixed32"
+        OFF)
 option(TNX_ENABLE_ROLLBACK "Enable N-frame rollback history. Off = TNX_TEMPORAL_FIELDS components use Volatile (5-frame) storage." OFF)
 option(TNX_DETERMINISM "Enable cross-platform determinism: disables FMA/fast-math in the engine and Jolt (JPH_CROSS_PLATFORM_DETERMINISTIC). Automatically forced ON by TNX_ENABLE_ROLLBACK." OFF)
 option(TNX_DETAILED_METRICS "Log per-frame latency breakdown (Buffer/Pipeline/Scanout). Noisy." OFF)
@@ -107,7 +110,7 @@ if (TNX_ENABLE_ROLLBACK)
     # Rollback requires bit-identical simulation — force determinism on.
     if (NOT TNX_DETERMINISM)
         message(STATUS "TNX_ENABLE_ROLLBACK forces TNX_DETERMINISM=ON")
-        set(TNX_DETERMINISM ON CACHE BOOL "" FORCE)
+        #set(TNX_DETERMINISM ON CACHE BOOL "" FORCE)
     endif ()
 else ()
     message(STATUS "Rollback history: DISABLED (Temporal fields stored in Volatile slab)")
@@ -115,7 +118,8 @@ endif ()
 
 if (TNX_DETERMINISM)
     add_compile_definitions(TNX_DETERMINISM)
-    message(STATUS "Determinism: ENABLED (FMA disabled, fp:precise / -ffp-contract=off applied to engine and Jolt)")
+    add_compile_definitions(TNX_USE_FAST_TRIG)
+    message(STATUS "Determinism: ENABLED (FMA disabled, fast trig forced on, fp:precise / -ffp-contract=off applied to engine and Jolt)")
 else ()
     message(STATUS "Determinism: DISABLED (fast-math allowed)")
 endif ()
@@ -474,6 +478,12 @@ endif () # TNX_ENABLE_NETWORK
 # 9. SUBDIRECTORIES (Projects in Solution)
 # -----------------------------------------------------------------------------
 add_subdirectory(Trinyx)
+# Propagate the TNX_FIXED_IMPLICIT_FLOAT define to the engine library
+if (TARGET Trinyx)
+    target_compile_definitions(Trinyx PRIVATE
+            $<IF:$<BOOL:${TNX_FIXED_IMPLICIT_FLOAT}>,TNX_FIXED_IMPLICIT_FLOAT,>
+    )
+endif ()
 add_subdirectory(Testbed)
 add_subdirectory(Playground)
 add_subdirectory(DeterminismTest)

@@ -26,9 +26,15 @@ static void WriteFieldValue(void* dst, size_t fieldSize, FieldValueType valueTyp
 
 	switch (valueType)
 	{
+		case FieldValueType::Fixed32:
+			{
+				SimFloat f = SimFloat(val.AsFloat());
+				std::memcpy(dst, &f, 4);
+				break;
+			}
 		case FieldValueType::Float32:
 			{
-				float f = val.AsFloat();
+				SimFloat f = SimFloat(val.AsFloat());
 				std::memcpy(dst, &f, 4);
 				break;
 			}
@@ -67,7 +73,7 @@ static void WriteFieldValue(void* dst, size_t fieldSize, FieldValueType valueTyp
 			{
 				case 4:
 					{
-						float f = val.AsFloat();
+						SimFloat f = SimFloat(val.AsFloat());
 						std::memcpy(dst, &f, 4);
 						break;
 					}
@@ -418,11 +424,17 @@ static JsonValue ReadFieldValue(const void* src, size_t fieldSize, FieldValueTyp
 {
 	switch (valueType)
 	{
+		case FieldValueType::Fixed32:
+			{
+				SimFloat f;
+				std::memcpy(&f, src, 4);
+				return JsonValue::Number(f.ToDouble());
+			}
 		case FieldValueType::Float32:
 			{
-				float f;
+				SimFloat f;
 				std::memcpy(&f, src, 4);
-				return JsonValue::Number(static_cast<double>(f));
+				return JsonValue::Number(f.ToDouble());
 			}
 		case FieldValueType::Float64:
 			{
@@ -460,9 +472,9 @@ static JsonValue ReadFieldValue(const void* src, size_t fieldSize, FieldValueTyp
 			{
 				case 4:
 					{
-						float f;
+						SimFloat f;
 						std::memcpy(&f, src, 4);
-						return JsonValue::Number(static_cast<double>(f));
+						return JsonValue::Number(f.ToDouble());
 					}
 				case 8:
 					{

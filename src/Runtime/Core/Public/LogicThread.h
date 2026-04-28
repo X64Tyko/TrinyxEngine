@@ -90,6 +90,7 @@ private:
 	void PublishCompletedFrame();
 	void WaitForTiming(uint64_t frameStart, uint64_t perfFrequency);
 	void TrackFPS();
+	void TickOnce();
 	bool TickPause(uint64_t perfFrequency, uint64_t frameStartCounter, double dt);
 
 	void PhysicsLoop(SimFloat fixedStepTime);

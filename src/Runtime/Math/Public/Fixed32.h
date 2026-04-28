@@ -29,7 +29,7 @@ struct Fixed32
 	{
 	}
 
-	constexpr Fixed32(int32_t i)
+	constexpr Fixed32(const int32_t i)
 		: value(i * Scale)
 	{
 	}
@@ -229,3 +229,24 @@ constexpr Fixed32 operator*(double a, Fixed32 b) { return Fixed32::FromDouble(a)
 constexpr Fixed32 operator/(Fixed32 a, double b) { return a / Fixed32::FromDouble(b); }
 constexpr Fixed32 operator/(double a, Fixed32 b) { return Fixed32::FromDouble(a) / b; }
 #endif
+
+// --- Fast square root for Fixed32 (integer Newton) -------------------------
+// Deterministic, no floating-point, fast convergence (≤3 iterations).
+// Returns the fixed-point result scaled by the same Scale.
+// Public domain – integer Newton–Raphson
+constexpr Fixed32 FixedSqrt(Fixed32 x)
+{
+	if (x.value <= 0) return Fixed32::FromRaw(0);
+
+	// Compute integer sqrt of (raw * Scale) — result is raw of sqrt(x).
+	int64_t n  = static_cast<int64_t>(x.value) * Fixed32::Scale;
+	int64_t r  = n; // initial guess
+	int64_t r0 = 0;
+	// Newton's method for integer sqrt: r = (r + n/r) / 2
+	while (r != r0)
+	{
+		r0 = r;
+		r  = (r + n / r) >> 1;
+	}
+	return Fixed32::FromRaw(static_cast<int32_t>(r));
+}

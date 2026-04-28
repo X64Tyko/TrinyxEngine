@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+enum class FieldValueType : uint8_t;
+
 class DetailsPanel : public EditorPanel
 {
 public:
@@ -16,5 +18,5 @@ public:
 private:
 	// Returns true if the field was edited. Writes directly to fieldArray at entityIndex.
 	bool EditFieldValue(const char* label, size_t fieldSize, void* fieldArray,
-						uint32_t entityIndex, uint8_t valueType);
+						uint32_t entityIndex, FieldValueType valueType);
 };

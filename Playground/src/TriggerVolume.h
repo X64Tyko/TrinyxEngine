@@ -23,8 +23,8 @@ public:
 	TNX_CONSTRUCT_WORLD
 
 	// --- Configuration (set before Initialize via the config lambda) ---
-	float PosX  = 0.f, PosY  = 0.f, PosZ  = 0.f;
-	float HalfX = 1.f, HalfY = 1.f, HalfZ = 1.f;
+	SimFloat PosX  = 0.f, PosY  = 0.f, PosZ  = 0.f;
+	SimFloat HalfX = 1.f, HalfY = 1.f, HalfZ = 1.f;
 
 	// --- User-bindable callbacks ---
 	using TriggerCallback = Callback<void, PhysicsOverlapData>;
@@ -43,10 +43,10 @@ public:
 			v.Scale.ScaleX         = HalfX * 2.0f;
 			v.Scale.ScaleY         = HalfY * 2.0f;
 			v.Scale.ScaleZ         = HalfZ * 2.0f;
-			v.Color.R              = 0.2f;
-			v.Color.G              = 0.8f;
-			v.Color.B              = 0.2f;
-			v.Color.A              = 0.15f;
+			v.Color.R              = SimFloat(0.2f);
+			v.Color.G              = SimFloat(0.8f);
+			v.Color.B              = SimFloat(0.2f);
+			v.Color.A              = SimFloat(0.15f);
 			v.Mesh.MeshID          = 1u;
 			v.PhysBody.Shape       = JoltShapeType::Box;
 			v.PhysBody.HalfExtentX = HalfX;

@@ -16,7 +16,7 @@ concept ProxyType = std::is_same_v<std::remove_cvref_t<T>, FIELDTYPE> || std::is
 template <FieldWidth WIDTH>
 struct FieldProxyMask
 {
-	__m256i mask{};
+	__m256i mask = _mm256_set1_epi64x(-1); // all lanes set — default is "store everything"
 };
 
 template <>

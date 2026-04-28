@@ -58,7 +58,7 @@ template <typename CLASS, template <typename, FieldWidth> class SUPER = Componen
 using FinalComp = SUPER<CLASS, WIDTH>;
 
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-using FloatProxy = FieldProxy<float, WIDTH>;
+using FloatProxy = FieldProxy<SimFloat, WIDTH>;
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 using IntProxy = FieldProxy<int32_t, WIDTH>;
 template <FieldWidth WIDTH = FieldWidth::Scalar>

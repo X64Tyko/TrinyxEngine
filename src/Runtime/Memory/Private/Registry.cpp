@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <functional>
 #include <immintrin.h>
+#include <emmintrin.h>
 #include <queue>
 #include <span>
 #include <vector>
@@ -737,9 +738,10 @@ int Registry::SweepAliveFlagsToActive()
 	__m128i lo     = _mm256_castsi256_si128(vCount);
 	__m128i hi     = _mm256_extracti128_si256(vCount, 1);
 	__m128i sum128 = _mm_add_epi32(lo, hi);
-	__m128i sum64  = _mm_add_epi32(sum128, _mm_shuffle_epi32(sum128, _MM_SHUFFLE(1, 0, 3, 2)));
-	int sweepCount = _mm_cvtsi128_si32(_mm_add_epi32(sum64, _mm_shuffle_epi32(sum64, _MM_SHUFFLE(0, 1, 0,
-																				  1))));
+	// Horizontal sum of 4 int32 lanes in sum128 -> scalar sweepCount
+	__m128i sum64  = _mm_add_epi32(sum128, _mm_shuffle_epi32(sum128, _MM_SHUFFLE(2, 3, 0, 1)));
+	int sweepCount = _mm_cvtsi128_si32(
+		_mm_add_epi32(sum64, _mm_shuffle_epi32(sum64, _MM_SHUFFLE(1, 0, 3, 2))));
 
 	for (uint32_t i = wideMax; i < max; ++i)
 	{
@@ -800,14 +802,14 @@ bool Registry::CheckAndCorrectEntityTransform(const EntityTransformCorrection& c
 							   GetVolatileCache()->GetActiveWriteFrame());
 
 	// Read the resimmed position from the current write frame
-	constexpr float kThresholdSq = 0.01f * 0.01f; // 1cm
-	float predictedX             = 0.f, predictedY = 0.f, predictedZ = 0.f;
+	constexpr SimFloat kThresholdSq = SimFloat(0.01f * 0.01f); // 1cm
+	SimFloat predictedX             = 0.f, predictedY = 0.f, predictedZ = 0.f;
 	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 	{
 		if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
 		void* base = fieldArrayTable[fdesc.fieldSlotIndex];
 		if (!base) continue;
-		auto* fa = static_cast<float*>(base);
+		auto* fa = static_cast<SimFloat*>(base);
 		switch (fdesc.componentSlotIndex)
 		{
 			case 0: predictedX = fa[localIdx];
@@ -820,9 +822,9 @@ bool Registry::CheckAndCorrectEntityTransform(const EntityTransformCorrection& c
 		}
 	}
 
-	const float dx = predictedX - correction.PosX;
-	const float dy = predictedY - correction.PosY;
-	const float dz = predictedZ - correction.PosZ;
+	const SimFloat dx = predictedX - correction.PosX;
+	const SimFloat dy = predictedY - correction.PosY;
+	const SimFloat dz = predictedZ - correction.PosZ;
 	if (dx * dx + dy * dy + dz * dz <= kThresholdSq) return false;
 
 	// Still divergent after resim — write server-authoritative transform
@@ -831,7 +833,7 @@ bool Registry::CheckAndCorrectEntityTransform(const EntityTransformCorrection& c
 		if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
 		void* base = fieldArrayTable[fdesc.fieldSlotIndex];
 		if (!base) continue;
-		auto* fa = static_cast<float*>(base);
+		auto* fa = static_cast<SimFloat*>(base);
 		switch (fdesc.componentSlotIndex)
 		{
 			case 0: fa[localIdx] = correction.PosX;

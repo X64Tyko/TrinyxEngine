@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FieldProxy.h"
+#include "FastTrig.h"
 #include <cmath>
 
 // VecMath — vector operations on FieldProxy<float, WIDTH> groups.

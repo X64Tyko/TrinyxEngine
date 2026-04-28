@@ -3,7 +3,7 @@
 #include "FixedBitset.h"
 #include <cstdint>
 #include <functional>
-#include <cmath>
+#include <type_traits>
 
 // Cross-platform force inline macro
 #ifdef _MSC_VER
@@ -66,10 +66,10 @@ enum class CacheTier : uint8_t
 // Defined here (not in NetTypes.h) so it is available regardless of TNX_ENABLE_NETWORK.
 enum class EngineMode : uint8_t
 {
-	Standalone,   // No networking — default for singleplayer / editor
-	Client,       // Connects to remote server, renders locally
-	Server,       // Headless — no window/Vulkan/renderer
-	Host, // Server + local client in one process (PIE default)
+	Standalone, // No networking — default for singleplayer / editor
+	Client,     // Connects to remote server, renders locally
+	Server,     // Headless — no window/Vulkan/renderer
+	Host,       // Server + local client in one process (PIE default)
 };
 
 [[maybe_unused]] static const char* EngineModeNames[] = {
@@ -90,82 +90,236 @@ enum class ConstructLifetime : uint8_t
 	Persistent, // Survives everything. Destroyed only explicitly.
 };
 
-// Simulation scalar type — float by default, swappable to Fixed32 for
-// bit-identical determinism via TNX_DETERMINISTIC build flag.
-#if TNX_DETERMINISTIC
-using SimFloat = Fixed32;
-#else
-using SimFloat = float;
-#endif
+#include "SimFloat.h"
+
+namespace TVecDetail
+{
+	template <typename Dst, typename Src>
+	FORCE_INLINE Dst ConvertScalar(const Src& s)
+	{
+		if constexpr (std::is_same_v<Dst, Src>) return s;
+		else if constexpr (std::is_same_v<Dst, float>) return s.ToFloat();
+		else if constexpr (std::is_same_v<Src, float>) return Dst(Fixed32::FromFloat(s));
+		else return Dst(Fixed32::FromFloat(s.ToFloat()));
+	}
+}
+
+// Forward declaration for Sqrt – defined in SimFloat.h
+template <typename T>
+SimFloatImpl<T> Sqrt(SimFloatImpl<T> x);
 
 template <template <FieldWidth> class Derived, FieldWidth WIDTH = FieldWidth::Scalar>
 using MaskTemplate = Derived<WIDTH>;
 
 // Math types
-struct Vector3
+template <typename VecType = SimFloat>
+struct TVector3
 {
-	float x, y, z;
+	VecType x, y, z;
 
-	Vector3()
+	TVector3()
 		: x(0)
 		, y(0)
 		, z(0)
 	{
 	}
 
-	Vector3(float x, float y, float z)
-		: x(x)
-		, y(y)
-		, z(z)
+	// Converting constructor – accepts any three arguments that can be
+	// converted to floatType.  Avoids duplication when SimFloat == float.
+	template <typename... Args,
+			  std::enable_if_t<sizeof...(Args) == 3 &&
+							   (std::is_convertible_v<Args, VecType> && ...), int> = 0>
+	TVector3(Args... args)
 	{
+		VecType arr[] = {static_cast<VecType>(args)...};
+		x             = arr[0];
+		y             = arr[1];
+		z             = arr[2];
 	}
 
-	Vector3 operator+(const Vector3& other) const { return Vector3(x + other.x, y + other.y, z + other.z); }
-	Vector3 operator-(const Vector3& other) const { return Vector3(x - other.x, y - other.y, z - other.z); }
-	Vector3 operator*(float scalar) const { return Vector3(x * scalar, y * scalar, z * scalar); }
-	Vector3 operator/(float scalar) const { return Vector3(x / scalar, y / scalar, z / scalar); }
-	Vector3 operator-() const { return Vector3(-x, -y, -z); }
-	friend Vector3 operator*(float scalar, const Vector3& v) { return Vector3(scalar * v.x, scalar * v.y, scalar * v.z); }
-
-	float Length() const { return std::sqrt(x * x + y * y + z * z); }
-
-	Vector3 Normalized() const
+	// Cross‑type copy: convert each component from any other TVector3.
+#ifdef TNX_FIXED_IMPLICIT_FLOAT
+	template <typename Other>
+	TVector3(const TVector3<Other>& other)
+		: TVector3(other.template CastTo<VecType>())
 	{
-		float len = Length();
-		return len > 0 ? Vector3(x / len, y / len, z / len) : Vector3();
+	}
+#endif
+
+	// Compiler-generated copy and move assignment are fine for same-type.
+	// This template handles cross‑type assignment (e.g., TVector3<Fixed32> <- TVector3<float>).
+#ifdef TNX_FIXED_IMPLICIT_FLOAT
+	template <typename Other>
+	TVector3& operator=(const TVector3<Other>& other)
+	{
+		*this = other.template CastTo<VecType>();
+		return *this;
+	}
+#endif
+
+	// ── Explicit conversions ──
+	template <typename Dst>
+	TVector3<Dst> CastTo() const
+	{
+		return TVector3<Dst>(
+			TVecDetail::ConvertScalar<Dst>(x),
+			TVecDetail::ConvertScalar<Dst>(y),
+			TVecDetail::ConvertScalar<Dst>(z));
+	}
+
+	TVector3<float> ToFloat() const { return CastTo<float>(); }
+	TVector3<SimFloat> ToSim() const { return CastTo<SimFloat>(); }
+
+	TVector3& operator+=(const TVector3& other)
+	{
+		x += other.x;
+		y += other.y;
+		z += other.z;
+		return *this;
+	}
+
+	TVector3& operator-=(const TVector3& other)
+	{
+		x -= other.x;
+		y -= other.y;
+		z -= other.z;
+		return *this;
+	}
+
+	TVector3& operator*=(VecType scalar)
+	{
+		x *= scalar;
+		y *= scalar;
+		z *= scalar;
+		return *this;
+	}
+
+	TVector3& operator/=(VecType scalar)
+	{
+		x /= scalar;
+		y /= scalar;
+		z /= scalar;
+		return *this;
+	}
+
+	TVector3 operator+(const TVector3<VecType>& other) const { return TVector3(x + other.x, y + other.y, z + other.z); }
+	TVector3 operator-(const TVector3<VecType>& other) const { return TVector3(x - other.x, y - other.y, z - other.z); }
+	// Right‑multiply by any type convertible to floatType
+	template <typename T>
+	TVector3 operator*(const T& scalar) const
+	{
+		VecType s = static_cast<VecType>(scalar);
+		return TVector3(x * s, y * s, z * s);
+	}
+
+	template <typename T>
+	TVector3 operator/(const T& scalar) const
+	{
+		VecType s = static_cast<VecType>(scalar);
+		return TVector3(x / s, y / s, z / s);
+	}
+
+	TVector3 operator-() const { return TVector3(-x, -y, -z); }
+	// Left‑multiply by any type convertible to floatType
+	template <typename T>
+	friend TVector3 operator*(const T& scalar, const TVector3& v)
+	{
+		VecType s = static_cast<VecType>(scalar);
+		return TVector3(s * v.x, s * v.y, s * v.z);
+	}
+
+	// ── Squared magnitude & distance (no sqrt) ──
+	VecType LengthSqr() const { return x * x + y * y + z * z; }
+	VecType DistanceSqr(const TVector3& o) const { return (*this - o).LengthSqr(); }
+	VecType Distance(const TVector3& o) const { return Sqrt(DistanceSqr(o)); }
+	bool IsNearZero(VecType eps2 = VecType(1e-8f)) const { return LengthSqr() <= eps2; }
+
+	VecType Length() const
+	{
+		return Sqrt(x * x + y * y + z * z);
+	}
+
+	float LengthF() const
+	{
+		if constexpr (std::is_same_v<VecType, SimFloat>) return static_cast<float>(Length());
+		else return static_cast<float>(Length());
+	}
+
+	TVector3 Normalized() const
+	{
+		VecType len = Length();
+		return len > VecType(0) ? TVector3(x / len, y / len, z / len) : TVector3();
 	}
 };
 
-struct Matrix4
-{
-	float m[16]; // Column-major order
+using Vector3  = TVector3<>;
+using Vector3f = TVector3<float>;
 
-	Matrix4()
+// Free functions
+template <typename VecType>
+VecType Dot(const TVector3<VecType>& a, const TVector3<VecType>& b)
+{
+	return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+template <typename VecType>
+TVector3<VecType> Cross(const TVector3<VecType>& a, const TVector3<VecType>& b)
+{
+	return TVector3<VecType>(
+		a.y * b.z - a.z * b.y,
+		a.z * b.x - a.x * b.z,
+		a.x * b.y - a.y * b.x);
+}
+
+template <typename MatType = SimFloat>
+struct TMatrix4
+{
+	MatType m[16]; // Column-major order
+
+	TMatrix4()
 	{
 		for (int i = 0; i < 16; i++) m[i] = 0;
-		m[0] = m[5] = m[10] = m[15] = 1.0f; // Identity
+		m[0] = m[5] = m[10] = m[15] = 1; // Identity
 	}
 
-	static Matrix4 Identity() { return Matrix4(); }
+	static TMatrix4 Identity() { return TMatrix4(); }
 
 	// Column-major multiply: result = a * b
 	// Both forms compile to the same code; the named static is here so you can
 	// grep for it when profiling and swap in an intrinsic version if needed.
-	static Matrix4 Multiply(const Matrix4& a, const Matrix4& b)
+	static TMatrix4 Multiply(const TMatrix4& a, const TMatrix4& b)
 	{
-		Matrix4 r;
+		TMatrix4 r;
 		for (int col = 0; col < 4; ++col)
 			for (int row = 0; row < 4; ++row)
 			{
-				float sum = 0.0f;
+				MatType sum = 0.0f;
 				for (int k = 0; k < 4; ++k) sum += a.m[k * 4 + row] * b.m[col * 4 + k];
 				r.m[col * 4 + row] = sum;
 			}
 		return r;
 	}
+	
+	MatType& operator[](int i) { return m[i]; }
 
-	Matrix4 operator*(const Matrix4& o) const { return Multiply(*this, o); }
+	TMatrix4 operator*(const TMatrix4& o) const { return Multiply(*this, o); }
+
+
+	// ── Explicit conversions ──
+	template <typename Dst>
+	TMatrix4<Dst> CastTo() const
+	{
+		TMatrix4<Dst> r;
+		for (int i = 0; i < 16; ++i) r.m[i] = TVecDetail::ConvertScalar<Dst>(m[i]);
+		return r;
+	}
+
+	TMatrix4<float> ToFloat() const { return CastTo<float>(); }
+	TMatrix4<SimFloat> ToSim() const { return CastTo<SimFloat>(); }
 };
+
+using Matrix4  = TMatrix4<>;
+using Matrix4f = TMatrix4<float>;
 
 // Component type ID - numeric identifier for each component type (0-255)
 using ComponentTypeID = uint32_t;

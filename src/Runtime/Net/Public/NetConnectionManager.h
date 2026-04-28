@@ -28,7 +28,7 @@ struct ConnectionInfo
 	uint32_t NextSeqOut                  = 0;    // Next outgoing sequence number
 	uint32_t LastSeqIn                   = 0;    // Latest received sequence number (for ack piggybacking)
 	uint32_t AckBitfield                 = 0;    // Received-packet bitfield (for ack piggybacking)
-	float RTT_ms                         = 0.0f; // Smoothed round-trip time in milliseconds
+	SimFloat RTT_ms                      = 0.0f; // Smoothed round-trip time in milliseconds
 	uint32_t ServerFrameAtHandshake      = 0;    // Server FrameNumber when HandshakeAccept was sent
 	uint32_t ClientLocalFrameAtHandshake = 0;    // Client's local frame at handshake.
 	//   Client-side: set when HandshakeAccept is received.

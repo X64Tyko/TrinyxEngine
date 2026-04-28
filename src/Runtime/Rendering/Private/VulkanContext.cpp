@@ -2,6 +2,8 @@
 #define VOLK_IMPLEMENTATION
 #include "VulkanContext.h"
 
+#include "Types.h"
+
 // VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE must appear exactly once per program,
 // in the same TU as VOLK_IMPLEMENTATION so both live in the same object file.
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE

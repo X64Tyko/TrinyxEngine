@@ -33,9 +33,8 @@ static void MarkEntityDirty(EditorState& state)
 }
 
 bool DetailsPanel::EditFieldValue(const char* label, size_t fieldSize, void* fieldArray,
-								  uint32_t entityIndex, uint8_t valueType)
+								  uint32_t entityIndex, FieldValueType valueType)
 {
-	auto type      = static_cast<FieldValueType>(valueType);
 	uint8_t* base  = static_cast<uint8_t*>(fieldArray);
 	void* valuePtr = base + entityIndex * fieldSize;
 
@@ -44,8 +43,19 @@ bool DetailsPanel::EditFieldValue(const char* label, size_t fieldSize, void* fie
 
 	bool edited = false;
 
-	switch (type)
+	switch (valueType)
 	{
+		case FieldValueType::Fixed32:
+			{
+				SimFloat val   = *static_cast<SimFloat*>(valuePtr);
+				float floatVal = val.ToFloat();
+				if (ImGui::InputFloat("##v", &floatVal, 0.1f, 1.0f, "%.4f"))
+				{
+					*static_cast<SimFloat*>(valuePtr) = SimFloat(floatVal);
+					edited                            = true;
+				}
+				break;
+			}
 		case FieldValueType::Float32:
 			{
 				float val = *static_cast<float*>(valuePtr);
@@ -295,7 +305,7 @@ void DetailsPanel::Draw(EditorState& state)
 							bool edited = EditFieldValue(
 								fieldName, fdesc.fieldSize, fieldArrayTable[idx],
 								state.SelectedLocalIndex,
-								static_cast<uint8_t>(fdesc.valueType));
+								fdesc.valueType);
 
 							if (edited)
 							{
@@ -311,6 +321,8 @@ void DetailsPanel::Draw(EditorState& state)
 
 							switch (fdesc.valueType)
 							{
+								case FieldValueType::Fixed32: ImGui::Text("%.4f", ((Fixed32*)valPtr)->ToFloat());
+									break;
 								case FieldValueType::Float32: ImGui::Text("%.4f", *static_cast<const float*>(valPtr));
 									break;
 								case FieldValueType::Float64: ImGui::Text("%.6f", *static_cast<const double*>(valPtr));

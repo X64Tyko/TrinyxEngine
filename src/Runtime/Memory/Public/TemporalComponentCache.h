@@ -45,7 +45,7 @@ struct alignas(64) TemporalFrameHeader
 	// Scene/Lighting data
 	Vector3 SunDirection;
 	Vector3 SunColor;
-	float AmbientIntensity;
+	SimFloat AmbientIntensity;
 
 #if TNX_DEV_METRICS
 	// Input-to-photon latency tracking
@@ -60,21 +60,21 @@ struct alignas(64) TemporalFrameHeader
 	// Input snapshot for deterministic replay during rollback.
 	// Recorded after ProcessSimInput each tick; replayed during resimulation.
 	uint8_t InputKeyState[64];
-	float InputMouseDX;
-	float InputMouseDY;
+	SimFloat InputMouseDX;
+	SimFloat InputMouseDY;
 #endif
 
 	// Padding to cache line
 #if defined(TNX_ENABLE_ROLLBACK) && TNX_DEV_METRICS
 	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint32_t) * 3
-		+ sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(float) + 64 + sizeof(float) * 2) % 64];
+		+ sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(SimFloat) + 64 + sizeof(SimFloat) * 2) % 64];
 #elif defined(TNX_ENABLE_ROLLBACK)
 	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint32_t) * 3
-		+ sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(float) + 64 + sizeof(float) * 2) % 64];
+		+ sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(SimFloat) + 64 + sizeof(SimFloat) * 2) % 64];
 #elif TNX_DEV_METRICS
-	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(float)) % 64];
+	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(SimFloat)) % 64];
 #else
-	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(float)) % 64];
+	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(SimFloat)) % 64];
 #endif
 };
 
@@ -144,7 +144,7 @@ public:
 
 	uint32_t GetTotalFrameCount() const { return static_cast<uint32_t>(TemporalFrameCount); }
 	CacheTier GetTier() const { return Tier_; }
-	uint32_t GetMaxCachedEntityCount() const { return static_cast<uint32_t>(MaxCachedBoundary / sizeof(float)); }
+	uint32_t GetMaxCachedEntityCount() const { return static_cast<uint32_t>(MaxCachedBoundary / sizeof(SimFloat)); }
 
 	// Returns [start, end) cache index range for the contiguous DUAL+PHYS partition.
 	// Physics systems iterate this as a single dense scan with no gap.

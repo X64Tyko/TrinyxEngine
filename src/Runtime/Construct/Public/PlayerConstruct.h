@@ -17,9 +17,9 @@
 // Camera layer used by PlayerConstruct — writes eye/orbit position to WorldCameraState.
 struct PlayerCameraLayer : CameraLayer, CameraStateMix<PlayerCameraLayer>
 {
-	float PosX = 0.f, PosY  = 0.f, PosZ = 0.f;
-	float Yaw  = 0.f, Pitch = 0.f;
-	float FOV  = 60.f;
+	SimFloat PosX = 0.f, PosY  = 0.f, PosZ = 0.f;
+	SimFloat Yaw  = 0.f, Pitch = 0.f;
+	SimFloat FOV  = 60.f;
 
 	void ApplyState(WorldCameraState& state)
 	{
@@ -64,15 +64,15 @@ public:
 			tr.Rotation.SetIdentity();
 
 			auto& sc  = Body.Scale;
-			sc.ScaleX = 1.0f;
-			sc.ScaleY = 1.0f;
-			sc.ScaleZ = 1.0f;
+			sc.ScaleX = SimFloat(1.0f);
+			sc.ScaleY = SimFloat(1.0f);
+			sc.ScaleZ = SimFloat(1.0f);
 
 			auto& col = Body.Color;
-			col.R     = 0.2f;
-			col.G     = 0.8f;
-			col.B     = 0.2f;
-			col.A     = 1.0f;
+			col.R     = SimFloat(0.2f);
+			col.G     = SimFloat(0.8f);
+			col.B     = SimFloat(0.2f);
+			col.A     = SimFloat(1.0f);
 
 			auto& mesh  = Body.Mesh;
 			mesh.MeshID = 2u;
@@ -85,7 +85,7 @@ public:
 		CharacterController.Initialize(
 			phys,
 			Record.CacheEntityIndex,
-			JPH::RVec3(SpawnPosX, SpawnPosY, SpawnPosZ),
+			JPH::RVec3(SpawnPosX.ToFloat(), SpawnPosY.ToFloat(), SpawnPosZ.ToFloat()),
 			0.3f,
 			0.7f);
 
@@ -122,30 +122,30 @@ public:
 	{
 		if (bIsClientSide)
 		{
-			const float ecsPosX = Body.Transform.PosX.Value();
-			const float ecsPosY = Body.Transform.PosY.Value();
-			const float ecsPosZ = Body.Transform.PosZ.Value();
+			const SimFloat ecsPosX = Body.Transform.PosX.Value();
+			const SimFloat ecsPosY = Body.Transform.PosY.Value();
+			const SimFloat ecsPosZ = Body.Transform.PosZ.Value();
 
 			Soul* soul = GetOwnerSoul();
 			if (!soul || soul->GetRole() == SoulRole::Echo)
 			{
-				CharacterController.SetPosition(JPH::RVec3(ecsPosX, ecsPosY, ecsPosZ));
+				CharacterController.SetPosition(JPH::RVec3(ecsPosX.ToFloat(), ecsPosY.ToFloat(), ecsPosZ.ToFloat()));
 				return;
 			}
 
-			CharacterController.SetPosition(JPH::RVec3(ecsPosX, ecsPosY, ecsPosZ));
+			CharacterController.SetPosition(JPH::RVec3(ecsPosX.ToFloat(), ecsPosY.ToFloat(), ecsPosZ.ToFloat()));
 		}
 
 		CharacterController.Update(
-			JPH::Vec3(DesiredVelX, 0, DesiredVelZ),
+			JPH::Vec3(DesiredVelX.ToFloat(), 0, DesiredVelZ.ToFloat()),
 			JPH::Vec3(0, -9.81f, 0),
-			static_cast<float>(dt),
+			dt.ToFloat(),
 			*GetWorld()->GetPhysics()->GetTempAllocator());
 
 		JPH::RVec3 pos      = CharacterController.GetPosition();
-		Body.Transform.PosX = pos.GetX();
-		Body.Transform.PosY = pos.GetY();
-		Body.Transform.PosZ = pos.GetZ();
+		Body.Transform.PosX = SimFloat(pos.GetX());
+		Body.Transform.PosY = SimFloat(pos.GetY());
+		Body.Transform.PosZ = SimFloat(pos.GetZ());
 
 		DesiredVelX = 0.0f;
 		DesiredVelZ = 0.0f;
@@ -159,21 +159,21 @@ public:
 			: GetWorld()->GetSimInput();
 		if (!simInput) return;
 
-		float sinYaw = std::sin(Yaw);
-		float cosYaw = std::cos(Yaw);
+		SimFloat sinYaw = FastSin(Yaw);
+		SimFloat cosYaw = FastCos(Yaw);
 
-		float forwardX = sinYaw, forwardZ = -cosYaw;
-		float rightX   = cosYaw, rightZ   = sinYaw;
+		SimFloat forwardX = sinYaw, forwardZ = -cosYaw;
+		SimFloat rightX   = cosYaw, rightZ   = sinYaw;
 
-		float moveX = 0.0f, moveZ = 0.0f;
+		SimFloat moveX = 0.0f, moveZ = 0.0f;
 
 		if (simInput->IsActionDown(Action::MoveForward))  { moveX += forwardX; moveZ += forwardZ; }
 		if (simInput->IsActionDown(Action::MoveBackward)) { moveX -= forwardX; moveZ -= forwardZ; }
 		if (simInput->IsActionDown(Action::MoveRight))    { moveX += rightX;   moveZ += rightZ;   }
 		if (simInput->IsActionDown(Action::MoveLeft))     { moveX -= rightX;   moveZ -= rightZ;   }
 
-		float len = std::sqrt(moveX * moveX + moveZ * moveZ);
-		if (len > 0.001f)
+		SimFloat len = Sqrt(moveX * moveX + moveZ * moveZ);
+		if (len > SimFloat(0.001f))
 		{
 			DesiredVelX += moveX / len * MoveSpeed;
 			DesiredVelZ += moveZ / len * MoveSpeed;
@@ -195,8 +195,8 @@ public:
 
 		if (!vizInput) return;
 
-		constexpr float MouseSens = 0.002f;
-		constexpr float MaxPitch  = 1.5533f;
+		constexpr SimFloat MouseSens = SimFloat(0.002f);
+		constexpr SimFloat MaxPitch  = SimFloat(1.5533f);
 
 		Yaw   += vizInput->GetMouseDX() * MouseSens;
 		Pitch -= vizInput->GetMouseDY() * MouseSens;
@@ -230,9 +230,9 @@ public:
 			pz       = tr.PosZ.Value();
 		}
 
-		float sinYaw   = std::sin(Yaw);
-		float cosYaw   = std::cos(Yaw);
-		float cosPitch = std::cos(Pitch);
+		SimFloat sinYaw   = FastSin(Yaw);
+		SimFloat cosYaw   = FastCos(Yaw);
+		SimFloat cosPitch = FastCos(Pitch);
 
 		FPLayer.PosX  = px;
 		FPLayer.PosY  = py + EyeHeight;
@@ -240,17 +240,17 @@ public:
 		FPLayer.Yaw   = Yaw;
 		FPLayer.Pitch = Pitch;
 
-		constexpr float CamDist = 5.0f;
-		TPLayer.PosX            = px - sinYaw * cosPitch * CamDist;
-		TPLayer.PosY            = py + EyeHeight + std::sin(Pitch) * CamDist + 1.5f;
-		TPLayer.PosZ            = pz + cosYaw * cosPitch * CamDist;
-		TPLayer.Yaw             = Yaw;
-		TPLayer.Pitch           = Pitch;
+		constexpr SimFloat CamDist = SimFloat(5.0f);
+		TPLayer.PosX               = px - sinYaw * cosPitch * CamDist;
+		TPLayer.PosY               = py + EyeHeight + FastSin(Pitch) * CamDist + SimFloat(1.5f);
+		TPLayer.PosZ               = pz + cosYaw * cosPitch * CamDist;
+		TPLayer.Yaw                = Yaw;
+		TPLayer.Pitch              = Pitch;
 	}
 
-	float SpawnPosX = 0.0f;
-	float SpawnPosY = 5.0f;
-	float SpawnPosZ = 0.0f;
+	SimFloat SpawnPosX = 0.0f;
+	SimFloat SpawnPosY = 5.0f;
+	SimFloat SpawnPosZ = 0.0f;
 
 	uint8_t GetOwnerID() const
 	{
@@ -265,12 +265,12 @@ private:
 	bool bIsClientSide = false;
 	EntityHandle ReplicationEntityHandle{};
 
-	float Yaw         = 0.0f;
-	float Pitch       = 0.0f;
-	float DesiredVelX = 0.0f;
-	float DesiredVelZ = 0.0f;
-	bool bToggleHeld  = false;
+	SimFloat Yaw         = 0.0f;
+	SimFloat Pitch       = 0.0f;
+	SimFloat DesiredVelX = 0.0f;
+	SimFloat DesiredVelZ = 0.0f;
+	bool bToggleHeld     = false;
 
-	static constexpr float MoveSpeed = 1.0f;
-	static constexpr float EyeHeight = 1.5f;
+	static constexpr SimFloat MoveSpeed = SimFloat(1.0f);
+	static constexpr SimFloat EyeHeight = SimFloat(1.5f);
 };

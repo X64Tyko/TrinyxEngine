@@ -135,9 +135,9 @@ void RollbackSim::ExecuteRollback(TLogic& logic, uint32_t targetFrame)
         {
             InjectFrameInput(logic, logic.FrameNumber);
             logic.NetMode.OnSimInput(logic.FrameNumber, logic);
-            logic.PhysicsLoop(static_cast<SimFloat>(fixedStepTime));
+			logic.PhysicsLoop(SimFloat(fixedStepTime));
 
-            for (auto it = PendingCorrections.begin(); it != PendingCorrections.end();)
+			for (auto it = PendingCorrections.begin(); it != PendingCorrections.end();)
             {
                 if (it->ClientFrame != logic.FrameNumber) { ++it; continue; }
                 if (logic.RegistryPtr->CheckAndCorrectEntityTransform(*it))

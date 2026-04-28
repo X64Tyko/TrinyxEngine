@@ -50,7 +50,6 @@ void CameraManager::RemoveAllOwnerLayers(uint32_t ownerHandle)
 
 void CameraManager::Tick(SimFloat dt)
 {
-	const float fdt = static_cast<float>(dt);
 	for (uint8_t s = 0; s < CameraSlotCount; ++s)
 	{
 		Slot& slot = Slots[s];
@@ -59,8 +58,8 @@ void CameraManager::Tick(SimFloat dt)
 			CameraLayer* layer = slot.Layers[l];
 			if (!layer->Active) continue;
 
-			const float target = layer->BlendAlpha;
-			const float step   = layer->TransitionSpeed * fdt;
+			const SimFloat target = layer->BlendAlpha;
+			const SimFloat step   = layer->TransitionSpeed * dt;
 			if (layer->TransitionAlpha < target)
 				layer->TransitionAlpha = std::min(layer->TransitionAlpha + step, target);
 			else if (layer->TransitionAlpha > target)
@@ -98,7 +97,7 @@ WorldCameraState CameraManager::Resolve() const
 		}
 
 		// Blend pass — BlendMix layers contribute a weighted average.
-		float   totalWeight = 0.0f;
+		SimFloat totalWeight = 0.0f;
 		WorldCameraState blended;
 
 		for (uint8_t l = 0; l < slot.Count; ++l)
@@ -106,7 +105,7 @@ WorldCameraState CameraManager::Resolve() const
 			const CameraLayer* layer = slot.Layers[l];
 			if (!layer->Active || layer->TransitionAlpha <= 0.0f || !layer->BlendFn) continue;
 
-			const float w = layer->TransitionAlpha *
+			const SimFloat w = layer->TransitionAlpha *
 				(layer->BlendWeightFn ? layer->BlendWeightFn(const_cast<CameraLayer*>(layer)) : 1.0f);
 			if (w <= 0.0f) continue;
 
@@ -123,7 +122,7 @@ WorldCameraState CameraManager::Resolve() const
 
 		if (totalWeight > 0.0f)
 		{
-			const float inv  = 1.0f / totalWeight;
+			const SimFloat inv = 1.0f / totalWeight;
 			state.Position   = blended.Position * inv;
 			state.Yaw        = blended.Yaw      * inv;
 			state.Pitch      = blended.Pitch    * inv;

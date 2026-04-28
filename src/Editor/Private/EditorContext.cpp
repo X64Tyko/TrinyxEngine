@@ -86,6 +86,12 @@ void EditorContext::Initialize(TrinyxEngine* engine, LogicThreadBase* logic, Mes
 		LoadScene(scenePath, false);
 	}
 
+	// Force one logic tick so the renderer gets a valid initial transform snapshot.
+	if (LogicPtr && !LogicPtr->IsRunning())
+	{
+		LogicPtr->TickOnce();
+	}
+
 	// Register all panels
 	AddPanel<WorldOutlinerPanel>();
 	AddPanel<DetailsPanel>();
@@ -153,13 +159,13 @@ void EditorContext::LoadScene(const std::string& path, bool bReset)
 // -----------------------------------------------------------------------
 
 /// Find a float field pointer by debug name in an archetype's field array table.
-static float* FindFieldFloat(Archetype* arch, void** fieldArrayTable, const char* name, uint32_t localIndex)
+static SimFloat* FindFieldFloat(Archetype* arch, void** fieldArrayTable, const char* name, uint32_t localIndex)
 {
 	const auto& cfr = ReflectionRegistry::Get();
 
 	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 	{
-		if (fdesc.valueType != FieldValueType::Float32) continue;
+		if (fdesc.valueType != FieldValueType::Float32 && fdesc.valueType != FieldValueType::Fixed32) continue;
 		if (!fieldArrayTable[fdesc.fieldSlotIndex]) continue;
 
 		const auto* fields    = cfr.GetFields(fdesc.componentID);
@@ -169,40 +175,40 @@ static float* FindFieldFloat(Archetype* arch, void** fieldArrayTable, const char
 
 		if (fieldName && std::strcmp(fieldName, name) == 0)
 		{
-			return static_cast<float*>(fieldArrayTable[fdesc.fieldSlotIndex]) + localIndex;
+			return static_cast<SimFloat*>(fieldArrayTable[fdesc.fieldSlotIndex]) + localIndex;
 		}
 	}
 	return nullptr;
 }
 
 /// Build a column-major 4x4 model matrix from position, quaternion rotation, and scale.
-static void BuildModelMatrix(float* m, float px, float py, float pz,
-							 float qx, float qy, float qz, float qw,
-							 float sx, float sy, float sz)
+static void BuildModelMatrix(float* m, SimFloat px, SimFloat py, SimFloat pz,
+							 SimFloat qx, SimFloat qy, SimFloat qz, SimFloat qw,
+							 SimFloat sx, SimFloat sy, SimFloat sz)
 {
 	// Quaternion to rotation matrix (column-major)
-	float xx = qx * qx, yy = qy * qy, zz = qz * qz;
-	float xy = qx * qy, xz = qx * qz, yz = qy * qz;
-	float wx = qw * qx, wy = qw * qy, wz = qw * qz;
+	SimFloat xx = qx * qx, yy = qy * qy, zz = qz * qz;
+	SimFloat xy = qx * qy, xz = qx * qz, yz = qy * qz;
+	SimFloat wx = qw * qx, wy = qw * qy, wz = qw * qz;
 
-	m[0] = (1.0f - 2.0f * (yy + zz)) * sx;
-	m[1] = (2.0f * (xy + wz)) * sx;
-	m[2] = (2.0f * (xz - wy)) * sx;
+	m[0] = ((1 - 2 * (yy + zz)) * sx).ToFloat();
+	m[1] = ((2 * (xy + wz)) * sx).ToFloat();
+	m[2] = ((2 * (xz - wy)) * sx).ToFloat();
 	m[3] = 0.0f;
 
-	m[4] = (2.0f * (xy - wz)) * sy;
-	m[5] = (1.0f - 2.0f * (xx + zz)) * sy;
-	m[6] = (2.0f * (yz + wx)) * sy;
+	m[4] = ((2 * (xy - wz)) * sy).ToFloat();
+	m[5] = ((1 - 2 * (xx + zz)) * sy).ToFloat();
+	m[6] = ((2 * (yz + wx)) * sy).ToFloat();
 	m[7] = 0.0f;
 
-	m[8]  = (2.0f * (xz + wy)) * sz;
-	m[9]  = (2.0f * (yz - wx)) * sz;
-	m[10] = (1.0f - 2.0f * (xx + yy)) * sz;
+	m[8]  = ((2 * (xz + wy)) * sz).ToFloat();
+	m[9]  = ((2 * (yz - wx)) * sz).ToFloat();
+	m[10] = ((1 - 2 * (xx + yy)) * sz).ToFloat();
 	m[11] = 0.0f;
 
-	m[12] = px;
-	m[13] = py;
-	m[14] = pz;
+	m[12] = px.ToFloat();
+	m[13] = py.ToFloat();
+	m[14] = pz.ToFloat();
 	m[15] = 1.0f;
 }
 
@@ -230,28 +236,28 @@ void EditorContext::DrawGizmo()
 	uint32_t li = State.SelectedLocalIndex;
 
 	// Read transform fields
-	float* pPosX = FindFieldFloat(arch, fieldArrayTable, "PosX", li);
-	float* pPosY = FindFieldFloat(arch, fieldArrayTable, "PosY", li);
-	float* pPosZ = FindFieldFloat(arch, fieldArrayTable, "PosZ", li);
+	SimFloat* pPosX = FindFieldFloat(arch, fieldArrayTable, "PosX", li);
+	SimFloat* pPosY = FindFieldFloat(arch, fieldArrayTable, "PosY", li);
+	SimFloat* pPosZ = FindFieldFloat(arch, fieldArrayTable, "PosZ", li);
 	if (!pPosX || !pPosY || !pPosZ) return; // No position — can't place gizmo
 
-	float* pRotQx = FindFieldFloat(arch, fieldArrayTable, "RotQx", li);
-	float* pRotQy = FindFieldFloat(arch, fieldArrayTable, "RotQy", li);
-	float* pRotQz = FindFieldFloat(arch, fieldArrayTable, "RotQz", li);
-	float* pRotQw = FindFieldFloat(arch, fieldArrayTable, "RotQw", li);
+	SimFloat* pRotQx = FindFieldFloat(arch, fieldArrayTable, "RotQx", li);
+	SimFloat* pRotQy = FindFieldFloat(arch, fieldArrayTable, "RotQy", li);
+	SimFloat* pRotQz = FindFieldFloat(arch, fieldArrayTable, "RotQz", li);
+	SimFloat* pRotQw = FindFieldFloat(arch, fieldArrayTable, "RotQw", li);
 
-	float* pScaleX = FindFieldFloat(arch, fieldArrayTable, "ScaleX", li);
-	float* pScaleY = FindFieldFloat(arch, fieldArrayTable, "ScaleY", li);
-	float* pScaleZ = FindFieldFloat(arch, fieldArrayTable, "ScaleZ", li);
+	SimFloat* pScaleX = FindFieldFloat(arch, fieldArrayTable, "ScaleX", li);
+	SimFloat* pScaleY = FindFieldFloat(arch, fieldArrayTable, "ScaleY", li);
+	SimFloat* pScaleZ = FindFieldFloat(arch, fieldArrayTable, "ScaleZ", li);
 
 	// Safe defaults
-	float qx = pRotQx ? *pRotQx : 0.0f;
-	float qy = pRotQy ? *pRotQy : 0.0f;
-	float qz = pRotQz ? *pRotQz : 0.0f;
-	float qw = pRotQw ? *pRotQw : 1.0f;
-	float sx = pScaleX ? *pScaleX : 1.0f;
-	float sy = pScaleY ? *pScaleY : 1.0f;
-	float sz = pScaleZ ? *pScaleZ : 1.0f;
+	SimFloat qx = pRotQx ? *pRotQx : 0.0f;
+	SimFloat qy = pRotQy ? *pRotQy : 0.0f;
+	SimFloat qz = pRotQz ? *pRotQz : 0.0f;
+	SimFloat qw = pRotQw ? *pRotQw : 1.0f;
+	SimFloat sx = pScaleX ? *pScaleX : 1.0f;
+	SimFloat sy = pScaleY ? *pScaleY : 1.0f;
+	SimFloat sz = pScaleZ ? *pScaleZ : 1.0f;
 
 	float modelMatrix[16];
 	BuildModelMatrix(modelMatrix, *pPosX, *pPosY, *pPosZ, qx, qy, qz, qw, sx, sy, sz);
@@ -262,9 +268,9 @@ void EditorContext::DrawGizmo()
 
 	// ImGuizmo expects OpenGL-style projection (Y-up). Vulkan's projection has
 	// m[5] negated for Y-down NDC. Undo the flip for the gizmo.
-	float projFixup[16];
-	std::memcpy(projFixup, hdr->ProjectionMatrix.m, sizeof(projFixup));
-	projFixup[5] = -projFixup[5];
+	Matrix4f projFixup = hdr->ProjectionMatrix.CastTo<float>();
+	Matrix4f viewFixup = hdr->ViewMatrix.CastTo<float>();
+	projFixup[5]       = -projFixup[5];
 
 	// Map our enum to ImGuizmo operation
 	ImGuizmo::OPERATION op;
@@ -301,7 +307,7 @@ void EditorContext::DrawGizmo()
 
 	// Manipulate — modifies modelMatrix in-place if the user drags
 	bool manipulated = ImGuizmo::Manipulate(
-		hdr->ViewMatrix.m, projFixup,
+		viewFixup.m, projFixup.m,
 		op, mode, modelMatrix, nullptr, snapPtr);
 
 	if (manipulated)
@@ -311,9 +317,9 @@ void EditorContext::DrawGizmo()
 		ImGuizmo::DecomposeMatrixToComponents(modelMatrix, translation, rotation, scale);
 
 		// Write position back
-		*pPosX = translation[0];
-		*pPosY = translation[1];
-		*pPosZ = translation[2];
+		*pPosX = SimFloat(translation[0]);
+		*pPosY = SimFloat(translation[1]);
+		*pPosZ = SimFloat(translation[2]);
 
 		// Convert Euler angles (degrees) back to quaternion
 		if (pRotQx && pRotQy && pRotQz && pRotQw)
@@ -326,16 +332,16 @@ void EditorContext::DrawGizmo()
 			float cy = std::cos(ry), sy2 = std::sin(ry);
 			float cz = std::cos(rz), sz2 = std::sin(rz);
 
-			*pRotQw = cx * cy * cz + sx2 * sy2 * sz2;
-			*pRotQx = sx2 * cy * cz - cx * sy2 * sz2;
-			*pRotQy = cx * sy2 * cz + sx2 * cy * sz2;
-			*pRotQz = cx * cy * sz2 - sx2 * sy2 * cz;
+			*pRotQw = SimFloat(cx * cy * cz + sx2 * sy2 * sz2);
+			*pRotQx = SimFloat(sx2 * cy * cz - cx * sy2 * sz2);
+			*pRotQy = SimFloat(cx * sy2 * cz + sx2 * cy * sz2);
+			*pRotQz = SimFloat(cx * cy * sz2 - sx2 * sy2 * cz);
 		}
 
 		// Write scale back
-		if (pScaleX) *pScaleX = scale[0];
-		if (pScaleY) *pScaleY = scale[1];
-		if (pScaleZ) *pScaleZ = scale[2];
+		if (pScaleX) *pScaleX = SimFloat(scale[0]);
+		if (pScaleY) *pScaleY = SimFloat(scale[1]);
+		if (pScaleZ) *pScaleZ = SimFloat(scale[2]);
 
 		State.bSceneDirty = true;
 

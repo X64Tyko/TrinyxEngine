@@ -97,11 +97,11 @@ void LogicThread::PhysicsLoop(const SimFloat fixedStepTime)
 	if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
 	{
 		PhysicsPtr->FlushPendingBodies(RegistryPtr);
-		PhysicsPtr->PushKinematicTransforms(RegistryPtr, fixedStepTime);
+		PhysicsPtr->PushKinematicTransforms(RegistryPtr, fixedStepTime.ToFloat());
 		ScalarPhysicsStepBatch.Execute(fixedStepTime * PhysicsDivizor);
 		TrinyxJobs::Dispatch([this, fixedStepTime](uint32_t)
 		{
-			PhysicsPtr->Step(fixedStepTime * PhysicsDivizor);
+			PhysicsPtr->Step(fixedStepTime.ToFloat() * PhysicsDivizor);
 		}, PhysicsPtr->GetJoltPhysCounter(), TrinyxJobs::Queue::Physics);
 	}
 
@@ -141,16 +141,16 @@ bool LogicThread::FixedUpdate(const uint64_t perfFrequency, const SimFloat fixed
 			}
 
 			FpsFixedCount++;
-			FpsFixedTimer += fixedStepTime;
+			FpsFixedTimer += fixedStepTime.ToDouble();
 
 			Rollback.RecordFrameInput(*this);
 
 			PhysicsLoop(fixedStepTime);
 
-			Accumulator.store(Accumulator.load(std::memory_order_relaxed) + fixedStepTime,
+			Accumulator.store(Accumulator.load(std::memory_order_relaxed) + fixedStepTime.ToDouble(),
 							  std::memory_order_relaxed);
 			++steps;
-			SimulationTime += fixedStepTime;
+			SimulationTime += fixedStepTime.ToDouble();
 
 			ProcessVizInput(fixedStepTime);
 
@@ -256,20 +256,20 @@ void LogicThread::ProcessVizInput(SimFloat dt)
 	CamYaw   += VizInput->GetMouseDX() * CamMouseSens;
 	CamPitch -= VizInput->GetMouseDY() * CamMouseSens;
 
-	constexpr float MaxPitch = 1.5533f;
+	constexpr SimFloat MaxPitch = SimFloat(1.5533f);
 	if (CamPitch > MaxPitch) CamPitch = MaxPitch;
 	if (CamPitch < -MaxPitch) CamPitch = -MaxPitch;
 
-	float sinYaw   = std::sin(CamYaw);
-	float cosYaw   = std::cos(CamYaw);
-	float sinPitch = std::sin(CamPitch);
-	float cosPitch = std::cos(CamPitch);
+	SimFloat sinYaw   = FastSin(CamYaw);
+	SimFloat cosYaw   = FastCos(CamYaw);
+	SimFloat sinPitch = FastSin(CamPitch);
+	SimFloat cosPitch = FastCos(CamPitch);
 
 	Vector3 forward{sinYaw * cosPitch, sinPitch, -cosYaw * cosPitch};
-	Vector3 right{cosYaw, 0.0f, sinYaw};
-	Vector3 up{0.0f, 1.0f, 0.0f};
+	Vector3 right{cosYaw, 0, sinYaw};
+	Vector3 up{0, 1, 0};
 
-	Vector3 moveDir{0.0f, 0.0f, 0.0f};
+	Vector3 moveDir{0, 0, 0};
 
 	if (VizInput->IsActionDown(Action::MoveForward)) moveDir = moveDir + forward;
 	if (VizInput->IsActionDown(Action::MoveBackward)) moveDir = moveDir - forward;
@@ -278,8 +278,8 @@ void LogicThread::ProcessVizInput(SimFloat dt)
 	if (VizInput->IsActionDown(Action::MoveUp)) moveDir = moveDir + up;
 	if (VizInput->IsActionDown(Action::MoveDown)) moveDir = moveDir - up;
 
-	float moveLen = moveDir.Length();
-	if (moveLen > 0.001f) CamPos = CamPos + moveDir * (static_cast<float>(dt) * CamMoveSpeed / moveLen);
+	SimFloat moveLen = moveDir.Length();
+	if (moveLen > SimFloat(0.001f)) CamPos = CamPos + moveDir * (dt * CamMoveSpeed / moveLen).ToFloat();
 }
 
 // ---------------------------------------------------------------------------
@@ -320,9 +320,9 @@ void LogicThread::PublishCompletedFrame()
 	header->ActiveEntityCount      = static_cast<uint32_t>(RegistryPtr->GetTotalEntityCount());
 	header->TotalAllocatedEntities = static_cast<uint32_t>(RegistryPtr->GetTotalEntityCount());
 
-	float activeFOV   = 60.0f;
-	float activeYaw   = CamYaw, activePitch = CamPitch;
-	Vector3 activePos = CamPos;
+	SimFloat activeFOV = 60.0f;
+	SimFloat activeYaw = CamYaw, activePitch = CamPitch;
+	Vector3 activePos  = CamPos;
 
 	if (LocalCameraManager)
 	{
@@ -336,14 +336,14 @@ void LogicThread::PublishCompletedFrame()
 		}
 	}
 
-	float AspectRatio = static_cast<float>(WindowWidth) / static_cast<float>(WindowHeight);
-	float Fov         = activeFOV * 3.14159f / 180.0f;
-	float ZNear       = 0.1f;
-	float ZFar        = 5000.0f;
+	SimFloat AspectRatio = static_cast<SimFloat>(WindowWidth) / static_cast<SimFloat>(WindowHeight);
+	SimFloat Fov         = activeFOV * SimFloat(3.14159f) / SimFloat(180.0f);
+	SimFloat ZNear       = SimFloat(0.1f);
+	SimFloat ZFar        = SimFloat(5000.0f);
 
-	float F  = 1.0f / std::tan(Fov * 0.5f);
-	float dz = ZNear - ZFar;
-	auto& P  = header->ProjectionMatrix;
+	SimFloat F  = 1.0f / FastTan(Fov * SimFloat(0.5f));
+	SimFloat dz = ZNear - ZFar;
+	auto& P     = header->ProjectionMatrix;
 
 	P.m[0]  = F / AspectRatio;
 	P.m[1]  = 0.0f;
@@ -362,10 +362,10 @@ void LogicThread::PublishCompletedFrame()
 	P.m[14] = (ZFar * ZNear) / dz;
 	P.m[15] = 0.0f;
 
-	float sinYaw   = std::sin(activeYaw);
-	float cosYaw   = std::cos(activeYaw);
-	float sinPitch = std::sin(activePitch);
-	float cosPitch = std::cos(activePitch);
+	SimFloat sinYaw   = FastSin(activeYaw);
+	SimFloat cosYaw   = FastCos(activeYaw);
+	SimFloat sinPitch = FastSin(activePitch);
+	SimFloat cosPitch = FastCos(activePitch);
 
 	Vector3 camForward{sinYaw * cosPitch, sinPitch, -cosYaw * cosPitch};
 	Vector3 camRight{cosYaw, 0.0f, sinYaw};
@@ -375,9 +375,10 @@ void LogicThread::PublishCompletedFrame()
 		camRight.x * camForward.y - camRight.y * camForward.x
 	};
 
-	float tx = -(camRight.x * activePos.x + camRight.y * activePos.y + camRight.z * activePos.z);
-	float ty = -(camUp.x * activePos.x + camUp.y * activePos.y + camUp.z * activePos.z);
-	float tz = (camForward.x * activePos.x + camForward.y * activePos.y + camForward.z * activePos.z);
+	Vector3 activePosF{activePos.x, activePos.y, activePos.z};
+	SimFloat tx = -(camRight.x * activePosF.x + camRight.y * activePosF.y + camRight.z * activePosF.z);
+	SimFloat ty = -(camUp.x * activePosF.x + camUp.y * activePosF.y + camUp.z * activePosF.z);
+	SimFloat tz = (camForward.x * activePosF.x + camForward.y * activePosF.y + camForward.z * activePosF.z);
 
 	auto& V = header->ViewMatrix;
 	V.m[0]  = camRight.x;
@@ -412,7 +413,7 @@ void LogicThread::PublishCompletedFrame()
 
 	header->SunDirection     = Vector3{0.0f, -1.0f, 0.0f};
 	header->SunColor         = Vector3{1.0f, 1.0f, 1.0f};
-	header->AmbientIntensity = 0.2f;
+	header->AmbientIntensity = SimFloat(0.2f);
 
 	LastCompletedFrame.store(FrameNumber, std::memory_order_release);
 	RegistryPtr->LastPublishedFrame = FrameNumber;
@@ -483,6 +484,45 @@ void LogicThread::TrackFPS()
 		FpsFixedCount = 0;
 		FpsFixedTimer = 0.0;
 	}
+}
+
+// ---------------------------------------------------------------------------
+// TickOnce — synchronous one-frame tick for editor
+// ---------------------------------------------------------------------------
+TMPL
+void LogicThread::TickOnce()
+{
+	// Ensure no background thread is running (we are single-threaded here)
+	if (bIsRunning.load(std::memory_order_acquire)) return; // already running; don't interfere
+
+	const double fixedStep = ConfigPtr->GetFixedStepTime();
+
+	// Process deferred removals
+	RegistryPtr->ProcessDeferredDestructions();
+	if (ConstructsPtr) ConstructsPtr->ProcessDeferredDestructions();
+
+	// Swap input buffers once (with zero simulated time)
+	SimInput->Swap();
+	VizInput->Swap();
+
+	// Accumulate exactly one fixed step
+	double acc = Accumulator.load(std::memory_order_relaxed);
+	acc        -= fixedStep;
+	if (acc < -0.25) acc = -0.25;
+	Accumulator.store(acc, std::memory_order_relaxed);
+
+	// Do one fixed step using the same internal loop
+	// We'll call FixedUpdate with dt = fixedStep. It will run once because acc <= 0.
+	uint64_t dummy = SDL_GetPerformanceCounter();
+	FixedUpdate(dummy, static_cast<SimFloat>(fixedStep), 1, dummy);
+
+	// After FixedUpdate, the accumulator is 0 or positive because it did one step.
+	// Now run the slow update path (like the main loop does after FixedUpdate returns false)
+	ScalarUpdate(static_cast<SimFloat>(fixedStep));
+	ScalarUpdateBatch.Execute(static_cast<SimFloat>(fixedStep));
+
+	// The temporal frame is already written by PublishCompletedFrame inside FixedUpdate.
+	// LastCompletedFrame is increased.
 }
 
 

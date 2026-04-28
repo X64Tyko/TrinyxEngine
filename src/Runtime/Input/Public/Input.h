@@ -4,6 +4,8 @@
 #include <SDL3/SDL_scancode.h>
 #include <SDL3/SDL_timer.h>
 
+#include "Types.h"
+
 // ── Actions ──────────────────────────────────────────────────────────────────
 // Named actions that game logic queries. Decoupled from physical keys.
 enum class Action : uint8_t
@@ -73,8 +75,8 @@ struct InputBuffer
 	alignas(64) uint8_t KeyState[2][64]{};
 
 	// ── Mouse state (continuous) ─────────────────────────────────────────
-	alignas(16) float MouseDX[2]{};
-	float MouseDY[2]{};
+	alignas(16) SimFloat MouseDX[2]{};
+	SimFloat MouseDY[2]{};
 	uint8_t MouseButtons[2]{}; // bitmask per slot: bit N = button N+1
 
 	// ── Slot management ──────────────────────────────────────────────────
@@ -124,7 +126,7 @@ struct InputBuffer
 		}
 	}
 
-	void AddMouseDelta(float dx, float dy)
+	void AddMouseDelta(SimFloat dx, SimFloat dy)
 	{
 		uint8_t slot  = WriteSlot.load(std::memory_order_relaxed);
 		MouseDX[slot] += dx;
@@ -146,7 +148,7 @@ struct InputBuffer
 	// Same write slot as Sentinel — on a server, NetThread is the sole writer.
 
 	/// Replace the entire key state + mouse delta + mouse buttons for the current write slot.
-	void InjectState(const uint8_t* keyData, float mouseDX, float mouseDY, uint8_t mouseButtons = 0)
+	void InjectState(const uint8_t* keyData, SimFloat mouseDX, SimFloat mouseDY, uint8_t mouseButtons = 0)
 	{
 		uint8_t slot = WriteSlot.load(std::memory_order_relaxed);
 		std::memcpy(KeyState[slot], keyData, 64);
@@ -218,8 +220,8 @@ struct InputBuffer
 		return false;
 	}
 
-	float GetMouseDX() const { return MouseDX[ReadSlot]; }
-	float GetMouseDY() const { return MouseDY[ReadSlot]; }
+	SimFloat GetMouseDX() const { return MouseDX[ReadSlot]; }
+	SimFloat GetMouseDY() const { return MouseDY[ReadSlot]; }
 
 	// Network-side snapshot — copy the ReadSlot key state and mouse button mask
 	// for sending in an InputFrame. Call NetInput->Swap() before this to ensure

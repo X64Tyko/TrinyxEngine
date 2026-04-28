@@ -90,16 +90,16 @@ static JPH::ObjectLayer ToJoltLayer(uint32_t motion)
 // Create a Jolt shape from JoltBody component settings (single entity, scalar access).
 // Returns a ref-counted shape pointer. Jolt handles deduplication internally.
 static JPH::RefConst<JPH::Shape> CreateShapeFromSettings(
-	uint32_t shapeType, float hx, float hy, float hz)
+	uint32_t shapeType, SimFloat hx, SimFloat hy, SimFloat hz)
 {
 	switch (shapeType)
 	{
 		case 1: // Sphere
-			return new JPH::SphereShape(hx);
+			return new JPH::SphereShape(hx.ToFloat());
 		case 2: // Capsule
-			return new JPH::CapsuleShape(hy, hx);
+			return new JPH::CapsuleShape(hy.ToFloat(), hx.ToFloat());
 		default: // Box (0 or unknown)
-			return new JPH::BoxShape(JPH::Vec3(hx, hy, hz));
+			return new JPH::BoxShape(JPH::Vec3(hx.ToFloat(), hy.ToFloat(), hz.ToFloat()));
 	}
 }
 
@@ -336,26 +336,26 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 
 	const uint8_t bodySlot = CJoltBody<>::StaticTemporalIndex();
 	auto* slabShape        = static_cast<uint32_t*>(VC->GetFieldData(volHeader, bodySlot, 0));
-	auto* slabHalfX        = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 1));
-	auto* slabHalfY        = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 2));
-	auto* slabHalfZ        = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 3));
+	auto* slabHalfX        = static_cast<SimFloat*>(VC->GetFieldData(volHeader, bodySlot, 1));
+	auto* slabHalfY        = static_cast<SimFloat*>(VC->GetFieldData(volHeader, bodySlot, 2));
+	auto* slabHalfZ        = static_cast<SimFloat*>(VC->GetFieldData(volHeader, bodySlot, 3));
 	auto* slabMotion       = static_cast<uint32_t*>(VC->GetFieldData(volHeader, bodySlot, 4));
-	auto* slabMass         = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 5));
-	auto* slabFriction     = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 6));
-	auto* slabRestit       = static_cast<float*>(VC->GetFieldData(volHeader, bodySlot, 7));
+	auto* slabMass         = static_cast<SimFloat*>(VC->GetFieldData(volHeader, bodySlot, 5));
+	auto* slabFriction     = static_cast<SimFloat*>(VC->GetFieldData(volHeader, bodySlot, 6));
+	auto* slabRestit       = static_cast<SimFloat*>(VC->GetFieldData(volHeader, bodySlot, 7));
 	auto* slabIsSensor     = static_cast<uint32_t*>(VC->GetFieldData(volHeader, bodySlot, 8));
 
 	const uint8_t transSlot = CTransform<>::StaticTemporalIndex();
-	auto* slabPosX          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 0));
-	auto* slabPosY          = static_cast<float*>(TC->GetFrameHeader() ? TC->GetFieldData(tmpHeader, transSlot, 1) : nullptr); // Safety
-	auto* slabPosZ          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 2));
-	auto* slabRotX          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 3));
-	auto* slabRotY          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 4));
-	auto* slabRotZ          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 5));
-	auto* slabRotW          = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 6));
+	auto* slabPosX          = static_cast<SimFloat*>(TC->GetFieldData(tmpHeader, transSlot, 0));
+	auto* slabPosY          = static_cast<SimFloat*>(TC->GetFrameHeader() ? TC->GetFieldData(tmpHeader, transSlot, 1) : nullptr); // Safety
+	auto* slabPosZ          = static_cast<SimFloat*>(TC->GetFieldData(tmpHeader, transSlot, 2));
+	auto* slabRotX          = static_cast<SimFloat*>(TC->GetFieldData(tmpHeader, transSlot, 3));
+	auto* slabRotY          = static_cast<SimFloat*>(TC->GetFieldData(tmpHeader, transSlot, 4));
+	auto* slabRotZ          = static_cast<SimFloat*>(TC->GetFieldData(tmpHeader, transSlot, 5));
+	auto* slabRotW          = static_cast<SimFloat*>(TC->GetFieldData(tmpHeader, transSlot, 6));
 
 	// Re-get slabPosY correctly
-	slabPosY = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 1));
+	slabPosY = static_cast<SimFloat*>(TC->GetFieldData(tmpHeader, transSlot, 1));
 
 	if (!slabShape || !slabPosX) return; // Fields not allocated yet
 
@@ -386,17 +386,17 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 		uint32_t shapeType = slabShape[idx];
 
 		// Read JoltBody fields directly from slab
-		float hx          = slabHalfX[idx];
-		float hy          = slabHalfY[idx];
-		float hz          = slabHalfZ[idx];
+		float hx          = slabHalfX[idx].ToFloat();
+		float hy          = slabHalfY[idx].ToFloat();
+		float hz          = slabHalfZ[idx].ToFloat();
 		uint32_t motion   = slabMotion[idx];
-		float mass        = slabMass[idx];
-		float friction    = slabFriction[idx];
-		float restitution = slabRestit[idx];
+		float mass        = slabMass[idx].ToFloat();
+		float friction    = slabFriction[idx].ToFloat();
+		float restitution = slabRestit[idx].ToFloat();
 
 		// Read initial transform from slab
-		JPH::RVec3 pos(slabPosX[idx], slabPosY[idx], slabPosZ[idx]);
-		JPH::Quat rot(slabRotX[idx], slabRotY[idx], slabRotZ[idx], slabRotW[idx]);
+		JPH::RVec3 pos(slabPosX[idx].ToFloat(), slabPosY[idx].ToFloat(), slabPosZ[idx].ToFloat());
+		JPH::Quat rot(slabRotX[idx].ToFloat(), slabRotY[idx].ToFloat(), slabRotZ[idx].ToFloat(), slabRotW[idx].ToFloat());
 
 		// Guard against zero/denorm quaternions (zero-initialized fields
 		// or imprecise scene file values). Jolt asserts on unnormalized quats.
@@ -490,13 +490,13 @@ void JoltPhysics::PushKinematicTransforms(Registry* reg, float dt)
 	TemporalFrameHeader* tmpHeader = TC->GetFrameHeader();
 
 	const uint8_t transSlot = CTransform<>::StaticTemporalIndex();
-	auto* posX              = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 0));
-	auto* posY              = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 1));
-	auto* posZ              = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 2));
-	auto* rotX              = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 3));
-	auto* rotY              = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 4));
-	auto* rotZ              = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 5));
-	auto* rotW              = static_cast<float*>(TC->GetFieldData(tmpHeader, transSlot, 6));
+	auto* posX              = static_cast<SimFloat*>(TC->GetFieldData(tmpHeader, transSlot, 0));
+	auto* posY              = static_cast<SimFloat*>(TC->GetFieldData(tmpHeader, transSlot, 1));
+	auto* posZ              = static_cast<SimFloat*>(TC->GetFieldData(tmpHeader, transSlot, 2));
+	auto* rotX              = static_cast<SimFloat*>(TC->GetFieldData(tmpHeader, transSlot, 3));
+	auto* rotY              = static_cast<SimFloat*>(TC->GetFieldData(tmpHeader, transSlot, 4));
+	auto* rotZ              = static_cast<SimFloat*>(TC->GetFieldData(tmpHeader, transSlot, 5));
+	auto* rotW              = static_cast<SimFloat*>(TC->GetFieldData(tmpHeader, transSlot, 6));
 
 	auto* VC                       = reg->GetVolatileCache();
 	TemporalFrameHeader* volHeader = VC->GetFrameHeader();
@@ -508,8 +508,8 @@ void JoltPhysics::PushKinematicTransforms(Registry* reg, float dt)
 		if (EntityToBody[idx].IsInvalid()) continue;
 		if (slabMotion[idx] != JoltMotion::Kinematic) continue;
 
-		JPH::RVec3 pos(posX[idx], posY[idx], posZ[idx]);
-		JPH::Quat rot(rotX[idx], rotY[idx], rotZ[idx], rotW[idx]);
+		JPH::RVec3 pos(posX[idx].ToFloat(), posY[idx].ToFloat(), posZ[idx].ToFloat());
+		JPH::Quat rot(rotX[idx].ToFloat(), rotY[idx].ToFloat(), rotZ[idx].ToFloat(), rotW[idx].ToFloat());
 
 		if (rot.LengthSq() < 1.0e-6f) rot = JPH::Quat::sIdentity();
 		else rot                          = rot.Normalized();
@@ -603,7 +603,7 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 		float* fieldPtr = fieldScratch[i].data();
 		TrinyxJobs::Dispatch([this, TC, i, fieldPtr](uint32_t)
 		{
-			float* fieldArr = static_cast<float*>(TC->GetFieldData(TC->GetFrameHeader(), CTransform<>::StaticTemporalIndex(), i));
+			SimFloat* fieldArr = static_cast<SimFloat*>(TC->GetFieldData(TC->GetFrameHeader(), CTransform<>::StaticTemporalIndex(), i));
 			int idx         = 0;
 			for (auto& Entity : syncList)
 			{
@@ -612,8 +612,8 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 					idx++;
 					continue;
 				}
-				float* field = fieldArr + Entity.offset;
-				*field       = fieldPtr[idx++];
+				SimFloat* field = fieldArr + Entity.offset;
+				*field          = SimFloat(fieldPtr[idx++]);
 			}
 		}, &writebackCounter, TrinyxJobs::Queue::Logic);
 	}

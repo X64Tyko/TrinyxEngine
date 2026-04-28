@@ -39,24 +39,24 @@ public:
 			TargetCube = reg->Create<CubeEntity<>>([](CubeEntity<>& v)
 			{
 				v.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive | TemporalFlagBits::Replicated);
-				v.transform.PosX = 5.0f;
-				v.transform.PosY = 1.0f;
-				v.transform.PosZ = -6.0f;
+				v.transform.PosX = SimFloat(5.0f);
+				v.transform.PosY = SimFloat(1.0f);
+				v.transform.PosZ = SimFloat(-6.0f);
 				v.transform.Rotation.SetIdentity();
-				v.scale.ScaleX         = 1.0f;
-				v.scale.ScaleY         = 1.0f;
-				v.scale.ScaleZ         = 1.0f;
-				v.color.R              = 1.0f;
-				v.color.G              = 0.3f;
-				v.color.B              = 0.1f;
-				v.color.A              = 1.0f;
+				v.scale.ScaleX         = SimFloat(1.0f);
+				v.scale.ScaleY         = SimFloat(1.0f);
+				v.scale.ScaleZ         = SimFloat(1.0f);
+				v.color.R              = SimFloat(1.0f);
+				v.color.G              = SimFloat(0.3f);
+				v.color.B              = SimFloat(0.1f);
+				v.color.A              = SimFloat(1.0f);
 				v.mesh.MeshID          = 1u;
 				v.physBody.Shape       = JoltShapeType::Box;
-				v.physBody.HalfExtentX = 0.5f;
-				v.physBody.HalfExtentY = 0.5f;
-				v.physBody.HalfExtentZ = 0.5f;
+				v.physBody.HalfExtentX = SimFloat(0.5f);
+				v.physBody.HalfExtentY = SimFloat(0.5f);
+				v.physBody.HalfExtentZ = SimFloat(0.5f);
 				v.physBody.Motion      = JoltMotion::Dynamic;
-				v.physBody.Mass        = 10.0f;
+				v.physBody.Mass        = SimFloat(10.0f);
 			});
 
 			// Spawn the trigger volume centered at (5, 1, 0), slightly larger than the cube.
@@ -142,7 +142,7 @@ private:
 		const uint16_t typeHash   = ReflectionRegistry::ConstructTypeHashFromName("PlayerConstruct");
 
 		// Stagger spawn positions so players don't overlap.
-		const float spawnX = (SpawnCounter % 2 == 0) ? -2.0f : 2.0f;
+		const SimFloat spawnX = (SpawnCounter % 2 == 0) ? -2.0f : 2.0f;
 		++SpawnCounter;
 
 		// Use PreInit callable so spawn position is set BEFORE Initialize() seeds JoltCharacter.
@@ -172,7 +172,7 @@ private:
 
 		soul.ClaimBody(ref);
 		LOG_INFO_F("[ArenaMode] Spawned body for ownerID=%u at (%.1f,5,0) (networked=%s)",
-				   soul.GetOwnerID(), spawnX, repl ? "yes" : "no");
+				   soul.GetOwnerID(), spawnX.ToFloat(), repl ? "yes" : "no");
 	}
 };
 

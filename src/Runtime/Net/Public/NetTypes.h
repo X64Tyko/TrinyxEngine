@@ -5,6 +5,7 @@
 #include <type_traits>
 
 #include "RegistryTypes.h" // NetOwnerID_Bits
+#include "Types.h"
 
 // ---------------------------------------------------------------------------
 // NetMessageType — discriminator for network messages.
@@ -205,14 +206,14 @@ struct EntitySpawnPayload
 	uint32_t Manifest;  // EntityNetManifest.Value — ClassType + flags
 
 	// TransRot (Temporal)
-	float PosX, PosY, PosZ;
-	float RotQx, RotQy, RotQz, RotQw;
+	SimFloat PosX, PosY, PosZ;
+	SimFloat RotQx, RotQy, RotQz, RotQw;
 
 	// Scale (Volatile)
-	float ScaleX, ScaleY, ScaleZ;
+	SimFloat ScaleX, ScaleY, ScaleZ;
 
 	// Color (Volatile)
-	float ColorR, ColorG, ColorB, ColorA;
+	SimFloat ColorR, ColorG, ColorB, ColorA;
 
 	// Mesh (Volatile)
 	uint32_t MeshID;
@@ -617,8 +618,8 @@ static_assert(sizeof(NetInputEvent) == 8, "NetInputEvent must be 8 bytes");
 struct InputSnapshot
 {
 	uint8_t KeyState[64] = {}; // held-key bitfield (all 512 SDL scancodes)
-	float MouseDX        = 0.f;
-	float MouseDY        = 0.f;
+	SimFloat MouseDX     = 0.f;
+	SimFloat MouseDY     = 0.f;
 	uint8_t MouseButtons = 0;
 	uint8_t _Pad[3]      = {};
 };

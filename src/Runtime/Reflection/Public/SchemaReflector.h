@@ -153,6 +153,8 @@ constexpr FieldValueType DeduceFieldValueType()
 	else if constexpr (std::is_same_v<T, uint32_t>) return FieldValueType::Uint32;
 	else if constexpr (std::is_same_v<T, int64_t>) return FieldValueType::Int64;
 	else if constexpr (std::is_same_v<T, uint64_t>) return FieldValueType::Uint64;
+	else if constexpr (std::is_same_v<T, SimFloatImpl<Fixed32>>) return FieldValueType::Fixed32;
+	else if constexpr (std::is_same_v<T, SimFloatImpl<float>>) return FieldValueType::Float32;
 	else return FieldValueType::Unknown;
 }
 

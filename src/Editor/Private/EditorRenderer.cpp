@@ -538,13 +538,13 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 // its world's camera, but the FrameSync's scratch buffer addresses.
 // -----------------------------------------------------------------------
 
-static void MultMat4(float* out, const float* A, const float* B)
+static void MultMat4(float* out, const SimFloat* A, const SimFloat* B)
 {
 	for (int col = 0; col < 4; ++col)
 		for (int row = 0; row < 4; ++row)
 		{
 			float sum = 0.0f;
-			for (int k = 0; k < 4; ++k) sum += A[k * 4 + row] * B[col * 4 + k];
+			for (int k = 0; k < 4; ++k) sum += (A[k * 4 + row] * B[col * 4 + k]).ToFloat();
 			out[col * 4 + row] = sum;
 		}
 }

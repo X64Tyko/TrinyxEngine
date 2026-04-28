@@ -44,7 +44,7 @@ void OwnerNet::WriteEntitySpawnFields([[maybe_unused]] Registry* reg, EntityReco
 		void* fieldBase = fieldArrayTable[fdesc.fieldSlotIndex];
 		if (!fieldBase) continue;
 
-		auto* floatArr = static_cast<float*>(fieldBase);
+		auto* floatArr = static_cast<SimFloat*>(fieldBase);
 		auto* intArr   = static_cast<int32_t*>(fieldBase);
 		auto* uintArr  = static_cast<uint32_t*>(fieldBase);
 
@@ -510,9 +510,9 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 				{
 					const uint16_t now  = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
 					const uint16_t sent = msg.Header.Timestamp;
-					const float rtt     = static_cast<float>(static_cast<uint16_t>(now - sent));
+					const SimFloat rtt  = SimFloat(static_cast<uint16_t>(now - sent));
 					if (ci->RTT_ms <= 0.0f) ci->RTT_ms = rtt;
-					else ci->RTT_ms                    = ci->RTT_ms * 0.875f + rtt * 0.125f;
+					else ci->RTT_ms                    = ci->RTT_ms * SimFloat(0.875f) + rtt * SimFloat(0.125f);
 
 					if (ci->bOwnerInitiated
 						&& ci->RepState == ClientRepState::Synchronizing
@@ -591,7 +591,7 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 				const float stepMs = 1000.0f / static_cast<float>(tickRate);
 				// InputLead is kept on ConnectionInfo for diagnostics but is no longer used
 				// to offset packet frame tags — the logic thread stamps each frame exactly.
-				ci->InputLead = static_cast<uint32_t>(ci->RTT_ms * 0.5f / stepMs) + 2u;
+				ci->InputLead = static_cast<uint32_t>(ci->RTT_ms.ToFloat() * 0.5f / stepMs) + 2u;
 
 				// Guard: ClockSync (unreliable) can arrive after TravelNotify (reliable).
 				if (ci->RepState == ClientRepState::Synchronizing)
@@ -600,7 +600,7 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 					WorldBase* origWorld = WorldMap[ci->OwnerID];
 					Soul* soul       = (origWorld && origWorld->GetFlowManager()) ? origWorld->GetFlowManager()->GetSoul(ci->OwnerID) : nullptr;
 					LOG_NET_INFO_F(soul, "[ClientNet] ClockSync complete — InputLead=%u RTT=%.1fms → Loading",
-								   ci->InputLead, ci->RTT_ms);
+								   ci->InputLead, ci->RTT_ms.ToFloat());
 				}
 				else
 				{
