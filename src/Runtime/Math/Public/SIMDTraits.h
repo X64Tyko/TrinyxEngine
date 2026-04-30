@@ -389,6 +389,16 @@ struct SIMDTraits<int32_t, WIDTH>
 		return {_mm256_andnot_si256(_mm256_cmpeq_epi32(a, b), _mm256_set1_epi32(-1))};
 	}
 
+	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> GE(VecType a, VecType b)
+	{
+		return {_mm256_andnot_si256(_mm256_cmpgt_epi32(b, a), _mm256_set1_epi32(-1))};
+	}
+
+	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> LE(VecType a, VecType b)
+	{
+		return {_mm256_andnot_si256(_mm256_cmpgt_epi32(a, b), _mm256_set1_epi32(-1))};
+	}
+
 	static FORCE_INLINE VecType min(VecType a, VecType b) { return _mm256_min_epi32(a, b); }
 	static FORCE_INLINE VecType max(VecType a, VecType b) { return _mm256_max_epi32(a, b); }
 	static FORCE_INLINE VecType abs(VecType a) { return _mm256_abs_epi32(a); }
@@ -481,6 +491,18 @@ struct SIMDTraits<uint32_t, WIDTH>
 		return {_mm256_andnot_si256(_mm256_cmpeq_epi32(a, b), _mm256_set1_epi32(-1))};
 	}
 
+	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> GE(VecType a, VecType b)
+	{
+		// Flip sign bit to convert unsigned compare to signed
+		const __m256i signBit = _mm256_set1_epi32(0x80000000);
+		return {_mm256_cmpgt_epi32(_mm256_xor_si256(a, signBit), _mm256_xor_si256(b, signBit))};
+	}
+
+	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> LE(VecType a, VecType b)
+	{
+		return {_mm256_andnot_si256(GE(a, b).mask, _mm256_set1_epi32(-1))};
+	}
+
 	static FORCE_INLINE VecType min(VecType a, VecType b) { return _mm256_min_epu32(a, b); }
 	static FORCE_INLINE VecType max(VecType a, VecType b) { return _mm256_max_epu32(a, b); }
 
@@ -493,6 +515,11 @@ struct SIMDTraits<uint32_t, WIDTH>
 	{
 		SIMDTraits<int32_t, WIDTH>::StoreFlagsOr(flagsPtr, value);
 	}
+};
+
+template <FieldWidth WIDTH>
+struct SIMDTraits<unsigned int, WIDTH> : SIMDTraits<uint32_t, WIDTH>
+{
 };
 
 // --- Fixed32 (add/sub/cmp delegate to int32_t; mul/div scalar fallback) ----
