@@ -389,11 +389,9 @@ constexpr Fixed32 FixedSqrt(Fixed32 x)
 	// Compute integer sqrt of (raw * Scale) — result is raw of sqrt(x).
 	int64_t n  = static_cast<int64_t>(x.value) * Fixed32::Scale;
 	int64_t r  = n; // initial guess
-	int64_t r0 = 0;
 	// Newton's method for integer sqrt: r = (r + n/r) / 2
-	while (r != r0)
+	while (r > (n / r))
 	{
-		r0 = r;
 		r  = (r + n / r) >> 1;
 	}
 	return Fixed32::FromRaw(static_cast<int32_t>(r));

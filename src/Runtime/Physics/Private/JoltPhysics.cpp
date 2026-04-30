@@ -227,6 +227,9 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 					 *s_BPLayerInterface, *s_ObjVsBPFilter, *s_ObjPairFilter);
 
 	PhysSystem->SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f));
+	JPH::PhysicsSettings settings;
+	settings.mPenetrationSlop = 0.001f;
+	PhysSystem->SetPhysicsSettings(settings);
 
 	// --- Contact event ring + listener ---
 	ContactEventRing.Initialize(512);
@@ -618,13 +621,9 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 		}, &writebackCounter, TrinyxJobs::Queue::Logic);
 	}
 
-	// Because we're waiting for jobs to finish within the func we shouldn't need to worry about scope loss
-	TrinyxJobs::WaitForCounter(&writebackCounter, TrinyxJobs::Queue::Logic);
-
 	// Mark pulled entities dirty — PullActiveTransforms bypasses FieldProxy, so we set bits manually.
-	constexpr int32_t dirtyMask = static_cast<int32_t>(TemporalFlagBits::Dirty)
-		| static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
-	auto* flags = static_cast<int32_t*>(TC->GetFieldData(TC->GetFrameHeader(), CacheSlotMeta<>::StaticTemporalIndex(), 0));
+	constexpr int32_t dirtyMask = static_cast<int32_t>(TemporalFlagBits::Dirty) | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
+	auto* flags                 = static_cast<int32_t*>(TC->GetFieldData(TC->GetFrameHeader(), CacheSlotMeta<>::StaticTemporalIndex(), 0));
 	if (flags)
 	{
 		for (const auto& entity : syncList)
@@ -632,6 +631,9 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 			if (entity.offset != InvalidEntityIndex) flags[entity.offset] |= dirtyMask;
 		}
 	}
+
+	// Because we're waiting for jobs to finish within the func we shouldn't need to worry about scope loss
+	TrinyxJobs::WaitForCounter(&writebackCounter, TrinyxJobs::Queue::Logic);
 
 	TC->UnlockFrameWrite();
 }

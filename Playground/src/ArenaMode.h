@@ -35,12 +35,12 @@ public:
 			Registry* reg         = world->GetRegistry();
 			ConstructRegistry* cr = world->GetConstructRegistry();
 
-			// Spawn the target cube at (5, 1, 0).
+			// Spawn the target cube at (5, 2, 0).
 			TargetCube = reg->Create<CubeEntity<>>([](CubeEntity<>& v)
 			{
 				v.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive | TemporalFlagBits::Replicated);
 				v.transform.PosX = SimFloat(5.0f);
-				v.transform.PosY = SimFloat(1.0f);
+				v.transform.PosY = SimFloat(2.0f);
 				v.transform.PosZ = SimFloat(-6.0f);
 				v.transform.Rotation.SetIdentity();
 				v.scale.ScaleX         = SimFloat(1.0f);
@@ -108,9 +108,9 @@ public:
 
 		PlayerBeginResult result;
 		result.Accepted = true;
-		result.PosX     = 0.0f;
-		result.PosY     = 5.0f;
-		result.PosZ     = 0.0f;
+		result.PosX     = SimFloat(0.0f);
+		result.PosY     = SimFloat(5.0f);
+		result.PosZ     = SimFloat(0.0f);
 		result.Body     = soul.GetBodyHandle();
 		return result;
 	}
@@ -142,7 +142,7 @@ private:
 		const uint16_t typeHash   = ReflectionRegistry::ConstructTypeHashFromName("PlayerConstruct");
 
 		// Stagger spawn positions so players don't overlap.
-		const SimFloat spawnX = (SpawnCounter % 2 == 0) ? -2.0f : 2.0f;
+		const SimFloat spawnX = SimFloat((SpawnCounter % 2 == 0) ? -2.0f : 2.0f);
 		++SpawnCounter;
 
 		// Use PreInit callable so spawn position is set BEFORE Initialize() seeds JoltCharacter.
@@ -150,8 +150,8 @@ private:
 		{
 			p->SetOwnerSoul(&soul);
 			p->SpawnPosX = spawnX;
-			p->SpawnPosY = 5.0f;
-			p->SpawnPosZ = 0.0f;
+			p->SpawnPosY = SimFloat(5.0f);
+			p->SpawnPosZ = SimFloat(0.0f);
 		});
 
 		ConstructRef ref;
