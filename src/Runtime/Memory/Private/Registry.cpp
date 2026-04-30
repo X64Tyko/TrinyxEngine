@@ -803,7 +803,7 @@ bool Registry::CheckAndCorrectEntityTransform(const EntityTransformCorrection& c
 
 	// Read the resimmed position from the current write frame
 	constexpr SimFloat kThresholdSq = SimFloat(0.01f * 0.01f); // 1cm
-	SimFloat predictedX             = 0.f, predictedY = 0.f, predictedZ = 0.f;
+	SimFloat predictedX             = SimFloat(0.f), predictedY = SimFloat(0.f), predictedZ = SimFloat(0.f);
 	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 	{
 		if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;

@@ -22,8 +22,8 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 	std::uniform_real_distribution<float> colorDist(0.4f, 1.0f);
 
 	constexpr int Count     = 100; // increase to stress-test
-	constexpr float OriginY  = 20.0f;
-	constexpr float OriginZ  = -50.0f;
+	constexpr SimFloat OriginY = SimFloat(20.0f);
+	constexpr SimFloat OriginZ = SimFloat(-50.0f);
 
 	static std::vector<ProjectileSetup> setups;
 	setups.clear();
@@ -31,11 +31,11 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 
 	for (int i = 0; i < Count; ++i)
 	{
-		float speed = speedDist(gen);
+		SimFloat speed = speedDist(gen);
 		setups.push_back({
 			0.0f, OriginY, OriginZ,
-			spreadDist(gen), spreadDist(gen) + 10.0f, -speed,
-			colorDist(gen), colorDist(gen) * 0.5f, 0.1f, 1.0f
+			spreadDist(gen), spreadDist(gen) + SimFloat(10.0f), -speed,
+			colorDist(gen), colorDist(gen) * SimFloat(0.5f), SimFloat(0.1f), SimFloat(1.0f)
 		});
 	}
 
@@ -51,7 +51,7 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 	ASSERT_EQ(reg->GetTotalEntityCount() - before, static_cast<uint32_t>(Count));
 
 	LOG_ENG_ALWAYS_F("[Spawn_ProjectileBurst] %d projectiles from origin (0, %.0f, %.0f) (30s lifetime)",
-		Count, OriginY, OriginZ);
+					 Count, OriginY.ToFloat(), OriginZ.ToFloat());
 
 	std::thread([]()
 	{

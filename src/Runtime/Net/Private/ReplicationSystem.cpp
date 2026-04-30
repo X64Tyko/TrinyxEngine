@@ -567,13 +567,13 @@ void ReplicationSystem::DispatchCorrectionJobs(uint32_t frameNumber)
 	const ComponentTypeID transformSlot = CTransform<>::StaticTemporalIndex();
 
 	const auto* flags = static_cast<const int32_t*>(temporalCache->GetFieldData(temporalHdr, flagsSlot, 0));
-	const auto* posX  = static_cast<const float*>(temporalCache->GetFieldData(temporalHdr, transformSlot, 0));
-	const auto* posY  = static_cast<const float*>(temporalCache->GetFieldData(temporalHdr, transformSlot, 1));
-	const auto* posZ  = static_cast<const float*>(temporalCache->GetFieldData(temporalHdr, transformSlot, 2));
-	const auto* rotQx = static_cast<const float*>(temporalCache->GetFieldData(temporalHdr, transformSlot, 3));
-	const auto* rotQy = static_cast<const float*>(temporalCache->GetFieldData(temporalHdr, transformSlot, 4));
-	const auto* rotQz = static_cast<const float*>(temporalCache->GetFieldData(temporalHdr, transformSlot, 5));
-	const auto* rotQw = static_cast<const float*>(temporalCache->GetFieldData(temporalHdr, transformSlot, 6));
+	const auto* posX  = static_cast<const SimFloat*>(temporalCache->GetFieldData(temporalHdr, transformSlot, 0));
+	const auto* posY  = static_cast<const SimFloat*>(temporalCache->GetFieldData(temporalHdr, transformSlot, 1));
+	const auto* posZ  = static_cast<const SimFloat*>(temporalCache->GetFieldData(temporalHdr, transformSlot, 2));
+	const auto* rotQx = static_cast<const SimFloat*>(temporalCache->GetFieldData(temporalHdr, transformSlot, 3));
+	const auto* rotQy = static_cast<const SimFloat*>(temporalCache->GetFieldData(temporalHdr, transformSlot, 4));
+	const auto* rotQz = static_cast<const SimFloat*>(temporalCache->GetFieldData(temporalHdr, transformSlot, 5));
+	const auto* rotQw = static_cast<const SimFloat*>(temporalCache->GetFieldData(temporalHdr, transformSlot, 6));
 
 	if (!flags || !posX) return;
 
@@ -589,13 +589,13 @@ void ReplicationSystem::DispatchCorrectionJobs(uint32_t frameNumber)
 
 		TemporalFrameHeader* resimHdr = temporalCache->GetFrameHeader(resimFrom % ringSize);
 		ResimCache[oid].delta         = frameNumber - resimFrom;
-		ResimCache[oid].posX          = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 0));
-		ResimCache[oid].posY          = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 1));
-		ResimCache[oid].posZ          = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 2));
-		ResimCache[oid].rotQx         = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 3));
-		ResimCache[oid].rotQy         = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 4));
-		ResimCache[oid].rotQz         = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 5));
-		ResimCache[oid].rotQw         = static_cast<const float*>(temporalCache->GetFieldData(resimHdr, transformSlot, 6));
+		ResimCache[oid].posX          = static_cast<const SimFloat*>(temporalCache->GetFieldData(resimHdr, transformSlot, 0));
+		ResimCache[oid].posY          = static_cast<const SimFloat*>(temporalCache->GetFieldData(resimHdr, transformSlot, 1));
+		ResimCache[oid].posZ          = static_cast<const SimFloat*>(temporalCache->GetFieldData(resimHdr, transformSlot, 2));
+		ResimCache[oid].rotQx         = static_cast<const SimFloat*>(temporalCache->GetFieldData(resimHdr, transformSlot, 3));
+		ResimCache[oid].rotQy         = static_cast<const SimFloat*>(temporalCache->GetFieldData(resimHdr, transformSlot, 4));
+		ResimCache[oid].rotQz         = static_cast<const SimFloat*>(temporalCache->GetFieldData(resimHdr, transformSlot, 5));
+		ResimCache[oid].rotQw         = static_cast<const SimFloat*>(temporalCache->GetFieldData(resimHdr, transformSlot, 6));
 	}
 
 	// Rebuild DirtyCache — one pass over all entities on Sentinel, shared by all correction jobs.
@@ -637,13 +637,13 @@ void ReplicationSystem::DispatchCorrectionJobs(uint32_t frameNumber)
 		const DirtyEntityInfo* Dirty;
 		uint32_t DirtyCount;
 		const ResimSnapshot* Resim;
-		const float* posX;
-		const float* posY;
-		const float* posZ;
-		const float* rotQx;
-		const float* rotQy;
-		const float* rotQz;
-		const float* rotQw;
+		const SimFloat* posX;
+		const SimFloat* posY;
+		const SimFloat* posZ;
+		const SimFloat* rotQx;
+		const SimFloat* rotQy;
+		const SimFloat* rotQz;
+		const SimFloat* rotQw;
 		uint32_t frameNumber;
 	};
 

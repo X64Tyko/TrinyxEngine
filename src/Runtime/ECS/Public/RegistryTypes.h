@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 
+#include "SimFloat.h"
+
 // Disable MSVC warning for anonymous structs in unions (C++11 standard feature)
 #ifdef _MSC_VER
 #pragma warning(push)
@@ -171,6 +173,6 @@ struct EntityTransformCorrection
 {
 	uint32_t NetHandle;
 	uint32_t ClientFrame;
-	float    PosX, PosY, PosZ;
-	float    RotQx, RotQy, RotQz, RotQw;
+	SimFloat PosX, PosY, PosZ;
+	SimFloat RotQx, RotQy, RotQz, RotQw;
 };

@@ -66,7 +66,7 @@ public:
 	}
 
 	/// Called each Sentinel frame while this state is the top of the stack.
-	virtual void Tick(float dt) { (void)dt; }
+	virtual void Tick(SimFloat dt) { (void)dt; }
 
 	/// Called on the Sentinel thread when a net flow event arrives from the NetThread.
 	/// eventID is a FlowEventID enum value cast to uint8_t.

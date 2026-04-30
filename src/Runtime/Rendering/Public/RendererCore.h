@@ -201,6 +201,7 @@ private:
 	bool CreateMeshBuffers();
 	void TrackFPS();
 	void OnSwapchainResize();
+	void NameRenderResources(); // VK_EXT_debug_utils tags for Nsight / RenderDoc
 
 #ifdef TNX_GPU_PICKING
 	bool CreatePickImages();

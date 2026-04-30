@@ -268,9 +268,9 @@ if (ci)
 {
 const uint16_t now  = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
 const uint16_t sent = msg.Header.Timestamp;
-const float rtt     = static_cast<float>(static_cast<uint16_t>(now - sent));
+const SimFloat rtt  = SimFloat(static_cast<uint16_t>(now - sent));
 if (ci->RTT_ms <= 0.0f) ci->RTT_ms = rtt;
-else ci->RTT_ms                    = ci->RTT_ms * 0.875f + rtt * 0.125f;
+else ci->RTT_ms                    = ci->RTT_ms * SimFloat(0.875f) + rtt * SimFloat(0.125f);
 }
 break;
 }

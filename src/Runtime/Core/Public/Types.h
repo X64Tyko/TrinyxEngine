@@ -293,7 +293,7 @@ struct TMatrix4
 		for (int col = 0; col < 4; ++col)
 			for (int row = 0; row < 4; ++row)
 			{
-				MatType sum = 0.0f;
+				MatType sum(0);
 				for (int k = 0; k < 4; ++k) sum += a.m[k * 4 + row] * b.m[col * 4 + k];
 				r.m[col * 4 + row] = sum;
 			}

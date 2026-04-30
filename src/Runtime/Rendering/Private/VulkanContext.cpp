@@ -12,10 +12,13 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #include <SDL3/SDL_vulkan.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <set>
 
+#include "Aftermath.h"
 #include "Logger.h"
+#include "VulkanDebug.h"
 
 // Validation layer callback
 static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
@@ -53,6 +56,11 @@ bool VulkanContext::Initialize(SDL_Window* window, bool enableValidation)
 	// Populate volk's global function table for the C recording path.
 	volkLoadInstance(*Instance);
 
+#ifdef TNX_ENABLE_NSIGHT
+	// Function pointers for debug-utils are now available — enable the helper.
+	if (bDebugUtilsEnabled) VulkanDebug::SetAvailable(true);
+#endif
+
 	if (enableValidation && !SetupDebugMessenger())
 	{
 		LOG_ENG_WARN("[VulkanContext] Could not set up debug messenger (continuing without validation output)");
@@ -60,12 +68,22 @@ bool VulkanContext::Initialize(SDL_Window* window, bool enableValidation)
 
 	if (!CreateSurface(window)) return false;
 	if (!SelectPhysicalDevice()) return false;
+
+#ifdef TNX_ENABLE_AFTERMATH
+	// Register Aftermath crash-dump callbacks BEFORE vkCreateDevice so the
+	// driver hooks into the device we're about to make. Failure is non-fatal —
+	// the engine continues without crash dumps.
+	Aftermath::Initialize();
+#endif
+
 	if (!CreateLogicalDevice()) return false;
 	volkLoadDevice(*Device);
 
 	if (!CreateCommandPools()) return false;
 	if (!CreateSwapchain(window)) return false;
 	// Depth image is owned by VulkRender (VMA-allocated, recreated on resize).
+
+	NameCoreObjects();
 
 	LOG_ENG_INFO("[VulkanContext] Initialized successfully");
 	return true;
@@ -78,6 +96,11 @@ void VulkanContext::Shutdown()
 
 	vkDeviceWaitIdle(*Device);
 
+#ifdef TNX_ENABLE_NSIGHT
+	// Stop emitting debug-utils calls before the instance is destroyed.
+	VulkanDebug::SetAvailable(false);
+#endif
+
 	// Destroy owned objects in strict dependency order.
 	// raii move-assign from nullptr triggers the underlying vkDestroy* call.
 	DestroySwapchain();
@@ -89,6 +112,10 @@ void VulkanContext::Shutdown()
 	Surface             = vk::raii::SurfaceKHR{nullptr};
 	DebugMessenger      = vk::raii::DebugUtilsMessengerEXT{nullptr};
 	Instance            = vk::raii::Instance{nullptr};
+
+#ifdef TNX_ENABLE_AFTERMATH
+	Aftermath::Shutdown();
+#endif
 }
 
 // VulkanContext::RecreateSwapchain
@@ -96,7 +123,9 @@ bool VulkanContext::RecreateSwapchain(SDL_Window* window)
 {
 	vkDeviceWaitIdle(*Device);
 	DestroySwapchain();
-	return CreateSwapchain(window);
+	if (!CreateSwapchain(window)) return false;
+	NameCoreObjects(); // re-tag the new swapchain images for Nsight
+	return true;
 	// VulkRender recreates its depth image separately after receiving the resize notification.
 }
 
@@ -109,7 +138,16 @@ bool VulkanContext::CreateInstance(SDL_Window* /*window*/, bool enableValidation
 		const char* const* sdlExts = SDL_Vulkan_GetInstanceExtensions(&sdlExtCount);
 
 		std::vector<const char*> extensions(sdlExts, sdlExts + sdlExtCount);
-		if (enableValidation) extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+
+		// VK_EXT_debug_utils is needed for validation messenger AND Nsight/RenderDoc
+		// object naming + cmd-buffer labels. Enable it whenever either side wants it.
+#if defined(TNX_ENABLE_NSIGHT)
+		bool wantsDebugUtils = true;
+#else
+		bool wantsDebugUtils = enableValidation;
+#endif
+		if (wantsDebugUtils) extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+		bDebugUtilsEnabled = wantsDebugUtils;
 
 		static const char* ValidationLayer = "VK_LAYER_KHRONOS_validation";
 		std::vector<const char*> layers;
@@ -376,6 +414,22 @@ bool VulkanContext::CreateLogicalDevice()
 		std::vector<const char*> deviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 		if (bSupportsShaderObject) deviceExtensions.push_back(VK_EXT_SHADER_OBJECT_EXTENSION_NAME);
 
+#ifdef TNX_ENABLE_AFTERMATH
+		// Append VK_NV_device_diagnostics_config if both Aftermath SDK is active
+		// and the GPU supports it (NVIDIA-only, requires recent driver).
+		const char* aftermathExt = nullptr;
+		if (Aftermath::TryAddDeviceExtension(*PhysicalDevice, &aftermathExt))
+		{
+			deviceExtensions.push_back(aftermathExt);
+			bAftermathEnabled = true;
+			LOG_ENG_INFO("[VulkanContext] VK_NV_device_diagnostics_config enabled (Aftermath)");
+		}
+		else if (Aftermath::IsEnabled())
+		{
+			LOG_ENG_WARN("[VulkanContext] Aftermath active but VK_NV_device_diagnostics_config unsupported on this device");
+		}
+#endif
+
 		// Feature chain using StructureChain for automatic pNext wiring.
 		auto featureChain = vk::StructureChain<
 			vk::PhysicalDeviceFeatures2,
@@ -412,7 +466,12 @@ bool VulkanContext::CreateLogicalDevice()
 					.setIndexTypeUint8(bSupportsIndexTypeUint8);
 
 		vk::DeviceCreateInfo deviceCreateInfo{};
-		deviceCreateInfo.pNext                   = &featureChain.get<vk::PhysicalDeviceFeatures2>();
+		const void* pNextHead = &featureChain.get<vk::PhysicalDeviceFeatures2>();
+#ifdef TNX_ENABLE_AFTERMATH
+		// Splice Aftermath's diagnostic-config struct in front of the feature chain.
+		if (bAftermathEnabled) pNextHead = Aftermath::PrependDeviceCreateChain(pNextHead);
+#endif
+		deviceCreateInfo.pNext                   = pNextHead;
 		deviceCreateInfo.queueCreateInfoCount    = static_cast<uint32_t>(queueCreateInfos.size());
 		deviceCreateInfo.pQueueCreateInfos       = queueCreateInfos.data();
 		deviceCreateInfo.enabledExtensionCount   = static_cast<uint32_t>(deviceExtensions.size());
@@ -582,6 +641,34 @@ vk::Extent2D VulkanContext::ChooseExtent(const vk::SurfaceCapabilitiesKHR& caps,
 	extent.height = std::clamp(static_cast<uint32_t>(h),
 							   caps.minImageExtent.height, caps.maxImageExtent.height);
 	return extent;
+}
+
+// Apply human-readable names to the core handles so they show up identifiably
+// in Nsight Graphics, RenderDoc, and validation messages.
+void VulkanContext::NameCoreObjects()
+{
+#ifdef TNX_ENABLE_NSIGHT
+	if (!bDebugUtilsEnabled) return;
+	VkDevice dev = *Device;
+	VulkanDebug::Name(dev, *Instance, "Trinyx::Instance");
+	VulkanDebug::Name(dev, *PhysicalDevice, "Trinyx::PhysicalDevice");
+	VulkanDebug::Name(dev, *Device, "Trinyx::Device");
+	VulkanDebug::Name(dev, Queues.Graphics, "Trinyx::Queue::Graphics");
+	if (Queues.ComputeFamily != Queues.GraphicsFamily) VulkanDebug::Name(dev, Queues.Compute, "Trinyx::Queue::Compute");
+	if (Queues.TransferFamily != Queues.GraphicsFamily) VulkanDebug::Name(dev, Queues.Transfer, "Trinyx::Queue::Transfer");
+	VulkanDebug::Name(dev, *GraphicsCommandPool, "Trinyx::CmdPool::Graphics");
+	VulkanDebug::Name(dev, *ComputeCommandPool, "Trinyx::CmdPool::Compute");
+	VulkanDebug::Name(dev, *TransferCommandPool, "Trinyx::CmdPool::Transfer");
+	VulkanDebug::Name(dev, *Swapchain.Handle, "Trinyx::Swapchain");
+	for (size_t i = 0; i < Swapchain.ImageViews.size(); ++i)
+	{
+		char name[64];
+		std::snprintf(name, sizeof(name), "Trinyx::Swapchain::ImageView[%zu]", i);
+		VulkanDebug::Name(dev, *Swapchain.ImageViews[i], name);
+		std::snprintf(name, sizeof(name), "Trinyx::Swapchain::Image[%zu]", i);
+		VulkanDebug::Name(dev, Swapchain.Images[i], name);
+	}
+#endif
 }
 
 VkFormat VulkanContext::FindSupportedFormat(const std::vector<VkFormat>& candidates,

@@ -7,7 +7,8 @@
 // Used by Fixed32 (deterministic sim) and any code converting between sim
 // space and meters (Jolt bridge, render upload, scene I/O).
 // ---------------------------------------------------------------------------
-inline constexpr int32_t FixedUnitsPerMeter = 10000;
+inline constexpr int32_t FixedUnitsPerMeter  = 10000;
+inline constexpr int32_t FixedUnitsPerRadian = 1048576;
 
 // ---------------------------------------------------------------------------
 // Globals.h — compile-time world type aliases.

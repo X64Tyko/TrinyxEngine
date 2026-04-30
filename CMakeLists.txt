@@ -56,6 +56,17 @@ option(TNX_GPU_PICKING "Enable GPU-based entity picking (click-to-select). Requi
 option(TNX_GPU_PICKING_FAST "Enable fast GPU picking mode (picks every frame at mouse cursor). Requires TNX_GPU_PICKING." OFF)
 option(TNX_HEADLESS "Headless build: no window, no GPU/Vulkan. Implied by TNX_NET_MODEL=Server. Also used standalone for CI/CD." OFF)
 
+# Nsight integration:
+#   TNX_ENABLE_NSIGHT     — Compile in VK_EXT_debug_utils object names + command-buffer
+#                           debug labels. Cost is a few function pointer calls per frame
+#                           and some const string storage. Safe to leave on for any
+#                           non-shipping build; compiles to nothing when OFF.
+#   TNX_ENABLE_AFTERMATH  — Enable NVIDIA Nsight Aftermath GPU crash dumps. Requires the
+#                           Aftermath SDK at TNX_AFTERMATH_SDK_PATH. Implies _NSIGHT.
+option(TNX_ENABLE_NSIGHT "Compile in Vulkan debug-utils object naming + command-buffer labels for Nsight Graphics." ON)
+option(TNX_ENABLE_AFTERMATH "Enable NVIDIA Nsight Aftermath GPU crash dumps. Requires Aftermath SDK." OFF)
+set(TNX_AFTERMATH_SDK_PATH "" CACHE PATH "Path to NVIDIA Nsight Aftermath SDK root (only used when TNX_ENABLE_AFTERMATH=ON).")
+
 # Dedicated server implies headless — a server never needs a window or GPU.
 if (TNX_NET_MODEL STREQUAL "Server" AND NOT TNX_HEADLESS)
     message(STATUS "Server model detected — forcing TNX_HEADLESS=ON")
@@ -129,6 +140,47 @@ if (TNX_TESTING)
     message(STATUS "Test harnesses: ENABLED")
 else ()
     message(STATUS "Test harnesses: DISABLED")
+endif ()
+
+# Aftermath always implies the Nsight debug-utils path (we want object names on
+# any handle that ends up in a crash dump).
+if (TNX_ENABLE_AFTERMATH AND NOT TNX_ENABLE_NSIGHT)
+    message(STATUS "TNX_ENABLE_AFTERMATH forces TNX_ENABLE_NSIGHT=ON")
+    set(TNX_ENABLE_NSIGHT ON CACHE BOOL "" FORCE)
+endif ()
+
+# Nsight is meaningless in a headless build (no GPU work to capture).
+if (TNX_ENABLE_NSIGHT AND TNX_HEADLESS)
+    message(STATUS "TNX_HEADLESS overrides TNX_ENABLE_NSIGHT — disabling")
+    set(TNX_ENABLE_NSIGHT OFF CACHE BOOL "" FORCE)
+    if (TNX_ENABLE_AFTERMATH)
+        message(WARNING "TNX_ENABLE_AFTERMATH is meaningless in headless builds — disabling")
+        set(TNX_ENABLE_AFTERMATH OFF CACHE BOOL "" FORCE)
+    endif ()
+endif ()
+
+if (TNX_ENABLE_NSIGHT)
+    add_compile_definitions(TNX_ENABLE_NSIGHT)
+    message(STATUS "Nsight Graphics integration: ENABLED (debug-utils object names + cmd-buffer labels)")
+else ()
+    message(STATUS "Nsight Graphics integration: DISABLED")
+endif ()
+
+if (TNX_ENABLE_AFTERMATH)
+    if (NOT TNX_AFTERMATH_SDK_PATH OR NOT EXISTS "${TNX_AFTERMATH_SDK_PATH}/include/GFSDK_Aftermath.h")
+        message(WARNING
+                "TNX_ENABLE_AFTERMATH=ON but TNX_AFTERMATH_SDK_PATH does not point to a valid Aftermath SDK.\n"
+                "Set -DTNX_AFTERMATH_SDK_PATH=<path-to-aftermath-sdk> or download from\n"
+                "  https://developer.nvidia.com/nsight-aftermath\n"
+                "Aftermath will compile as a no-op stub until the SDK is provided.")
+        # Keep the define on so the stub plumbing compiles; runtime initialization is a no-op.
+        add_compile_definitions(TNX_ENABLE_AFTERMATH TNX_AFTERMATH_SDK_MISSING)
+    else ()
+        add_compile_definitions(TNX_ENABLE_AFTERMATH)
+        message(STATUS "Nsight Aftermath: ENABLED (SDK at ${TNX_AFTERMATH_SDK_PATH})")
+    endif ()
+else ()
+    message(STATUS "Nsight Aftermath: DISABLED")
 endif ()
 
 if (TNX_ENABLE_EDITOR)

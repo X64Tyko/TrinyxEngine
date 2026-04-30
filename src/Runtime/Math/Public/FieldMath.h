@@ -20,7 +20,7 @@ namespace FieldMath
 	FORCE_INLINE auto Read(const FloatProxy<WIDTH>& f)
 	{
 		if constexpr (WIDTH == FieldWidth::Scalar) return f.WriteArray[f.index];
-		else return SIMDTraits < float, WIDTH > ::load(&f.WriteArray[f.index]);
+		else return SIMDTraits<SimFloat, WIDTH>::load(&f.WriteArray[f.index]);
 	}
 
 	template <FieldWidth WIDTH>
@@ -40,12 +40,12 @@ namespace FieldMath
 	// ── Clamp ───────────────────────────────────────────────────────────────
 
 	template <FieldWidth WIDTH>
-	FORCE_INLINE auto Clamp(const FloatProxy<WIDTH>& f, float lo, float hi)
+	FORCE_INLINE auto Clamp(const FloatProxy<WIDTH>& f, SimFloat lo, SimFloat hi)
 	{
-		using T = SIMDTraits<float, WIDTH>;
+		using T = SIMDTraits<SimFloat, WIDTH>;
 		if constexpr (WIDTH == FieldWidth::Scalar)
 		{
-			float v = f.WriteArray[f.index];
+			SimFloat v = f.WriteArray[f.index];
 			return v < lo ? lo : (v > hi ? hi : v);
 		}
 		else
@@ -74,17 +74,17 @@ namespace FieldMath
 	// ── Min / Max ───────────────────────────────────────────────────────────
 
 	template <FieldWidth WIDTH>
-	FORCE_INLINE auto Min(const FloatProxy<WIDTH>& f, float val)
+	FORCE_INLINE auto Min(const FloatProxy<WIDTH>& f, SimFloat val)
 	{
-		using T = SIMDTraits<float, WIDTH>;
+		using T = SIMDTraits<SimFloat, WIDTH>;
 		if constexpr (WIDTH == FieldWidth::Scalar) return f.WriteArray[f.index] < val ? f.WriteArray[f.index] : val;
 		else return T::min(T::load(&f.WriteArray[f.index]), T::set1(val));
 	}
 
 	template <FieldWidth WIDTH>
-	FORCE_INLINE auto Max(const FloatProxy<WIDTH>& f, float val)
+	FORCE_INLINE auto Max(const FloatProxy<WIDTH>& f, SimFloat val)
 	{
-		using T = SIMDTraits<float, WIDTH>;
+		using T = SIMDTraits<SimFloat, WIDTH>;
 		if constexpr (WIDTH == FieldWidth::Scalar) return f.WriteArray[f.index] > val ? f.WriteArray[f.index] : val;
 		else return T::max(T::load(&f.WriteArray[f.index]), T::set1(val));
 	}
@@ -93,7 +93,7 @@ namespace FieldMath
 	template <FieldWidth WIDTH>
 	FORCE_INLINE auto Min(const FloatProxy<WIDTH>& a, const FloatProxy<WIDTH>& b)
 	{
-		using T = SIMDTraits<float, WIDTH>;
+		using T = SIMDTraits<SimFloat, WIDTH>;
 		if constexpr (WIDTH == FieldWidth::Scalar) return a.WriteArray[a.index] < b.WriteArray[b.index] ? a.WriteArray[a.index] : b.WriteArray[b.index];
 		else return T::min(T::load(&a.WriteArray[a.index]), T::load(&b.WriteArray[b.index]));
 	}
@@ -101,7 +101,7 @@ namespace FieldMath
 	template <FieldWidth WIDTH>
 	FORCE_INLINE auto Max(const FloatProxy<WIDTH>& a, const FloatProxy<WIDTH>& b)
 	{
-		using T = SIMDTraits<float, WIDTH>;
+		using T = SIMDTraits<SimFloat, WIDTH>;
 		if constexpr (WIDTH == FieldWidth::Scalar) return a.WriteArray[a.index] > b.WriteArray[b.index] ? a.WriteArray[a.index] : b.WriteArray[b.index];
 		else return T::max(T::load(&a.WriteArray[a.index]), T::load(&b.WriteArray[b.index]));
 	}
@@ -111,7 +111,7 @@ namespace FieldMath
 	template <FieldWidth WIDTH>
 	FORCE_INLINE auto Abs(const FloatProxy<WIDTH>& f)
 	{
-		using T = SIMDTraits<float, WIDTH>;
+		using T = SIMDTraits<SimFloat, WIDTH>;
 		if constexpr (WIDTH == FieldWidth::Scalar) return std::abs(f.WriteArray[f.index]);
 		else return T::abs(T::load(&f.WriteArray[f.index]));
 	}
@@ -128,13 +128,13 @@ namespace FieldMath
 	// result = a + t * (b - a)
 
 	template <FieldWidth WIDTH>
-	FORCE_INLINE auto Lerp(const FloatProxy<WIDTH>& a, const FloatProxy<WIDTH>& b, float t)
+	FORCE_INLINE auto Lerp(const FloatProxy<WIDTH>& a, const FloatProxy<WIDTH>& b, SimFloat t)
 	{
-		using T = SIMDTraits<float, WIDTH>;
+		using T = SIMDTraits<SimFloat, WIDTH>;
 		if constexpr (WIDTH == FieldWidth::Scalar)
 		{
-			float va = a.WriteArray[a.index];
-			float vb = b.WriteArray[b.index];
+			SimFloat va = a.WriteArray[a.index];
+			SimFloat vb = b.WriteArray[b.index];
 			return va + t * (vb - va);
 		}
 		else
@@ -148,12 +148,12 @@ namespace FieldMath
 
 	// Lerp between proxy and scalar target
 	template <FieldWidth WIDTH>
-	FORCE_INLINE auto Lerp(const FloatProxy<WIDTH>& a, float target, float t)
+	FORCE_INLINE auto Lerp(const FloatProxy<WIDTH>& a, SimFloat target, SimFloat t)
 	{
-		using T = SIMDTraits<float, WIDTH>;
+		using T = SIMDTraits<SimFloat, WIDTH>;
 		if constexpr (WIDTH == FieldWidth::Scalar)
 		{
-			float va = a.WriteArray[a.index];
+			SimFloat va = a.WriteArray[a.index];
 			return va + t * (target - va);
 		}
 		else
@@ -169,9 +169,9 @@ namespace FieldMath
 
 	// Returns 0 if val < edge, 1 otherwise
 	template <FieldWidth WIDTH>
-	FORCE_INLINE auto Step(const FloatProxy<WIDTH>& f, float edge)
+	FORCE_INLINE auto Step(const FloatProxy<WIDTH>& f, SimFloat edge)
 	{
-		using T = SIMDTraits<float, WIDTH>;
+		using T = SIMDTraits<SimFloat, WIDTH>;
 		if constexpr (WIDTH == FieldWidth::Scalar) return f.WriteArray[f.index] >= edge ? 1.0f : 0.0f;
 		else
 		{
@@ -184,13 +184,13 @@ namespace FieldMath
 
 	// Hermite smoothstep: 0 below lo, 1 above hi, smooth cubic in between
 	template <FieldWidth WIDTH>
-	FORCE_INLINE auto SmoothStep(const FloatProxy<WIDTH>& f, float lo, float hi)
+	FORCE_INLINE auto SmoothStep(const FloatProxy<WIDTH>& f, SimFloat lo, SimFloat hi)
 	{
-		using T = SIMDTraits<float, WIDTH>;
+		using T = SIMDTraits<SimFloat, WIDTH>;
 		if constexpr (WIDTH == FieldWidth::Scalar)
 		{
-			float v = f.WriteArray[f.index];
-			float t = (v - lo) / (hi - lo);
+			SimFloat v = f.WriteArray[f.index];
+			SimFloat t = (v - lo) / (hi - lo);
 			t       = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
 			return t * t * (3.0f - 2.0f * t);
 		}

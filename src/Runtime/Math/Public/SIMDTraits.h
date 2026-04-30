@@ -92,23 +92,24 @@ template <FieldWidth WIDTH>
 struct SIMDTraits<SimFloatImpl<float>, WIDTH>
 {
 	using Underlying = SIMDTraits<float, WIDTH>;
-	using VecType    = typename Underlying::VecType;
+	using VecType    = __m256;
 
 	static FORCE_INLINE VecType load(const SimFloatImpl<float>* ptr)
 	{
 		return Underlying::load(reinterpret_cast<const float*>(ptr));
 	}
 
-	static FORCE_INLINE void store(SimFloatImpl<float>* ptr, VecType mask, VecType val)
+	static FORCE_INLINE void store(SimFloatImpl<float>* ptr, __m256i mask, VecType val)
 	{
 		Underlying::store(reinterpret_cast<float*>(ptr), mask, val);
 	}
 
-	static FORCE_INLINE void stream(SimFloatImpl<float>* ptr, VecType mask, VecType val)
+	static FORCE_INLINE void stream(SimFloatImpl<float>* ptr, __m256i mask, VecType val)
 	{
 		Underlying::stream(reinterpret_cast<float*>(ptr), mask, val);
 	}
 
+	static FORCE_INLINE VecType set1(float val) { return Underlying::set1(val); }
 	static FORCE_INLINE VecType set1(SimFloatImpl<float> val) { return Underlying::set1(val.value); }
 	static FORCE_INLINE VecType add(VecType a, VecType b) { return Underlying::add(a, b); }
 	static FORCE_INLINE VecType sub(VecType a, VecType b) { return Underlying::sub(a, b); }
@@ -157,7 +158,7 @@ template <FieldWidth WIDTH>
 struct SIMDTraits<SimFloatImpl<Fixed32>, WIDTH>
 {
 	using Underlying = SIMDTraits<Fixed32, WIDTH>;
-	using VecType    = typename Underlying::VecType;
+	using VecType    = __m256i;
 
 	static FORCE_INLINE VecType load(const SimFloatImpl<Fixed32>* ptr)
 	{
@@ -174,6 +175,7 @@ struct SIMDTraits<SimFloatImpl<Fixed32>, WIDTH>
 		Underlying::stream(reinterpret_cast<Fixed32*>(ptr), mask, val);
 	}
 
+	static FORCE_INLINE VecType set1(Fixed32 val) { return Underlying::set1(val); }
 	static FORCE_INLINE VecType set1(SimFloatImpl<Fixed32> val) { return Underlying::set1(val.value); }
 	static FORCE_INLINE VecType add(VecType a, VecType b) { return Underlying::add(a, b); }
 	static FORCE_INLINE VecType sub(VecType a, VecType b) { return Underlying::sub(a, b); }
@@ -245,14 +247,15 @@ struct FieldMask
 	{
 		VecType falseV;
 		if constexpr (std::is_same_v<FVAL, VecType>) falseV = FalseVal;
-		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<FVAL>>::value) falseV = Traits::load(&FalseVal.WriteArray[FalseVal.index]);
+		else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<FVAL>>::value) falseV = Traits::load(&FalseVal.WriteArray[FalseVal.index]);
 		else if constexpr (std::is_same_v<FVAL, std::remove_cvref_t<FieldType>>) falseV = Traits::set1(FalseVal);
-		else falseV                                                                     = FalseVal;
+		else falseV                                                                     = Traits::set1(FalseVal);
 
 		VecType trueV;
-		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<TVAL>>::value) trueV = Traits::load(&TrueVal.WriteArray[TrueVal.index]);
+		if constexpr (std::is_same_v<TVAL, VecType>) trueV = TrueVal;
+		else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<TVAL>>::value) trueV = Traits::load(&TrueVal.WriteArray[TrueVal.index]);
 		else if constexpr (std::is_same_v<TVAL, std::remove_cvref_t<FieldType>>) trueV = Traits::set1(TrueVal);
-		else trueV                                                                     = TrueVal;
+		else trueV                                                                     = Traits::set1(TrueVal);
 
 		if constexpr (std::is_same_v<VecType, __m256>)
 		{
@@ -318,6 +321,8 @@ struct SIMDTraits<float, WIDTH>
 	static FORCE_INLINE VecType min(VecType a, VecType b) { return _mm256_min_ps(a, b); }
 	static FORCE_INLINE VecType max(VecType a, VecType b) { return _mm256_max_ps(a, b); }
 	static FORCE_INLINE VecType abs(VecType a) { return _mm256_andnot_ps(_mm256_set1_ps(-0.0f), a); }
+	static FORCE_INLINE VecType sqrt(VecType a) { return _mm256_sqrt_ps(a); }
+	static FORCE_INLINE VecType rsqrt(VecType a) { return _mm256_rsqrt_ps(a); }
 
 	// Generate a mask (as __m256i) where the first `count` lanes are active.
 	// Used by FieldProxy::Bind to set the per-chunk count mask.
@@ -387,6 +392,32 @@ struct SIMDTraits<int32_t, WIDTH>
 	static FORCE_INLINE VecType min(VecType a, VecType b) { return _mm256_min_epi32(a, b); }
 	static FORCE_INLINE VecType max(VecType a, VecType b) { return _mm256_max_epi32(a, b); }
 	static FORCE_INLINE VecType abs(VecType a) { return _mm256_abs_epi32(a); }
+
+	static FORCE_INLINE VecType sqrt(VecType a)
+	{
+		alignas(32) int32_t aData[8], result[8];
+		_mm256_store_si256((__m256i*)aData, a);
+		for (int i = 0; i < 8; ++i) result[i] = FixedSqrt(Fixed32::FromRaw(aData[i])).Raw();
+		return _mm256_load_si256((__m256i*)result);
+	}
+
+	static FORCE_INLINE VecType rsqrt(VecType a)
+	{
+		alignas(32) int32_t aData[8], result[8];
+		_mm256_store_si256((__m256i*)aData, a);
+		for (int i = 0; i < 8; ++i)
+		{
+			Fixed32 x = Fixed32::FromRaw(aData[i]);
+			if (x.Raw() <= 0)
+			{
+				result[i] = 0;
+				continue;
+			}
+			Fixed32 s = FixedSqrt(x);
+			result[i] = (Fixed32::FromFloat(1.0f) / s).Raw();
+		}
+		return _mm256_load_si256((__m256i*)result);
+	}
 
 	static FORCE_INLINE __m256i GenerateCountMask(int32_t count)
 	{

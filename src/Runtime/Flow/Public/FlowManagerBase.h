@@ -145,7 +145,7 @@ public:
 
 	// ----- Tick -----
 
-	void Tick(float dt);
+	void Tick(SimFloat dt);
 
 	// ----- Accessors -----
 

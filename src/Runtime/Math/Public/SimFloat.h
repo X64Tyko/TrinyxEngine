@@ -3,8 +3,7 @@
 #include <immintrin.h>
 #include <type_traits>
 
-#include "FastTrig.h"
-#include "Fixed32.h"   // for Fixed32 and FixedSqrt
+#include "Fixed32.h"
 #include "FixedTrig.h"
 
 // Cross-platform force inline macro
@@ -126,7 +125,6 @@ struct SimFloatImpl<float>
 	}
 
 	// Assignment operators
-	//SimFloatImpl& operator=(const SimFloatImpl&) = default;
 	SimFloatImpl& operator=(float f)
 	{
 		value = f;
@@ -151,11 +149,19 @@ struct SimFloatImpl<float>
 		return *this;
 	}
 
-	//SimFloatImpl& operator=(const SimFloatImpl<Fixed32>& other) { value = other.ToFloat(); return *this; }
-
 	// Comparison
 	friend auto operator<=>(const SimFloatImpl&, const SimFloatImpl&) = default;
-	friend bool operator==(const SimFloatImpl&, const SimFloatImpl&)  = default;
+
+	friend auto operator<=>(const SimFloatImpl& A, const float& B)
+	{
+		return A.ToFloat() <=> B;
+	};
+
+	friend auto operator<=>(const float& B, const SimFloatImpl& A)
+	{
+		return B <=> A.ToFloat();
+	};
+	friend bool operator==(const SimFloatImpl&, const SimFloatImpl&) = default;
 };
 
 // Specialization for Fixed32
@@ -289,7 +295,6 @@ struct SimFloatImpl<Fixed32>
 	}
 
 	// Assignment operators
-	//SimFloatImpl& operator=(const SimFloatImpl&) = default;
 	SimFloatImpl& operator=(const Fixed32& fx)
 	{
 		value = fx;
@@ -314,11 +319,19 @@ struct SimFloatImpl<Fixed32>
 		return *this;
 	}
 
-	//SimFloatImpl& operator=(const SimFloatImpl<float>& other) { value = Fixed32::FromFloat(other.ToFloat()); return *this; }
-
 	// Comparison
 	friend auto operator<=>(const SimFloatImpl&, const SimFloatImpl&) = default;
-	friend bool operator==(const SimFloatImpl&, const SimFloatImpl&)  = default;
+
+	friend auto operator<=>(const SimFloatImpl& A, const float& B)
+	{
+		return A.ToFloat() <=> B;
+	};
+
+	friend auto operator<=>(const float& B, const SimFloatImpl& A)
+	{
+		return B <=> A.ToFloat();
+	};
+	friend bool operator==(const SimFloatImpl&, const SimFloatImpl&) = default;
 };
 
 static_assert(sizeof(SimFloatImpl<float>) == 4, "SimFloat<float> must be 4 bytes");
@@ -416,9 +429,12 @@ FORCE_INLINE SimFloatImpl<T> Rsqrt(SimFloatImpl<T> x)
 {
 	if constexpr (std::is_same_v<T, Fixed32>)
 	{
-		// TODO: implement fixed-point rsqrt table
-		// Fallback: 1/sqrt via float (not deterministic but functional)
-		return SimFloatImpl<T>(Fixed32::FromFloat(1.0f / std::sqrt(x.ToFloat())));
+		// 1/sqrt(x) = Scale² / FixedSqrt(x).raw — fully deterministic integer path.
+		// Guard against zero input (returns max representable value).
+		const Fixed32 s = FixedSqrt(x.ToFixed());
+		if (s.value == 0) return SimFloatImpl<T>(Fixed32::FromRaw(0x7FFFFFFF));
+		return SimFloatImpl<T>(Fixed32::FromRaw(
+			static_cast<int32_t>((Fixed32::Scale64 * Fixed32::Scale64) / static_cast<int64_t>(s.value))));
 	}
 	else
 	{
@@ -443,15 +459,11 @@ FORCE_INLINE SimFloatImpl<T> FastSin(SimFloatImpl<T> x)
 {
 	if constexpr (std::is_same_v<T, Fixed32>)
 	{
-		// Wrap x to [0, 2π) using integer arithmetic for determinism.
-		static constexpr Fixed32 k2PI = Fixed32::FromDouble(6.283185307179586);
-		Fixed32 wrapped               = x.ToFixed();
-		int32_t n                     = wrapped.value / k2PI.value;
-		wrapped                       = wrapped - k2PI * Fixed32::FromRaw(n);
-		if (wrapped < Fixed32(0)) wrapped = wrapped + k2PI;
-		return SimFloatImpl<T>(FixedSin(wrapped));
+		const FixedUnit r = FixedSin(x.ToFixed());
+		return SimFloatImpl<T>(Fixed32::FromRaw(
+			static_cast<int32_t>((static_cast<int64_t>(r.value) * Fixed32::Scale64) >> 20)));
 	}
-	else return SimFloatImpl<T>(FastSin(x.ToFloat()));
+	else return SimFloatImpl<T>(std::sin(x.value));
 }
 
 template <typename T>
@@ -459,30 +471,22 @@ FORCE_INLINE SimFloatImpl<T> FastCos(SimFloatImpl<T> x)
 {
 	if constexpr (std::is_same_v<T, Fixed32>)
 	{
-		static constexpr Fixed32 k2PI = Fixed32::FromDouble(6.283185307179586);
-		Fixed32 wrapped               = x.ToFixed();
-		int32_t n                     = wrapped.value / k2PI.value;
-		wrapped                       = wrapped - k2PI * Fixed32::FromRaw(n);
-		if (wrapped < Fixed32(0)) wrapped = wrapped + k2PI;
-		return SimFloatImpl<T>(FixedCos(wrapped));
+		const FixedUnit r = FixedCos(x.ToFixed());
+		return SimFloatImpl<T>(Fixed32::FromRaw(
+			static_cast<int32_t>((static_cast<int64_t>(r.value) * Fixed32::Scale64) >> 20)));
 	}
-	else return SimFloatImpl<T>(FastCos(x.ToFloat()));
+	else return SimFloatImpl<T>(std::cos(x.value));
 }
 
 template <typename T>
 FORCE_INLINE SimFloatImpl<T> FastTan(SimFloatImpl<T> x)
 {
-	auto s = FastSin(x);
-	auto c = FastCos(x);
 	if constexpr (std::is_same_v<T, Fixed32>)
 	{
-		Fixed32 absCos = c.ToFixed() >= Fixed32(0) ? c.ToFixed() : -c.ToFixed();
-		if (absCos.ToFloat() < 1e-6f) return SimFloatImpl<T>(Fixed32::FromInt(99999));
+		const auto s = FastSin(x);
+		const auto c = FastCos(x);
+		if (c.ToFixed().value == 0) return SimFloatImpl<T>(Fixed32::FromInt(99999));
+		return s / c;
 	}
-	else
-	{
-		float absCos = c.ToFloat() >= 0.0f ? c.ToFloat() : -c.ToFloat();
-		if (absCos < 1e-6f) return SimFloatImpl<T>(99999.0f);
-	}
-	return s / c;
+	else return SimFloatImpl<T>(std::tan(x.value));
 }

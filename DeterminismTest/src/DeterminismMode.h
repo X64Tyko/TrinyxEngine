@@ -35,10 +35,10 @@ public:
 
 	ConstructView<EPlayer> Body;
 
-	float SpawnX = 0.0f;
-	float SpawnY = 2.0f;
-	float SpawnZ = -10.0f;
-	float Speed  = 3.0f; // units/s in +X when MoveForward is held
+	SimFloat SpawnX = 0.0f;
+	SimFloat SpawnY = 2.0f;
+	SimFloat SpawnZ = -10.0f;
+	SimFloat Speed  = 3.0f; // units/s in +X when MoveForward is held
 
 	void InitializeViews()
 	{
@@ -97,12 +97,12 @@ public:
 						   "[Cube] localF=%u srvF=%d moving=%d resim=%d pos=%.6f",
 						   localF, srvF, bMoving ? 1 : 0,
 						   GetWorld()->GetLogicThread()->IsResimulating() ? 1 : 0,
-						   Body.Transform.PosX.Value());
+						   Body.Transform.PosX.Value().ToFloat());
 		}
 
 		if (!bMoving) return; // Echo souls have no input
 
-		Body.Transform.PosX = Body.Transform.PosX.Value() + Speed * static_cast<float>(dt);
+		Body.Transform.PosX = Body.Transform.PosX.Value() + Speed * dt;
 	}
 
 private:
@@ -291,13 +291,13 @@ private:
 
 			arch->BuildFieldArrayTable(chunk, fieldArrayTable, absFrame, volatileWrite);
 
-			float posX = 0.f, posY = 0.f, posZ = 0.f;
+			SimFloat posX = 0.f, posY = 0.f, posZ = 0.f;
 			for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 			{
 				if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
 				void* base = fieldArrayTable[fdesc.fieldSlotIndex];
 				if (!base) continue;
-				auto* fa = static_cast<float*>(base);
+				auto* fa = static_cast<SimFloat*>(base);
 				switch (fdesc.componentSlotIndex)
 				{
 					case 0: posX = fa[localIdx];
@@ -311,7 +311,7 @@ private:
 			}
 
 			LOG_INFO_F("[DeterminismDriver]  slot=%2u  localF=%5u  srvF=%5d  pos=(%8.4f, %8.4f, %8.4f)",
-					   slot, absFrame, static_cast<int32_t>(absFrame) + offset, posX, posY, posZ);
+					   slot, absFrame, static_cast<int32_t>(absFrame) + offset, posX.ToFloat(), posY.ToFloat(), posZ.ToFloat());
 		}
 
 		LOG_INFO("[DeterminismDriver] ==================== END DUMP =====================");

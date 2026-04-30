@@ -167,6 +167,111 @@ struct Fixed32
 	friend constexpr bool operator==(Fixed32 a, Fixed32 b)  = default;
 };
 
+// FixedUnit — unit-range fixed-point for trig output and direction components.
+//
+// Encoding: Scale = 1<<20 (1,048,576). 1.0 = Scale. Range ≈ [-2, +2].
+// Used as the return type of FixedSin / FixedCos so dot products with Fixed32
+// positions stay exact: (int64_t(pos.value) * unit.value) >> 20.
+struct FixedUnit : Fixed32
+{
+	static constexpr int32_t Scale   = FixedUnitsPerRadian; // 1,048,576 = 1<<20
+	static constexpr int64_t Scale64 = static_cast<int64_t>(Scale);
+
+	// --- Construction --------------------------------------------------------
+
+	constexpr FixedUnit() = default;
+
+	constexpr FixedUnit(int32_t i) // shadows Fixed32(int32_t) — uses FixedUnit::Scale
+	{
+		value = i * Scale;
+	}
+
+	static constexpr FixedUnit FromRaw(int32_t raw)
+	{
+		FixedUnit r;
+		r.value = raw;
+		return r;
+	}
+
+	static constexpr FixedUnit FromFloat(float f)
+	{
+		return FromRaw(static_cast<int32_t>(f * static_cast<float>(Scale)));
+	}
+
+	static constexpr FixedUnit FromDouble(double f)
+	{
+		return FromRaw(static_cast<int32_t>(f * static_cast<double>(Scale)));
+	}
+
+	// --- Accessors (override to use FixedUnit::Scale) -----------------------
+
+	constexpr float ToFloat() const { return static_cast<float>(value) / static_cast<float>(Scale); }
+	constexpr double ToDouble() const { return static_cast<double>(value) / static_cast<double>(Scale); }
+
+	// --- Unary --------------------------------------------------------------
+
+	constexpr FixedUnit operator+() const { return *this; }
+	constexpr FixedUnit operator-() const { return FromRaw(-value); }
+
+	// --- Compound assignment — FixedUnit op FixedUnit -----------------------
+
+	constexpr FixedUnit& operator+=(FixedUnit rhs)
+	{
+		value += rhs.value;
+		return *this;
+	}
+
+	constexpr FixedUnit& operator-=(FixedUnit rhs)
+	{
+		value -= rhs.value;
+		return *this;
+	}
+
+	constexpr FixedUnit& operator*=(FixedUnit rhs)
+	{
+		value = static_cast<int32_t>((static_cast<int64_t>(value) * rhs.value) / Scale64);
+		return *this;
+	}
+
+	constexpr FixedUnit& operator/=(FixedUnit rhs)
+	{
+		value = static_cast<int32_t>((static_cast<int64_t>(value) * Scale64) / rhs.value);
+		return *this;
+	}
+
+	// --- Compound assignment — unitless int scalar --------------------------
+	// + and - treat int as a whole unit (1 → Scale). * and / are raw scalars.
+
+	constexpr FixedUnit& operator+=(int32_t rhs)
+	{
+		value += rhs * Scale;
+		return *this;
+	}
+
+	constexpr FixedUnit& operator-=(int32_t rhs)
+	{
+		value -= rhs * Scale;
+		return *this;
+	}
+
+	constexpr FixedUnit& operator*=(int32_t rhs)
+	{
+		value *= rhs;
+		return *this;
+	}
+
+	constexpr FixedUnit& operator/=(int32_t rhs)
+	{
+		value /= rhs;
+		return *this;
+	}
+
+	// --- Comparison ---------------------------------------------------------
+
+	friend constexpr auto operator<=>(FixedUnit a, FixedUnit b) = default;
+	friend constexpr bool operator==(FixedUnit a, FixedUnit b)  = default;
+};
+
 // --- Binary arithmetic — Fixed32 op Fixed32 ---------------------------------
 
 constexpr Fixed32 operator+(Fixed32 a, Fixed32 b) { return Fixed32::FromRaw(a.value + b.value); }
@@ -229,6 +334,49 @@ constexpr Fixed32 operator*(double a, Fixed32 b) { return Fixed32::FromDouble(a)
 constexpr Fixed32 operator/(Fixed32 a, double b) { return a / Fixed32::FromDouble(b); }
 constexpr Fixed32 operator/(double a, Fixed32 b) { return Fixed32::FromDouble(a) / b; }
 #endif
+
+// --- Binary arithmetic — FixedUnit op FixedUnit ---------------------------------
+
+constexpr FixedUnit operator+(FixedUnit a, FixedUnit b) { return FixedUnit::FromRaw(a.value + b.value); }
+constexpr FixedUnit operator-(FixedUnit a, FixedUnit b) { return FixedUnit::FromRaw(a.value - b.value); }
+
+constexpr FixedUnit operator*(FixedUnit a, FixedUnit b)
+{
+	return FixedUnit::FromRaw(static_cast<int32_t>((static_cast<int64_t>(a.value) * b.value) / FixedUnit::Scale64));
+}
+
+constexpr FixedUnit operator/(FixedUnit a, FixedUnit b)
+{
+	return FixedUnit::FromRaw(static_cast<int32_t>((static_cast<int64_t>(a.value) * FixedUnit::Scale64) / b.value));
+}
+
+// --- Binary arithmetic — FixedUnit op int / int op FixedUnit --------------------
+// + and - treat int as a whole unit (1 = Scale). * and / are unitless scalars.
+
+constexpr FixedUnit operator+(FixedUnit a, int32_t b) { return FixedUnit::FromRaw(a.value + b * FixedUnit::Scale); }
+constexpr FixedUnit operator+(int32_t a, FixedUnit b) { return FixedUnit::FromRaw(a * FixedUnit::Scale + b.value); }
+
+constexpr FixedUnit operator-(FixedUnit a, int32_t b) { return FixedUnit::FromRaw(a.value - b * FixedUnit::Scale); }
+constexpr FixedUnit operator-(int32_t a, FixedUnit b) { return FixedUnit::FromRaw(a * FixedUnit::Scale - b.value); }
+
+constexpr FixedUnit operator*(FixedUnit a, int32_t b) { return FixedUnit::FromRaw(a.value * b); }
+constexpr FixedUnit operator*(int32_t a, FixedUnit b) { return FixedUnit::FromRaw(a * b.value); }
+
+constexpr FixedUnit operator/(FixedUnit a, int32_t b) { return FixedUnit::FromRaw(a.value / b); }
+
+// --- Cross-type: Fixed32 scaled by FixedUnit ------------------------------------
+// FixedUnit::Scale is a power of 2 (1<<20), so division is a pure right shift.
+// Used for: pos * sin(angle), velocity * cos(heading), etc.
+
+constexpr Fixed32 operator*(Fixed32 a, FixedUnit b)
+{
+	return Fixed32::FromRaw(static_cast<int32_t>((static_cast<int64_t>(a.value) * b.value) >> 20));
+}
+
+constexpr Fixed32 operator*(FixedUnit a, Fixed32 b)
+{
+	return Fixed32::FromRaw(static_cast<int32_t>((static_cast<int64_t>(a.value) * b.value) >> 20));
+}
 
 // --- Fast square root for Fixed32 (integer Newton) -------------------------
 // Deterministic, no floating-point, fast convergence (≤3 iterations).

@@ -258,16 +258,16 @@ struct StateCorrectionEntry
 	uint32_t NetHandle; // EntityNetHandle.Value
 
 	// Authoritative position + rotation at the correction frame (header.FrameNumber)
-	float PosX, PosY, PosZ;
-	float RotQx, RotQy, RotQz, RotQw;
+	SimFloat PosX, PosY, PosZ;
+	SimFloat RotQx, RotQy, RotQz, RotQw;
 
 	// Server resim annotation. ResimFrameDelta > 0 means the server resimulated this entity;
 	// the resim root was (header.FrameNumber - ResimFrameDelta) in client-local frame space.
 	// ResimPos/Rot are the authoritative values at that root frame (to patch the client slab).
 	// 0 = normal current-frame correction, no slab patch needed.
 	uint32_t ResimFrameDelta;
-	float ResimPosX, ResimPosY, ResimPosZ;
-	float ResimRotQx, ResimRotQy, ResimRotQz, ResimRotQw;
+	SimFloat ResimPosX, ResimPosY, ResimPosZ;
+	SimFloat ResimRotQx, ResimRotQy, ResimRotQz, ResimRotQw;
 };
 
 static_assert(sizeof(StateCorrectionEntry) == 64, "StateCorrectionEntry must be 64 bytes");
@@ -366,8 +366,8 @@ struct PlayerBeginRequestPayload
 	int64_t PrefabID;      // AssetID raw value of the requested Construct prefab
 	uint32_t PredictionID; // Client-local prediction token; echoed in Confirm/Reject
 	uint32_t _Pad;
-	float PosX, PosY, PosZ; // Desired spawn position hint (server may override)
-	float _Pad2;
+	SimFloat PosX, PosY, PosZ; // Desired spawn position hint (server may override)
+	SimFloat _Pad2;
 };
 
 static_assert(sizeof(PlayerBeginRequestPayload) == 32, "PlayerBeginRequestPayload must be 32 bytes");
@@ -380,7 +380,7 @@ struct PlayerBeginConfirmPayload
 {
 	uint32_t NetHandle;     // ConstructNetHandle.Value for the spawned body Construct
 	uint32_t PredictionID;  // Echoed from PlayerBeginRequestPayload
-	float PosX, PosY, PosZ; // Authoritative spawn position
+	SimFloat PosX, PosY, PosZ; // Authoritative spawn position
 	uint16_t Generation;    // ConstructRef generation — client uses this to form a valid ConstructRef
 	uint16_t _Pad;
 	uint32_t SpawnFrame; // Server sim frame at which the spawn was confirmed.
@@ -445,9 +445,9 @@ struct RPCContext
 struct PlayerBeginResult
 {
 	bool Accepted     = false;
-	float PosX        = 0.0f;
-	float PosY        = 5.0f; // Reasonable default so body isn't in the floor
-	float PosZ        = 0.0f;
+	SimFloat PosX     = 0.0f;
+	SimFloat PosY     = 5.0f; // Reasonable default so body isn't in the floor
+	SimFloat PosZ     = 0.0f;
 	ConstructRef Body = {}; // Handle to the created Body Construct (may be invalid until Constructs wire up)
 };
 
@@ -462,7 +462,7 @@ struct PlayerBeginResult
 //                              carry client-local frame numbers; the server translates.
 //
 // Server → Client (response): ServerFrame set to current FrameNumber,
-//                              ClientTimestamp echoed for RTT calculation,
+//                              ClientTimestamp echoed for RTT calculation,float
 //                              LocalFrameAtHandshake echoed back (unused on client, zero-cost).
 //
 // Sent unreliable (NetMessageType::ClockSync).

@@ -30,8 +30,8 @@ public:
 	void SetPosition(JPH::RVec3 position);
 
 	// Write results back to slab fields
-	void SyncToSlab(float* posX, float* posY, float* posZ,
-					float* rotX, float* rotY, float* rotZ, float* rotW,
+	void SyncToSlab(SimFloat* posX, SimFloat* posY, SimFloat* posZ,
+					SimFloat* rotX, SimFloat* rotY, SimFloat* rotZ, SimFloat* rotW,
 					uint32_t index);
 
 private:

@@ -130,7 +130,7 @@ public:
 
 	// Dispatch an orientation delta from highest slot to lowest.
 	// Each layer's ConsumeScope controls whether processing continues.
-	void DispatchOrientationDelta(float dyaw, float dpitch);
+	void DispatchOrientationDelta(SimFloat dyaw, SimFloat dpitch);
 
 private:
 	struct Slot

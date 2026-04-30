@@ -3,8 +3,9 @@
 #include "FieldProxy.h"
 #include "FastTrig.h"
 #include <cmath>
+#include "ComponentView.h"
 
-// QuatMath — quaternion operations on FieldProxy<float, WIDTH>.
+// QuatMath — quaternion operations on FieldProxy<SimFloat, WIDTH>.
 //
 // Solves the cross-dependency problem: all 4 components are loaded into
 // locals before any writes, so the result is correct at every FieldWidth
@@ -18,7 +19,7 @@ namespace QuatMath
 	template <FieldWidth WIDTH>
 	struct QuatLocal
 	{
-		using Val = std::conditional_t<WIDTH == FieldWidth::Scalar, float, __m256>;
+		using Val = std::conditional_t<WIDTH == FieldWidth::Scalar, SimFloat, __m256>;
 		Val x, y, z, w;
 	};
 
@@ -38,7 +39,7 @@ namespace QuatMath
 		}
 		else
 		{
-			using T = SIMDTraits<float, WIDTH>;
+			using T = SIMDTraits<SimFloat, WIDTH>;
 			q.x     = T::load(&qx.WriteArray[qx.index]);
 			q.y     = T::load(&qy.WriteArray[qy.index]);
 			q.z     = T::load(&qz.WriteArray[qz.index]);
@@ -64,7 +65,7 @@ FORCE_INLINE void Store(
 	// b is a uniform scalar quaternion (same delta rotation for all entities in the lane).
 	template <FieldWidth WIDTH>
 	FORCE_INLINE QuatLocal<WIDTH> Multiply(const QuatLocal<WIDTH>& a,
-										   float bx, float by, float bz, float bw)
+										   SimFloat bx, SimFloat by, SimFloat bz, SimFloat bw)
 	{
 		QuatLocal<WIDTH> r;
 		if constexpr (WIDTH == FieldWidth::Scalar)
@@ -76,7 +77,7 @@ FORCE_INLINE void Store(
 		}
 		else
 		{
-			using T         = SIMDTraits<float, WIDTH>;
+			using T         = SIMDTraits<SimFloat, WIDTH>;
 			const __m256 Bx = T::set1(bx), By = T::set1(by);
 			const __m256 Bz = T::set1(bz), Bw = T::set1(bw);
 
@@ -102,10 +103,10 @@ FORCE_INLINE void Store(
 FORCE_INLINE void RotateAxisAngle(
 		FloatProxy<WIDTH>& qx, FloatProxy<WIDTH>& qy,
 		FloatProxy<WIDTH>& qz, FloatProxy<WIDTH>& qw,
-		float ax, float ay, float az, float angle)
+		SimFloat ax, SimFloat ay, SimFloat az, SimFloat angle)
 	{
-		const float half = angle * 0.5f;
-		const float s    = FastSin(half), c = FastCos(half);
+		const SimFloat half = angle * SimFloat(0.5f);
+		const SimFloat s    = FastSin(half), c = FastCos(half);
 		auto q           = Load<WIDTH>(qx, qy, qz, qw);
 		auto r           = Multiply<WIDTH>(q, ax * s, ay * s, az * s, c);
 		Store<WIDTH>(qx, qy, qz, qw, r);
@@ -114,7 +115,7 @@ FORCE_INLINE void RotateAxisAngle(
 	// Convenience: rotate around world X axis.
 	template <FieldWidth WIDTH>
 FORCE_INLINE void RotateX(FloatProxy<WIDTH>& qx, FloatProxy<WIDTH>& qy,
-						  FloatProxy<WIDTH>& qz, FloatProxy<WIDTH>& qw, float angle)
+						  FloatProxy<WIDTH>& qz, FloatProxy<WIDTH>& qw, SimFloat angle)
 	{
 		RotateAxisAngle<WIDTH>(qx, qy, qz, qw, 1.0f, 0.0f, 0.0f, angle);
 	}
@@ -122,7 +123,7 @@ FORCE_INLINE void RotateX(FloatProxy<WIDTH>& qx, FloatProxy<WIDTH>& qy,
 	// Convenience: rotate around world Y axis.
 	template <FieldWidth WIDTH>
 FORCE_INLINE void RotateY(FloatProxy<WIDTH>& qx, FloatProxy<WIDTH>& qy,
-						  FloatProxy<WIDTH>& qz, FloatProxy<WIDTH>& qw, float angle)
+						  FloatProxy<WIDTH>& qz, FloatProxy<WIDTH>& qw, SimFloat angle)
 	{
 		RotateAxisAngle<WIDTH>(qx, qy, qz, qw, 0.0f, 1.0f, 0.0f, angle);
 	}
@@ -130,7 +131,7 @@ FORCE_INLINE void RotateY(FloatProxy<WIDTH>& qx, FloatProxy<WIDTH>& qy,
 	// Convenience: rotate around world Z axis.
 	template <FieldWidth WIDTH>
 FORCE_INLINE void RotateZ(FloatProxy<WIDTH>& qx, FloatProxy<WIDTH>& qy,
-						  FloatProxy<WIDTH>& qz, FloatProxy<WIDTH>& qw, float angle)
+						  FloatProxy<WIDTH>& qz, FloatProxy<WIDTH>& qw, SimFloat angle)
 	{
 		RotateAxisAngle<WIDTH>(qx, qy, qz, qw, 0.0f, 0.0f, 1.0f, angle);
 	}

@@ -114,6 +114,7 @@ private:
 	bool CreateCommandPools();
 	bool CreateSwapchain(SDL_Window* window);
 	void DestroySwapchain();
+	void NameCoreObjects();
 
 	vk::SurfaceFormatKHR ChooseSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& available) const;
 	vk::PresentModeKHR ChoosePresentMode(const std::vector<vk::PresentModeKHR>& available) const;
@@ -146,4 +147,7 @@ private:
 	bool bSupportsDynRenderLocalRead  = false;
 	bool bSupportsIndexTypeUint8      = false;
 	uint32_t ReBarHeapIndex           = UINT32_MAX;
+
+	bool bDebugUtilsEnabled = false; // VK_EXT_debug_utils — Nsight / RenderDoc / validation
+	bool bAftermathEnabled  = false; // VK_NV_device_diagnostics_config (when TNX_ENABLE_AFTERMATH)
 };

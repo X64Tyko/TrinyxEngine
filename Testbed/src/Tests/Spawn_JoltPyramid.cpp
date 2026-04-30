@@ -20,17 +20,17 @@ RUNTIME_TEST(Spawn_JoltPyramid)
 	std::mt19937 gen(std::random_device{}());
 	std::uniform_real_distribution<float> colorDist(0.2f, 1.0f);
 
-	constexpr float cBoxSize       = 2.0f;
-	constexpr float cHalfBoxSize   = 1.0f;
-	constexpr float cBoxSeparation = 0.5f;
+	constexpr SimFloat cBoxSize       = SimFloat(2.0f);
+	constexpr SimFloat cHalfBoxSize   = SimFloat(1.0f);
+	constexpr SimFloat cBoxSeparation = SimFloat(0.5f);
 #ifdef TNX_ENABLE_ROLLBACK
 	constexpr int cPyramidHeight = 3; // reduced — rollback determinism test re-simulates these
 #else
 	constexpr int cPyramidHeight = 5;
 #endif
-	constexpr float xOffset = 0.0f;
-	constexpr float yOffset = -30.0f;
-	constexpr float zOffset = -100.0f;
+	constexpr SimFloat xOffset = SimFloat(0.0f);
+	constexpr SimFloat yOffset = SimFloat(-30.0f);
+	constexpr SimFloat zOffset = SimFloat(-100.0f);
 
 	static std::vector<CubeSetup> setups;
 	setups.clear();
@@ -42,9 +42,9 @@ RUNTIME_TEST(Spawn_JoltPyramid)
 			for (int k = layer / 2; k < cPyramidHeight - (layer + 1) / 2; ++k)
 			{
 				setups.push_back({
-					xOffset + static_cast<float>(-cPyramidHeight) + cBoxSize * static_cast<float>(j) + ((layer & 1) ? cHalfBoxSize : 0.0f),
-					yOffset + 1.0f + (cBoxSize + cBoxSeparation) * static_cast<float>(layer),
-					zOffset + static_cast<float>(-cPyramidHeight) + cBoxSize * static_cast<float>(k) + ((layer & 1) ? cHalfBoxSize : 0.0f),
+					xOffset + static_cast<SimFloat>(-cPyramidHeight) + cBoxSize * static_cast<SimFloat>(j) + ((layer & 1) ? cHalfBoxSize : 0.0f),
+					yOffset + 1.0f + (cBoxSize + cBoxSeparation) * static_cast<SimFloat>(layer),
+					zOffset + static_cast<SimFloat>(-cPyramidHeight) + cBoxSize * static_cast<SimFloat>(k) + ((layer & 1) ? cHalfBoxSize : 0.0f),
 					cHalfBoxSize, cHalfBoxSize, cHalfBoxSize,
 					1.0f,
 					colorDist(gen), colorDist(gen), colorDist(gen),

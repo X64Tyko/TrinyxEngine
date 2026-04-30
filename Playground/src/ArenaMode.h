@@ -59,15 +59,15 @@ public:
 				v.physBody.Mass        = SimFloat(10.0f);
 			});
 
-			// Spawn the trigger volume centered at (5, 1, 0), slightly larger than the cube.
+			// Spawn the trigger volume across from the cube and off the ground
 			cr->Create<TriggerVolume>(world, [this](TriggerVolume* tv)
 			{
-				tv->PosX  = -5.0f;
-				tv->PosY  = 3.0f;
-				tv->PosZ  = -6.0f;
-				tv->HalfX = 1.5f;
-				tv->HalfY = 1.5f;
-				tv->HalfZ = 1.5f;
+				tv->PosX  = SimFloat(-5.0f);
+				tv->PosY  = SimFloat(3.0f);
+				tv->PosZ  = SimFloat(-6.0f);
+				tv->HalfX = SimFloat(1.5f);
+				tv->HalfY = SimFloat(1.5f);
+				tv->HalfZ = SimFloat(1.5f);
 
 				tv->OnEnter.Bind<ArenaMode, &ArenaMode::OnTriggerOverlap>(this);
 			});

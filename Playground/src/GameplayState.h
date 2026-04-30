@@ -65,7 +65,7 @@ public:
 	{
 	}
 
-	void Tick(float dt) override { (void)dt; }
+	void Tick(SimFloat dt) override { (void)dt; }
 
 	StateRequirements GetRequirements() const override
 	{

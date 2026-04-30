@@ -320,7 +320,7 @@ void FlowManagerBase::PostPlayerBeginConfirm(const PlayerBeginConfirmPayload& pa
 	PostNetEvent(static_cast<uint8_t>(FlowEventID::PlayerBeginConfirm));
 }
 
-void FlowManagerBase::Tick(float dt)
+void FlowManagerBase::Tick(SimFloat dt)
 {
 	const uint32_t events = PendingNetEvents.exchange(0, std::memory_order_acquire);
 	if (events)

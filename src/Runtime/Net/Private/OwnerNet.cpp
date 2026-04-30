@@ -177,7 +177,7 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 									  [[maybe_unused]] WorldBase* world, [[maybe_unused]] uint32_t LastAckedFrame)
 {
 #ifdef TNX_ENABLE_ROLLBACK
-	constexpr float kDivergenceThresholdSq = 0.01f * 0.01f;
+	constexpr SimFloat kDivergenceThresholdSq = SimFloat(0.01f * 0.01f);
 
 	const auto* temporal      = reg->GetTemporalCache();
 	const uint32_t ringSize   = temporal->GetTotalFrameCount();
@@ -222,13 +222,13 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 				void* resimFieldTable[MAX_FIELDS_PER_ARCHETYPE];
 				arch->BuildFieldArrayTable(chunk, resimFieldTable, clientResimFrame, volatileFrame);
 
-				float resimX = 0.f, resimY = 0.f, resimZ = 0.f;
+				SimFloat resimX = 0.f, resimY = 0.f, resimZ = 0.f;
 				for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 				{
 					if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
 					void* base = resimFieldTable[fdesc.fieldSlotIndex];
 					if (!base) continue;
-					auto* fa = static_cast<float*>(base);
+					auto* fa = static_cast<SimFloat*>(base);
 					switch (fdesc.componentSlotIndex)
 					{
 						case 0: resimX = fa[localIdx];
@@ -241,14 +241,14 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 					}
 				}
 
-				const float rdx = resimX - entry.ResimPosX;
-				const float rdy = resimY - entry.ResimPosY;
-				const float rdz = resimZ - entry.ResimPosZ;
+				const SimFloat rdx = resimX - entry.ResimPosX;
+				const SimFloat rdy = resimY - entry.ResimPosY;
+				const SimFloat rdz = resimZ - entry.ResimPosZ;
 				if (rdx * rdx + rdy * rdy + rdz * rdz > kDivergenceThresholdSq)
 				{
 					LOG_ENG_WARN_F("[Replication] ResimRoot divergence: netHandle=%u resimFrame=%u dist=%.4fm",
 								   entry.NetHandle, clientResimFrame,
-								   std::sqrt(rdx * rdx + rdy * rdy + rdz * rdz));
+								   Sqrt(rdx * rdx + rdy * rdy + rdz * rdz).ToDouble());
 					bPushCorrection = true;
 				}
 			}
@@ -257,13 +257,13 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 		void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 		arch->BuildFieldArrayTable(chunk, fieldArrayTable, clientFrame, volatileFrame);
 
-		float predictedX = 0.f, predictedY = 0.f, predictedZ = 0.f;
+		SimFloat predictedX = 0.f, predictedY = 0.f, predictedZ = 0.f;
 		for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 		{
 			if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
 			void* base = fieldArrayTable[fdesc.fieldSlotIndex];
 			if (!base) continue;
-			auto* fa = static_cast<float*>(base);
+			auto* fa = static_cast<SimFloat*>(base);
 			switch (fdesc.componentSlotIndex)
 			{
 				case 0: predictedX = fa[localIdx];
@@ -276,13 +276,13 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 			}
 		}
 
-		const float dx = predictedX - entry.PosX;
-		const float dy = predictedY - entry.PosY;
-		const float dz = predictedZ - entry.PosZ;
+		const SimFloat dx = predictedX - entry.PosX;
+		const SimFloat dy = predictedY - entry.PosY;
+		const SimFloat dz = predictedZ - entry.PosZ;
 		if (dx * dx + dy * dy + dz * dz > kDivergenceThresholdSq)
 		{
 			LOG_ENG_WARN_F("[Replication] Divergence: netHandle=%u frame=%u dist=%.4fm",
-						   entry.NetHandle, clientFrame, std::sqrt(dx * dx + dy * dy + dz * dz));
+						   entry.NetHandle, clientFrame, Sqrt(dx * dx + dy * dy + dz * dz).ToDouble());
 			bPushCorrection = true;
 		}
 
@@ -352,7 +352,7 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 			if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
 			void* base = fieldArrayTable[fdesc.fieldSlotIndex];
 			if (!base) continue;
-			auto* fa = static_cast<float*>(base);
+			auto* fa = static_cast<SimFloat*>(base);
 			switch (fdesc.componentSlotIndex)
 			{
 				case 0: fa[localIdx] = entry.PosX;

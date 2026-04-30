@@ -16,13 +16,13 @@ RUNTIME_TEST(Spawn_SuperCubeGrid)
 	std::uniform_real_distribution<float> colorDist(0.2f, 1.0f);
 
 	constexpr int   Count    = 10000;
-	constexpr float Spacing  = 3.0f;
-	constexpr float CubeHalf = 0.5f;
-	constexpr float YBase    = 10.0f;
-	constexpr float ZOffset  = -200.0f;
+	constexpr SimFloat Spacing  = SimFloat(3.0f);
+	constexpr SimFloat CubeHalf = SimFloat(0.5f);
+	constexpr SimFloat YBase    = SimFloat(10.0f);
+	constexpr SimFloat ZOffset  = SimFloat(-200.0f);
 
-	int   gridSide = static_cast<int>(std::ceil(std::sqrt(static_cast<float>(Count))));
-	float gridHalf = static_cast<float>(gridSide) * Spacing * 0.5f;
+	int gridSide      = static_cast<int>(std::ceil(Sqrt(SimFloat(Count)).ToFloat()));
+	SimFloat gridHalf = static_cast<SimFloat>(gridSide) * Spacing * SimFloat(0.5f);
 
 	static std::vector<CubeSetup> setups;
 	setups.clear();
@@ -33,8 +33,8 @@ RUNTIME_TEST(Spawn_SuperCubeGrid)
 		int row = i / gridSide;
 		int col = i % gridSide;
 		setups.push_back({
-			static_cast<float>(col) * Spacing - gridHalf,
-			YBase + static_cast<float>(row) * Spacing,
+			static_cast<SimFloat>(col) * Spacing - gridHalf,
+			YBase + static_cast<SimFloat>(row) * Spacing,
 			ZOffset,
 			CubeHalf, CubeHalf, CubeHalf,
 			0.0f,

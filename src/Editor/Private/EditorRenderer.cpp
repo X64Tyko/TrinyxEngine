@@ -492,35 +492,71 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 	const ComponentTypeID flagsSlot     = CacheSlotMeta<>::StaticTemporalIndex();
 	const ComponentTypeID meshRefSlot   = CMeshRef<>::StaticTemporalIndex();
 
+	enum class FieldKind : uint8_t { SimFloat, RawU32 };
 	struct FD
 	{
 		ComponentCacheBase* cache;
 		TemporalFrameHeader* hdr;
 		ComponentTypeID slot;
 		size_t fi;
+		FieldKind kind;
 	};
 	const FD fieldDescs[GpuOutFieldCount] = {
-		{temporalC, temporalHdr, flagsSlot, 0},
-		{temporalC, temporalHdr, transformSlot, 0}, {temporalC, temporalHdr, transformSlot, 1},
-		{temporalC, temporalHdr, transformSlot, 2}, {temporalC, temporalHdr, transformSlot, 3},
-		{temporalC, temporalHdr, transformSlot, 4}, {temporalC, temporalHdr, transformSlot, 5},
-		{temporalC, temporalHdr, transformSlot, 6},
-		{volatileC, volatileHdr, scaleSlot, 0}, {volatileC, volatileHdr, scaleSlot, 1},
-		{volatileC, volatileHdr, scaleSlot, 2},
-		{volatileC, volatileHdr, colorSlot, 0}, {volatileC, volatileHdr, colorSlot, 1},
-		{volatileC, volatileHdr, colorSlot, 2}, {volatileC, volatileHdr, colorSlot, 3},
-		{volatileC, volatileHdr, meshRefSlot, 0},
+		{temporalC, temporalHdr, flagsSlot, 0, FieldKind::RawU32},
+		{temporalC, temporalHdr, transformSlot, 0, FieldKind::SimFloat},
+		{temporalC, temporalHdr, transformSlot, 1, FieldKind::SimFloat},
+		{temporalC, temporalHdr, transformSlot, 2, FieldKind::SimFloat},
+		{temporalC, temporalHdr, transformSlot, 3, FieldKind::SimFloat},
+		{temporalC, temporalHdr, transformSlot, 4, FieldKind::SimFloat},
+		{temporalC, temporalHdr, transformSlot, 5, FieldKind::SimFloat},
+		{temporalC, temporalHdr, transformSlot, 6, FieldKind::SimFloat},
+		{volatileC, volatileHdr, scaleSlot, 0, FieldKind::SimFloat},
+		{volatileC, volatileHdr, scaleSlot, 1, FieldKind::SimFloat},
+		{volatileC, volatileHdr, scaleSlot, 2, FieldKind::SimFloat},
+		{volatileC, volatileHdr, colorSlot, 0, FieldKind::SimFloat},
+		{volatileC, volatileHdr, colorSlot, 1, FieldKind::SimFloat},
+		{volatileC, volatileHdr, colorSlot, 2, FieldKind::SimFloat},
+		{volatileC, volatileHdr, colorSlot, 3, FieldKind::SimFloat},
+		{volatileC, volatileHdr, meshRefSlot, 0, FieldKind::RawU32},
 	};
 
-	// Full copy — viewport slabs are always fully rewritten (no dirty tracking optimization yet)
+	// One job per field — all 16 run in parallel on the Render queue.
+	// SimFloat fields go through .ToFloat() in Fixed32 builds so the GPU sees IEEE 754 meters,
+	// not raw Fixed32 integers. RawU32 fields (flags, mesh ID) are copied verbatim.
+	TrinyxJobs::JobCounter transferCounter;
 	for (uint32_t f = 0; f < GpuOutFieldCount; ++f)
 	{
 		const FD& fd    = fieldDescs[f];
 		const void* src = fd.cache->GetFieldData(fd.hdr, fd.slot, fd.fi);
 		uint8_t* dst    = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
-		if (src) std::memcpy(dst, src, static_cast<size_t>(fieldStride));
-		else std::memset(dst, 0, static_cast<size_t>(fieldStride));
+		const FieldKind kind = fd.kind;
+
+		TrinyxJobs::Dispatch([src, dst, fieldStride, kind](uint32_t)
+		{
+			if (kind == FieldKind::RawU32)
+			{
+				if (src) std::memcpy(dst, src, static_cast<size_t>(fieldStride));
+				else std::memset(dst, 0, static_cast<size_t>(fieldStride));
+			}
+			else if constexpr (std::is_same_v<SimFloat, SimFloatImpl<float>>)
+			{
+				if (src) std::memcpy(dst, src, static_cast<size_t>(fieldStride));
+				else std::memset(dst, 0, static_cast<size_t>(fieldStride));
+			}
+			else
+			{
+				if (src)
+				{
+					const Fixed32* fsrc = static_cast<const Fixed32*>(src);
+					float* fdst         = reinterpret_cast<float*>(dst);
+					const size_t count  = static_cast<size_t>(fieldStride) / sizeof(float);
+					for (size_t i = 0; i < count; ++i) fdst[i] = fsrc[i].ToFloat();
+				}
+				else std::memset(dst, 0, static_cast<size_t>(fieldStride));
+			}
+		}, &transferCounter, TrinyxJobs::Queue::Render);
 	}
+	TrinyxJobs::WaitForCounter(&transferCounter, TrinyxJobs::Queue::Render);
 
 	vp->bHasSlabData = true;
 
@@ -543,9 +579,9 @@ static void MultMat4(float* out, const SimFloat* A, const SimFloat* B)
 	for (int col = 0; col < 4; ++col)
 		for (int row = 0; row < 4; ++row)
 		{
-			float sum = 0.0f;
-			for (int k = 0; k < 4; ++k) sum += (A[k * 4 + row] * B[col * 4 + k]).ToFloat();
-			out[col * 4 + row] = sum;
+			SimFloat sum = 0.0f;
+			for (int k = 0; k < 4; ++k) sum += A[k * 4 + row] * B[col * 4 + k];
+			out[col * 4 + row] = sum.ToFloat();
 		}
 }
 

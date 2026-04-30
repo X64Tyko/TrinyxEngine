@@ -25,18 +25,18 @@ inline std::vector<EntityHandle> gProjectileIds;
 // ---------------------------------------------------------------------------
 struct CubeSetup
 {
-	float x, y, z;
-	float halfX, halfY, halfZ;
-	float mass;
-	float r, g, b;
+	SimFloat x, y, z;
+	SimFloat halfX, halfY, halfZ;
+	SimFloat mass;
+	SimFloat r, g, b;
 	uint32_t motion;
 };
 
 struct ProjectileSetup
 {
-	float x, y, z;
-	float velX, velY, velZ;
-	float r, g, b, a;
+	SimFloat x, y, z;
+	SimFloat velX, velY, velZ;
+	SimFloat r, g, b, a;
 };
 
 // ---------------------------------------------------------------------------
@@ -75,18 +75,18 @@ inline void WriteCubeSetups(Registry* reg, const std::vector<CubeSetup>& setups,
 				cube.transform.PosY = s.y;
 				cube.transform.PosZ = s.z;
 				cube.transform.Rotation.SetIdentity();
-				cube.scale.ScaleX = s.halfX * 2.0f;
-				cube.scale.ScaleY = s.halfY * 2.0f;
-				cube.scale.ScaleZ = s.halfZ * 2.0f;
+				cube.scale.ScaleX = s.halfX * SimFloat(2.0f);
+				cube.scale.ScaleY = s.halfY * SimFloat(2.0f);
+				cube.scale.ScaleZ = s.halfZ * SimFloat(2.0f);
 
-				cube.velocity.vX = 0.0f;
-				cube.velocity.vY = 0.0f;
-				cube.velocity.vZ = 0.0f;
+				cube.velocity.vX = SimFloat(0.0f);
+				cube.velocity.vY = SimFloat(0.0f);
+				cube.velocity.vZ = SimFloat(0.0f);
 
 				cube.color.R = s.r;
 				cube.color.G = s.g;
 				cube.color.B = s.b;
-				cube.color.A = 1.0f;
+				cube.color.A = SimFloat(1.0f);
 
 				cube.physBody.Shape       = JoltShapeType::Box;
 				cube.physBody.HalfExtentX = s.halfX;
@@ -94,8 +94,8 @@ inline void WriteCubeSetups(Registry* reg, const std::vector<CubeSetup>& setups,
 				cube.physBody.HalfExtentZ = s.halfZ;
 				cube.physBody.Motion      = s.motion;
 				cube.physBody.Mass        = s.mass;
-				cube.physBody.Friction    = 0.5f;
-				cube.physBody.Restitution = 0.5f;
+				cube.physBody.Friction    = SimFloat(0.5f);
+				cube.physBody.Restitution = SimFloat(0.5f);
 			}
 		}
 	}
@@ -187,18 +187,18 @@ inline void WriteSuperCubeSetups(Registry* reg, const std::vector<CubeSetup>& se
 				cube.transform.PosY = s.y;
 				cube.transform.PosZ = s.z;
 				cube.transform.Rotation.SetIdentity();
-				cube.scale.ScaleX = s.halfX * 2.0f;
-				cube.scale.ScaleY = s.halfY * 2.0f;
-				cube.scale.ScaleZ = s.halfZ * 2.0f;
+				cube.scale.ScaleX = s.halfX * SimFloat(2.0f);
+				cube.scale.ScaleY = s.halfY * SimFloat(2.0f);
+				cube.scale.ScaleZ = s.halfZ * SimFloat(2.0f);
 
-				cube.velocity.vX = 0.0f;
-				cube.velocity.vY = 0.0f;
-				cube.velocity.vZ = 0.0f;
+				cube.velocity.vX = SimFloat(0.0f);
+				cube.velocity.vY = SimFloat(0.0f);
+				cube.velocity.vZ = SimFloat(0.0f);
 
 				cube.color.R = s.r;
 				cube.color.G = s.g;
 				cube.color.B = s.b;
-				cube.color.A = 1.0f;
+				cube.color.A = SimFloat(1.0f);
 			}
 		}
 	}

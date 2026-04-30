@@ -30,9 +30,9 @@ public:
 		PlayerBeginResult result;
 		result.Accepted = true;
 
-		static constexpr float SpawnPoints[2][3] = {
-			{  2.0f, 5.0f, 0.0f },
-			{ -2.0f, 5.0f, 0.0f },
+		static constexpr SimFloat SpawnPoints[2][3] = {
+			{SimFloat(2.0f), SimFloat(5.0f), SimFloat(0.0f)},
+			{SimFloat(-2.0f), SimFloat(5.0f), SimFloat(0.0f)},
 		};
 		const uint8_t idx  = SpawnCounter.fetch_add(1, std::memory_order_relaxed) % 2;
 		result.PosX = SpawnPoints[idx][0];
@@ -49,7 +49,7 @@ public:
 		ConstructRef bodyRef{};
 		ConstructRef* bodyRefPtr = &bodyRef;
 		Soul* soulPtr            = &soul;
-		float posX               = result.PosX, posY = result.PosY, posZ = result.PosZ;
+		SimFloat posX            = result.PosX, posY = result.PosY, posZ = result.PosZ;
 
 		world->SpawnAndWait([world, repl, soulPtr, typeHash, posX, posY, posZ, bodyRefPtr](uint32_t)
 		{

@@ -279,7 +279,7 @@ void LogicThread::ProcessVizInput(SimFloat dt)
 	if (VizInput->IsActionDown(Action::MoveDown)) moveDir = moveDir - up;
 
 	SimFloat moveLen = moveDir.Length();
-	if (moveLen > SimFloat(0.001f)) CamPos = CamPos + moveDir * (dt * CamMoveSpeed / moveLen).ToFloat();
+	if (moveLen > SimFloat(0.001f)) CamPos = CamPos + moveDir * (dt * CamMoveSpeed / moveLen);
 }
 
 // ---------------------------------------------------------------------------

@@ -189,6 +189,17 @@ if (NOT TNX_HEADLESS)
     target_link_libraries(${PROJECT_NAME} PUBLIC Vulkan::Vulkan)
 endif ()
 
+# F. Nsight Aftermath SDK (optional — only linked if SDK path is valid)
+if (TNX_ENABLE_AFTERMATH AND TNX_AFTERMATH_SDK_PATH AND EXISTS "${TNX_AFTERMATH_SDK_PATH}/include/GFSDK_Aftermath.h")
+    target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC "${TNX_AFTERMATH_SDK_PATH}/include")
+    if (WIN32)
+        target_link_libraries(${PROJECT_NAME} PUBLIC "${TNX_AFTERMATH_SDK_PATH}/lib/x64/GFSDK_Aftermath_Lib.x64.lib")
+        # GFSDK_Aftermath_Lib.x64.dll must be alongside the executable at runtime.
+    elseif (UNIX)
+        target_link_libraries(${PROJECT_NAME} PUBLIC "${TNX_AFTERMATH_SDK_PATH}/lib/x64/libGFSDK_Aftermath_Lib.x64.so")
+    endif ()
+endif ()
+
 # D. Jolt Physics
 # Jolt::Jolt works whether Jolt was found via find_package (installed/vcpkg)
 # or built from the vendored submodule (source build creates a Jolt::Jolt alias).

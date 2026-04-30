@@ -112,7 +112,7 @@ TNX_IMPL_SERVER(Soul, PlayerBegin, PlayerBeginRequestPayload)
 		ctx.CI->RepState     = ClientRepState::Playing;
 		PlayerBeginConfirm(confirm);
 		LOG_NET_INFO_F(this, "[Soul] PlayerBeginConfirm sent (ownerID=%u, pos=%.1f,%.1f,%.1f, serverFrame=%u clientFrame=%u)",
-					   OwnerID, confirm.PosX, confirm.PosY, confirm.PosZ, spawnFrame, clientSpawnFrame);
+					   OwnerID, confirm.PosX.ToFloat(), confirm.PosY.ToFloat(), confirm.PosZ.ToFloat(), spawnFrame, clientSpawnFrame);
 	}
 	else
 	{
@@ -161,7 +161,7 @@ TNX_IMPL_CLIENT(Soul, PlayerBeginConfirm, PlayerBeginConfirmPayload)
 	}
 
 	LOG_NET_INFO_F(this, "[Soul] PlayerBeginConfirm received (PredictionID=%u, pos=%.1f,%.1f,%.1f)",
-				   params.PredictionID, params.PosX, params.PosY, params.PosZ);
+				   params.PredictionID, params.PosX.ToFloat(), params.PosY.ToFloat(), params.PosZ.ToFloat());
 }
 
 // ---------------------------------------------------------------------------

@@ -102,18 +102,18 @@ bool JoltCharacter::IsGrounded() const
 	return Character ? Character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround : false;
 }
 
-void JoltCharacter::SyncToSlab(float* posX, float* posY, float* posZ,
-							   float* rotX, float* rotY, float* rotZ, float* rotW,
+void JoltCharacter::SyncToSlab(SimFloat* posX, SimFloat* posY, SimFloat* posZ,
+							   SimFloat* rotX, SimFloat* rotY, SimFloat* rotZ, SimFloat* rotW,
 							   uint32_t index)
 {
 	if (!Character) return;
 	JPH::RVec3 pos = GetPosition();
 	JPH::Quat rot  = GetRotation();
-	posX[index]    = pos.GetX();
-	posY[index]    = pos.GetY();
-	posZ[index]    = pos.GetZ();
-	rotX[index]    = rot.GetX();
-	rotY[index]    = rot.GetY();
-	rotZ[index]    = rot.GetZ();
-	rotW[index]    = rot.GetW();
+	posX[index]    = SimFloat(pos.GetX());
+	posY[index]    = SimFloat(pos.GetY());
+	posZ[index]    = SimFloat(pos.GetZ());
+	rotX[index]    = SimFloat(rot.GetX());
+	rotY[index]    = SimFloat(rot.GetY());
+	rotZ[index]    = SimFloat(rot.GetZ());
+	rotW[index]    = SimFloat(rot.GetW());
 }

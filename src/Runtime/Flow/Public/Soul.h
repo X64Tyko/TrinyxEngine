@@ -76,7 +76,7 @@ public:
 
 	// Route an orientation delta through the camera layer stack.
 	// Called by Soul input layers (see CameraInputMix.h) — do not call directly.
-	void DispatchOrientationDelta(float dyaw, float dpitch)
+	void DispatchOrientationDelta(SimFloat dyaw, SimFloat dpitch)
 	{
 		CamManager.DispatchOrientationDelta(dyaw, dpitch);
 	}

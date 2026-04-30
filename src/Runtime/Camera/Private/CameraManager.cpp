@@ -136,7 +136,7 @@ WorldCameraState CameraManager::Resolve() const
 	return state;
 }
 
-void CameraManager::DispatchOrientationDelta(float dyaw, float dpitch)
+void CameraManager::DispatchOrientationDelta(SimFloat dyaw, SimFloat dpitch)
 {
 	// Highest-priority slot first (Cinematic → World), last-pushed layer first within slot.
 	for (int8_t s = static_cast<int8_t>(CameraSlotCount) - 1; s >= 0; --s)

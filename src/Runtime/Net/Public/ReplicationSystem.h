@@ -263,13 +263,13 @@ private:
 	// Per-ownerID resim frame snapshot — rebuilt on Sentinel each DispatchFrameJobs(), read-only by correction build jobs.
 	struct ResimSnapshot
 	{
-		const float* posX  = nullptr;
-		const float* posY  = nullptr;
-		const float* posZ  = nullptr;
-		const float* rotQx = nullptr;
-		const float* rotQy = nullptr;
-		const float* rotQz = nullptr;
-		const float* rotQw = nullptr;
+		const SimFloat* posX  = nullptr;
+		const SimFloat* posY  = nullptr;
+		const SimFloat* posZ  = nullptr;
+		const SimFloat* rotQx = nullptr;
+		const SimFloat* rotQy = nullptr;
+		const SimFloat* rotQz = nullptr;
+		const SimFloat* rotQw = nullptr;
 		uint32_t delta     = 0;
 	};
 

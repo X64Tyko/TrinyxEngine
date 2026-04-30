@@ -15,7 +15,7 @@
 //
 //   CurveRef<T>  — Runtime read-only field. Lives in component and layer
 //                  structs. Wraps a CurveHandle and exposes Evaluate(t) → T.
-//                  T must have scalar lerp semantics (float, Vector3, etc.).
+//                  T must have scalar lerp semantics (SimFloat, Vector3, etc.).
 //
 //   CurveEditor<T> — Editor / pipeline only. Never placed in runtime structs.
 //                  Owns key storage, supports key editing and type switching.
@@ -46,7 +46,7 @@ enum class CurveType : uint8_t
 //   bits[27:0]  = table index (28 bits — 268M entries max)
 //
 //   Value == 0  → CurveType::Linear, no table entry (free default).
-//                 CurveRef::Evaluate() returns t unchanged for scalar float,
+//                 CurveRef::Evaluate() returns t unchanged for scalar SimFloat,
 //                 or linearly interpolates endpoints for other T.
 // ---------------------------------------------------------------------------
 struct CurveHandle
@@ -75,7 +75,7 @@ static_assert(sizeof(CurveHandle) == 4, "CurveHandle must be 4 bytes");
 //
 // For Linear / Step: only Time and Value are used.
 // For Bezier:        TangentIn / TangentOut are the off-curve control points
-//                    (same type as Value — e.g. float or Vector3).
+//                    (same type as Value — e.g. SimFloat or Vector3).
 // For Hermite:       TangentIn / TangentOut are slope values (same type).
 //
 // Keys must be stored sorted by Time in ascending order.
@@ -83,8 +83,8 @@ static_assert(sizeof(CurveHandle) == 4, "CurveHandle must be 4 bytes");
 template <typename T>
 struct CurveKey
 {
-    float Time       = 0.0f;
-    T     Value      = {};
+	SimFloat Time    = 0.0f;
+	T     Value      = {};
     T     TangentIn  = {};
     T     TangentOut = {};
 };
@@ -118,20 +118,20 @@ public:
         return instance;
     }
 
-    // Register a pre-built float curve and return its handle.
-    // Called by CurveEditor<float>::Bake() — not called at runtime.
-    CurveHandle RegisterFloat(CurveData<float>&& data)
-    {
+	// Register a pre-built SimFloat curve and return its handle.
+	// Called by CurveEditor<SimFloat>::Bake() — not called at runtime.
+	CurveHandle RegisterFloat(CurveData<SimFloat>&& data)
+	{
         const uint32_t index = static_cast<uint32_t>(FloatCurves.size());
         CurveType type = data.Type;
         FloatCurves.push_back(std::move(data));
         return CurveHandle::Make(type, index);
     }
 
-    // Evaluate a float curve at normalized t ∈ [0, 1].
-    // CurveHandle::Value == 0 → returns t directly (linear pass-through).
-    float EvaluateFloat(CurveHandle handle, float t) const
-    {
+	// Evaluate a SimFloat curve at normalized t ∈ [0, 1].
+	// CurveHandle::Value == 0 → returns t directly (linear pass-through).
+	SimFloat EvaluateFloat(CurveHandle handle, SimFloat t) const
+	{
         if (handle.IsLinear()) return t;
         const uint32_t index = handle.GetIndex();
         if (index >= FloatCurves.size()) return t;
@@ -143,8 +143,8 @@ private:
 
     // Evaluate a typed curve — dispatches by CurveType without virtual calls.
     template <typename T>
-    static T EvaluateCurve(const CurveData<T>& curve, CurveType type, float t)
-    {
+	static T EvaluateCurve(const CurveData<T>& curve, CurveType type, SimFloat t)
+	{
         const auto& keys = curve.Keys;
         if (keys.empty()) return T{};
         if (keys.size() == 1) return keys[0].Value;
@@ -165,10 +165,10 @@ private:
 
         const CurveKey<T>& k0 = keys[lo];
         const CurveKey<T>& k1 = keys[hi];
-        const float segLen = k1.Time - k0.Time;
-        const float s      = segLen > 0.0f ? (t - k0.Time) / segLen : 0.0f;
+		const SimFloat segLen = k1.Time - k0.Time;
+		const SimFloat s      = segLen > 0.0f ? (t - k0.Time) / segLen : 0.0f;
 
-        switch (type)
+		switch (type)
         {
         case CurveType::Step:
             return k0.Value;
@@ -184,50 +184,50 @@ private:
         }
     }
 
-    // Lerp — requires T supports operator+ and operator* with float.
-    template <typename T>
-    static T Lerp(const T& a, const T& b, float t)
-    {
+	// Lerp — requires T supports operator+ and operator* with SimFloat.
+	template <typename T>
+	static T Lerp(const T& a, const T& b, SimFloat t)
+	{
         return a + (b - a) * t;
     }
 
     // Cubic Hermite: p(s) = h00*p0 + h10*m0*d + h01*p1 + h11*m1*d
     // m0/m1 are tangent slopes (rise over run); d is segment duration.
     template <typename T>
-    static T EvalHermite(const T& p0, const T& m0, const T& p1, const T& m1, float s, float d)
-    {
-        const float s2  = s  * s;
-        const float s3  = s2 * s;
-        const float h00 =  2*s3 - 3*s2 + 1;
-        const float h10 =    s3 - 2*s2 + s;
-        const float h01 = -2*s3 + 3*s2;
-        const float h11 =    s3 -   s2;
-        return p0 * h00 + m0 * (h10 * d) + p1 * h01 + m1 * (h11 * d);
+	static T EvalHermite(const T& p0, const T& m0, const T& p1, const T& m1, SimFloat s, SimFloat d)
+	{
+		const SimFloat s2  = s * s;
+		const SimFloat s3  = s2 * s;
+		const SimFloat h00 = 2 * s3 - 3 * s2 + 1;
+		const SimFloat h10 = s3 - 2 * s2 + s;
+		const SimFloat h01 = -2 * s3 + 3 * s2;
+		const SimFloat h11 = s3 - s2;
+		return p0 * h00 + m0 * (h10 * d) + p1 * h01 + m1 * (h11 * d);
     }
 
     // Cubic Bezier: B(s) = (1-s)³p0 + 3(1-s)²s·c0 + 3(1-s)s²·c1 + s³p1
     template <typename T>
-    static T EvalBezier(const T& p0, const T& c0, const T& c1, const T& p1, float s)
-    {
-        const float t1  = 1.0f - s;
-        const float b0  = t1 * t1 * t1;
-        const float b1  = 3.0f * t1 * t1 * s;
-        const float b2  = 3.0f * t1 * s  * s;
-        const float b3  = s  * s  * s;
-        return p0 * b0 + c0 * b1 + c1 * b2 + p1 * b3;
+	static T EvalBezier(const T& p0, const T& c0, const T& c1, const T& p1, SimFloat s)
+	{
+		const SimFloat t1 = 1.0f - s;
+		const SimFloat b0 = t1 * t1 * t1;
+		const SimFloat b1 = 3.0f * t1 * t1 * s;
+		const SimFloat b2 = 3.0f * t1 * s * s;
+		const SimFloat b3 = s * s * s;
+		return p0 * b0 + c0 * b1 + c1 * b2 + p1 * b3;
     }
 
-    std::vector<CurveData<float>> FloatCurves;
+	std::vector<CurveData<SimFloat>> FloatCurves;
 };
 
 // ---------------------------------------------------------------------------
 // CurveRef<T> — runtime field handle. Lives in component and layer structs.
 //
 // Evaluate(t) → T:
-//   - handle.IsLinear(): returns t for float, or Lerp(T{}, T{1}, t) for others.
-//   - Otherwise: delegates to CurveTable::Get().EvaluateFloat() (float only for now).
+//   - handle.IsLinear(): returns t for SimFloat, or Lerp(T{}, T{1}, t) for others.
+//   - Otherwise: delegates to CurveTable::Get().EvaluateFloat() (SimFloat only for now).
 //
-// T == float is the primary use case. Additional specializations can be added
+// T == SimFloat is the primary use case. Additional specializations can be added
 // as CurveTable gains RegisterVector3 / RegisterColor etc.
 // ---------------------------------------------------------------------------
 template <typename T>
@@ -238,14 +238,14 @@ struct CurveRef
     CurveRef() = default;
     explicit CurveRef(CurveHandle h) : Handle(h) {}
 
-    T Evaluate(float t) const;
+	T Evaluate(SimFloat t) const;
 
-    bool IsLinear() const { return Handle.IsLinear(); }
+	bool IsLinear() const { return Handle.IsLinear(); }
 };
 
-// float specialization — fully inline, zero overhead for the linear case.
+// SimFloat specialization — fully inline, zero overhead for the linear case.
 template <>
-inline float CurveRef<float>::Evaluate(float t) const
+inline SimFloat CurveRef<SimFloat>::Evaluate(SimFloat t) const
 {
     if (Handle.IsLinear()) return t;
     return CurveTable::Get().EvaluateFloat(Handle, t);
@@ -263,8 +263,8 @@ struct CurveEditor
     CurveType            Type = CurveType::Linear;
     std::vector<CurveKey<T>> Keys;
 
-    void AddKey(float time, T value, T tangentIn = {}, T tangentOut = {})
-    {
+	void AddKey(SimFloat time, T value, T tangentIn = {}, T tangentOut = {})
+	{
         CurveKey<T> k{ time, value, tangentIn, tangentOut };
         // Insert sorted by time.
         auto it = Keys.begin();
@@ -280,17 +280,17 @@ struct CurveEditor
     void SetType(CurveType type) { Type = type; }
 
     // Bake into CurveTable and return the runtime handle.
-    // Only valid for T == float until CurveTable gains more typed stores.
-    CurveHandle Bake();
+	// Only valid for T == SimFloat until CurveTable gains more typed stores.
+	CurveHandle Bake();
 };
 
-// float specialization.
+// SimFloat specialization.
 template <>
-inline CurveHandle CurveEditor<float>::Bake()
+inline CurveHandle CurveEditor<SimFloat>::Bake()
 {
     if (Keys.empty() || Type == CurveType::Linear) return CurveHandle::Linear();
-    CurveData<float> data;
-    data.Type = Type;
+	CurveData<SimFloat> data;
+	data.Type = Type;
     data.Keys = Keys;
     return CurveTable::Get().RegisterFloat(std::move(data));
 }
