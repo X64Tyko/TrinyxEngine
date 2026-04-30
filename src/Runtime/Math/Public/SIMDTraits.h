@@ -517,11 +517,6 @@ struct SIMDTraits<uint32_t, WIDTH>
 	}
 };
 
-template <FieldWidth WIDTH>
-struct SIMDTraits<unsigned int, WIDTH> : SIMDTraits<uint32_t, WIDTH>
-{
-};
-
 // --- Fixed32 (add/sub/cmp delegate to int32_t; mul/div scalar fallback) ----
 template <FieldWidth WIDTH>
 struct SIMDTraits<Fixed32, WIDTH>
