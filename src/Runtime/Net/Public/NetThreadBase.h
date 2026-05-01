@@ -138,6 +138,8 @@ void NetThreadBase<Derived>::Tick()
 template <typename Derived>
 void NetThreadBase<Derived>::PumpMessages()
 {
+	if (!ConnectionMgr) return;
+	
 	GNS->Poll();
 	ConnectionMgr->RunCallbacks();
 

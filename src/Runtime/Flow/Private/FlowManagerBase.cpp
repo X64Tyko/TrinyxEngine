@@ -26,14 +26,13 @@ FlowManagerBase::~FlowManagerBase()
 	// Mode before World — Mode may reference World state
 	ActiveMode.reset();
 
-	// Destroy all Constructs before the World so Views unbind cleanly
-	ConstructReg.DestroyAll();
-
 	if (ActiveWorld)
 	{
 		ActiveWorld->Shutdown();
 		ActiveWorld.reset();
 	}
+
+	ConstructReg.DestroyAll();
 }
 
 // ---------------------------------------------------------------------------

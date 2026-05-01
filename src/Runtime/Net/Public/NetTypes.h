@@ -618,8 +618,8 @@ static_assert(sizeof(NetInputEvent) == 8, "NetInputEvent must be 8 bytes");
 struct InputSnapshot
 {
 	uint8_t KeyState[64] = {}; // held-key bitfield (all 512 SDL scancodes)
-	SimFloat MouseDX     = 0.f;
-	SimFloat MouseDY     = 0.f;
+	SimFloat MouseDX     = SimFloat(0.f);
+	SimFloat MouseDY     = SimFloat(0.f);
 	uint8_t MouseButtons = 0;
 	uint8_t _Pad[3]      = {};
 };

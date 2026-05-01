@@ -228,7 +228,7 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 
 	PhysSystem->SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f));
 	JPH::PhysicsSettings settings;
-	settings.mPenetrationSlop = 0.001f;
+	settings.mPenetrationSlop = 0.00005f;
 	PhysSystem->SetPhysicsSettings(settings);
 
 	// --- Contact event ring + listener ---

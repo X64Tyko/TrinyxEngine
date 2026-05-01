@@ -41,6 +41,7 @@ public:
 
 	ConstructView<EPlayer> Body;
 	JoltCharacter CharacterController;
+	Vector3 PhysPos;
 
 	void InitializeViews()
 	{
@@ -107,7 +108,7 @@ public:
 		{
 			soul->GetCameraManager().RemoveLayer(CameraSlot::Gameplay, &FPLayer);
 			soul->GetCameraManager().RemoveLayer(CameraSlot::Gameplay, &TPLayer);
-			if (IsInitialized()) GetWorld()->GetLogicThread()->SetLocalCameraManager(nullptr);
+			if (IsInitialized() && GetWorld() && GetWorld()->GetLogicThread()) GetWorld()->GetLogicThread()->SetLocalCameraManager(nullptr);
 		}
 	}
 
@@ -118,40 +119,7 @@ public:
 		Initialize(world);
 	}
 
-	void PhysicsStep(SimFloat dt)
-	{
-		if (bIsClientSide)
-		{
-			const SimFloat ecsPosX = Body.Transform.PosX.Value();
-			const SimFloat ecsPosY = Body.Transform.PosY.Value();
-			const SimFloat ecsPosZ = Body.Transform.PosZ.Value();
-
-			Soul* soul = GetOwnerSoul();
-			if (!soul || soul->GetRole() == SoulRole::Echo)
-			{
-				CharacterController.SetPosition(JPH::RVec3(ecsPosX.ToFloat(), ecsPosY.ToFloat(), ecsPosZ.ToFloat()));
-				return;
-			}
-
-			CharacterController.SetPosition(JPH::RVec3(ecsPosX.ToFloat(), ecsPosY.ToFloat(), ecsPosZ.ToFloat()));
-		}
-
-		CharacterController.Update(
-			JPH::Vec3(DesiredVelX.ToFloat(), 0, DesiredVelZ.ToFloat()),
-			JPH::Vec3(0, -9.81f, 0),
-			dt.ToFloat(),
-			*GetWorld()->GetPhysics()->GetTempAllocator());
-
-		JPH::RVec3 pos      = CharacterController.GetPosition();
-		Body.Transform.PosX = SimFloat(pos.GetX());
-		Body.Transform.PosY = SimFloat(pos.GetY());
-		Body.Transform.PosZ = SimFloat(pos.GetZ());
-
-		DesiredVelX = 0.0f;
-		DesiredVelZ = 0.0f;
-	}
-
-	void PrePhysics(SimFloat /*dt*/)
+	void PrePhysics(SimFloat dt)
 	{
 		Soul* soul            = GetOwnerSoul();
 		InputBuffer* simInput = soul
@@ -173,11 +141,65 @@ public:
 		if (simInput->IsActionDown(Action::MoveLeft))     { moveX -= rightX;   moveZ -= rightZ;   }
 
 		SimFloat len = Sqrt(moveX * moveX + moveZ * moveZ);
-		if (len > SimFloat(0.001f))
+		SimFloat XDelt =  0;
+		SimFloat ZDelt = 0;
+		if (len > 0.f)
 		{
-			DesiredVelX += moveX / len * MoveSpeed;
-			DesiredVelZ += moveZ / len * MoveSpeed;
+			XDelt = moveX / len * MoveSpeed * dt;
+			ZDelt = moveZ / len * MoveSpeed * dt;
+			Body.Transform.PosX += XDelt;
+			Body.Transform.PosZ += ZDelt;
+			DesiredVelX += XDelt;
+			DesiredVelZ += ZDelt;
 		}
+		
+		/*
+		if (GetOwnerSoul()->HasRole(SoulRole::Authority))
+			LOG_NET_INFO_F(GetOwnerSoul(), "PlayerConstruct::ProcessInput: PosX: %u, PosY: %u, PosZ: %u, Delta: %f, %f", Body.Transform.PosX.Value().ToFixed(), Body.Transform.PosY.Value().ToFixed(), Body.Transform.PosZ.Value().ToFixed(), XDelt.ToFloat(), ZDelt.ToFloat());
+			*/
+	}
+
+	void PhysicsStep(SimFloat dt)
+	{
+		//if (bIsClientSide)
+		{
+			// Set position to corrected position - our desired velocity.
+			const SimFloat ecsPosX = Body.Transform.PosX.Value() - DesiredVelX;
+			const SimFloat ecsPosY = Body.Transform.PosY.Value();
+			const SimFloat ecsPosZ = Body.Transform.PosZ.Value() - DesiredVelZ;
+			
+			CharacterController.SetPosition(JPH::RVec3(ecsPosX.ToFloat(), ecsPosY.ToFloat(), ecsPosZ.ToFloat()));
+			
+			Soul* soul = GetOwnerSoul();
+			if (!soul || soul->GetRole() == SoulRole::Echo)
+			{
+				return;
+			}
+		}
+
+		CharacterController.Update(
+			JPH::Vec3((DesiredVelX / dt).ToFloat(), 0, (DesiredVelZ / dt).ToFloat()),
+			JPH::Vec3(0, -9.81f, 0),
+			dt.ToFloat(),
+			*GetWorld()->GetPhysics()->GetTempAllocator());
+
+		JPH::RVec3 pos      = CharacterController.GetPosition();
+		PhysPos = Vector3(pos.GetX(), pos.GetY(), pos.GetZ());
+		Vector3 BodyPos = { Body.Transform.PosX.Value(), Body.Transform.PosY.Value(), Body.Transform.PosZ.Value() };
+		if ((BodyPos - PhysPos).LengthSqr() > SimFloat(0.0003f))
+		{
+			Body.Transform.PosX = SimFloat(pos.GetX());
+			Body.Transform.PosY = SimFloat(pos.GetY());
+			Body.Transform.PosZ = SimFloat(pos.GetZ());
+		}
+		
+		/*
+		if (GetOwnerSoul()->HasRole(SoulRole::Authority))
+			LOG_NET_INFO_F(GetOwnerSoul(), "PlayerConstruct::PhysStep: PosX: %u, PosY: %u, PosZ: %u", Body.Transform.PosX.Value().ToFixed(), Body.Transform.PosY.Value().ToFixed(), Body.Transform.PosZ.Value().ToFixed());
+			*/
+
+		DesiredVelX = 0.0f;
+		DesiredVelZ = 0.0f;
 	}
 
 	void PostPhysics(SimFloat /*dt*/)
@@ -213,22 +235,10 @@ public:
 		}
 		bToggleHeld = toggleDown;
 
-		// Local player: use Jolt position to avoid camera rubber-banding.
 		SimFloat px, py, pz;
-		if (bIsClientSide && bIsLocalPlayer)
-		{
-			JPH::RVec3 joltPos = CharacterController.GetPosition();
-			px                 = static_cast<SimFloat>(joltPos.GetX());
-			py                 = static_cast<SimFloat>(joltPos.GetY());
-			pz                 = static_cast<SimFloat>(joltPos.GetZ());
-		}
-		else
-		{
-			auto& tr = Body.Transform;
-			px       = tr.PosX.Value();
-			py       = tr.PosY.Value();
-			pz       = tr.PosZ.Value();
-		}
+		px                 = Body.Transform.PosX.Value();
+		py                 = Body.Transform.PosY.Value();
+		pz                 = Body.Transform.PosZ.Value();
 
 		SimFloat sinYaw   = FastSin(Yaw);
 		SimFloat cosYaw   = FastCos(Yaw);
@@ -271,6 +281,6 @@ private:
 	SimFloat DesiredVelZ = 0.0f;
 	bool bToggleHeld     = false;
 
-	static constexpr SimFloat MoveSpeed = SimFloat(1.0f);
+	static constexpr SimFloat MoveSpeed = SimFloat(8.0f);
 	static constexpr SimFloat EyeHeight = SimFloat(1.5f);
 };

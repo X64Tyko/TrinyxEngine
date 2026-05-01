@@ -154,12 +154,12 @@ struct SimFloatImpl<float>
 
 	friend auto operator<=>(const SimFloatImpl& A, const float& B)
 	{
-		return A.ToFloat() <=> B;
+		return A <=> SimFloatImpl(B);
 	};
 
 	friend auto operator<=>(const float& B, const SimFloatImpl& A)
 	{
-		return B <=> A.ToFloat();
+		return SimFloatImpl(B) <=> A;
 	};
 	friend bool operator==(const SimFloatImpl&, const SimFloatImpl&) = default;
 };
@@ -324,12 +324,12 @@ struct SimFloatImpl<Fixed32>
 
 	friend auto operator<=>(const SimFloatImpl& A, const float& B)
 	{
-		return A.ToFloat() <=> B;
+		return A <=> SimFloatImpl(B);
 	};
 
 	friend auto operator<=>(const float& B, const SimFloatImpl& A)
 	{
-		return B <=> A.ToFloat();
+		return SimFloatImpl(B) <=> A;
 	};
 	friend bool operator==(const SimFloatImpl&, const SimFloatImpl&) = default;
 };

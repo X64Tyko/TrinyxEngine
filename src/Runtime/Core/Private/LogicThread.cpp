@@ -94,22 +94,21 @@ void LogicThread::PhysicsLoop(const SimFloat fixedStepTime)
 	PrePhysics(fixedStepTime);
 	ScalarPrePhysicsBatch.Execute(fixedStepTime);
 
-	if (FrameNumber % PhysicsDivizor == 0) [[unlikely]]
+	if (FrameNumber % PhysicsDivizor == 0)
 	{
+		PhysicsPtr->PullActiveTransforms(RegistryPtr);
+		
 		PhysicsPtr->FlushPendingBodies(RegistryPtr);
 		PhysicsPtr->PushKinematicTransforms(RegistryPtr, fixedStepTime.ToFloat());
 		ScalarPhysicsStepBatch.Execute(fixedStepTime * PhysicsDivizor);
+		
+		PhysicsPtr->ProcessContacts(RegistryPtr);
+		Rollback.SaveSnapshot(*this);
+		
 		TrinyxJobs::Dispatch([this, fixedStepTime](uint32_t)
 		{
 			PhysicsPtr->Step(fixedStepTime.ToFloat() * PhysicsDivizor);
 		}, PhysicsPtr->GetJoltPhysCounter(), TrinyxJobs::Queue::Physics);
-	}
-
-	if (FrameNumber % PhysicsDivizor == PhysicsDivizor - 1) [[unlikely]]
-	{
-		PhysicsPtr->PullActiveTransforms(RegistryPtr);
-		PhysicsPtr->ProcessContacts(RegistryPtr);
-		Rollback.SaveSnapshot(*this);
 	}
 
 	PostPhysics(fixedStepTime);
@@ -228,6 +227,11 @@ void LogicThread::ThreadMain()
 
 		if (ConfigPtr->TargetFPS > 0) WaitForTiming(frameStartCounter, perfFrequency);
 	}
+
+	// Drain any in-flight Jolt step before the thread exits so JoltPhysics::Shutdown
+	// cannot destroy PhysSystem while a physics job is still running on a worker.
+	TrinyxJobs::WaitForCounter(PhysicsPtr->GetJoltPhysCounter(), TrinyxJobs::Queue::Physics);
+	PhysicsPtr->Shutdown();
 }
 
 // ---------------------------------------------------------------------------

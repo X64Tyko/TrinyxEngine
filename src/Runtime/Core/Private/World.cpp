@@ -13,89 +13,89 @@ WorldBase::~WorldBase()
 {
 	if (Logic && Logic->IsRunning())
 	{
-Stop();
-Join();
-}
+		Stop();
+		Join();
+	}
 }
 
 bool WorldBase::InitBase(const EngineConfig& config, ConstructRegistry* constructRegistry,
-                         int windowWidth, int windowHeight)
+						 int windowWidth, int windowHeight)
 {
-(void)windowWidth;
-(void)windowHeight;
+	(void)windowWidth;
+	(void)windowHeight;
 
-Config = config;
-Constructs = constructRegistry;
+	Config     = config;
+	Constructs = constructRegistry;
 
-// --- Registry ---
-RegistryPtr = std::make_unique<Registry>(&Config);
+	// --- Registry ---
+	RegistryPtr = std::make_unique<Registry>(&Config);
 
-// --- Physics ---
-Physics = std::make_unique<JoltPhysics>();
-if (!Physics->Initialize(&Config))
-{
-LOG_ENG_ERROR("[World] JoltPhysics::Initialize failed");
-return false;
-}
-RegistryPtr->SetPhysics(Physics.get());
+	// --- Physics ---
+	Physics = std::make_unique<JoltPhysics>();
+	if (!Physics->Initialize(&Config))
+	{
+		LOG_ENG_ERROR("[World] JoltPhysics::Initialize failed");
+		return false;
+	}
+	RegistryPtr->SetPhysics(Physics.get());
 
-// --- World queue ---
-WQHandle = TrinyxJobs::CreateWorldQueue();
-if (WQHandle == TrinyxJobs::InvalidWorldQueue)
-{
-LOG_ENG_ERROR("[World] Failed to create WorldQueue");
-return false;
-}
+	// --- World queue ---
+	WQHandle = TrinyxJobs::CreateWorldQueue();
+	if (WQHandle == TrinyxJobs::InvalidWorldQueue)
+	{
+		LOG_ENG_ERROR("[World] Failed to create WorldQueue");
+		return false;
+	}
 
-return true;
+	return true;
 }
 
 void WorldBase::Start()
 {
-if (Logic) Logic->Start();
+	if (Logic) Logic->Start();
 }
 
 void WorldBase::Stop()
 {
-if (Logic) Logic->Stop();
+	if (Logic) Logic->Stop();
 }
 
 void WorldBase::Join()
 {
-if (Logic) Logic->Join();
+	if (Logic) Logic->Join();
 }
 
 void WorldBase::Shutdown()
 {
-Stop();
-Join();
+	Stop();
+	Join();
 
-// Note: ConstructRegistry is owned by FlowManager and outlives the World.
-// World-lifetime and Level-lifetime Constructs are destroyed by FlowManager
-// during transitions, not here.
+	// Note: ConstructRegistry is owned by FlowManager and outlives the World.
+	// World-lifetime and Level-lifetime Constructs are destroyed by FlowManager
+	// during transitions, not here.
 
-Logic.reset();
-Physics.reset();
-RegistryPtr.reset();
+	Logic.reset();
+	Physics.reset();
+	RegistryPtr.reset();
 
-if (WQHandle != TrinyxJobs::InvalidWorldQueue)
-{
-TrinyxJobs::DestroyWorldQueue(WQHandle);
-WQHandle = TrinyxJobs::InvalidWorldQueue;
-}
+	if (WQHandle != TrinyxJobs::InvalidWorldQueue)
+	{
+		TrinyxJobs::DestroyWorldQueue(WQHandle);
+		WQHandle = TrinyxJobs::InvalidWorldQueue;
+	}
 
-Constructs = nullptr;
-LOG_ENG_INFO("[World] Shut down");
+	Constructs = nullptr;
+	LOG_ENG_INFO("[World] Shut down");
 }
 
 void WorldBase::ResetRegistry() const
 {
-if (RegistryPtr) RegistryPtr->ResetRegistry();
+	if (RegistryPtr) RegistryPtr->ResetRegistry();
 }
 
 void WorldBase::ConfirmLocalRecycles() const
 {
-if (RegistryPtr) RegistryPtr->ConfirmLocalRecycles();
+	if (RegistryPtr) RegistryPtr->ConfirmLocalRecycles();
 }
 
 // ---------------------------------------------------------------------------

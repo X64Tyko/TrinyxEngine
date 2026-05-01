@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <RPC.h>
 
 #include "Input.h"
 #include "Logger.h"
@@ -177,7 +178,7 @@ private:
 
 	uint8_t OwnerID                  = 0;
 	uint32_t InputLead               = 0;
-	SoulRole Role                    = SoulRole::Authority;
+	SoulRole Role                    = SoulRole::Echo;
 	ConstructRef ConfirmedBodyHandle = {};
 	CameraManager CamManager;
 
