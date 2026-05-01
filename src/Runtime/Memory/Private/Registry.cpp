@@ -123,6 +123,21 @@ Archetype* Registry::GetOrCreateArchetype(const Signature& sig, const ClassID& i
 	// Create new archetype
 	auto NewArchetype = new Archetype(sig, id);
 
+	// Set DebugName from the registered class name in ReflectionRegistry
+	{
+		const auto& cfr              = ReflectionRegistry::Get();
+		const std::string* debugName = nullptr;
+		for (const auto& entry : cfr.NameToClassID)
+		{
+			if (entry.second == id)
+			{
+				debugName = &entry.first;
+				break;
+			}
+		}
+		if (debugName) NewArchetype->DebugName = debugName->c_str();
+	}
+
 	// Build component layout from class ID
 	std::vector<ComponentMetaEx> Components;
 	auto& MR = ReflectionRegistry::Get();
@@ -590,6 +605,22 @@ void Registry::InitializeArchetypes()
 		if (!NewArch)
 		{
 			NewArch = new Archetype(key);
+
+			// Set DebugName from the registered class name
+			{
+				const auto& cfr              = ReflectionRegistry::Get();
+				const std::string* debugName = nullptr;
+				for (const auto& entry : cfr.NameToClassID)
+				{
+					if (entry.second == key.ID)
+					{
+						debugName = &entry.first;
+						break;
+					}
+				}
+				if (debugName) NewArch->DebugName = debugName->c_str();
+			}
+
 			std::vector<ComponentMetaEx> Components;
 			for (auto& CompID : MR.ClassToComponentList[Arch.first])
 			{

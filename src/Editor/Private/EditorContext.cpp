@@ -1,5 +1,6 @@
 #include "EditorContext.h"
 #include "EditorPanel.h"
+#include "UndoCommand.h"
 #include "EntityBuilder.h"
 #include "FlowManager.h"
 #include "Globals.h"
@@ -181,36 +182,6 @@ static SimFloat* FindFieldFloat(Archetype* arch, void** fieldArrayTable, const c
 	return nullptr;
 }
 
-/// Build a column-major 4x4 model matrix from position, quaternion rotation, and scale.
-static void BuildModelMatrix(float* m, SimFloat px, SimFloat py, SimFloat pz,
-							 SimFloat qx, SimFloat qy, SimFloat qz, SimFloat qw,
-							 SimFloat sx, SimFloat sy, SimFloat sz)
-{
-	// Quaternion to rotation matrix (column-major)
-	SimFloat xx = qx * qx, yy = qy * qy, zz = qz * qz;
-	SimFloat xy = qx * qy, xz = qx * qz, yz = qy * qz;
-	SimFloat wx = qw * qx, wy = qw * qy, wz = qw * qz;
-
-	m[0] = ((1 - 2 * (yy + zz)) * sx).ToFloat();
-	m[1] = ((2 * (xy + wz)) * sx).ToFloat();
-	m[2] = ((2 * (xz - wy)) * sx).ToFloat();
-	m[3] = 0.0f;
-
-	m[4] = ((2 * (xy - wz)) * sy).ToFloat();
-	m[5] = ((1 - 2 * (xx + zz)) * sy).ToFloat();
-	m[6] = ((2 * (yz + wx)) * sy).ToFloat();
-	m[7] = 0.0f;
-
-	m[8]  = ((2 * (xz + wy)) * sz).ToFloat();
-	m[9]  = ((2 * (yz - wx)) * sz).ToFloat();
-	m[10] = ((1 - 2 * (xx + yy)) * sz).ToFloat();
-	m[11] = 0.0f;
-
-	m[12] = px.ToFloat();
-	m[13] = py.ToFloat();
-	m[14] = pz.ToFloat();
-	m[15] = 1.0f;
-}
 
 void EditorContext::DrawGizmo()
 {
@@ -250,19 +221,47 @@ void EditorContext::DrawGizmo()
 	SimFloat* pScaleY = FindFieldFloat(arch, fieldArrayTable, "ScaleY", li);
 	SimFloat* pScaleZ = FindFieldFloat(arch, fieldArrayTable, "ScaleZ", li);
 
-	// Safe defaults
-	SimFloat qx = pRotQx ? *pRotQx : 0.0f;
-	SimFloat qy = pRotQy ? *pRotQy : 0.0f;
-	SimFloat qz = pRotQz ? *pRotQz : 0.0f;
-	SimFloat qw = pRotQw ? *pRotQw : 1.0f;
-	SimFloat sx = pScaleX ? *pScaleX : 1.0f;
-	SimFloat sy = pScaleY ? *pScaleY : 1.0f;
-	SimFloat sz = pScaleZ ? *pScaleZ : 1.0f;
+	// Read raw floats from the fields
+	float px = (*pPosX).ToFloat();
+	float py = (*pPosY).ToFloat();
+	float pz = (*pPosZ).ToFloat();
+	float qx = pRotQx ? (*pRotQx).ToFloat() : 0.0f;
+	float qy = pRotQy ? (*pRotQy).ToFloat() : 0.0f;
+	float qz = pRotQz ? (*pRotQz).ToFloat() : 0.0f;
+	float qw = pRotQw ? (*pRotQw).ToFloat() : 1.0f;
+	float sx = pScaleX ? (*pScaleX).ToFloat() : 1.0f;
+	float sy = pScaleY ? (*pScaleY).ToFloat() : 1.0f;
+	float sz = pScaleZ ? (*pScaleZ).ToFloat() : 1.0f;
+
+	// Build column-major transformation matrix from quaternion + scale + translation
+	float x2 = qx + qx, y2 = qy + qy, z2 = qz + qz;
+	float xx = qx * x2, xy = qx * y2, xz = qx * z2;
+	float yy = qy * y2, yz = qy * z2, zz = qz * z2;
+	float wx = qw * x2, wy = qw * y2, wz = qw * z2;
 
 	float modelMatrix[16];
-	BuildModelMatrix(modelMatrix, *pPosX, *pPosY, *pPosZ, qx, qy, qz, qw, sx, sy, sz);
+	modelMatrix[0] = (1.0f - (yy + zz)) * sx;
+	modelMatrix[1] = (xy + wz) * sx;
+	modelMatrix[2] = (xz - wy) * sx;
+	modelMatrix[3] = 0.0f;
+
+	modelMatrix[4] = (xy - wz) * sy;
+	modelMatrix[5] = (1.0f - (xx + zz)) * sy;
+	modelMatrix[6] = (yz + wx) * sy;
+	modelMatrix[7] = 0.0f;
+
+	modelMatrix[8]  = (xz + wy) * sz;
+	modelMatrix[9]  = (yz - wx) * sz;
+	modelMatrix[10] = (1.0f - (xx + yy)) * sz;
+	modelMatrix[11] = 0.0f;
+
+	modelMatrix[12] = px;
+	modelMatrix[13] = py;
+	modelMatrix[14] = pz;
+	modelMatrix[15] = 1.0f;
 
 	// Set ImGuizmo to cover the editor viewport panel
+	ImGuizmo::SetDrawlist(); // bind to the current window's draw list for correct hit-testing
 	ImGuizmo::SetRect(ViewportPanelPos.x, ViewportPanelPos.y, ViewportPanelSize.x, ViewportPanelSize.y);
 	ImGuizmo::SetOrthographic(false);
 
@@ -312,52 +311,58 @@ void EditorContext::DrawGizmo()
 
 	if (manipulated)
 	{
-		// Decompose the modified matrix back into components
+	    // Original: decompose and write values
 		float translation[3], rotation[3], scale[3];
 		ImGuizmo::DecomposeMatrixToComponents(modelMatrix, translation, rotation, scale);
 
-		// Write position back
+		// --- Undo: capture before state ---
+		auto cmd = std::make_unique<EntityTransformCommand>(
+			arch, State.SelectedChunk, State.SelectedLocalIndex, State.RegistryPtr);
+
+		// Write new values (same as original)
 		*pPosX = SimFloat(translation[0]);
 		*pPosY = SimFloat(translation[1]);
 		*pPosZ = SimFloat(translation[2]);
-
-		// Convert Euler angles (degrees) back to quaternion
 		if (pRotQx && pRotQy && pRotQz && pRotQw)
 		{
 			float rx = rotation[0] * (3.14159265358979f / 180.0f) * 0.5f;
 			float ry = rotation[1] * (3.14159265358979f / 180.0f) * 0.5f;
 			float rz = rotation[2] * (3.14159265358979f / 180.0f) * 0.5f;
-
 			float cx = std::cos(rx), sx2 = std::sin(rx);
 			float cy = std::cos(ry), sy2 = std::sin(ry);
 			float cz = std::cos(rz), sz2 = std::sin(rz);
-
-			*pRotQw = SimFloat(cx * cy * cz + sx2 * sy2 * sz2);
-			*pRotQx = SimFloat(sx2 * cy * cz - cx * sy2 * sz2);
-			*pRotQy = SimFloat(cx * sy2 * cz + sx2 * cy * sz2);
-			*pRotQz = SimFloat(cx * cy * sz2 - sx2 * sy2 * cz);
+			*pRotQw  = SimFloat(cx * cy * cz + sx2 * sy2 * sz2);
+			*pRotQx  = SimFloat(sx2 * cy * cz - cx * sy2 * sz2);
+			*pRotQy  = SimFloat(cx * sy2 * cz + sx2 * cy * sz2);
+			*pRotQz  = SimFloat(cx * cy * sz2 - sx2 * sy2 * cz);
 		}
-
-		// Write scale back
 		if (pScaleX) *pScaleX = SimFloat(scale[0]);
 		if (pScaleY) *pScaleY = SimFloat(scale[1]);
 		if (pScaleZ) *pScaleZ = SimFloat(scale[2]);
 
-		State.bSceneDirty = true;
-
-		// Mark entity dirty for GPU upload via CacheSlotMeta::Flags (bit 30)
-		Archetype::FieldKey flagKey{CacheSlotMeta<>::StaticTypeID(), ReflectionRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID()), 0};
-		auto* flagDesc = State.SelectedArchetype->ArchetypeFieldLayout.find(flagKey);
+		// --- Original dirty marking (restored from pre-undo code) ---
+	    Archetype::FieldKey flagKey{
+	        CacheSlotMeta<>::StaticTypeID(),
+			ReflectionRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID()),
+			0
+		};
+		auto* flagDesc = arch->ArchetypeFieldLayout.find(flagKey);
 		if (flagDesc)
 		{
 			auto* base = static_cast<uint8_t*>(State.SelectedChunk->GetFieldPtr(flagDesc->fieldSlotIndex));
 			if (base)
 			{
-				auto* flags = reinterpret_cast<int32_t*>(
-					State.RegistryPtr->GetCache(flagDesc->tier)->GetWriteFramePtr(base));
+				auto* cache                     = State.RegistryPtr->GetTemporalCache();
+				auto* flags                     = reinterpret_cast<int32_t*>(cache->GetWriteFramePtr(base));
 				flags[State.SelectedLocalIndex] |= static_cast<int32_t>(TemporalFlagBits::Dirty);
 			}
 		}
+
+		// --- Undo: capture after state ---
+		cmd->SetAfter(SerializeEntityFields(State.RegistryPtr, arch, State.SelectedChunk, State.SelectedLocalIndex));
+		PushCommand(std::move(cmd));
+
+		State.bSceneDirty = true;
 	}
 }
 
@@ -443,21 +448,22 @@ void EditorContext::BuildFrame()
 		panel->Tick(State);
 	}
 
-	// Gizmo hotkeys (W=Translate, E=Rotate, R=Scale) — only when editor owns keyboard
-	if (!ImGui::GetIO().WantTextInput)
+	// Editor hotkeys — all gated behind WantTextInput so they don't fire inside text fields
+	const ImGuiIO& io = ImGui::GetIO();
+	if (!io.WantTextInput)
 	{
 		if (ImGui::IsKeyPressed(ImGuiKey_W)) State.CurrentGizmoOp = EditorState::GizmoOp::Translate;
 		if (ImGui::IsKeyPressed(ImGuiKey_E)) State.CurrentGizmoOp = EditorState::GizmoOp::Rotate;
 		if (ImGui::IsKeyPressed(ImGuiKey_R)) State.CurrentGizmoOp = EditorState::GizmoOp::Scale;
+		if (ImGui::IsKeyPressed(ImGuiKey_Z) && io.KeyCtrl && !io.KeyShift) Undo();
+		if (ImGui::IsKeyPressed(ImGuiKey_Y) && io.KeyCtrl) Redo();
 	}
-
-	// Gizmo overlay on selected entity
-	DrawGizmo();
 
 	// Modals / overlays
 	DrawFileDialog();
 	DrawImportDialog();
 	DrawUnsavedWarning();
+	DrawPrefabSaveDialog();
 
 	// PIE viewport panels
 	if (bPIEActive)
@@ -477,7 +483,6 @@ void EditorContext::BuildFrame()
 
 	// Tell Sentinel whether the engine should own input.
 	// Engine gets input when: right-click held in viewport, or Play is running.
-	const ImGuiIO& io         = ImGui::GetIO();
 	bool rightClickInViewport = ImGui::IsMouseDown(ImGuiMouseButton_Right) && ViewportPanelHovered;
 	bool playing              = (LogicPtr && !LogicPtr->IsSimPaused() && bHasSnapshot) || bPIEActive;
 	// Escape requests PIE stop — deferred to after the ImGui frame completes
@@ -490,6 +495,45 @@ void EditorContext::BuildFrame()
 	if (!playing) bMouseReleasedDuringPlay = false;
 	bool engineGetsInput = (rightClickInViewport || playing) && !bMouseReleasedDuringPlay;
 	EnginePtr->Render->SetEditorOwnsKeyboard(!engineGetsInput);
+}
+
+void EditorContext::PushCommand(std::unique_ptr<UndoCommand> cmd)
+{
+    // Try to merge with previous command
+    if (UndoIndex > 0)
+    {
+        auto& last = UndoStack[UndoIndex - 1];
+		if (last->MergeWith(*cmd)) return; // merged, discard new
+	}
+
+	// Truncate redo history
+	UndoStack.resize(UndoIndex);
+
+	// Push new command
+	UndoStack.push_back(std::move(cmd));
+	UndoIndex++;
+
+	// Cap size
+	if (UndoStack.size() > MaxUndo)
+	{
+		UndoStack.erase(UndoStack.begin());
+		UndoIndex--;
+	}
+}
+
+void EditorContext::Undo()
+{
+	if (!CanUndo()) return;
+	UndoStack[UndoIndex - 1]->Undo();
+	UndoIndex--;
+	// Clear selection? Leave it for now.
+}
+
+void EditorContext::Redo()
+{
+	if (!CanRedo()) return;
+	UndoStack[UndoIndex]->Execute();
+	UndoIndex++;
 }
 
 void EditorContext::BuildDockspace()
@@ -600,6 +644,31 @@ void EditorContext::BuildMenuBar()
 			FileDialogPath     = State.CurrentScenePath;
 		}
 		ImGui::Separator();
+		if (ImGui::MenuItem("Save as Prefab...", nullptr, false,
+		                    State.Selection == EditorState::SelectionType::Entity))
+		{
+			bShowPrefabSaveDialog = true;
+
+			// Build default filename from entity's class name
+			std::string defaultName = "NewPrefab";
+			if (State.SelectedClassID != 0)
+			{
+				const auto& cfr       = ReflectionRegistry::Get();
+				std::string debugName = "UnknownClass";
+				for (const auto& entry : cfr.NameToClassID)
+				{
+					if (entry.second == State.SelectedClassID)
+					{
+						debugName = entry.first;
+						break;
+					}
+				}
+			}
+			// Prepend content directory
+			std::string contentDir = State.ConfigPtr ? std::string(State.ConfigPtr->ProjectDir) + "/content/" : "";
+			FileDialogPath         = contentDir + defaultName + ".prefab";
+		}
+		ImGui::Separator();
 		if (ImGui::MenuItem("Import Mesh...", nullptr, false, MeshMgr != nullptr))
 		{
 			bShowImportDialog = true;
@@ -612,8 +681,8 @@ void EditorContext::BuildMenuBar()
 
 	if (ImGui::BeginMenu("Edit"))
 	{
-		ImGui::MenuItem("Undo", "Ctrl+Z", false, false);
-		ImGui::MenuItem("Redo", "Ctrl+Y", false, false);
+		if (ImGui::MenuItem("Undo", "Ctrl+Z", false, CanUndo())) Undo();
+		if (ImGui::MenuItem("Redo", "Ctrl+Y", false, CanRedo())) Redo();
 		ImGui::Separator();
 
 		bool isTranslate = State.CurrentGizmoOp == EditorState::GizmoOp::Translate;
@@ -839,6 +908,98 @@ void EditorContext::DrawFileDialog()
 			ImGui::CloseCurrentPopup();
 		}
 
+		ImGui::EndPopup();
+	}
+}
+
+void EditorContext::DrawPrefabSaveDialog()
+{
+	if (!bShowPrefabSaveDialog) return;
+
+	ImGui::OpenPopup("Save Prefab As");
+	ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+	ImGui::SetNextWindowSize(ImVec2(500, 120), ImGuiCond_Appearing);
+
+	if (ImGui::BeginPopupModal("Save Prefab As", &bShowPrefabSaveDialog, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		char pathBuf[512];
+		snprintf(pathBuf, sizeof(pathBuf), "%s", FileDialogPath.c_str());
+
+		// Show the path relative to content directory for clarity
+		std::string relativePath;
+		if (State.ConfigPtr)
+		{
+			std::string contentDir = std::string(State.ConfigPtr->ProjectDir) + "/content/";
+			if (FileDialogPath.find(contentDir) == 0) relativePath = FileDialogPath.substr(contentDir.length());
+			else relativePath                                      = FileDialogPath;
+		}
+		ImGui::Text("Save prefab to:  %s", relativePath.c_str());
+
+		ImGui::SetNextItemWidth(-1);
+		if (ImGui::InputText("##prefabpath", pathBuf, sizeof(pathBuf))) FileDialogPath = pathBuf;
+
+		ImGui::Separator();
+		if (ImGui::Button("Save", ImVec2(120, 0)))
+		{
+			// Prepare full path with content directory and .prefab extension
+			std::string finalPath = FileDialogPath;
+
+			// Prepend content directory if not already present
+			if (State.ConfigPtr)
+			{
+				std::string contentDir = std::string(State.ConfigPtr->ProjectDir) + "/content/";
+				if (finalPath.find(contentDir) != 0) finalPath = contentDir + finalPath;
+			}
+
+			// Ensure .prefab extension
+			if (finalPath.size() < 7 || finalPath.substr(finalPath.size() - 7) != ".prefab") finalPath += ".prefab";
+
+			if (State.Selection == EditorState::SelectionType::Entity)
+			{
+				Registry* reg = State.RegistryPtr;
+
+				// Serialize entity fields
+				JsonValue components = SerializeEntityFields(reg,
+															 State.SelectedArchetype, State.SelectedChunk, State.SelectedLocalIndex);
+
+				// Wrap in prefab JSON (type + components)
+				JsonValue prefabJson = JsonValue::Object();
+				// Look up class name from ClassID
+				std::string typeName   = "Unknown";
+				const auto& archetypes = reg->GetArchetypes();
+				for (const auto& entry : archetypes)
+				{
+					if (entry.first.ID == State.SelectedClassID)
+					{
+						typeName = entry.second->DebugName;
+						break;
+					}
+				}
+				prefabJson["type"]       = JsonValue::String(typeName);
+				prefabJson["components"] = components;
+
+				std::string jsonStr = JsonWrite(prefabJson, true);
+				std::ofstream file(finalPath);
+				if (file.is_open())
+				{
+					file << jsonStr;
+					file.close();
+					LOG_ENG_INFO_F("[Editor] Saved prefab to %s", finalPath.c_str());
+				}
+				else
+					LOG_ENG_ERROR("[Editor] Failed to write prefab file");
+			}
+
+			bShowPrefabSaveDialog = false;
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel", ImVec2(120, 0)))
+		{
+			bShowPrefabSaveDialog = false;
+			ImGui::CloseCurrentPopup();
+		}
 		ImGui::EndPopup();
 	}
 }
@@ -1082,12 +1243,20 @@ void EditorContext::SpawnPrefab(const std::string& prefabPath)
 
 void EditorContext::DeleteSelectedEntity()
 {
-	if (State.Selection != EditorState::SelectionType::Entity) return;
+    if (State.Selection != EditorState::SelectionType::Entity) return;
 
-	// Capture selection data before clearing — Spawn lambda runs on Logic thread.
-	Chunk* chunk        = State.SelectedChunk;
+    // Capture undo data before deletion
+    Archetype* arch     = State.SelectedArchetype;
+    Chunk* chunk        = State.SelectedChunk;
 	uint16_t localIndex = State.SelectedLocalIndex;
+	//uint32_t cacheIndex    = State.SelectedCacheIndex;
+	ClassID classID = State.SelectedClassID;
+	Registry* reg   = State.RegistryPtr;
 
+	// Serialize entity state while it still exists
+	JsonValue beforeState = SerializeEntityFields(reg, arch, chunk, localIndex);
+
+	// Perform deletion as before
 	State.ClearSelection();
 
 	Registry* deleteReg = EnginePtr->GetDefaultWorld() ? EnginePtr->GetDefaultWorld()->GetRegistry() : nullptr;
@@ -1104,6 +1273,55 @@ void EditorContext::DeleteSelectedEntity()
 		LOG_ENG_INFO_F("[Editor] Deleted entity (cache index %u)", cacheIdx);
 	});
 
+	// Create and push delete command (inlined class for simplicity)
+	class UndoableDeleteCommand : public UndoCommand
+	{
+	public:
+		UndoableDeleteCommand(TrinyxEngine* engine, Registry* reg, ClassID classID, JsonValue savedState)
+			: m_Engine(engine)
+			, m_Reg(reg), m_ClassID(classID), m_SavedState(std::move(savedState)) {}
+
+		void Execute() override
+		{
+			if (m_RestoredCacheIdx == UINT32_MAX) return;
+			uint32_t cacheIdx  = m_RestoredCacheIdx;
+			m_RestoredCacheIdx = UINT32_MAX;
+			m_Engine->Spawn([reg = m_Reg, cacheIdx](uint32_t)
+			{
+				GlobalEntityHandle gh = reg->FindEntityByLocation(static_cast<EntityCacheHandle>(cacheIdx));
+				if (gh.GetIndex() == 0)
+				{
+					LOG_ENG_WARN("[Editor] Redo delete: entity not found");
+					return;
+				}
+				reg->DestroyByGlobalHandle(gh);
+			});
+		}
+
+		void Undo() override
+		{
+			m_Engine->Spawn([this](uint32_t)
+			{
+				EntityHandle handle = m_Reg->CreateByClassID(m_ClassID);
+				EntityRecord record = m_Reg->GetRecord(handle);
+				if (record.IsValid())
+				{
+					DeserializeEntityFields(m_Reg, record.Arch, record.TargetChunk, record.LocalIndex, m_SavedState);
+					MarkEntityDirty(m_Reg, record.Arch, record.TargetChunk, record.LocalIndex);
+					m_RestoredCacheIdx = record.TargetChunk->Header.CacheIndexStart + record.LocalIndex;
+				}
+			});
+		}
+
+	private:
+		TrinyxEngine* m_Engine;
+		Registry* m_Reg;
+		ClassID m_ClassID;
+		JsonValue m_SavedState;
+		uint32_t m_RestoredCacheIdx = UINT32_MAX;
+	};
+
+	PushCommand(std::make_unique<UndoableDeleteCommand>(EnginePtr, reg, classID, std::move(beforeState)));
 	State.bSceneDirty = true;
 }
 
@@ -1660,6 +1878,7 @@ void EditorContext::DrawEditorViewportPanel()
 				ImGui::EndDragDropTarget();
 			}
 		}
+		DrawGizmo();
 	}
 	ImGui::End();
 	ImGui::PopStyleVar();

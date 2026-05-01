@@ -1,5 +1,7 @@
 #include "Panels/DetailsPanel.h"
 #include "EditorState.h"
+#include "UndoCommand.h"
+#include "EditorContext.h"
 #include "Archetype.h"
 #include "AssetTypes.h"
 #include "CacheSlotMeta.h"
@@ -8,115 +10,6 @@
 #include "MeshManager.h"
 #include "Registry.h"
 #include "imgui.h"
-
-// Mark an entity's flags field dirty so the render pipeline uploads the change.
-static void MarkEntityDirty(EditorState& state)
-{
-	Archetype* arch = state.SelectedArchetype;
-	if (!arch || !state.SelectedChunk || !state.RegistryPtr) return;
-
-	Archetype::FieldKey flagKey{
-		CacheSlotMeta<>::StaticTypeID(),
-		ReflectionRegistry::Get().GetCacheSlotIndex(CacheSlotMeta<>::StaticTypeID()),
-		0
-	};
-	auto* flagDesc = arch->ArchetypeFieldLayout.find(flagKey);
-	if (!flagDesc) return;
-
-	auto* base = static_cast<uint8_t*>(state.SelectedChunk->GetFieldPtr(flagDesc->fieldSlotIndex));
-	if (!base) return;
-
-	// CacheSlotMeta is always temporal tier — use the cache's write frame helper
-	auto* cache                     = state.RegistryPtr->GetTemporalCache();
-	auto* flags                     = reinterpret_cast<int32_t*>(cache->GetWriteFramePtr(base));
-	flags[state.SelectedLocalIndex] |= static_cast<int32_t>(TemporalFlagBits::Dirty);
-}
-
-bool DetailsPanel::EditFieldValue(const char* label, size_t fieldSize, void* fieldArray,
-								  uint32_t entityIndex, FieldValueType valueType)
-{
-	uint8_t* base  = static_cast<uint8_t*>(fieldArray);
-	void* valuePtr = base + entityIndex * fieldSize;
-
-	// Unique ID per field so ImGui doesn't collide
-	ImGui::PushID(label);
-
-	bool edited = false;
-
-	switch (valueType)
-	{
-		case FieldValueType::Fixed32:
-			{
-				SimFloat val   = *static_cast<SimFloat*>(valuePtr);
-				float floatVal = val.ToFloat();
-				if (ImGui::InputFloat("##v", &floatVal, 0.1f, 1.0f, "%.4f"))
-				{
-					*static_cast<SimFloat*>(valuePtr) = SimFloat(floatVal);
-					edited                            = true;
-				}
-				break;
-			}
-		case FieldValueType::Float32:
-			{
-				float val = *static_cast<float*>(valuePtr);
-				if (ImGui::InputFloat("##v", &val, 0.1f, 1.0f, "%.4f"))
-				{
-					*static_cast<float*>(valuePtr) = val;
-					edited                         = true;
-				}
-				break;
-			}
-		case FieldValueType::Float64:
-			{
-				double val = *static_cast<double*>(valuePtr);
-				float fval = static_cast<float>(val);
-				if (ImGui::InputFloat("##v", &fval, 0.1f, 1.0f, "%.6f"))
-				{
-					*static_cast<double*>(valuePtr) = static_cast<double>(fval);
-					edited                          = true;
-				}
-				break;
-			}
-		case FieldValueType::Int32:
-			{
-				int32_t val = *static_cast<int32_t*>(valuePtr);
-				if (ImGui::InputInt("##v", &val))
-				{
-					*static_cast<int32_t*>(valuePtr) = val;
-					edited                           = true;
-				}
-				break;
-			}
-		case FieldValueType::Uint32:
-			{
-				// Display as hex for flags/enums, decimal input
-				uint32_t val = *static_cast<uint32_t*>(valuePtr);
-				int ival     = static_cast<int>(val);
-				if (ImGui::InputInt("##v", &ival))
-				{
-					*static_cast<uint32_t*>(valuePtr) = static_cast<uint32_t>(ival);
-					edited                            = true;
-				}
-				break;
-			}
-		default:
-			{
-				// Unknown or unhandled type — read-only display
-				if (fieldSize == sizeof(float))
-				{
-					ImGui::Text("%.4f", *static_cast<const float*>(valuePtr));
-				}
-				else
-				{
-					ImGui::Text("%zu bytes", fieldSize);
-				}
-				break;
-			}
-	}
-
-	ImGui::PopID();
-	return edited;
-}
 
 void DetailsPanel::Draw(EditorState& state)
 {
@@ -269,9 +162,21 @@ void DetailsPanel::Draw(EditorState& state)
 										bool selected     = (i == slotIdx);
 										if (ImGui::Selectable(label, selected))
 										{
+											uint32_t oldSlot  = slotIdx; // before change
 											*slotPtr          = i;
 											state.bSceneDirty = true;
-											MarkEntityDirty(state);
+											MarkEntityDirty(state.RegistryPtr, arch, state.SelectedChunk, state.SelectedLocalIndex);
+
+											// Push undo command
+											if (state.EditorCtx)
+											{
+												auto cmd = std::make_unique<ComponentFieldChangeCommand>(
+													arch, state.SelectedChunk, state.SelectedLocalIndex,
+													fieldName, state.RegistryPtr,
+													&oldSlot, FieldValueType::Uint32, fdesc.fieldSize);
+												cmd->SetNewValue(slotPtr);
+												state.EditorCtx->PushCommand(std::move(cmd));
+											}
 										}
 										if (selected) ImGui::SetItemDefaultFocus();
 									}
@@ -283,10 +188,22 @@ void DetailsPanel::Draw(EditorState& state)
 								{
 									if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("MESH_SLOT"))
 									{
+										uint32_t oldSlot     = slotIdx;
 										uint32_t droppedSlot = *static_cast<const uint32_t*>(payload->Data);
 										*slotPtr             = droppedSlot;
 										state.bSceneDirty    = true;
-										MarkEntityDirty(state);
+										MarkEntityDirty(state.RegistryPtr, arch, state.SelectedChunk, state.SelectedLocalIndex);
+
+										// Push undo command
+										if (state.EditorCtx)
+										{
+											auto cmd = std::make_unique<ComponentFieldChangeCommand>(
+												arch, state.SelectedChunk, state.SelectedLocalIndex,
+												fieldName, state.RegistryPtr,
+												&oldSlot, FieldValueType::Uint32, fdesc.fieldSize);
+											cmd->SetNewValue(slotPtr);
+											state.EditorCtx->PushCommand(std::move(cmd));
+										}
 									}
 									ImGui::EndDragDropTarget();
 								}
@@ -302,16 +219,121 @@ void DetailsPanel::Draw(EditorState& state)
 						}
 						else if (simPaused)
 						{
-							bool edited = EditFieldValue(
-								fieldName, fdesc.fieldSize, fieldArrayTable[idx],
-								state.SelectedLocalIndex,
-								fdesc.valueType);
+							uint8_t* base  = static_cast<uint8_t*>(fieldArrayTable[idx]);
+							void* valuePtr = base + state.SelectedLocalIndex * fdesc.fieldSize;
+							ImGui::PushID(fieldName);
 
-							if (edited)
+							switch (fdesc.valueType)
 							{
-								state.bSceneDirty = true;
-								MarkEntityDirty(state);
+								case FieldValueType::Fixed32:
+									{
+										SimFloat* pVal  = static_cast<SimFloat*>(valuePtr);
+										SimFloat oldVal = *pVal;
+										float floatVal  = pVal->ToFloat();
+										if (ImGui::InputFloat("##v", &floatVal, 0.1f, 1.0f, "%.4f"))
+										{
+											*pVal             = SimFloat(floatVal);
+											state.bSceneDirty = true;
+											MarkEntityDirty(state.RegistryPtr, arch, state.SelectedChunk, state.SelectedLocalIndex);
+											if (state.EditorCtx)
+											{
+												auto cmd = std::make_unique<ComponentFieldChangeCommand>(
+													arch, state.SelectedChunk, state.SelectedLocalIndex,
+													fieldName, state.RegistryPtr, &oldVal,
+													fdesc.valueType, fdesc.fieldSize);
+												cmd->SetNewValue(pVal);
+												state.EditorCtx->PushCommand(std::move(cmd));
+											}
+										}
+										break;
+									}
+								case FieldValueType::Float32:
+									{
+										float* pVal  = static_cast<float*>(valuePtr);
+										float oldVal = *pVal;
+										if (ImGui::InputFloat("##v", pVal, 0.1f, 1.0f, "%.4f"))
+										{
+											state.bSceneDirty = true;
+											MarkEntityDirty(state.RegistryPtr, arch, state.SelectedChunk, state.SelectedLocalIndex);
+											if (state.EditorCtx)
+											{
+												auto cmd = std::make_unique<ComponentFieldChangeCommand>(
+													arch, state.SelectedChunk, state.SelectedLocalIndex,
+													fieldName, state.RegistryPtr, &oldVal,
+													fdesc.valueType, fdesc.fieldSize);
+												cmd->SetNewValue(pVal);
+												state.EditorCtx->PushCommand(std::move(cmd));
+											}
+										}
+										break;
+									}
+								case FieldValueType::Float64:
+									{
+										double* pVal  = static_cast<double*>(valuePtr);
+										double oldVal = *pVal;
+										float fVal    = static_cast<float>(*pVal);
+										if (ImGui::InputFloat("##v", &fVal, 0.1f, 1.0f, "%.6f"))
+										{
+											*pVal             = static_cast<double>(fVal);
+											state.bSceneDirty = true;
+											MarkEntityDirty(state.RegistryPtr, arch, state.SelectedChunk, state.SelectedLocalIndex);
+											if (state.EditorCtx)
+											{
+												auto cmd = std::make_unique<ComponentFieldChangeCommand>(
+													arch, state.SelectedChunk, state.SelectedLocalIndex,
+													fieldName, state.RegistryPtr, &oldVal,
+													fdesc.valueType, fdesc.fieldSize);
+												cmd->SetNewValue(pVal);
+												state.EditorCtx->PushCommand(std::move(cmd));
+											}
+										}
+										break;
+									}
+								case FieldValueType::Int32:
+									{
+										int32_t* pVal  = static_cast<int32_t*>(valuePtr);
+										int32_t oldVal = *pVal;
+										if (ImGui::InputInt("##v", pVal))
+										{
+											state.bSceneDirty = true;
+											MarkEntityDirty(state.RegistryPtr, arch, state.SelectedChunk, state.SelectedLocalIndex);
+											if (state.EditorCtx)
+											{
+												auto cmd = std::make_unique<ComponentFieldChangeCommand>(
+													arch, state.SelectedChunk, state.SelectedLocalIndex,
+													fieldName, state.RegistryPtr, &oldVal,
+													fdesc.valueType, fdesc.fieldSize);
+												cmd->SetNewValue(pVal);
+												state.EditorCtx->PushCommand(std::move(cmd));
+											}
+										}
+										break;
+									}
+								case FieldValueType::Uint32:
+									{
+										uint32_t* pVal  = static_cast<uint32_t*>(valuePtr);
+										uint32_t oldVal = *pVal;
+										int iVal        = static_cast<int>(*pVal);
+										if (ImGui::InputInt("##v", &iVal))
+										{
+											*pVal             = static_cast<uint32_t>(iVal);
+											state.bSceneDirty = true;
+											MarkEntityDirty(state.RegistryPtr, arch, state.SelectedChunk, state.SelectedLocalIndex);
+											if (state.EditorCtx)
+											{
+												auto cmd = std::make_unique<ComponentFieldChangeCommand>(
+													arch, state.SelectedChunk, state.SelectedLocalIndex,
+													fieldName, state.RegistryPtr, &oldVal,
+													fdesc.valueType, fdesc.fieldSize);
+												cmd->SetNewValue(pVal);
+												state.EditorCtx->PushCommand(std::move(cmd));
+											}
+										}
+										break;
+									}
+								default: break;
 							}
+							ImGui::PopID();
 						}
 						else
 						{

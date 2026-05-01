@@ -90,16 +90,16 @@ static JPH::ObjectLayer ToJoltLayer(uint32_t motion)
 // Create a Jolt shape from JoltBody component settings (single entity, scalar access).
 // Returns a ref-counted shape pointer. Jolt handles deduplication internally.
 static JPH::RefConst<JPH::Shape> CreateShapeFromSettings(
-	uint32_t shapeType, SimFloat hx, SimFloat hy, SimFloat hz)
+	uint32_t shapeType, float hx, float hy, float hz)
 {
 	switch (shapeType)
 	{
 		case 1: // Sphere
-			return new JPH::SphereShape(hx.ToFloat());
+			return new JPH::SphereShape(hx);
 		case 2: // Capsule
-			return new JPH::CapsuleShape(hy.ToFloat(), hx.ToFloat());
+			return new JPH::CapsuleShape(hy, hx);
 		default: // Box (0 or unknown)
-			return new JPH::BoxShape(JPH::Vec3(hx.ToFloat(), hy.ToFloat(), hz.ToFloat()));
+			return new JPH::BoxShape(JPH::Vec3(hx, hy, hz));
 	}
 }
 

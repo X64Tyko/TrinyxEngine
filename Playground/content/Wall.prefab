@@ -1,0 +1,33 @@
+{
+	"type": "CubeEntity",
+	"components": {
+		"Flags": -2013265920.0,
+		"R": 0.5,
+		"G": 0.5,
+		"B": 0.55000001192092896,
+		"A": 1.0,
+		"MeshID": 1.0,
+		"MaterialID": 0.0,
+		"LODCount": 0.0,
+		"CastShadow": 0.0,
+		"ScaleX": 30.0,
+		"ScaleY": 4.0,
+		"ScaleZ": 1.0,
+		"PosX": 0.0,
+		"PosY": 2.0,
+		"PosZ": -15.5,
+		"RotQx": 0.0,
+		"RotQy": 0.0,
+		"RotQz": 0.0,
+		"RotQw": 1.0,
+		"Shape": 0.0,
+		"HalfExtentX": 15.0,
+		"HalfExtentY": 2.0,
+		"HalfExtentZ": 0.5,
+		"Motion": 0.0,
+		"Mass": 0.0,
+		"Friction": 0.5,
+		"Restitution": 0.30000001192092896,
+		"IsSensor": 0.0
+	}
+}

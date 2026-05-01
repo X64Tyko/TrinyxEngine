@@ -12,6 +12,7 @@
 #include "EditorState.h"
 #include "EngineConfig.h"
 #include "WorldViewport.h"
+#include "UndoCommand.h"
 #include "imgui.h"
 
 class AudioManager;
@@ -79,6 +80,16 @@ public:
 	/// Returns the screen-space top-left of the 3D viewport panel (logical pixels).
 	/// Updated each frame during DrawEditorViewportPanel(); valid after BuildFrame() returns.
 	ImVec2 GetViewportPanelPos() const { return ViewportPanelPos; }
+
+	std::vector<std::unique_ptr<UndoCommand>> UndoStack;
+	size_t UndoIndex                = 0;
+	static constexpr size_t MaxUndo = 50;
+
+	void PushCommand(std::unique_ptr<UndoCommand> cmd);
+	void Undo();
+	void Redo();
+	bool CanUndo() const { return UndoIndex > 0; }
+	bool CanRedo() const { return UndoIndex < UndoStack.size(); }
 
 private:
 	void BuildDockspace();
@@ -159,14 +170,16 @@ private:
 
 	enum class PendingActionType : uint8_t { None, OpenScene };
 
-	bool bMouseReleasedDuringPlay   = false;
-	bool bShowDemoWindow            = false;
-	bool bShowMetrics               = false;
-	bool bFirstFrame                = true;
-	bool bShowFileDialog            = false;
-	bool bFileDialogForSave         = false;
-	bool bShowUnsavedWarning        = false;
-	bool bShowImportDialog          = false;
+	bool bMouseReleasedDuringPlay = false;
+	bool bShowDemoWindow          = false;
+	bool bShowMetrics             = false;
+	bool bFirstFrame              = true;
+	bool bShowFileDialog          = false;
+	bool bFileDialogForSave       = false;
+	bool bShowUnsavedWarning      = false;
+	bool bShowImportDialog        = false;
+	void DrawPrefabSaveDialog();
+	bool bShowPrefabSaveDialog = false;
 	bool ViewportPanelHovered       = false;
 	ImVec2 ViewportPanelPos         = {0, 0};
 	ImVec2 ViewportPanelSize        = {0, 0};
