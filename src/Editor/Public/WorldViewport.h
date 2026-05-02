@@ -64,6 +64,8 @@ struct WorldViewport
 	// ── Per-world frame tracking ────────────────────────────────────────
 	uint64_t LastVolatileFrame = 0;
 	uint64_t LastTemporalFrame = 0;
+	uint64_t PrevVolatileFrame = 0;
+	uint64_t PrevTemporalFrame = 0;
 
 	// ── Viewport dimensions ─────────────────────────────────────────────
 	uint32_t Width    = 0;

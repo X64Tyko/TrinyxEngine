@@ -194,3 +194,14 @@ struct QuatAccessor
 		Store(r);
 	}
 };
+
+// Build a camera orientation quaternion from FPS-style yaw (world Y) and pitch (local X).
+// yaw=0, pitch=0 → facing -Z with up=+Y.  Result is a unit quaternion.
+inline Quat QuatFromYawPitch(SimFloat yaw, SimFloat pitch)
+{
+	const SimFloat hy = yaw   * SimFloat(0.5f);
+	const SimFloat hp = pitch * SimFloat(0.5f);
+	const Quat qY{SimFloat(0), FastSin(hy), SimFloat(0), FastCos(hy)};
+	const Quat qP{FastSin(hp), SimFloat(0), SimFloat(0), FastCos(hp)};
+	return qY * qP;
+}

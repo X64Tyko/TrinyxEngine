@@ -32,19 +32,6 @@
 // Helpers
 // -----------------------------------------------------------------------
 
-// Simfloat to float for GPU push.
-static void MultMat4(float* out, const float* A, const float* B)
-{
-	for (int col = 0; col < 4; ++col)
-	{
-		for (int row = 0; row < 4; ++row)
-		{
-			SimFloat sum = 0.0f;
-			for (int k = 0; k < 4; ++k) sum += A[k * 4 + row] * B[col * 4 + k];
-			out[col * 4 + row] = sum.ToFloat();
-		}
-	}
-}
 
 static std::vector<uint32_t> ReadSPIRV(const char* path)
 {
@@ -1265,9 +1252,31 @@ void RendererCore<Derived>::FillGpuFrameData(FrameSync& frame)
 
 	ComponentCacheBase* tc   = RegistryPtr->GetTemporalCache();
 	TemporalFrameHeader* hdr = tc->GetFrameHeader(LastTemporalFrame);
-	const Matrix4f PMf       = hdr->ProjectionMatrix.ToFloat();
-	const Matrix4f VMf       = hdr->ViewMatrix.ToFloat();
-	MultMat4(FrameData->ViewProj, PMf.m, VMf.m);
+
+	FrameData->Position[0] = hdr->CameraPosition.x.ToFloat();
+	FrameData->Position[1] = hdr->CameraPosition.y.ToFloat();
+	FrameData->Position[2] = hdr->CameraPosition.z.ToFloat();
+	FrameData->FoV         = hdr->CameraFoV.ToFloat();
+
+	const Quatf rot        = hdr->CameraRotation.ToFloat();
+	FrameData->Rotation[0] = rot.x;
+	FrameData->Rotation[1] = rot.y;
+	FrameData->Rotation[2] = rot.z;
+	FrameData->Rotation[3] = rot.w;
+
+	FrameData->OldPosition[0] = hdr->PrevCameraPosition.x.ToFloat();
+	FrameData->OldPosition[1] = hdr->PrevCameraPosition.y.ToFloat();
+	FrameData->OldPosition[2] = hdr->PrevCameraPosition.z.ToFloat();
+	FrameData->OldFoV         = hdr->PrevCameraFoV.ToFloat();
+
+	const Quatf oldRot        = hdr->PrevCameraRotation.ToFloat();
+	FrameData->OldRotation[0] = oldRot.x;
+	FrameData->OldRotation[1] = oldRot.y;
+	FrameData->OldRotation[2] = oldRot.z;
+	FrameData->OldRotation[3] = oldRot.w;
+
+	const vk::Extent2D ext = VkCtx->GetSwapchain().Extent;
+	FrameData->AspectRatio  = ext.height > 0 ? static_cast<float>(ext.width) / static_cast<float>(ext.height) : 1.0f;
 
 	FrameData->VerticesAddr          = Meshes.GetVertexBufferAddr();
 	FrameData->InstancesAddr         = frame.InstancesBuffer.DeviceAddr;

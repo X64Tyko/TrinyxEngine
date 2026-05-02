@@ -265,11 +265,55 @@ void EditorContext::DrawGizmo()
 	ImGuizmo::SetRect(ViewportPanelPos.x, ViewportPanelPos.y, ViewportPanelSize.x, ViewportPanelSize.y);
 	ImGuizmo::SetOrthographic(false);
 
-	// ImGuizmo expects OpenGL-style projection (Y-up). Vulkan's projection has
-	// m[5] negated for Y-down NDC. Undo the flip for the gizmo.
-	Matrix4f projFixup = hdr->ProjectionMatrix.CastTo<float>();
-	Matrix4f viewFixup = hdr->ViewMatrix.CastTo<float>();
-	projFixup[5]       = -projFixup[5];
+	// Rebuild view and projection matrices from the frame header's quat+position+FoV.
+	// ImGuizmo expects column-major, OpenGL-style (no Vulkan Y-flip in projection).
+	const Quatf camRot = hdr->CameraRotation.ToFloat();
+	const float crx = camRot.x, cry = camRot.y, crz = camRot.z, crw = camRot.w;
+
+	// quatRotate(q, v): right = q*(1,0,0), up = q*(0,1,0), fwd = q*(0,0,-1)
+	auto qr = [&](float vx, float vy, float vz, float& ox, float& oy, float& oz)
+	{
+		float tx = 2.0f * (cry * vz - crz * vy);
+		float ty = 2.0f * (crz * vx - crx * vz);
+		float tz = 2.0f * (crx * vy - cry * vx);
+		ox = vx + crw * tx + (cry * tz - crz * ty);
+		oy = vy + crw * ty + (crz * tx - crx * tz);
+		oz = vz + crw * tz + (crx * ty - cry * tx);
+	};
+
+	float rx, ry, rz, ux, uy, uz, fx, fy, fz;
+	qr( 1,  0,  0, rx, ry, rz);  // right
+	qr( 0,  1,  0, ux, uy, uz);  // up
+	qr( 0,  0, -1, fx, fy, fz);  // forward (-Z)
+
+	const float cpx = hdr->CameraPosition.x.ToFloat();
+	const float cpy = hdr->CameraPosition.y.ToFloat();
+	const float cpz = hdr->CameraPosition.z.ToFloat();
+
+	// Column-major view matrix
+	Matrix4f viewFixup;
+	viewFixup[0]  = rx; viewFixup[1]  = ux; viewFixup[2]  = -fx; viewFixup[3]  = 0;
+	viewFixup[4]  = ry; viewFixup[5]  = uy; viewFixup[6]  = -fy; viewFixup[7]  = 0;
+	viewFixup[8]  = rz; viewFixup[9]  = uz; viewFixup[10] = -fz; viewFixup[11] = 0;
+	viewFixup[12] = -(rx*cpx + ry*cpy + rz*cpz);
+	viewFixup[13] = -(ux*cpx + uy*cpy + uz*cpz);
+	viewFixup[14] =  (fx*cpx + fy*cpy + fz*cpz);
+	viewFixup[15] = 1;
+
+	// Column-major projection (OpenGL-style, no Y-flip — ImGuizmo adds its own)
+	const float aspect = (ViewportPanelSize.y > 0.f) ? ViewportPanelSize.x / ViewportPanelSize.y : 1.0f;
+	const float fovRad  = hdr->CameraFoV.ToFloat() * 3.14159265f / 180.0f;
+	const float F       = 1.0f / std::tan(fovRad * 0.5f);
+	const float zNear   = 0.1f, zFar = 5000.0f;
+	const float dz      = zNear - zFar;
+
+	Matrix4f projFixup;
+	for (int i = 0; i < 16; ++i) projFixup[i] = 0.0f;
+	projFixup[0]  = F / aspect;
+	projFixup[5]  = F;               // Y-up (no Vulkan flip)
+	projFixup[10] = zFar / dz;
+	projFixup[11] = -1.0f;
+	projFixup[14] = (zFar * zNear) / dz;
 
 	// Map our enum to ImGuizmo operation
 	ImGuizmo::OPERATION op;

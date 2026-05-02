@@ -12,14 +12,14 @@
 			"name": "Arena",
 			"path": "Arena.tnxscene",
 			"type": 8.0,
-			"contentHash": 1.4312568556420289e+19
+			"contentHash": 5.2013519780859884e+18
 		},
 		{
 			"uuid": 256.0,
 			"name": "DefaultCharacter",
 			"path": "DefaultCharacter.tnxprefab",
 			"type": 9.0,
-			"contentHash": 5.6986800749862932e+18
+			"contentHash": 5.3161583432269373e+18
 		},
 		{
 			"uuid": 256.0,
@@ -33,14 +33,21 @@
 			"name": "StaticCube",
 			"path": "StaticCube.prefab",
 			"type": 9.0,
-			"contentHash": 1.3857244063096052e+19
+			"contentHash": 1.5915071583945736e+19
 		},
 		{
 			"uuid": 1280.0,
 			"name": "Wall",
 			"path": "Wall.prefab",
 			"type": 9.0,
-			"contentHash": 1.1574669438780266e+19
+			"contentHash": 4.6239603345486449e+18
+		},
+		{
+			"uuid": 256.0,
+			"name": "",
+			"path": "Audio\\firered_00A1.wav",
+			"type": 6.0,
+			"contentHash": 1.5625005118455796e+19
 		}
 	],
 	"counters": {

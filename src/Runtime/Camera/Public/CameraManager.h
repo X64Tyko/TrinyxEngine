@@ -19,11 +19,10 @@ static constexpr uint8_t CameraSlotCount = 5;
 // Resolved camera state written into the frame header each tick.
 struct WorldCameraState
 {
-	Vector3 Position{};
-	SimFloat Yaw   = 0.0f;
-	SimFloat Pitch = 0.0f;
-	SimFloat FOV   = 60.0f;
-	bool Valid     = false;
+	Vector3  Position{};
+	Quat     Rotation{};            // identity by default
+	SimFloat FOV   = SimFloat(60.0f);
+	bool     Valid = false;
 };
 
 // Float‑based camera state used exclusively by the render pipeline.
@@ -31,17 +30,15 @@ struct WorldCameraState
 struct CameraRenderState
 {
 	Vector3f Position{}; // TVector3<float>
-	float Yaw   = 0.0f;
-	float Pitch = 0.0f;
-	float FOV   = 60.0f;
-	bool Valid  = false;
+	Quatf    Rotation{}; // identity by default
+	float    FOV   = 60.0f;
+	bool     Valid = false;
 
 	CameraRenderState() = default;
 
 	CameraRenderState(const WorldCameraState& gs)
 		: Position(gs.Position.ToFloat())
-		, Yaw(gs.Yaw.ToFloat())
-		, Pitch(gs.Pitch.ToFloat())
+		, Rotation(gs.Rotation.ToFloat())
 		, FOV(gs.FOV.ToFloat())
 		, Valid(gs.Valid)
 	{
@@ -66,9 +63,9 @@ struct CameraLayer
 {
 	uint32_t     OwnerHandle     = 0;
 	CameraSlot   Slot            = CameraSlot::World;
-	SimFloat TransitionAlpha = 0.0f; // animated → BlendAlpha by Tick
-	SimFloat BlendAlpha      = 1.0f; // target weight
-	SimFloat TransitionSpeed = 4.0f; // alpha units/sec
+	SimFloat TransitionAlpha = SimFloat(0.0f); // animated → BlendAlpha by Tick
+	SimFloat BlendAlpha      = SimFloat(1.0f); // target weight
+	SimFloat TransitionSpeed = SimFloat(4.0f); // alpha units/sec
 	CurveHandle  TransitionCurve{};      // 0 = linear
 	ConsumeScope Consume         = ConsumeScope::Stack;
 	bool         Active          = true;
@@ -152,7 +149,7 @@ void CameraManager::AddLayer(CameraSlot slot, T* layer)
 	static_assert(std::is_base_of_v<CameraLayer, T>, "T must derive from CameraLayer");
 
 	layer->Slot            = slot;
-	layer->TransitionAlpha = 0.0f;
+	layer->TransitionAlpha = SimFloat(0.0f);
 
 	if constexpr (requires(T* d, WorldCameraState& st) { d->ApplyState(st); })
 		layer->StateFn = [](void* self, WorldCameraState& st)

@@ -53,27 +53,34 @@ static_assert(sizeof(GpuMeshInfo) == 16, "GpuMeshInfo must be 16 bytes");
 
 struct GpuFrameData
 {
-	float ViewProj[16];                       // offset   0
-	uint64_t InstancesAddr;                   // offset  64 — sorted SoA (draw reads from here)
-	uint64_t DrawArgsAddr;                    // offset  72
-	uint64_t VerticesAddr;                    // offset  80
-	uint64_t CompactCounterAddr;              // offset  88
-	uint64_t ScanAddr;                        // offset  96
-	float Alpha;                              // offset 104
-	uint32_t EntityCount;                     // offset 108
-	uint32_t FieldCount;                      // offset 112
-	uint32_t OutFieldStride;                  // offset 116
-	uint64_t UnsortedInstancesAddr;           // offset 120 — scatter writes here
-	uint64_t MeshHistogramAddr;               // offset 128
-	uint64_t MeshWriteIdxAddr;                // offset 136
-	uint64_t MeshTableAddr;                   // offset 144
-	uint32_t MeshCount;                       // offset 152
-	uint32_t _pad0;                           // offset 156
-	uint64_t PrevFieldAddrs[MaxGpuFields];   // offset 160
-	uint64_t CurrFieldAddrs[MaxGpuFields];   // offset 1184
-	uint32_t FieldSemantics[MaxGpuFields];   // offset 2208
-	uint32_t FieldElementSize[MaxGpuFields]; // offset 2720
-};                                            // total  3232
+	float Position[3];
+	float OldPosition[3];
+	float Rotation[4];
+	float OldRotation[4];
+	float FoV;
+	float OldFoV;
+	float AspectRatio;                        // offset  64
+	float _pad1;                              // offset  68
+	uint64_t InstancesAddr;                   // offset  72 — sorted SoA (draw reads from here)
+	uint64_t DrawArgsAddr;                    // offset  80
+	uint64_t VerticesAddr;                    // offset  88
+	uint64_t CompactCounterAddr;              // offset  96
+	uint64_t ScanAddr;                        // offset 104
+	float Alpha;                              // offset 112
+	uint32_t EntityCount;                     // offset 116
+	uint32_t FieldCount;                      // offset 120
+	uint32_t OutFieldStride;                  // offset 124
+	uint64_t UnsortedInstancesAddr;           // offset 128 — scatter writes here
+	uint64_t MeshHistogramAddr;               // offset 136
+	uint64_t MeshWriteIdxAddr;                // offset 144
+	uint64_t MeshTableAddr;                   // offset 152
+	uint32_t MeshCount;                       // offset 160
+	uint32_t _pad0;                           // offset 164
+	uint64_t PrevFieldAddrs[MaxGpuFields];   // offset 168
+	uint64_t CurrFieldAddrs[MaxGpuFields];   // offset 1192
+	uint32_t FieldSemantics[MaxGpuFields];   // offset 2216
+	uint32_t FieldElementSize[MaxGpuFields]; // offset 2728
+};                                            // total  3240
 
-static_assert(sizeof(GpuFrameData) == 3232,
+static_assert(sizeof(GpuFrameData) == 3240,
 			  "GpuFrameData size mismatch — layout must match GpuFrameData.slang exactly");

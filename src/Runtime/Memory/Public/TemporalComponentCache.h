@@ -8,6 +8,7 @@
 #include "Types.h"
 #include "EngineConfig.h"
 #include "Logger.h"
+#include "QuatMath.h"
 
 namespace TrinyxJobs
 {
@@ -38,9 +39,12 @@ struct alignas(64) TemporalFrameHeader
 	uint32_t FrameNumber;
 
 	// Camera/View data
-	Matrix4 ViewMatrix;
-	Matrix4 ProjectionMatrix;
 	Vector3 CameraPosition;
+	Vector3 PrevCameraPosition;
+	Quat CameraRotation;
+	Quat PrevCameraRotation;
+	SimFloat CameraFoV;
+	SimFloat PrevCameraFoV;
 
 	// Scene/Lighting data
 	Vector3 SunDirection;
@@ -67,14 +71,14 @@ struct alignas(64) TemporalFrameHeader
 	// Padding to cache line
 #if defined(TNX_ENABLE_ROLLBACK) && TNX_DEV_METRICS
 	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint32_t) * 3
-		+ sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(SimFloat) + 64 + sizeof(SimFloat) * 2) % 64];
+		+ sizeof(Vector3) * 3 + sizeof(SimFloat) + 64 + sizeof(SimFloat) * 2) % 64];
 #elif defined(TNX_ENABLE_ROLLBACK)
 	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint32_t) * 3
-		+ sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(SimFloat) + 64 + sizeof(SimFloat) * 2) % 64];
+		+ sizeof(Vector3) * 3 + sizeof(SimFloat) + 64 + sizeof(SimFloat) * 2) % 64];
 #elif TNX_DEV_METRICS
-	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(SimFloat)) % 64];
+	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(SimFloat)) % 64];
 #else
-	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(Matrix4) * 2 + sizeof(SimFloat)) % 64];
+	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(SimFloat)) % 64];
 #endif
 };
 

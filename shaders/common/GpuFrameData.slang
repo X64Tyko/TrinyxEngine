@@ -40,7 +40,14 @@ struct GpuMeshInfo
 // A single 8-byte push constant holds its device address.
 struct GpuFrameData
 {
-    float    ViewProj[16];
+    float Position[3];
+    float OldPosition[3];
+    float Rotation[4];
+    float OldRotation[4];
+    float FoV;
+    float OldFoV;
+    float    AspectRatio;              // viewport width / height
+    float    _pad1;
     uint64_t InstancesAddr;            // sorted SoA — vertex shader reads from here
     uint64_t DrawArgsAddr;             // VkDrawIndexedIndirectCommand[MeshCount]
     uint64_t VerticesAddr;             // mesh vertex buffer (BDA)

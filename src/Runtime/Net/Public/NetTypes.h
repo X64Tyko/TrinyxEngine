@@ -445,9 +445,9 @@ struct RPCContext
 struct PlayerBeginResult
 {
 	bool Accepted     = false;
-	SimFloat PosX     = 0.0f;
-	SimFloat PosY     = 5.0f; // Reasonable default so body isn't in the floor
-	SimFloat PosZ     = 0.0f;
+	SimFloat PosX     = SimFloat(0.0f);
+	SimFloat PosY     = SimFloat(5.0f); // Reasonable default so body isn't in the floor
+	SimFloat PosZ     = SimFloat(0.0f);
 	ConstructRef Body = {}; // Handle to the created Body Construct (may be invalid until Constructs wire up)
 };
 

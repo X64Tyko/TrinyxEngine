@@ -192,7 +192,7 @@ private:
 	enum class TestPhase { Waiting, Moving, Cooling, Done };
 
 	static constexpr uint32_t WaitFrames     = 1024;
-	static constexpr uint32_t MoveFrames     = 30;
+	static constexpr uint32_t MoveFrames     = 4096;
 	static constexpr uint32_t CooldownFrames = 30;
 
 	// Both sides fire at the same server frame regardless of InputLead or clock offset.

@@ -1,4 +1,5 @@
 #include "LogicThread.h"
+#include "QuatMath.h"
 
 // ---------------------------------------------------------------------------
 // Template aliases for readability in method signatures
@@ -324,85 +325,29 @@ void LogicThread::PublishCompletedFrame()
 	header->ActiveEntityCount      = static_cast<uint32_t>(RegistryPtr->GetTotalEntityCount());
 	header->TotalAllocatedEntities = static_cast<uint32_t>(RegistryPtr->GetTotalEntityCount());
 
-	SimFloat activeFOV = 60.0f;
-	SimFloat activeYaw = CamYaw, activePitch = CamPitch;
-	Vector3 activePos  = CamPos;
+	// Preserve previous frame's camera state for GPU interpolation
+	header->PrevCameraPosition = header->CameraPosition;
+	header->PrevCameraRotation = header->CameraRotation;
+	header->PrevCameraFoV      = header->CameraFoV;
+
+	SimFloat activeFOV = SimFloat(60.0f);
+	Vector3  activePos = CamPos;
+	Quat     activeRot = QuatFromYawPitch(CamYaw, CamPitch);
 
 	if (LocalCameraManager)
 	{
 		WorldCameraState cs = LocalCameraManager->Resolve();
 		if (cs.Valid)
 		{
-			activePos   = cs.Position;
-			activeYaw   = cs.Yaw;
-			activePitch = cs.Pitch;
-			activeFOV   = cs.FOV;
+			activePos = cs.Position;
+			activeRot = cs.Rotation;
+			activeFOV = cs.FOV;
 		}
 	}
 
-	SimFloat AspectRatio = static_cast<SimFloat>(WindowWidth) / static_cast<SimFloat>(WindowHeight);
-	SimFloat Fov         = activeFOV * SimFloat(3.14159f) / SimFloat(180.0f);
-	SimFloat ZNear       = SimFloat(0.1f);
-	SimFloat ZFar        = SimFloat(5000.0f);
-
-	SimFloat F  = 1.0f / FastTan(Fov * SimFloat(0.5f));
-	SimFloat dz = ZNear - ZFar;
-	auto& P     = header->ProjectionMatrix;
-
-	P.m[0]  = F / AspectRatio;
-	P.m[1]  = 0.0f;
-	P.m[2]  = 0.0f;
-	P.m[3]  = 0.0f;
-	P.m[4]  = 0.0f;
-	P.m[5]  = -F;
-	P.m[6]  = 0.0f;
-	P.m[7]  = 0.0f;
-	P.m[8]  = 0.0f;
-	P.m[9]  = 0.0f;
-	P.m[10] = ZFar / dz;
-	P.m[11] = -1.0f;
-	P.m[12] = 0.0f;
-	P.m[13] = 0.0f;
-	P.m[14] = (ZFar * ZNear) / dz;
-	P.m[15] = 0.0f;
-
-	SimFloat sinYaw   = FastSin(activeYaw);
-	SimFloat cosYaw   = FastCos(activeYaw);
-	SimFloat sinPitch = FastSin(activePitch);
-	SimFloat cosPitch = FastCos(activePitch);
-
-	Vector3 camForward{sinYaw * cosPitch, sinPitch, -cosYaw * cosPitch};
-	Vector3 camRight{cosYaw, 0.0f, sinYaw};
-	Vector3 camUp{
-		camRight.y * camForward.z - camRight.z * camForward.y,
-		camRight.z * camForward.x - camRight.x * camForward.z,
-		camRight.x * camForward.y - camRight.y * camForward.x
-	};
-
-	Vector3 activePosF{activePos.x, activePos.y, activePos.z};
-	SimFloat tx = -(camRight.x * activePosF.x + camRight.y * activePosF.y + camRight.z * activePosF.z);
-	SimFloat ty = -(camUp.x * activePosF.x + camUp.y * activePosF.y + camUp.z * activePosF.z);
-	SimFloat tz = (camForward.x * activePosF.x + camForward.y * activePosF.y + camForward.z * activePosF.z);
-
-	auto& V = header->ViewMatrix;
-	V.m[0]  = camRight.x;
-	V.m[1]  = camUp.x;
-	V.m[2]  = -camForward.x;
-	V.m[3]  = 0.0f;
-	V.m[4]  = camRight.y;
-	V.m[5]  = camUp.y;
-	V.m[6]  = -camForward.y;
-	V.m[7]  = 0.0f;
-	V.m[8]  = camRight.z;
-	V.m[9]  = camUp.z;
-	V.m[10] = -camForward.z;
-	V.m[11] = 0.0f;
-	V.m[12] = tx;
-	V.m[13] = ty;
-	V.m[14] = tz;
-	V.m[15] = 1.0f;
-
 	header->CameraPosition = activePos;
+	header->CameraRotation = activeRot;
+	header->CameraFoV      = activeFOV;
 #if TNX_DEV_METRICS
 	header->InputTimestamp = VizInput->GetSwapPerfCount();
 #if TNX_DEV_METRICS_DETAILED

@@ -439,6 +439,8 @@ void EditorRenderer::UpdateViewportSlabs()
 
 		if (newVolatile != vp->LastVolatileFrame && newTemporal != vp->LastTemporalFrame)
 		{
+			vp->PrevVolatileFrame = vp->LastVolatileFrame;
+			vp->PrevTemporalFrame = vp->LastTemporalFrame;
 			vp->LastVolatileFrame = newVolatile;
 			vp->LastTemporalFrame = newTemporal;
 			WriteToViewportSlab(vp);
@@ -574,27 +576,40 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 // its world's camera, but the FrameSync's scratch buffer addresses.
 // -----------------------------------------------------------------------
 
-static void MultMat4(float* out, const SimFloat* A, const SimFloat* B)
-{
-	for (int col = 0; col < 4; ++col)
-		for (int row = 0; row < 4; ++row)
-		{
-			SimFloat sum = 0.0f;
-			for (int k = 0; k < 4; ++k) sum += A[k * 4 + row] * B[col * 4 + k];
-			out[col * 4 + row] = sum.ToFloat();
-		}
-}
-
 void EditorRenderer::FillGpuFrameDataForViewport(WorldViewport* vp, FrameSync& frame)
 {
 	auto* data = static_cast<GpuFrameData*>(vp->GpuData[CurrentFrame].MappedPtr);
 	std::memset(data, 0, sizeof(GpuFrameData));
 
-	// ViewProj from viewport's world — use the same read frame that WriteToViewportSlab captured
 	Registry* reg            = vp->TargetWorld->GetRegistry();
 	ComponentCacheBase* tc   = reg->GetTemporalCache();
 	TemporalFrameHeader* hdr = tc->GetFrameHeader(vp->LastTemporalFrame);
-	MultMat4(data->ViewProj, hdr->ProjectionMatrix.m, hdr->ViewMatrix.m);
+
+	// Current camera state
+	data->Position[0] = hdr->CameraPosition.x.ToFloat();
+	data->Position[1] = hdr->CameraPosition.y.ToFloat();
+	data->Position[2] = hdr->CameraPosition.z.ToFloat();
+	data->FoV         = hdr->CameraFoV.ToFloat();
+
+	const Quatf rot   = hdr->CameraRotation.ToFloat();
+	data->Rotation[0] = rot.x;
+	data->Rotation[1] = rot.y;
+	data->Rotation[2] = rot.z;
+	data->Rotation[3] = rot.w;
+
+	// Previous camera state (for GPU interpolation)
+	data->OldPosition[0] = hdr->PrevCameraPosition.x.ToFloat();
+	data->OldPosition[1] = hdr->PrevCameraPosition.y.ToFloat();
+	data->OldPosition[2] = hdr->PrevCameraPosition.z.ToFloat();
+	data->OldFoV         = hdr->PrevCameraFoV.ToFloat();
+
+	const Quatf oldRot   = hdr->PrevCameraRotation.ToFloat();
+	data->OldRotation[0] = oldRot.x;
+	data->OldRotation[1] = oldRot.y;
+	data->OldRotation[2] = oldRot.z;
+	data->OldRotation[3] = oldRot.w;
+
+	data->AspectRatio = vp->Width > 0 ? static_cast<float>(vp->Width) / static_cast<float>(vp->Height) : 1.0f;
 
 	// Scratch buffers from shared FrameSync
 	data->VerticesAddr          = Meshes.GetVertexBufferAddr();

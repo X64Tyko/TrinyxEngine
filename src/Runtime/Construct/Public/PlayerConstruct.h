@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CameraManager.h"
+#include "QuatMath.h"
 #include "Construct.h"
 #include "ConstructView.h"
 #include "EngineConfig.h"
@@ -17,15 +18,14 @@
 // Camera layer used by PlayerConstruct — writes eye/orbit position to WorldCameraState.
 struct PlayerCameraLayer : CameraLayer, CameraStateMix<PlayerCameraLayer>
 {
-	SimFloat PosX = 0.f, PosY  = 0.f, PosZ = 0.f;
-	SimFloat Yaw  = 0.f, Pitch = 0.f;
-	SimFloat FOV  = 60.f;
+	SimFloat PosX = SimFloat(0.f), PosY  = SimFloat(0.f), PosZ = SimFloat(0.f);
+	SimFloat Yaw  = SimFloat(0.f), Pitch = SimFloat(0.f);
+	SimFloat FOV  = SimFloat(60.f);
 
 	void ApplyState(WorldCameraState& state)
 	{
 		state.Position = {PosX, PosY, PosZ};
-		state.Yaw      = Yaw;
-		state.Pitch    = Pitch;
+		state.Rotation = QuatFromYawPitch(Yaw, Pitch);
 		state.FOV      = FOV;
 		state.Valid    = true;
 	}
@@ -200,6 +200,7 @@ public:
 
 		DesiredVelX = 0.0f;
 		DesiredVelZ = 0.0f;
+		
 	}
 
 	void PostPhysics(SimFloat /*dt*/)
@@ -258,9 +259,9 @@ public:
 		TPLayer.Pitch              = Pitch;
 	}
 
-	SimFloat SpawnPosX = 0.0f;
-	SimFloat SpawnPosY = 5.0f;
-	SimFloat SpawnPosZ = 0.0f;
+	SimFloat SpawnPosX = SimFloat(0.0f);
+	SimFloat SpawnPosY = SimFloat(5.0f);
+	SimFloat SpawnPosZ = SimFloat(0.0f);
 
 	uint8_t GetOwnerID() const
 	{
@@ -275,10 +276,10 @@ private:
 	bool bIsClientSide = false;
 	EntityHandle ReplicationEntityHandle{};
 
-	SimFloat Yaw         = 0.0f;
-	SimFloat Pitch       = 0.0f;
-	SimFloat DesiredVelX = 0.0f;
-	SimFloat DesiredVelZ = 0.0f;
+	SimFloat Yaw         = SimFloat(0.0f);
+	SimFloat Pitch       = SimFloat(0.0f);
+	SimFloat DesiredVelX = SimFloat(0.0f);
+	SimFloat DesiredVelZ = SimFloat(0.0f);
 	bool bToggleHeld     = false;
 
 	static constexpr SimFloat MoveSpeed = SimFloat(8.0f);

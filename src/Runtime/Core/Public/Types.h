@@ -271,6 +271,61 @@ TVector3<VecType> Cross(const TVector3<VecType>& a, const TVector3<VecType>& b)
 		a.x * b.y - a.y * b.x);
 }
 
+template <typename VecType = SimFloat>
+struct TQuat
+{
+	VecType x, y, z, w;
+
+	TQuat() : x(0), y(0), z(0), w(1) {}
+	TQuat(VecType x_, VecType y_, VecType z_, VecType w_) : x(x_), y(y_), z(z_), w(w_) {}
+
+	static TQuat Identity() { return TQuat(); }
+
+	TQuat Conjugate() const { return TQuat(-x, -y, -z, w); }
+
+	VecType LengthSqr() const { return x * x + y * y + z * z + w * w; }
+
+	TQuat Normalized() const
+	{
+		VecType len = Sqrt(LengthSqr());
+		return len > VecType(0) ? TQuat(x / len, y / len, z / len, w / len) : Identity();
+	}
+
+	// Hamilton product: this * o
+	TQuat operator*(const TQuat& o) const
+	{
+		return TQuat(
+			w * o.x + x * o.w + y * o.z - z * o.y,
+			w * o.y - x * o.z + y * o.w + z * o.x,
+			w * o.z + x * o.y - y * o.x + z * o.w,
+			w * o.w - x * o.x - y * o.y - z * o.z);
+	}
+
+	// Rotate vector v by this unit quaternion: v + 2w(q×v) + 2(q×(q×v))
+	TVector3<VecType> Rotate(const TVector3<VecType>& v) const
+	{
+		TVector3<VecType> qv{x, y, z};
+		TVector3<VecType> t = Cross(qv, v) * VecType(2);
+		return v + t * w + Cross(qv, t);
+	}
+
+	template <typename Dst>
+	TQuat<Dst> CastTo() const
+	{
+		return TQuat<Dst>(
+			TVecDetail::ConvertScalar<Dst>(x),
+			TVecDetail::ConvertScalar<Dst>(y),
+			TVecDetail::ConvertScalar<Dst>(z),
+			TVecDetail::ConvertScalar<Dst>(w));
+	}
+
+	TQuat<float> ToFloat() const { return CastTo<float>(); }
+	TQuat<SimFloat> ToSim() const { return CastTo<SimFloat>(); }
+};
+
+using Quat  = TQuat<>;
+using Quatf = TQuat<float>;
+
 template <typename MatType = SimFloat>
 struct TMatrix4
 {

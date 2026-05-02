@@ -112,10 +112,12 @@ WorldCameraState CameraManager::Resolve() const
 			WorldCameraState contrib = state;
 			layer->BlendFn(const_cast<CameraLayer*>(layer), w, contrib);
 
-			blended.Position = blended.Position + contrib.Position * w;
-			blended.Yaw     += contrib.Yaw   * w;
-			blended.Pitch   += contrib.Pitch * w;
-			blended.FOV     += contrib.FOV   * w;
+			blended.Position     = blended.Position + contrib.Position * w;
+			blended.Rotation.x  += contrib.Rotation.x * w;
+			blended.Rotation.y  += contrib.Rotation.y * w;
+			blended.Rotation.z  += contrib.Rotation.z * w;
+			blended.Rotation.w  += contrib.Rotation.w * w;
+			blended.FOV         += contrib.FOV * w;
 			totalWeight     += w;
 			slotTouched      = true;
 		}
@@ -123,11 +125,14 @@ WorldCameraState CameraManager::Resolve() const
 		if (totalWeight > 0.0f)
 		{
 			const SimFloat inv = 1.0f / totalWeight;
-			state.Position   = blended.Position * inv;
-			state.Yaw        = blended.Yaw      * inv;
-			state.Pitch      = blended.Pitch    * inv;
-			state.FOV        = blended.FOV      * inv;
-			state.Valid      = true;
+			state.Position     = blended.Position * inv;
+			// NLERP: normalize the accumulated weighted quaternion sum
+			state.Rotation     = Quat(blended.Rotation.x * inv,
+			                         blended.Rotation.y * inv,
+			                         blended.Rotation.z * inv,
+			                         blended.Rotation.w * inv).Normalized();
+			state.FOV          = blended.FOV * inv;
+			state.Valid        = true;
 		}
 
 		(void)slotTouched;
