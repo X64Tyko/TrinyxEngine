@@ -134,6 +134,12 @@ protected:
 	SimFloat CamYaw   = 0.0f;
 	SimFloat CamPitch = 0.0f;
 
+	// Last published camera state — used as Prev* in the next frame's header so temporal
+	// interpolation spans exactly 1 fixed step, not 3 (the ring-buffer slot period).
+	Vector3  LastPubCamPos{};
+	Quat     LastPubCamRot{};
+	SimFloat LastPubCamFoV = SimFloat(60.0f);
+
 	static constexpr SimFloat CamMoveSpeed = SimFloat(20.0f);
 	static constexpr SimFloat CamMouseSens = SimFloat(0.002f);
 

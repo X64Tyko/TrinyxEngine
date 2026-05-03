@@ -147,8 +147,8 @@ public:
 		{
 			XDelt = moveX / len * MoveSpeed * dt;
 			ZDelt = moveZ / len * MoveSpeed * dt;
-			Body.Transform.PosX += XDelt;
-			Body.Transform.PosZ += ZDelt;
+			//Body.Transform.PosX += XDelt;
+			//Body.Transform.PosZ += ZDelt;
 			DesiredVelX += XDelt;
 			DesiredVelZ += ZDelt;
 		}
@@ -164,9 +164,9 @@ public:
 		//if (bIsClientSide)
 		{
 			// Set position to corrected position - our desired velocity.
-			const SimFloat ecsPosX = Body.Transform.PosX.Value() - DesiredVelX;
+			const SimFloat ecsPosX = Body.Transform.PosX.Value();// - DesiredVelX;
 			const SimFloat ecsPosY = Body.Transform.PosY.Value();
-			const SimFloat ecsPosZ = Body.Transform.PosZ.Value() - DesiredVelZ;
+			const SimFloat ecsPosZ = Body.Transform.PosZ.Value();// - DesiredVelZ;
 			
 			CharacterController.SetPosition(JPH::RVec3(ecsPosX.ToFloat(), ecsPosY.ToFloat(), ecsPosZ.ToFloat()));
 			

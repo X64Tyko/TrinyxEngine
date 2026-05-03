@@ -11,7 +11,6 @@
 #include "LogicThread.h"
 #include "CMeshRef.h"
 #include "NetConnectionManager.h"
-#include "NetTypes.h"
 #include "Registry.h"
 #include "CScale.h"
 #include "Soul.h"

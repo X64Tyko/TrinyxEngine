@@ -325,11 +325,6 @@ void LogicThread::PublishCompletedFrame()
 	header->ActiveEntityCount      = static_cast<uint32_t>(RegistryPtr->GetTotalEntityCount());
 	header->TotalAllocatedEntities = static_cast<uint32_t>(RegistryPtr->GetTotalEntityCount());
 
-	// Preserve previous frame's camera state for GPU interpolation
-	header->PrevCameraPosition = header->CameraPosition;
-	header->PrevCameraRotation = header->CameraRotation;
-	header->PrevCameraFoV      = header->CameraFoV;
-
 	SimFloat activeFOV = SimFloat(60.0f);
 	Vector3  activePos = CamPos;
 	Quat     activeRot = QuatFromYawPitch(CamYaw, CamPitch);
@@ -345,9 +340,19 @@ void LogicThread::PublishCompletedFrame()
 		}
 	}
 
+	// Prev* uses the last published values (1 fixed step ago), not the current ring-buffer
+	// slot — which was written N_SLOTS frames ago, not 1.
+	header->PrevCameraPosition = LastPubCamPos;
+	header->PrevCameraRotation = LastPubCamRot;
+	header->PrevCameraFoV      = LastPubCamFoV;
+
 	header->CameraPosition = activePos;
 	header->CameraRotation = activeRot;
 	header->CameraFoV      = activeFOV;
+
+	LastPubCamPos = activePos;
+	LastPubCamRot = activeRot;
+	LastPubCamFoV = activeFOV;
 #if TNX_DEV_METRICS
 	header->InputTimestamp = VizInput->GetSwapPerfCount();
 #if TNX_DEV_METRICS_DETAILED
