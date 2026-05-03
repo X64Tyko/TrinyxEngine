@@ -5,6 +5,7 @@
 #include "CColor.h"
 #include "CMeshRef.h"
 #include "CJoltBody.h"
+#include "CVisualTransform.h"
 #include "EntityView.h"
 #include "SchemaReflector.h"
 
@@ -13,10 +14,11 @@
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 class CubeEntity : public EntityView<CubeEntity, WIDTH>
 {
-	TNX_REGISTER_SCHEMA(CubeEntity, EntityView, transform, scale, color, mesh, physBody)
+	TNX_REGISTER_SCHEMA(CubeEntity, EntityView, transform, VisTransform, scale, color, mesh, physBody)
 
 public:
 	CTransform<WIDTH> transform;
+	CVisualTransform<WIDTH> VisTransform;
 	CScale<WIDTH> scale;
 	CColor<WIDTH> color;
 	CMeshRef<WIDTH> mesh;

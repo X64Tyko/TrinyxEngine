@@ -36,9 +36,9 @@ public:
 		Body.Initialize(this, [this](EInstanced<>& v)
 		{
 			v.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive | TemporalFlagBits::Replicated);
-			v.Transform.PosX = PosX;
-			v.Transform.PosY = PosY;
-			v.Transform.PosZ = PosZ;
+			Vector3 SpawnPos { PosX, PosY, PosZ };
+			v.SetPosition(SpawnPos);
+			v.VisTransform.VisBlend = SimFloat(1.f);
 			v.Transform.Rotation.SetIdentity();
 			v.Scale.ScaleX         = HalfX * 2.0f;
 			v.Scale.ScaleY         = HalfY * 2.0f;

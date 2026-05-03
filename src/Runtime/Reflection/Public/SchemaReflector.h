@@ -286,14 +286,15 @@ FORCE_INLINE void ForEachField(Func&& func)
     public: \
     static constexpr auto DefineSchema() \
     { \
-        return SUPER<T, WIDTH>::DefineSchema().Extend(__VA_OPT__(TNX_MAP_LIST(TNX_GET_PTR, CLASS, __VA_ARGS__))); \
+        return SUPER<Derived, WIDTH>::DefineSchema().Extend(__VA_OPT__(TNX_MAP_LIST(TNX_GET_PTR, CLASS, __VA_ARGS__))); \
     } \
     \
     FORCE_INLINE void Advance(uint32_t step) \
     { \
-        SUPER<T, WIDTH>::Advance(step); \
+        SUPER<Derived, WIDTH>::Advance(step); \
         __VA_OPT__(TNX_MAPF_LIST(TNX_BIND_ADVANCE, CLASS, __VA_ARGS__)) \
     }
+
 #define TNX_EXPAND(x) x
 #define TNX_GET_ARG_COUNT(...) TNX_EXPAND(TNX_INTERNAL_ARG_COUNT(__VA_ARGS__, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1))
 #define TNX_INTERNAL_ARG_COUNT(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,_16, count, ...) count

@@ -43,6 +43,9 @@
           "ScaleX": 50.0,
           "ScaleY": 0.5,
           "ScaleZ": 50.0
+        },
+        "CVisualTransform": {
+          "VisBlend": 1.0
         }
       }
     }

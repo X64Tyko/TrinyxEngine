@@ -43,6 +43,9 @@
           "ScaleX": 1.0,
           "ScaleY": 4.0,
           "ScaleZ": 30.0
+        },
+        "CVisualTransform": {
+          "VisBlend": 1.0
         }
       }
     },
@@ -87,6 +90,9 @@
           "ScaleX": 4.0,
           "ScaleY": 2.0,
           "ScaleZ": 0.5
+        },
+        "CVisualTransform": {
+          "VisBlend": 1.0
         }
       }
     },
@@ -131,6 +137,9 @@
           "ScaleX": 0.5,
           "ScaleY": 2.0,
           "ScaleZ": 3.0
+        },
+        "CVisualTransform": {
+          "VisBlend": 1.0
         }
       }
     },
@@ -175,6 +184,9 @@
           "ScaleX": 30.0,
           "ScaleY": 1.0,
           "ScaleZ": 30.0
+        },
+        "CVisualTransform": {
+          "VisBlend": 1.0
         }
       }
     },
@@ -219,6 +231,9 @@
           "ScaleX": 3.0,
           "ScaleY": 2.0,
           "ScaleZ": 0.5
+        },
+        "CVisualTransform": {
+          "VisBlend": 1.0
         }
       }
     },
@@ -263,6 +278,9 @@
           "ScaleX": 30.0,
           "ScaleY": 4.0,
           "ScaleZ": 1.0
+        },
+        "CVisualTransform": {
+          "VisBlend": 1.0
         }
       }
     },
@@ -307,6 +325,9 @@
           "ScaleX": 30.0,
           "ScaleY": 4.0,
           "ScaleZ": 1.0
+        },
+        "CVisualTransform": {
+          "VisBlend": 1.0
         }
       }
     },
@@ -351,6 +372,9 @@
           "ScaleX": 1.0,
           "ScaleY": 4.0,
           "ScaleZ": 30.0
+        },
+        "CVisualTransform": {
+          "VisBlend": 1.0
         }
       }
     },
@@ -395,6 +419,9 @@
           "ScaleX": 0.5,
           "ScaleY": 2.0,
           "ScaleZ": 5.0
+        },
+        "CVisualTransform": {
+          "VisBlend": 1.0
         }
       }
     },

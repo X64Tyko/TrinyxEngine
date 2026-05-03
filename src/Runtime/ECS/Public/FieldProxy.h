@@ -8,7 +8,7 @@
 #include "SIMDTraits.h" // SIMDTraits, FieldMask, kSIMDWide32Lanes
 
 template <typename T, typename FIELDTYPE, typename VECTYPE>
-concept ProxyType = std::is_same_v<std::remove_cvref_t<T>, float> || std::is_same_v<std::remove_cvref_t<T>, FIELDTYPE> || std::is_same_v<std::remove_cvref_t<T>, VECTYPE> || SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value;
+concept ProxyType = std::is_same_v<std::remove_cvref_t<T>, SimFloat> || std::is_same_v<std::remove_cvref_t<T>, FIELDTYPE> || std::is_same_v<std::remove_cvref_t<T>, VECTYPE> || SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value;
 
 // Conditional mask storage: Wide/WideMask need a 32-byte __m256i mask; Scalar does not.
 // Storing it unconditionally wastes 32 bytes per FieldProxy in Scalar mode.
@@ -344,7 +344,7 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>) RVal = Traits::set1(RHS);
 			else RVal                                                                                       = Traits::set1(RHS);
 
-			return Traits::mul(LVal, RVal);
+			return Traits::add(LVal, RVal);
 		}
 	}
 
@@ -377,7 +377,7 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>) RVal = Traits::set1(RHS);
 			else RVal                                                                                       = Traits::set1(RHS);
 
-			return Traits::mul(LVal, RVal);
+			return Traits::sub(LVal, RVal);
 		}
 	}
 
@@ -410,7 +410,7 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>) RVal = Traits::set1(RHS);
 			else RVal                                                                                       = Traits::set1(RHS);
 
-			return Traits::mul(LVal, RVal);
+			return Traits::div(LVal, RVal);
 		}
 	}
 };

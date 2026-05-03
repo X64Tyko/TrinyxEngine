@@ -6,15 +6,13 @@
 #include "CMeshRef.h"
 #include "CScale.h"
 #include "SchemaReflector.h"
-#include "CTransform.h"
+#include "EInterpEntity.h"
 
 template <FieldWidth WIDTH = FieldWidth::Scalar>
-class EInstanced : public EntityView<EInstanced, WIDTH>
+class EInstanced : public EInterpEntity<EInstanced, WIDTH>
 {
-	TNX_REGISTER_SCHEMA(EInstanced, EntityView, Transform, Scale, Color, Mesh, PhysBody)
+	TNX_REGISTER_SCHEMA(EInstanced, EInterpEntity, Scale, Color, Mesh, PhysBody)
 
-public:
-	CTransform<WIDTH> Transform;
 	CScale<WIDTH> Scale;
 	CColor<WIDTH> Color;
 	CMeshRef<WIDTH> Mesh;

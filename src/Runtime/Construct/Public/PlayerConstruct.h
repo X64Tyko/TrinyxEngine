@@ -81,6 +81,13 @@ public:
 			Body.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive | TemporalFlagBits::Replicated);
 		}
 
+		// Seed visual position to match the authoritative spawn position so the first
+		// frame doesn't blend from (0,0,0).
+		Body.VisTransform.VisPosX = SpawnPosX;
+		Body.VisTransform.VisPosY = SpawnPosY;
+		Body.VisTransform.VisPosZ = SpawnPosZ;
+		Body.VisTransform.VisBlend = SimFloat(0.2f);
+
 		auto* phys          = GetWorld()->GetPhysics();
 		EntityRecord Record = GetWorld()->GetRegistry()->GetRecord(Body.GetEntityHandle());
 		CharacterController.Initialize(
@@ -147,8 +154,10 @@ public:
 		{
 			XDelt = moveX / len * MoveSpeed * dt;
 			ZDelt = moveZ / len * MoveSpeed * dt;
-			//Body.Transform.PosX += XDelt;
-			//Body.Transform.PosZ += ZDelt;
+			Body.Transform.PosX += XDelt;
+			Body.Transform.PosZ += ZDelt;
+			Body.VisTransform.VisPosX += XDelt;
+			Body.VisTransform.VisPosZ += ZDelt;
 			DesiredVelX += XDelt;
 			DesiredVelZ += ZDelt;
 		}
@@ -164,9 +173,9 @@ public:
 		//if (bIsClientSide)
 		{
 			// Set position to corrected position - our desired velocity.
-			const SimFloat ecsPosX = Body.Transform.PosX.Value();// - DesiredVelX;
+			const SimFloat ecsPosX = Body.Transform.PosX.Value() - DesiredVelX;
 			const SimFloat ecsPosY = Body.Transform.PosY.Value();
-			const SimFloat ecsPosZ = Body.Transform.PosZ.Value();// - DesiredVelZ;
+			const SimFloat ecsPosZ = Body.Transform.PosZ.Value() - DesiredVelZ;
 			
 			CharacterController.SetPosition(JPH::RVec3(ecsPosX.ToFloat(), ecsPosY.ToFloat(), ecsPosZ.ToFloat()));
 			
@@ -188,9 +197,8 @@ public:
 		Vector3 BodyPos = { Body.Transform.PosX.Value(), Body.Transform.PosY.Value(), Body.Transform.PosZ.Value() };
 		if ((BodyPos - PhysPos).LengthSqr() > SimFloat(0.0003f))
 		{
-			Body.Transform.PosX = SimFloat(pos.GetX());
-			Body.Transform.PosY = SimFloat(pos.GetY());
-			Body.Transform.PosZ = SimFloat(pos.GetZ());
+			Vector3 tempPos = {pos.GetX(), pos.GetY(), pos.GetZ()};
+			Body.SetPosition(tempPos);
 		}
 		
 		/*
@@ -237,9 +245,9 @@ public:
 		bToggleHeld = toggleDown;
 
 		SimFloat px, py, pz;
-		px                 = Body.Transform.PosX.Value();
-		py                 = Body.Transform.PosY.Value();
-		pz                 = Body.Transform.PosZ.Value();
+		px                 = Body.VisTransform.VisPosX.Value();
+		py                 = Body.VisTransform.VisPosY.Value();
+		pz                 = Body.VisTransform.VisPosZ.Value();
 
 		SimFloat sinYaw   = FastSin(Yaw);
 		SimFloat cosYaw   = FastCos(Yaw);

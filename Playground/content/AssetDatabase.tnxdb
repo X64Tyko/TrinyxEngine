@@ -12,7 +12,7 @@
 			"name": "Arena",
 			"path": "Arena.tnxscene",
 			"type": 8.0,
-			"contentHash": 5.2013519780859884e+18
+			"contentHash": 4.5045154207554555e+18
 		},
 		{
 			"uuid": 256.0,
@@ -33,14 +33,14 @@
 			"name": "StaticCube",
 			"path": "StaticCube.prefab",
 			"type": 9.0,
-			"contentHash": 1.5915071583945736e+19
+			"contentHash": 1.6835617540666714e+19
 		},
 		{
 			"uuid": 1280.0,
 			"name": "Wall",
 			"path": "Wall.prefab",
 			"type": 9.0,
-			"contentHash": 4.6239603345486449e+18
+			"contentHash": 1.5066031282316009e+19
 		},
 		{
 			"uuid": 256.0,

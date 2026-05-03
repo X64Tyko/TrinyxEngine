@@ -21,6 +21,7 @@
 #include "CMeshRef.h"
 #include "CScale.h"
 #include "CTransform.h"
+#include "CVisualTransform.h"
 #include "VulkanDebug.h"
 
 #include <immintrin.h>
@@ -1381,11 +1382,12 @@ void RendererCore<Derived>::WriteToFrameSlab()
 	TemporalFrameHeader* temporalHdr = temporalCache->GetFrameHeader(LastTemporalFrame);
 	TemporalFrameHeader* volatileHdr = volatileCache->GetFrameHeader(LastVolatileFrame);
 
-	const CacheSlotID transformSlot = CTransform<>::StaticTemporalIndex();
-	const CacheSlotID scaleSlot     = CScale<>::StaticTemporalIndex();
-	const CacheSlotID colorSlot     = CColor<>::StaticTemporalIndex();
-	const CacheSlotID flagsSlot     = CacheSlotMeta<>::StaticTemporalIndex();
-	const CacheSlotID meshRefSlot   = CMeshRef<>::StaticTemporalIndex();
+	const CacheSlotID transformSlot      = CTransform<>::StaticTemporalIndex();
+	const CacheSlotID scaleSlot          = CScale<>::StaticTemporalIndex();
+	const CacheSlotID colorSlot          = CColor<>::StaticTemporalIndex();
+	const CacheSlotID flagsSlot          = CacheSlotMeta<>::StaticTemporalIndex();
+	const CacheSlotID meshRefSlot        = CMeshRef<>::StaticTemporalIndex();
+	const CacheSlotID visualTransformSlot = CVisualTransform<>::StaticTemporalIndex();
 
 	// SimFloat fields go through .ToFloat() on Fixed32 builds; RawU32 fields are
 	// 4-byte-aligned scalar data (flags, mesh handle) that must be copied verbatim.
@@ -1402,22 +1404,22 @@ void RendererCore<Derived>::WriteToFrameSlab()
 		GpuFieldKind kind;
 	};
 	const FieldDescription fieldDescs[GpuOutFieldCount] = {
-		{temporalCache, temporalHdr, flagsSlot, 0, SemFlags, GpuFieldKind::RawU32},
-		{temporalCache, temporalHdr, transformSlot, 0, SemPosX, GpuFieldKind::SimFloat},
-		{temporalCache, temporalHdr, transformSlot, 1, SemPosY, GpuFieldKind::SimFloat},
-		{temporalCache, temporalHdr, transformSlot, 2, SemPosZ, GpuFieldKind::SimFloat},
-		{temporalCache, temporalHdr, transformSlot, 3, SemRotQx, GpuFieldKind::SimFloat},
-		{temporalCache, temporalHdr, transformSlot, 4, SemRotQy, GpuFieldKind::SimFloat},
-		{temporalCache, temporalHdr, transformSlot, 5, SemRotQz, GpuFieldKind::SimFloat},
-		{temporalCache, temporalHdr, transformSlot, 6, SemRotQw, GpuFieldKind::SimFloat},
-		{volatileCache, volatileHdr, scaleSlot, 0, SemScaleX, GpuFieldKind::SimFloat},
-		{volatileCache, volatileHdr, scaleSlot, 1, SemScaleY, GpuFieldKind::SimFloat},
-		{volatileCache, volatileHdr, scaleSlot, 2, SemScaleZ, GpuFieldKind::SimFloat},
-		{volatileCache, volatileHdr, colorSlot, 0, SemColorR, GpuFieldKind::SimFloat},
-		{volatileCache, volatileHdr, colorSlot, 1, SemColorG, GpuFieldKind::SimFloat},
-		{volatileCache, volatileHdr, colorSlot, 2, SemColorB, GpuFieldKind::SimFloat},
-		{volatileCache, volatileHdr, colorSlot, 3, SemColorA, GpuFieldKind::SimFloat},
-		{volatileCache, volatileHdr, meshRefSlot, 0, SemMeshID, GpuFieldKind::RawU32},
+		{temporalCache, temporalHdr, flagsSlot,           0, SemFlags,  GpuFieldKind::RawU32},
+		{volatileCache, volatileHdr, visualTransformSlot, 0, SemPosX,   GpuFieldKind::SimFloat},
+		{volatileCache, volatileHdr, visualTransformSlot, 1, SemPosY,   GpuFieldKind::SimFloat},
+		{volatileCache, volatileHdr, visualTransformSlot, 2, SemPosZ,   GpuFieldKind::SimFloat},
+		{temporalCache, temporalHdr, transformSlot,       3, SemRotQx,  GpuFieldKind::SimFloat},
+		{temporalCache, temporalHdr, transformSlot,       4, SemRotQy,  GpuFieldKind::SimFloat},
+		{temporalCache, temporalHdr, transformSlot,       5, SemRotQz,  GpuFieldKind::SimFloat},
+		{temporalCache, temporalHdr, transformSlot,       6, SemRotQw,  GpuFieldKind::SimFloat},
+		{volatileCache, volatileHdr, scaleSlot,           0, SemScaleX, GpuFieldKind::SimFloat},
+		{volatileCache, volatileHdr, scaleSlot,           1, SemScaleY, GpuFieldKind::SimFloat},
+		{volatileCache, volatileHdr, scaleSlot,           2, SemScaleZ, GpuFieldKind::SimFloat},
+		{volatileCache, volatileHdr, colorSlot,           0, SemColorR, GpuFieldKind::SimFloat},
+		{volatileCache, volatileHdr, colorSlot,           1, SemColorG, GpuFieldKind::SimFloat},
+		{volatileCache, volatileHdr, colorSlot,           2, SemColorB, GpuFieldKind::SimFloat},
+		{volatileCache, volatileHdr, colorSlot,           3, SemColorA, GpuFieldKind::SimFloat},
+		{volatileCache, volatileHdr, meshRefSlot,         0, SemMeshID, GpuFieldKind::RawU32},
 	};
 
 	// ── Step 1: Scan slab Flags for dirty bit (bit 30) → build current dirty set ──

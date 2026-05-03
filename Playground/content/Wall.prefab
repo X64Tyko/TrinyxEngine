@@ -28,6 +28,7 @@
 		"Mass": 0.0,
 		"Friction": 0.5,
 		"Restitution": 0.30000001192092896,
-		"IsSensor": 0.0
+		"IsSensor": 0.0,
+		"VisBlend": 1.0
 	}
 }

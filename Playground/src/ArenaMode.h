@@ -39,10 +39,10 @@ public:
 			TargetCube = reg->Create<CubeEntity<>>([](CubeEntity<>& v)
 			{
 				v.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive | TemporalFlagBits::Replicated);
-				v.transform.PosX = SimFloat(5.0f);
-				v.transform.PosY = SimFloat(2.0f);
-				v.transform.PosZ = SimFloat(-6.0f);
-				v.transform.Rotation.SetIdentity();
+				Vector3 spawnPos{ SimFloat(5.0f), SimFloat(2.0f), SimFloat(-6.0f)};
+				v.SetPosition(spawnPos);
+				v.Transform.Rotation.SetIdentity();
+				v.VisTransform.VisBlend = SimFloat(1.0f);
 				v.scale.ScaleX         = SimFloat(1.0f);
 				v.scale.ScaleY         = SimFloat(1.0f);
 				v.scale.ScaleZ         = SimFloat(1.0f);

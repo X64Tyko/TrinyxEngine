@@ -13,6 +13,7 @@
 
 #include "CacheSlotMeta.h"
 #include "CColor.h"
+#include "CVisualTransform.h"
 #include "EditorContext.h"
 #include "GpuFrameData.h"
 #include "ImGuizmo.h"
@@ -488,11 +489,12 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 	const VkDeviceSize fieldStride = static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
 	uint8_t* slabPtr               = static_cast<uint8_t*>(vp->FieldSlabs[nextSlab].MappedPtr);
 
-	const ComponentTypeID transformSlot = CTransform<>::StaticTemporalIndex();
-	const ComponentTypeID scaleSlot     = CScale<>::StaticTemporalIndex();
-	const ComponentTypeID colorSlot     = CColor<>::StaticTemporalIndex();
-	const ComponentTypeID flagsSlot     = CacheSlotMeta<>::StaticTemporalIndex();
-	const ComponentTypeID meshRefSlot   = CMeshRef<>::StaticTemporalIndex();
+	const ComponentTypeID transformSlot       = CTransform<>::StaticTemporalIndex();
+	const ComponentTypeID scaleSlot           = CScale<>::StaticTemporalIndex();
+	const ComponentTypeID colorSlot           = CColor<>::StaticTemporalIndex();
+	const ComponentTypeID flagsSlot           = CacheSlotMeta<>::StaticTemporalIndex();
+	const ComponentTypeID meshRefSlot         = CMeshRef<>::StaticTemporalIndex();
+	const ComponentTypeID visualTransformSlot = CVisualTransform<>::StaticTemporalIndex();
 
 	enum class FieldKind : uint8_t { SimFloat, RawU32 };
 	struct FD
@@ -504,22 +506,22 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 		FieldKind kind;
 	};
 	const FD fieldDescs[GpuOutFieldCount] = {
-		{temporalC, temporalHdr, flagsSlot, 0, FieldKind::RawU32},
-		{temporalC, temporalHdr, transformSlot, 0, FieldKind::SimFloat},
-		{temporalC, temporalHdr, transformSlot, 1, FieldKind::SimFloat},
-		{temporalC, temporalHdr, transformSlot, 2, FieldKind::SimFloat},
-		{temporalC, temporalHdr, transformSlot, 3, FieldKind::SimFloat},
-		{temporalC, temporalHdr, transformSlot, 4, FieldKind::SimFloat},
-		{temporalC, temporalHdr, transformSlot, 5, FieldKind::SimFloat},
-		{temporalC, temporalHdr, transformSlot, 6, FieldKind::SimFloat},
-		{volatileC, volatileHdr, scaleSlot, 0, FieldKind::SimFloat},
-		{volatileC, volatileHdr, scaleSlot, 1, FieldKind::SimFloat},
-		{volatileC, volatileHdr, scaleSlot, 2, FieldKind::SimFloat},
-		{volatileC, volatileHdr, colorSlot, 0, FieldKind::SimFloat},
-		{volatileC, volatileHdr, colorSlot, 1, FieldKind::SimFloat},
-		{volatileC, volatileHdr, colorSlot, 2, FieldKind::SimFloat},
-		{volatileC, volatileHdr, colorSlot, 3, FieldKind::SimFloat},
-		{volatileC, volatileHdr, meshRefSlot, 0, FieldKind::RawU32},
+		{temporalC, temporalHdr, flagsSlot,           0, FieldKind::RawU32},
+		{volatileC, volatileHdr, visualTransformSlot, 0, FieldKind::SimFloat},
+		{volatileC, volatileHdr, visualTransformSlot, 1, FieldKind::SimFloat},
+		{volatileC, volatileHdr, visualTransformSlot, 2, FieldKind::SimFloat},
+		{temporalC, temporalHdr, transformSlot,       3, FieldKind::SimFloat},
+		{temporalC, temporalHdr, transformSlot,       4, FieldKind::SimFloat},
+		{temporalC, temporalHdr, transformSlot,       5, FieldKind::SimFloat},
+		{temporalC, temporalHdr, transformSlot,       6, FieldKind::SimFloat},
+		{volatileC, volatileHdr, scaleSlot,           0, FieldKind::SimFloat},
+		{volatileC, volatileHdr, scaleSlot,           1, FieldKind::SimFloat},
+		{volatileC, volatileHdr, scaleSlot,           2, FieldKind::SimFloat},
+		{volatileC, volatileHdr, colorSlot,           0, FieldKind::SimFloat},
+		{volatileC, volatileHdr, colorSlot,           1, FieldKind::SimFloat},
+		{volatileC, volatileHdr, colorSlot,           2, FieldKind::SimFloat},
+		{volatileC, volatileHdr, colorSlot,           3, FieldKind::SimFloat},
+		{volatileC, volatileHdr, meshRefSlot,         0, FieldKind::RawU32},
 	};
 
 	// One job per field — all 16 run in parallel on the Render queue.

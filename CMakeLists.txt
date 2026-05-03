@@ -225,7 +225,9 @@ add_library(Slang::Compiler SHARED IMPORTED GLOBAL
         src/Runtime/Physics/Private/JoltCharacter.cpp
         src/Runtime/Entities/Public/EPlayer.h
         src/Runtime/Flow/Public/GameState.h
-        src/Runtime/Math/Public/Fixed32.h)
+        src/Runtime/Math/Public/Fixed32.h
+        src/Runtime/Entities/Private/EInterpEntity.cpp
+        src/Runtime/Entities/Public/EInterpEntity.h)
 set_target_properties(Slang::Compiler PROPERTIES
         IMPORTED_LOCATION             "${SLANG_PATH}/lib/libslang-compiler.so"
         INTERFACE_INCLUDE_DIRECTORIES "${SLANG_PATH}/include"
