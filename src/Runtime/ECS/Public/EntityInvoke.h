@@ -47,6 +47,14 @@ FORCE_INLINE void InvokeScalarUpdateImpl(SimFloat dt, void** fieldArrayTable, vo
 }
 
 template <typename T>
+FORCE_INLINE void InvokeInitializeImpl(void** fieldArrayTable, void* FlagBase, uint32_t localIndex)
+{
+	T view;
+	view.Hydrate(fieldArrayTable, FlagBase, localIndex);
+	view.InitializeInternal();
+}
+
+template <typename T>
 FORCE_INLINE void InvokePostPhysicsImpl(SimFloat dt, void** fieldArrayTable, void* FlagBase, uint32_t componentCount)
 {
 	alignas(32) typename T::WideType viewBatch;

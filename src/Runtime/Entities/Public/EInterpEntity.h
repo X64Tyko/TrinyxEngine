@@ -13,6 +13,11 @@ class EInterpEntity : public EntityView<Derived, WIDTH>
 	CTransform<WIDTH> Transform;
 	CVisualTransform<WIDTH> VisTransform;
 	
+	void Initialize()
+	{
+		VisTransform.VisBlend = SimFloat(1.0f);
+	}
+	
 	void PostPhysics([[maybe_unused]] SimFloat dt)
 	{
 		VisTransform.VisPosX = VisTransform.VisPosX + (Transform.PosX - VisTransform.VisPosX) * VisTransform.VisBlend;

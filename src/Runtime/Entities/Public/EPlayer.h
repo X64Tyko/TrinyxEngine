@@ -17,4 +17,10 @@ class EPlayer : public EInterpEntity<EPlayer, WIDTH>
 	CScale<WIDTH> Scale;
 	CColor<WIDTH> Color;
 	CMeshRef<WIDTH> Mesh;
+	
+	void Initialize()
+	{
+		EInterpEntity<EPlayer, WIDTH>::Initialize();
+		this->VisTransform.VisBlend = SimFloat(0.8f); // some default lerp for characters
+	}
 };

@@ -112,6 +112,8 @@ public:
 			NameToClassID[T::EntityTypeName]   = ID;
 		}
 
+		EntityGetters[ID].Initialize = InvokeInitializeImpl<T>;
+
 		if constexpr (HasScalarUpdate<T>)
 			EntityGetters[ID].ScalarUpdate = InvokeScalarUpdateImpl<T>;
 

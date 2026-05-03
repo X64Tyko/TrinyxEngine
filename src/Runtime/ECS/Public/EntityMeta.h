@@ -26,10 +26,13 @@ template <typename T> concept HasDefineFields = requires(T t) { t.DefineFields()
 // Function pointer type for wide/masked entity update dispatch.
 using UpdateFunc = void(*)(SimFloat, void**, void*, uint32_t);
 
+// Function pointer type for single-entity initialization (fieldArrayTable, FlagBase, localIndex).
+using InitFunc = void(*)(void**, void*, uint32_t);
+
 // ---------------------------------------------------------------------------
 // EntityMeta — per-entity-type metadata stored in ReflectionRegistry.
 //
-// Function pointers (PrePhys, PostPhys, ScalarUpdate) are NOT serializable.
+// Function pointers (PrePhys, PostPhys, ScalarUpdate, Initialize) are NOT serializable.
 // They are populated at static init by PrefabReflector and merged by name
 // when loading baked data.
 // ---------------------------------------------------------------------------
@@ -41,6 +44,7 @@ struct EntityMeta
 	UpdateFunc PrePhys      = nullptr;
 	UpdateFunc PostPhys     = nullptr;
 	UpdateFunc ScalarUpdate = nullptr;
+	InitFunc   Initialize   = nullptr;
 
 	uint32_t EntitiesPerChunk = 256;
 

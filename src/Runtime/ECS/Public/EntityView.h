@@ -55,6 +55,15 @@ public:
 	{
 		Flags |= flagBits;
 	}
+	
+	void Initialize()
+	{
+	}
+
+	void InitializeInternal()
+	{
+		static_cast<Derived<WIDTH>*>(this)->Initialize();
+	}
 
 	FORCE_INLINE void Advance(uint32_t step)
 	{

@@ -83,10 +83,9 @@ public:
 
 		// Seed visual position to match the authoritative spawn position so the first
 		// frame doesn't blend from (0,0,0).
-		Body.VisTransform.VisPosX = SpawnPosX;
-		Body.VisTransform.VisPosY = SpawnPosY;
-		Body.VisTransform.VisPosZ = SpawnPosZ;
-		Body.VisTransform.VisBlend = SimFloat(0.2f);
+		Vector3 spawnPos{ SpawnPosX, SpawnPosY, SpawnPosZ };
+		Body.SetPosition(spawnPos);
+		Body.VisTransform.VisBlend = SimFloat(0.6f);
 
 		auto* phys          = GetWorld()->GetPhysics();
 		EntityRecord Record = GetWorld()->GetRegistry()->GetRecord(Body.GetEntityHandle());

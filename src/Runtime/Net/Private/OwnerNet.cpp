@@ -141,6 +141,27 @@ void OwnerNet::HandleEntitySpawn(Registry* reg, const EntitySpawnPayload& payloa
 	}
 	record->NetworkID = receivedNetHandle;
 
+	Archetype* arch   = record->Arch;
+	Chunk* chunk      = record->TargetChunk;
+	uint32_t localIdx = record->LocalIndex;
+
+	// Apply entity-type defaults (e.g. VisBlend) before writing the replicated fields.
+	// Mirrors the InitializeInternal() call in Registry::Create<T> which this low-level
+	// path bypasses. Run for both write and read frames so all ring slots see correct defaults.
+	if (InitFunc initFn = ReflectionRegistry::Get().EntityGetters[classType].Initialize)
+	{
+		void* initTable[MAX_FIELDS_PER_ARCHETYPE];
+		arch->BuildFieldArrayTable(chunk, initTable,
+								   reg->GetTemporalCache()->GetActiveWriteFrame(),
+								   reg->GetVolatileCache()->GetActiveWriteFrame());
+		initFn(initTable, initTable[0], localIdx);
+
+		arch->BuildFieldArrayTable(chunk, initTable,
+								   reg->GetTemporalCache()->GetActiveReadFrame(),
+								   reg->GetVolatileCache()->GetActiveReadFrame());
+		initFn(initTable, initTable[0], localIdx);
+	}
+
 	// Write into both write and read frames so FieldProxy reads see correct data immediately.
 	WriteEntitySpawnFields(reg, record, payload,
 						   reg->GetTemporalCache()->GetActiveWriteFrame(),
