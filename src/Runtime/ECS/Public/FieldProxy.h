@@ -10,13 +10,13 @@
 template <typename T, typename FIELDTYPE, typename VECTYPE>
 concept ProxyType = std::is_same_v<std::remove_cvref_t<T>, SimFloat> || std::is_same_v<std::remove_cvref_t<T>, FIELDTYPE> || std::is_same_v<std::remove_cvref_t<T>, VECTYPE> || SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value;
 
-// Conditional mask storage: Wide/WideMask need a 32-byte __m256i mask; Scalar does not.
-// Storing it unconditionally wastes 32 bytes per FieldProxy in Scalar mode.
-// With e.g. 9 fields in Transform that is 288 bytes of dead weight per entity view.
+// Conditional mask storage: Wide/WideMask need an ISA-specific mask; Scalar does not.
+// Storing it unconditionally wastes bytes per FieldProxy in Scalar mode.
+// With e.g. 9 fields in Transform that is significant dead weight per entity view.
 template <FieldWidth WIDTH>
 struct FieldProxyMask
 {
-	__m256i mask = _mm256_set1_epi64x(-1); // all lanes set — default is "store everything"
+	WideMaskType mask = AllLanesActiveMask(); // all lanes active — default is "store everything"
 };
 
 template <>
