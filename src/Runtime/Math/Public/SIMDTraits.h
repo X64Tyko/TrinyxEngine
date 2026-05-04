@@ -458,6 +458,21 @@ struct SIMDTraits<int32_t, WIDTH>
 		f         = _mm256_or_si256(f, _mm256_set1_epi32(value));
 		_mm256_storeu_si256(reinterpret_cast<__m256i*>(flagsPtr), f);
 	}
+
+	// --- Bitwise / shift helpers (used by flag-sweep loops in Registry) -----
+	static FORCE_INLINE VecType bitand_(VecType a, VecType b) { return _mm256_and_si256(a, b); }
+	static FORCE_INLINE VecType bitandnot(VecType a, VecType b) { return _mm256_andnot_si256(a, b); } // ~a & b
+	static FORCE_INLINE VecType bitor_(VecType a, VecType b) { return _mm256_or_si256(a, b); }
+	static FORCE_INLINE VecType srl(VecType a, int count) { return _mm256_srli_epi32(a, count); }
+
+	static FORCE_INLINE int hsum(VecType v)
+	{
+		__m128i lo  = _mm256_castsi256_si128(v);
+		__m128i hi  = _mm256_extracti128_si256(v, 1);
+		__m128i s   = _mm_add_epi32(lo, hi);
+		s = _mm_add_epi32(s, _mm_shuffle_epi32(s, _MM_SHUFFLE(2, 3, 0, 1)));
+		return _mm_cvtsi128_si32(_mm_add_epi32(s, _mm_shuffle_epi32(s, _MM_SHUFFLE(1, 0, 3, 2))));
+	}
 };
 
 // --- uint32_t (delegates to int32_t intrinsics) ----------------------------
@@ -800,6 +815,24 @@ struct SIMDTraits<int32_t, WIDTH>
 
 	static FORCE_INLINE __mmask16 GenerateCountMask(int32_t count) { return FieldProxyConsts512::CountMask(count); }
 	static FORCE_INLINE void StoreFlagsOr(int32_t* flagsPtr, int32_t value) { FieldProxyConsts512::StoreFlagsOr16(flagsPtr, value); }
+
+	// --- Bitwise / shift helpers (used by flag-sweep loops in Registry) -----
+	static FORCE_INLINE VecType bitand_(VecType a, VecType b) { return _mm512_and_si512(a, b); }
+	static FORCE_INLINE VecType bitandnot(VecType a, VecType b) { return _mm512_andnot_si512(a, b); } // ~a & b
+	static FORCE_INLINE VecType bitor_(VecType a, VecType b) { return _mm512_or_si512(a, b); }
+	static FORCE_INLINE VecType srl(VecType a, int count) { return _mm512_srli_epi32(a, count); }
+
+	static FORCE_INLINE int hsum(VecType v)
+	{
+		__m256i lo  = _mm512_castsi512_si256(v);
+		__m256i hi  = _mm512_extracti64x4_epi64(v, 1);
+		__m256i s   = _mm256_add_epi32(lo, hi);
+		__m128i lo2 = _mm256_castsi256_si128(s);
+		__m128i hi2 = _mm256_extracti128_si256(s, 1);
+		__m128i s2  = _mm_add_epi32(lo2, hi2);
+		s2 = _mm_add_epi32(s2, _mm_shuffle_epi32(s2, _MM_SHUFFLE(2, 3, 0, 1)));
+		return _mm_cvtsi128_si32(_mm_add_epi32(s2, _mm_shuffle_epi32(s2, _MM_SHUFFLE(1, 0, 3, 2))));
+	}
 };
 
 // --- uint32_t ---------------------------------------------------------------

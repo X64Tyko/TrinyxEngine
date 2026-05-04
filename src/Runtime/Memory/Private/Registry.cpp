@@ -673,16 +673,19 @@ void Registry::PropagateFrame(uint32_t currentFrame)
 			// MAX_CACHED_ENTITIES worth of int32_t flags in the slab.
 			// Iterate the full range — bitplane scan over gaps costs ~microseconds.
 			const size_t entityCount = flagsCache->GetMaxCachedEntityCount();
-			const size_t simdCount   = entityCount / 8;
-			const size_t remainder   = entityCount % 8;
+			using FlagTraits        = SIMDTraits<int32_t, FieldWidth::Wide>;
+			using FlagVec           = typename FlagTraits::VecType;
+			const size_t stride     = kSIMDWide32Lanes;
+			const size_t simdCount  = entityCount / stride;
+			const size_t remainder  = entityCount % stride;
 
-			const __m256i mask = _mm256_set1_epi32(clearMask);
-			auto* ptr          = reinterpret_cast<__m256i*>(flags);
+			const FlagVec vMask = FlagTraits::set1(clearMask);
 			for (size_t i = 0; i < simdCount; ++i)
 			{
-				_mm256_storeu_si256(ptr + i, _mm256_and_si256(_mm256_loadu_si256(ptr + i), mask));
+				auto* p = flags + i * stride;
+				FlagTraits::store(p, WideMaskType{}, FlagTraits::bitand_(FlagTraits::load(p), vMask));
 			}
-			for (size_t i = simdCount * 8; i < simdCount * 8 + remainder; ++i)
+			for (size_t i = simdCount * stride; i < simdCount * stride + remainder; ++i)
 			{
 				flags[i] &= clearMask;
 			}
@@ -742,37 +745,30 @@ int Registry::SweepAliveFlagsToActive()
 	const uint32_t activeShift     = TNX_CTZ32(activeBit);
 	const uint32_t tombstoneShift  = TNX_CTZ32(tombstoneBit);
 
-	using Traits               = SIMDTraits<int32_t, FieldWidth::Wide>;
-	const __m256i vAlive       = _mm256_set1_epi32(static_cast<int32_t>(aliveBit));
-	const __m256i vActiveDirty = _mm256_set1_epi32(static_cast<int32_t>(activeBit | dirtyBit |
-		dirtiedFrameBit));
-	const __m256i vZero = _mm256_setzero_si256();
-
-	const __m256i vTombstone = _mm256_set1_epi32(static_cast<int32_t>(tombstoneBit));
-	__m256i vCount           = vZero;
-	const uint32_t wideMax   = max & ~7u;
-	for (uint32_t i = 0; i < wideMax; i += 8)
+	using Traits             = SIMDTraits<int32_t, FieldWidth::Wide>;
+	using VecType            = typename Traits::VecType;
+	const VecType vAlive     = Traits::set1(static_cast<int32_t>(aliveBit));
+	const VecType vActiveDirty = Traits::set1(static_cast<int32_t>(activeBit | dirtyBit | dirtiedFrameBit));
+	const VecType vZero      = Traits::set1(0);
+	const VecType vTombstone = Traits::set1(static_cast<int32_t>(tombstoneBit));
+	VecType vCount           = vZero;
+	const uint32_t stride    = static_cast<uint32_t>(kSIMDWide32Lanes);
+	const uint32_t wideMax   = max & ~(stride - 1u);
+	for (uint32_t i = 0; i < wideMax; i += stride)
 	{
-		__m256i f = Traits::load(flags + i);
-		// Skip tombstoned entities                                                                        
-		__m256i isTombstone = _mm256_srli_epi32(_mm256_and_si256(f, vTombstone), tombstoneShift);
-		__m256i shift       = _mm256_srli_epi32(_mm256_and_si256(f, vAlive), aliveShift); // 0 or 1              
-		__m256i neg         = _mm256_sub_epi32(vZero, shift);                             // 0 or 0xFFFFFFFF     
-		__m256i toSet       = _mm256_and_si256(vActiveDirty, neg);                        // activeBit | dirtyBit | dirtiedFrameBit or 0
-		// Only set active if not tombstoned                                                               
-		toSet  = _mm256_andnot_si256(isTombstone, toSet);
-		vCount = _mm256_add_epi32(vCount, _mm256_srli_epi32(_mm256_andnot_si256(f, toSet),
-															activeShift));
-		Traits::store(flags + i, vZero, _mm256_or_si256(f, toSet));
+		const VecType f     = Traits::load(flags + i);
+		// Skip tombstoned entities
+		VecType isTombstone = Traits::srl(Traits::bitand_(f, vTombstone), tombstoneShift);
+		VecType shift       = Traits::srl(Traits::bitand_(f, vAlive), aliveShift); // 0 or 1
+		VecType neg         = Traits::sub(vZero, shift);                           // 0 or 0xFFFFFFFF
+		VecType toSet       = Traits::bitand_(vActiveDirty, neg);                  // activeBit | dirtyBit | dirtiedFrameBit or 0
+		// Only set active if not tombstoned
+		toSet               = Traits::bitandnot(isTombstone, toSet);
+		vCount              = Traits::add(vCount, Traits::srl(Traits::bitandnot(f, toSet), activeShift));
+		Traits::store(flags + i, WideMaskType{}, Traits::bitor_(f, toSet));
 	}
 
-	__m128i lo     = _mm256_castsi256_si128(vCount);
-	__m128i hi     = _mm256_extracti128_si256(vCount, 1);
-	__m128i sum128 = _mm_add_epi32(lo, hi);
-	// Horizontal sum of 4 int32 lanes in sum128 -> scalar sweepCount
-	__m128i sum64  = _mm_add_epi32(sum128, _mm_shuffle_epi32(sum128, _MM_SHUFFLE(2, 3, 0, 1)));
-	int sweepCount = _mm_cvtsi128_si32(
-		_mm_add_epi32(sum64, _mm_shuffle_epi32(sum64, _MM_SHUFFLE(1, 0, 3, 2))));
+	int sweepCount = Traits::hsum(vCount);
 
 	for (uint32_t i = wideMax; i < max; ++i)
 	{
