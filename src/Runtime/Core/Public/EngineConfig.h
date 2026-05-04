@@ -82,7 +82,7 @@ struct EngineConfig
 	// Needs to cover one delivery batch + RTT headroom + startup timing offset.
 	// At 512Hz sim / 128Hz input = 4 frames/batch; 64 covers ~125ms of jitter/offset.
 	// Set to 0 for strict lockstep.
-	int MaxClientInputLead = 64;
+	int MaxClientInputLead = 16;
 
 	// Arena 1 capacity (Render + Dual partitions). Determines the slab boundary
 	// between Arena 1 and Arena 2. Must be <= MAX_CACHED_ENTITIES.

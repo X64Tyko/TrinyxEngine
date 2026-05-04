@@ -340,9 +340,9 @@ else()
 
     # AVX2 instruction set
     if(ENABLE_AVX2)
-        add_compile_options(-march=native)
+        add_compile_options(-mavx2 -mfma)
         add_compile_definitions(TNX_HAS_AVX2)
-        message(STATUS "Native architecture instructions enabled")
+        message(STATUS "AVX2 instructions enabled")
     endif()
 
     # Determinism: disable FMA and float contraction so the engine produces

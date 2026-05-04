@@ -1808,13 +1808,6 @@ void EditorContext::StopPIE()
 
 	EditorRenderer* renderer = EnginePtr->GetRenderer();
 
-	// 1. Stop and join all PIE worlds via FlowManagers
-	for (auto& client : PIEClients) client.Flow->StopWorld();
-	ServerFlow->StopWorld();
-
-	for (auto& client : PIEClients) client.Flow->JoinWorld();
-	ServerFlow->JoinWorld();
-
 	// 2. Tear down PIE networking
 	PIENetThread* net = EnginePtr->GetNetThread();
 	if (net)
@@ -1857,7 +1850,7 @@ void EditorContext::StopPIE()
 
 		connMgr->StopListening();
 	}
-
+	
 	// 3. Remove viewports from renderer and free GPU resources
 	renderer->WaitForGPU(); // Ensure in-flight frames finish before destroying images/descriptors
 	for (auto& client : PIEClients)

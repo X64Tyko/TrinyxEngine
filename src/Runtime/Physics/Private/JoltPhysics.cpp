@@ -260,6 +260,7 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 	LOG_ENG_INFO_F("[JoltPhysics] Snapshot ring: %u slots for rollback", SnapshotCapacity);
 #endif
 
+	bActive.store(true, std::memory_order_release);
 	return true;
 }
 
@@ -267,6 +268,8 @@ void JoltPhysics::Shutdown()
 {
 	if (!PhysSystem) return;
 
+	bActive.store(false, std::memory_order_release);
+	
 	// Unregister listener before destroying PhysSystem
 	ContactListener.reset();
 	PhysSystem.reset();

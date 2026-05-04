@@ -11,6 +11,8 @@
 
 #include <cstring>
 
+#include "LogicThreadBase.h"
+
 FlowManagerBase::FlowManagerBase() = default;
 
 FlowManagerBase::~FlowManagerBase()
@@ -25,14 +27,13 @@ FlowManagerBase::~FlowManagerBase()
 
 	// Mode before World — Mode may reference World state
 	ActiveMode.reset();
+	ConstructReg.DestroyAll();
 
 	if (ActiveWorld)
 	{
 		ActiveWorld->Shutdown();
 		ActiveWorld.reset();
 	}
-
-	ConstructReg.DestroyAll();
 }
 
 // ---------------------------------------------------------------------------

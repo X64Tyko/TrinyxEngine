@@ -149,6 +149,7 @@ public:
 	// Returns the oldest frame number in the snapshot ring, or UINT32_MAX if empty.
 	// Used by LogicThread to clamp rollback targets to the range we can actually restore.
 	uint32_t GetOldestSnapshotFrame() const;
+	bool GetIsActive() const { return bActive.load(std::memory_order_acquire); }
 #endif
 
 private:
@@ -158,6 +159,7 @@ private:
 	std::unique_ptr<JPH::PhysicsSystem> PhysSystem;
 	std::unique_ptr<JoltContactListener> ContactListener;
 	TrinyxMPSCRing<PhysicsContactEvent> ContactEventRing;
+	std::atomic_bool bActive{false};
 
 	// Entity ↔ Body mapping arrays.
 	// EntityToBody: indexed by archetype global index → JPH::BodyID

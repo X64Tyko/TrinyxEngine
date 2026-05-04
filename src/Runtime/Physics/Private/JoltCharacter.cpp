@@ -35,14 +35,14 @@ void JoltCharacter::Initialize(JoltPhysics* physics, EntityCacheHandle entityInd
 
 void JoltCharacter::Shutdown()
 {
-	if (Character)
+	if (Character && Physics && Physics->GetIsActive())
 	{
 		// Unregister our owner mapping before the body goes away.
-		if (Physics && !Character->GetInnerBodyID().IsInvalid())
+		if (!Character->GetInnerBodyID().IsInvalid())
 		{
 			Physics->UnregisterBody(Character->GetInnerBodyID());
 		}
-
+		
 		Character = nullptr;
 	}
 	Physics = nullptr;
