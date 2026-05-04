@@ -34,7 +34,7 @@
 #define TNX_SIMD_AVX2 1
 #elif defined(__AVX512F__)
 #define TNX_SIMD_AVX512 1
-#elif defined(__AVX2__)
+#elif defined(__AVX2__) || defined(TNX_HAS_AVX2)
 #define TNX_SIMD_AVX2 1
 #elif defined(__ARM_NEON) || defined(__aarch64__) || defined(_M_ARM64)
 #define TNX_SIMD_NEON 1

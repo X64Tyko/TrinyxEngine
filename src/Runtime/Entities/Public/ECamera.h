@@ -15,5 +15,4 @@ public:
 	CTransform<WIDTH>  Transform;
 	CCameraLayer<WIDTH> CameraLayer;
 
-	FORCE_INLINE void PrePhysics([[maybe_unused]] SimFloat dt) {}
 };
