@@ -3,11 +3,12 @@
 #include "TestFramework.h"
 #include "EngineConfig.h"
 #include "GNSContext.h"
-#include "AuthorityNetThread.h"
 #include "Logger.h"
 
 #include <SDL3/SDL_timer.h>
 #include <cstdlib>
+
+#include "AuthorityNet.h"
 
 // Two-process loopback: SERVER side.
 //
@@ -35,7 +36,7 @@ TEST(Net_Loopback_Server)
 	EngineConfig config{};
 	config.ApplyDefaults();
 
-	AuthorityNetThread serverThread;
+	AuthorityNet serverThread;
 	serverThread.Initialize(&gns, &config);
 
 	constexpr uint16_t kPort = 27020;
