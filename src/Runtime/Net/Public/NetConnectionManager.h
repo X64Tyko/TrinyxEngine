@@ -238,7 +238,7 @@ private:
 	/// Remove a connection from bookkeeping.
 	void RemoveConnection(HSteamNetConnection conn);
 
-	SocketHandle& Sockets           = SocketHandle::Invalid(); // Borrowed from GNSContext
+	ISteamNetworkingSockets* Sockets = nullptr;
 	HSteamListenSocket ListenSocket = 0;
 	HSteamNetPollGroup PollGroup    = 0;
 

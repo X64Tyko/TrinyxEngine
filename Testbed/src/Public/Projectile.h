@@ -29,13 +29,13 @@ public:
 		transform.PosZ += body.VelZ * dt;
 
 		// Simple drag
-		body.VelX *= 0.999f;
-		body.VelY *= 0.999f;
-		body.VelZ *= 0.999f;
+		body.VelX *= SimFloat(0.999f);
+		body.VelY *= SimFloat(0.999f);
+		body.VelZ *= SimFloat(0.999f);
 
 		// Fade alpha as the projectile slows — tests color write path
-		color.A = body.VelZ * (body.VelZ * 0.001f);
-		color.A = FieldMath::Clamp(color.A, 0.0f, 1.0f);
+		color.A = body.VelZ * (body.VelZ * SimFloat(0.001f));
+		color.A = FieldMath::Clamp(color.A, SimFloat(0.0f), SimFloat(1.0f));
 	}
 };
 

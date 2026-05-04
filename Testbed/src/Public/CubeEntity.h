@@ -10,8 +10,8 @@
 #include "FieldProxy.h"
 #include "CJoltBody.h"
 
-template <template <FieldWidth> class T, FieldWidth WIDTH = FieldWidth::Scalar>
-class BaseCube : public EntityView<T, WIDTH>
+template <template <FieldWidth> class Derived, FieldWidth WIDTH = FieldWidth::Scalar>
+class BaseCube : public EntityView<Derived, WIDTH>
 {
 	TNX_REGISTER_SUPER_SCHEMA(BaseCube, EntityView, transform, velocity, scale, color)
 public:
@@ -24,13 +24,13 @@ public:
 	FORCE_INLINE void PrePhysics([[maybe_unused]] SimFloat dt)
 	{
 		transform.Position += velocity.Vel * dt;
-		transform.PosX     = (transform.PosX > 50.f).Choose(-50.f, transform.PosX);
+		transform.PosX     = (transform.PosX > SimFloat(50.f)).Choose(SimFloat(-50.f), transform.PosX);
 
-		velocity.vX *= 0.98f;
-		velocity.vY *= 0.99f;
+		velocity.vX *= SimFloat(0.98f);
+		velocity.vY *= SimFloat(0.99f);
 
-		transform.Rotation.RotateY(dt * 0.2f);
-		transform.Rotation.RotateZ(dt * 0.4f);
+		transform.Rotation.RotateY(dt * SimFloat(0.2f));
+		transform.Rotation.RotateZ(dt * SimFloat(0.4f));
 	}
 };
 
@@ -73,7 +73,7 @@ public:
 	// Logic
 	FORCE_INLINE void ScalarUpdate([[maybe_unused]] SimFloat dt)
 	{
-		color.R = (color.R + (dt * 0.5f) > 1.f) ? 0.f : color.R + (dt * 0.5f);
-		color.B = ((color.B + dt) > 1.f) ? 0.f : color.B + dt;
+		color.R = (color.R + (dt * SimFloat(0.5f)) > SimFloat(1.f)) ? SimFloat(0.f) : color.R + (dt * SimFloat(0.5f));
+		color.B = ((color.B + dt) > SimFloat(1.f)) ? SimFloat(0.f) : color.B + dt;
 	}
 };

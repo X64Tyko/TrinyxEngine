@@ -46,7 +46,7 @@ NetConnectionManager::~NetConnectionManager()
 
 void NetConnectionManager::Initialize(GNSContext* gns)
 {
-	Sockets    = gns->GetInterface();
+	Sockets    = gns->GetInterface().Sockets;
 	s_Instance = this;
 
 	// Create a poll group so we can receive from all connections in one call
@@ -81,7 +81,7 @@ void NetConnectionManager::Shutdown()
 
 	if (s_Instance == this) s_Instance = nullptr;
 
-	Sockets = SocketHandle::Invalid();
+	Sockets = nullptr;
 	LOG_ENG_INFO("[NetConnectionManager] Shutdown");
 }
 

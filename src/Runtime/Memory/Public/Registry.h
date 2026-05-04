@@ -457,37 +457,7 @@ void Registry::RecreateAs(EntityHandle& inHandle)
 template <typename T>
 std::vector<EntityHandle> Registry::Create(size_t count)
 {
-	return CreateByClassID(T::StaticClassID(), count, [&](EntityRecord& record,[[maybe_unused]] void** fieldArrayTable)
-	{
-		if (record.IsValid())
-		{
-			uint32_t temporalWrite = GetTemporalCache()->GetActiveWriteFrame();
-			uint32_t volatileWrite = GetVolatileCache()->GetActiveWriteFrame();
-
-			void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
-			record.Arch->BuildFieldArrayTable(record.TargetChunk, fieldArrayTable, temporalWrite, volatileWrite);
-
-			T view;
-			view.Hydrate(fieldArrayTable, fieldArrayTable[0], record.LocalIndex);
-
-			view.InitializeInternal();
-
-			// Warn about mesh-ref fields still at 0 — slot 0 is the invalid sentinel.
-			// Material refs are excluded: MaterialID=0 means "no material", which is valid.
-			for (const auto& [fkey, fdesc] : record.Arch->ArchetypeFieldLayout)
-			{
-				if (fdesc.refAssetType != AssetType::StaticMesh &&
-					fdesc.refAssetType != AssetType::SkeletalMesh)
-					continue;
-				auto* arr    = static_cast<uint32_t*>(fieldArrayTable[fdesc.fieldSlotIndex]);
-				uint32_t val = arr[record.LocalIndex];
-				if (val == 0)
-					LOG_ENG_WARN("Registry::Create - MeshID not set (slot 0 is invalid; use SetMesh in your init lambda)");
-			}
-
-			AssetRegistry::Get().DrainPendingCheckouts();
-		}
-	});
+	return CreateByClassID(T::StaticClassID(), count);
 }
 
 template <typename T>

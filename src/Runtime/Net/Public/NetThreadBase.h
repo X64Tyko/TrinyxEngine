@@ -141,6 +141,7 @@ void NetThreadBase<Derived>::PumpMessages()
 	if (!ConnectionMgr) return;
 	
 	GNS->Poll();
+
 	ConnectionMgr->RunCallbacks();
 
 	std::vector<ReceivedMessage> messages;

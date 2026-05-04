@@ -60,5 +60,6 @@ public:
 private:
 	SocketHandle SocketsHandle;
 	ISteamNetworkingSockets* SocketsInterface = nullptr;
-	bool bInitialized                         = false;
+	bool bInitialized = false;
+	bool bOwnsGNS     = false; // true only if this instance called GameNetworkingSockets_Init
 };
