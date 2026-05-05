@@ -325,18 +325,25 @@ Chunk* Archetype::AllocateChunk()
 	auto* chunkBase      = reinterpret_cast<uint8_t*>(NewChunk);
 
 	// Phase-2 slab defrag: prefer a freed slab from the same archetype over fresh allocation.
-	// TryReuseFreedSlab wires FieldPtrs[] for every tracked temporal/volatile field in its
-	// cache and returns the recycled CacheIndexStart.  If it succeeds we skip AllocateFieldArray
-	// and AdvanceAllocator for slab fields entirely.
+	// TryReuseFreedSlab wires FieldPtrs[] for every tracked field in its cache and returns the
+	// recycled CacheIndexStart. When rollback is enabled the two caches track their own tier's
+	// fields independently, so both must be queried: an archetype whose fields are all Temporal
+	// has nothing in VolatileSlab.FreedChunkSlabs but everything in HistorySlab.FreedChunkSlabs,
+	// and vice versa for all-Volatile archetypes.
 	ComponentCacheBase* volatileCache = Reg->GetVolatileCache();
-	const size_t recycledCacheStart   = volatileCache->TryReuseFreedSlab(NewChunk, this);
-	const bool bRecycled              = (recycledCacheStart != SIZE_MAX);
+	size_t recycledCacheStart         = volatileCache->TryReuseFreedSlab(NewChunk, this);
 
 #ifdef TNX_ENABLE_ROLLBACK
 	ComponentCacheBase* temporalCache = Reg->GetTemporalCache();
-	if (bRecycled && temporalCache != volatileCache)
-		temporalCache->TryReuseFreedSlab(NewChunk, this); // wire any Temporal-tier fields
+	if (temporalCache != volatileCache)
+	{
+		const size_t temporalResult = temporalCache->TryReuseFreedSlab(NewChunk, this);
+		if (recycledCacheStart == SIZE_MAX)
+			recycledCacheStart = temporalResult; // volatile had nothing; use temporal's CacheStart
+	}
 #endif
+
+	const bool bRecycled = (recycledCacheStart != SIZE_MAX);
 
 	if (bRecycled)
 		NewChunk->Header.CacheIndexStart = recycledCacheStart;
