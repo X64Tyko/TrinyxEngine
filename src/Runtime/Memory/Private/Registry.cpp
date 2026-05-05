@@ -957,3 +957,109 @@ void Registry::PruneServerEvents(uint32_t oldestFrame)
 		ServerEvents.end());
 }
 #endif
+
+// =============================================================================
+// Defrag
+// =============================================================================
+
+void Registry::TickDefrag(TrinyxJobs::WorldQueueHandle wq)
+{
+	Defrag.Tick(Archetypes, *this, wq);
+}
+
+void Registry::ForceDefragSync()
+{
+	for (const auto& [key, arch] : Archetypes)
+	{
+		if (arch->TotalEntityCount < DefragSystem::MinLiveEntities) continue;
+		if (arch->AllocatedEntityCount == 0)                        continue;
+		if (arch->InactiveEntitySlots.empty())                      continue;
+
+		float holeRatio = 1.0f - static_cast<float>(arch->TotalEntityCount)
+		                       / static_cast<float>(arch->AllocatedEntityCount);
+		if (holeRatio < DefragSystem::HoleThreshold) continue;
+
+		// Loop: MaxMovesPerTick entities are processed per ProcessMoves call.
+		// Iterate until the archetype drops below the threshold or has no more holes.
+		while (holeRatio >= DefragSystem::HoleThreshold && !arch->InactiveEntitySlots.empty())
+		{
+			const uint32_t estimatedMoves = arch->AllocatedEntityCount - arch->TotalEntityCount;
+			Defrag.ProcessMoves(*this, arch, estimatedMoves, TrinyxJobs::InvalidWorldQueue);
+
+			if (arch->AllocatedEntityCount == 0) break;
+			holeRatio = 1.0f - static_cast<float>(arch->TotalEntityCount)
+			                 / static_cast<float>(arch->AllocatedEntityCount);
+		}
+	}
+}
+
+void Registry::ExecuteDefragMove(Archetype* arch,
+                                  const Archetype::EntitySlot& src,
+                                  const Archetype::EntitySlot& dst)
+{
+	GlobalEntityHandle gHandle = GlobalEntityRegistry.LookupGlobalHandle(
+	    static_cast<EntityCacheHandle>(src.CacheIndex));
+	EntityRecord* record = GlobalEntityRegistry.Records[gHandle.GetIndex()];
+	if (!record || !record->IsValid()) return;
+
+	// Copy all field data: cold fields in-chunk, temporal/volatile across every slab frame.
+	arch->MoveEntitySlot(src, dst,
+	                     GetCache(CacheTier::Temporal),
+	                     GetCache(CacheTier::Volatile));
+
+	// Update location fields in the EntityRecord.
+	const EntityCacheHandle oldCacheIndex = record->CacheEntityIndex;
+	record->ArchIndex        = dst.ArchIndex;
+	record->ChunkIndex       = dst.ChunkIndex;
+	record->LocalIndex       = dst.LocalIndex;
+	record->TargetChunk      = dst.TargetChunk;
+	record->CacheEntityIndex = static_cast<EntityCacheHandle>(dst.CacheIndex);
+
+	// Remap the CacheToRecord lookup so render/network threads that resolve by
+	// cache index find the entity at its new position.
+	GlobalEntityRegistry.CacheToRecord.set(dst.CacheIndex, gHandle);
+	GlobalEntityRegistry.CacheToRecord.set(src.CacheIndex, GlobalEntityHandle{});
+
+	// Per-chunk live counts: src chunk lost one entity, dst chunk gained one.
+	arch->ChunkLiveCounts[src.ChunkIndex]--;
+	arch->ChunkLiveCounts[dst.ChunkIndex]++;
+
+	// Notify ConstructViews so they can re-hydrate their field proxy cursors.
+	record->OnCacheSlotChange(oldCacheIndex, dst.CacheIndex);
+}
+
+void Registry::TrimTailChunks(Archetype* arch)
+{
+	LOG_ENG_INFO_F("Trimming tail chunks for archetype with %u entities", arch->AllocatedEntityCount);
+	while (!arch->Chunks.empty() && arch->ChunkLiveCounts.back() == 0)
+	{
+		const uint32_t lastChunkIdx     = static_cast<uint32_t>(arch->Chunks.size()) - 1;
+		const uint32_t prevAllocCount   = lastChunkIdx * arch->EntitiesPerChunk;
+		const uint32_t lastChunkAllocated = arch->AllocatedEntityCount - prevAllocCount;
+
+		// Drop all inactive slot entries that reference this chunk — they're gone.
+		arch->InactiveEntitySlots.erase(
+		    std::remove_if(arch->InactiveEntitySlots.begin(), arch->InactiveEntitySlots.end(),
+		                   [lastChunkIdx](const Archetype::EntitySlot& s)
+		                   { return s.ChunkIndex == lastChunkIdx; }),
+		    arch->InactiveEntitySlots.end());
+
+		// Shrink ActiveEntitySlots to match the reduced AllocatedEntityCount.
+		arch->ActiveEntitySlots.resize(
+		    arch->ActiveEntitySlots.size() - lastChunkAllocated);
+
+		// Free the chunk struct (cold field arrays are inline; slab allocations
+		// remain valid but become inert holes until phase-2 slab defrag).
+		Chunk* chunk = arch->Chunks.back();
+		TNX_FREE_N(chunk, arch->DebugName);
+#ifdef _MSC_VER
+		_aligned_free(chunk);
+#else
+		free(chunk);
+#endif
+		arch->Chunks.pop_back();
+		arch->ChunkLiveCounts.pop_back();
+		
+		arch->AllocatedEntityCount -= lastChunkAllocated;
+	}
+}

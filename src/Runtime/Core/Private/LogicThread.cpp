@@ -200,6 +200,7 @@ void LogicThread::ThreadMain()
 		TrinyxJobs::DrainWorldQueue(WQHandle);
 		RegistryPtr->ProcessDeferredDestructions();
 		if (ConstructsPtr) ConstructsPtr->ProcessDeferredDestructions();
+		RegistryPtr->TickDefrag(WQHandle);
 
 		const uint64_t frameStartCounter = SDL_GetPerformanceCounter();
 		uint64_t counterElapsed          = frameStartCounter - lastCounter;

@@ -9,6 +9,7 @@
 #include <vector>
 #include "Archetype.h"
 #include "AssetRegistry.h"
+#include "DefragSystem.h"
 #include "EntityRecord.h"
 #include "FlatMap.h"
 #include "ReflectionRegistry.h"
@@ -99,6 +100,15 @@ public:
 	void InvokeScalarUpdate(SimFloat dt);
 	void InvokePrePhys(SimFloat dt);
 	void InvokePostPhys(SimFloat dt);
+
+	// --- Defrag (Brain thread) ---
+	// Call once per Logic frame (after ProcessDeferredDestructions). On the
+	// analysis cadence, scans archetypes and posts WorldQueue move jobs.
+	void TickDefrag(TrinyxJobs::WorldQueueHandle wq);
+
+	// Synchronous defrag — bypasses the analysis cadence and runs all compaction
+	// inline on the calling thread. No WorldQueue needed. Use for tests only.
+	void ForceDefragSync();
 
 	// --- Slab accessors (used by LogicThread/RenderThread at init time) ---
 
@@ -191,6 +201,7 @@ public:
 
 private:
 	friend class Archetype;
+	friend class DefragSystem;
 	template <typename, typename, typename> friend class LogicThread;
 	friend struct RollbackSim;
 	friend class ReplicationSystem;
@@ -229,6 +240,19 @@ private:
 
 	bool DestroyRecord(GlobalEntityHandle& gHandle);
 	bool DestroyRecord(EntityRecord& record);
+
+	// --- Defrag internals (called by DefragSystem) ---
+
+	// Move a single live entity from src to dst within arch, updating EntityRecord,
+	// CacheToRecord, ChunkLiveCounts, and firing OnCacheSlotChange.
+	// DefragSystem::ProcessMoves is responsible for updating InactiveEntitySlots.
+	void ExecuteDefragMove(Archetype* arch,
+	                       const Archetype::EntitySlot& src,
+	                       const Archetype::EntitySlot& dst);
+
+	// Free trailing chunks in arch whose ChunkLiveCounts entry is 0, decrementing
+	// AllocatedEntityCount so future iteration scans shrink accordingly.
+	void TrimTailChunks(Archetype* arch);
 
 	// --- Slab tier dispatch ---
 	// When TNX_ENABLE_ROLLBACK is off, Temporal falls back to the Volatile slab
@@ -287,6 +311,7 @@ private:
 	std::vector<uint32_t> PendingNetRecycles;
 
 	FlatMap<Archetype::ArchetypeKey, Archetype*> Archetypes;
+	DefragSystem Defrag;
 
 	// Tombstoned record indices (not yet confirmed for destruction)
 	std::vector<uint32_t> TombstoneRecordIndices;

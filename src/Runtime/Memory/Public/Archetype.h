@@ -11,6 +11,8 @@
 #include "FlatMap.h"
 #include "Schema.h"
 
+class ComponentCacheBase;
+
 // Archetype — manages storage for all entities sharing a (Signature, ClassID) pair.
 //
 // Each archetype owns a list of Chunks (dense, 64-byte aligned allocations) and a
@@ -94,6 +96,10 @@ public:
 	std::vector<EntitySlot> ActiveEntitySlots;
 	std::vector<EntitySlot> InactiveEntitySlots;
 
+	// Exact live entity count per chunk — updated by PushEntities and RemoveEntity.
+	// DefragSystem reads this to identify trailing chunks that are fully empty.
+	std::vector<uint32_t> ChunkLiveCounts;
+
 	// Get all field array base pointers for a given component type within a chunk (frame 0).
 	std::vector<void*> GetFieldArrays(Chunk* targetChunk, ComponentTypeID typeId);
 
@@ -173,6 +179,14 @@ private:
 	// Entity slot allocation / removal — only Registry drives these.
 	void PushEntities(std::span<EntitySlot> outSlots);
 	void RemoveEntity(size_t chunkIndex, uint32_t localIndex, uint32_t archetypeIdx);
+
+	// Move one live entity from src to dst (dst must be an inactive slot).
+	// Copies all field data: cold fields inline in the chunk, temporal/volatile
+	// fields across all frames in the slab ring buffer.
+	// Does NOT update Registry records or slot lists — Registry::ExecuteDefragMove handles that.
+	void MoveEntitySlot(const EntitySlot& src, const EntitySlot& dst,
+	                    ComponentCacheBase* temporalCache,
+	                    ComponentCacheBase* volatileCache);
 
 	// Layout construction — called once by Registry after component metadata is known.
 	void BuildLayout(class Registry* reg, const std::vector<ComponentMetaEx>& components, SystemID inArchSystemID = SystemID::None);

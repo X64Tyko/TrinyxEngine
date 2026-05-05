@@ -9,9 +9,9 @@
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 class TestEntity : public EntityView<TestEntity, WIDTH>
 {
-	static constexpr uint32_t EntitiesPerChunk = 16;
 	TNX_REGISTER_SCHEMA(TestEntity, EntityView, transform, velocity)
 
+	static constexpr uint32_t EntitiesPerChunk = 16;
 public:
 	CTransform<WIDTH> transform;
 	CVelocity<WIDTH> velocity;

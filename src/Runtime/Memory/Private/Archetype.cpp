@@ -173,21 +173,10 @@ uint32_t Archetype::GetAllocatedChunkCount(size_t chunkIndex) const
 	return EntitiesPerChunk;
 }
 
-// Returns the number of live (non-tombstoned) entities in a specific chunk.
-// TODO: Currently an approximation — derives per-chunk count from a global TotalEntityCount
-// counter, which doesn't track which chunks the removals came from. Needs per-chunk live
-// counters or Active flag scanning to be accurate.
 uint32_t Archetype::GetLiveChunkCount(size_t chunkIndex) const
 {
-	if (Chunks.empty() || chunkIndex >= Chunks.size() || EntitiesPerChunk == 0) return 0;
-
-	if (chunkIndex == Chunks.size() - 1)
-	{
-		uint32_t remainder = TotalEntityCount % EntitiesPerChunk;
-		return (remainder == 0 && TotalEntityCount > 0) ? EntitiesPerChunk : remainder;
-	}
-
-	return EntitiesPerChunk;
+	if (chunkIndex >= ChunkLiveCounts.size()) return 0;
+	return ChunkLiveCounts[chunkIndex];
 }
 
 // Allocates entity slots, filling outSlots with chunk/index/cache information.
@@ -205,6 +194,7 @@ void Archetype::PushEntities(std::span<EntitySlot> outSlots)
 	{
 		Chunk* NewChunk = AllocateChunk();
 		Chunks.push_back(NewChunk);
+		ChunkLiveCounts.push_back(0);
 		ActiveEntitySlots.resize(Chunks.size() * EntitiesPerChunk);
 	}
 
@@ -232,6 +222,7 @@ void Archetype::PushEntities(std::span<EntitySlot> outSlots)
 		}
 
 		ActiveEntitySlots[Slot.ArchIndex] = Slot;
+		ChunkLiveCounts[Slot.ChunkIndex]++;
 		TotalEntityCount++;
 	}
 }
@@ -248,6 +239,8 @@ void Archetype::RemoveEntity(size_t chunkIndex, uint32_t localIndex, uint32_t ar
 	if (AllocatedEntityCount == 0) return;
 	if (chunkIndex >= Chunks.size()) return;
 	if (localIndex >= EntitiesPerChunk) return;
+
+	ChunkLiveCounts[chunkIndex]--;
 
 	// Tombstone: clear Active+Alive, set Dirty+Tombstoned. GPU predicate stops drawing,
 	// sweep skips, and replication can distinguish "dead" from "temporarily inactive."
@@ -408,6 +401,47 @@ Chunk* Archetype::AllocateChunk()
 	return NewChunk;
 }
 
+// Copy all field data for one entity from src slot to dst slot.
+// For temporal/volatile fields, copies across every frame in the slab ring buffer.
+// For cold fields, copies the inline chunk array element.
+// Registry::ExecuteDefragMove must update all bookkeeping before or after this call.
+void Archetype::MoveEntitySlot(const EntitySlot& src, const EntitySlot& dst,
+                                ComponentCacheBase* temporalCache,
+                                ComponentCacheBase* volatileCache)
+{
+	const size_t tStr = temporalCache ? temporalCache->GetFrameStride()     : 0;
+	const size_t vStr = volatileCache ? volatileCache->GetFrameStride()     : 0;
+	const size_t tN   = temporalCache ? temporalCache->GetTotalFrameCount() : 1;
+	const size_t vN   = volatileCache ? volatileCache->GetTotalFrameCount() : 1;
+
+	for (const auto& [fkey, fdesc] : ArchetypeFieldLayout)
+	{
+		auto* srcBase = static_cast<uint8_t*>(src.TargetChunk->Header.FieldPtrs[fdesc.fieldSlotIndex]);
+		auto* dstBase = static_cast<uint8_t*>(dst.TargetChunk->Header.FieldPtrs[fdesc.fieldSlotIndex]);
+
+		if (fdesc.bIsTemporal)
+		{
+			const bool   isTemporal = (fdesc.tier == CacheTier::Temporal);
+			const size_t stride     = isTemporal ? tStr : vStr;
+			const size_t frames     = isTemporal ? tN   : vN;
+
+			for (size_t f = 0; f < frames; ++f)
+			{
+				const size_t off = f * stride;
+				std::memcpy(dstBase + off + dst.LocalIndex * fdesc.fieldSize,
+				            srcBase + off + src.LocalIndex * fdesc.fieldSize,
+				            fdesc.fieldSize);
+			}
+		}
+		else
+		{
+			std::memcpy(dstBase + dst.LocalIndex * fdesc.fieldSize,
+			            srcBase + src.LocalIndex * fdesc.fieldSize,
+			            fdesc.fieldSize);
+		}
+	}
+}
+
 // Hard reset — frees all chunk memory and clears slot tracking.
 // Used by Registry::ResetRegistry. After this, new entities go through AllocateChunk
 // which re-wires slab field arrays at correct allocator offsets.
@@ -425,6 +459,7 @@ void Archetype::FreeAllChunks()
 	Chunks.clear();
 	ActiveEntitySlots.clear();
 	InactiveEntitySlots.clear();
+	ChunkLiveCounts.clear();
 	AllocatedEntityCount = 0;
 	TotalEntityCount     = 0;
 }
