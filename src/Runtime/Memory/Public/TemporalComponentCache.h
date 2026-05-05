@@ -124,6 +124,18 @@ public:
 	void ResetAllocators();
 	void ClearFrameData();
 
+	// Phase-2 slab defrag: called by TrimTailChunks before the chunk struct is freed.
+	// Records per-field slab regions into FreedChunkSlabs and decrements CurrentUsed,
+	// making the space available for reuse by the next AllocateChunk for the same archetype.
+	void NotifyChunkFreed(Chunk* chunk);
+
+	// Called at the top of AllocateChunk (before AllocateFieldArray).
+	// If a previously freed slab from the same archetype is available, wires FieldPtrs[] in
+	// newChunk for every temporal/volatile field that belongs to this cache, re-registers the
+	// allocations under newChunk, and returns the recycled CacheIndexStart.
+	// Returns SIZE_MAX when no suitable freed slab exists (caller must use AllocateFieldArray).
+	size_t TryReuseFreedSlab(Chunk* newChunk, Archetype* owner);
+
 	// Get the stride between frames (for calculating frame N from frame 0 pointer)
 	FORCE_INLINE size_t GetFrameStride() const { return sizeof(TemporalFrameHeader) + FrameDataCapacity; }
 
@@ -265,6 +277,24 @@ private:
 	};
 
 	std::vector<TemporalAllocation> ActiveAllocations;
+
+	// Freed slab regions available for reuse when a new chunk of the same archetype is allocated.
+	// Populated by NotifyChunkFreed; consumed by TryReuseFreedSlab.
+	struct FreedChunkSlab
+	{
+		Archetype* Owner;
+		size_t     CacheStart; // chunk->Header.CacheIndexStart at time of free
+
+		struct FieldRegion
+		{
+			uint16_t TableIndex;     // FieldAllocations[] index
+			uint8_t  FieldSlotIndex; // Chunk::Header::FieldPtrs[] slot to wire on reuse
+			size_t   OffsetInZone;   // Byte offset within this field's slab zone
+			size_t   Size;           // Bytes (= AlignSize(entitiesPerChunk * fieldSize))
+		};
+		std::vector<FieldRegion> Fields;
+	};
+	std::vector<FreedChunkSlab> FreedChunkSlabs;
 
 	// One large slab storing multiple frames of history
 	void* SlabPtr             = nullptr;

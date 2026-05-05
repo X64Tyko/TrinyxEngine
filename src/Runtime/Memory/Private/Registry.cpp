@@ -1048,9 +1048,20 @@ void Registry::TrimTailChunks(Archetype* arch)
 		arch->ActiveEntitySlots.resize(
 		    arch->ActiveEntitySlots.size() - lastChunkAllocated);
 
-		// Free the chunk struct (cold field arrays are inline; slab allocations
-		// remain valid but become inert holes until phase-2 slab defrag).
+		// Phase-2 slab defrag: reclaim this chunk's slab allocations before freeing
+		// the chunk struct.  NotifyChunkFreed removes entries from ActiveAllocations,
+		// decrements CurrentUsed, and stores the freed region in FreedChunkSlabs so
+		// the next AllocateChunk for the same archetype can reuse it.
 		Chunk* chunk = arch->Chunks.back();
+		{
+			ComponentCacheBase* vol = GetCache(CacheTier::Volatile);
+			vol->NotifyChunkFreed(chunk);
+#ifdef TNX_ENABLE_ROLLBACK
+			ComponentCacheBase* tmp = GetCache(CacheTier::Temporal);
+			if (tmp != vol) tmp->NotifyChunkFreed(chunk);
+#endif
+		}
+
 		TNX_FREE_N(chunk, arch->DebugName);
 #ifdef _MSC_VER
 		_aligned_free(chunk);

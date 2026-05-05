@@ -324,24 +324,45 @@ Chunk* Archetype::AllocateChunk()
 	size_t currentOffset = Chunk::HEADER_SIZE;
 	auto* chunkBase      = reinterpret_cast<uint8_t*>(NewChunk);
 
+	// Phase-2 slab defrag: prefer a freed slab from the same archetype over fresh allocation.
+	// TryReuseFreedSlab wires FieldPtrs[] for every tracked temporal/volatile field in its
+	// cache and returns the recycled CacheIndexStart.  If it succeeds we skip AllocateFieldArray
+	// and AdvanceAllocator for slab fields entirely.
+	ComponentCacheBase* volatileCache = Reg->GetVolatileCache();
+	const size_t recycledCacheStart   = volatileCache->TryReuseFreedSlab(NewChunk, this);
+	const bool bRecycled              = (recycledCacheStart != SIZE_MAX);
+
+#ifdef TNX_ENABLE_ROLLBACK
+	ComponentCacheBase* temporalCache = Reg->GetTemporalCache();
+	if (bRecycled && temporalCache != volatileCache)
+		temporalCache->TryReuseFreedSlab(NewChunk, this); // wire any Temporal-tier fields
+#endif
+
+	if (bRecycled)
+		NewChunk->Header.CacheIndexStart = recycledCacheStart;
+
 	// Wire each field's FieldPtrs[] entry:
-	//   Temporal/Volatile → allocated in the slab (pointer into ring buffer)
+	//   Temporal/Volatile → slab (recycled above, or fresh via AllocateFieldArray)
 	//   Cold              → packed inline after the chunk header
 	for (const auto& [fkey, fdesc] : ArchetypeFieldLayout)
 	{
 		largestSize = std::max(largestSize, fdesc.fieldSize);
 		if (fdesc.bIsTemporal)
 		{
-			ComponentCacheBase* TemporalCache                = Reg->GetCache(fdesc.tier);
-			NewChunk->Header.FieldPtrs[fdesc.fieldSlotIndex] = TemporalCache->AllocateFieldArray(
-				this,
-				NewChunk,
-				fdesc.temporalComponentIndex,
-				fdesc.componentSlotIndex,
-				"",
-				EntitiesPerChunk,
-				fdesc.fieldSize,
-				ArchSystemID);
+			if (!bRecycled)
+			{
+				ComponentCacheBase* fieldCache                   = Reg->GetCache(fdesc.tier);
+				NewChunk->Header.FieldPtrs[fdesc.fieldSlotIndex] = fieldCache->AllocateFieldArray(
+					this,
+					NewChunk,
+					fdesc.temporalComponentIndex,
+					fdesc.componentSlotIndex,
+					"",
+					EntitiesPerChunk,
+					fdesc.fieldSize,
+					ArchSystemID);
+			}
+			// else: FieldPtrs[] already wired by TryReuseFreedSlab
 		}
 		else
 		{
@@ -351,14 +372,18 @@ Chunk* Archetype::AllocateChunk()
 		}
 	}
 
-	// Advance ALL caches so entityCacheIDs stay globally synchronized.
-	// An archetype may only store fields in one cache, but the allocator index
-	// must advance in every cache so that entityCacheID N refers to the same
-	// entity slot regardless of which cache you look at.
-	NewChunk->Header.CacheIndexStart = Reg->GetVolatileCache()->AdvanceAllocator(ArchSystemID, EntitiesPerChunk, largestSize);
+	if (!bRecycled)
+	{
+		// Advance ALL caches so entityCacheIDs stay globally synchronized.
+		// An archetype may only store fields in one cache, but the allocator index
+		// must advance in every cache so that entityCacheID N refers to the same
+		// entity slot regardless of which cache you look at.
+		NewChunk->Header.CacheIndexStart = volatileCache->AdvanceAllocator(ArchSystemID, EntitiesPerChunk, largestSize);
 #ifdef TNX_ENABLE_ROLLBACK
-	Reg->GetTemporalCache()->AdvanceAllocator(ArchSystemID, EntitiesPerChunk, largestSize);
+		if (temporalCache != volatileCache)
+			temporalCache->AdvanceAllocator(ArchSystemID, EntitiesPerChunk, largestSize);
 #endif
+	}
 
 	LOG_ENG_INFO_F("Allocated chunk with %i entities at cache index %zi", EntitiesPerChunk, NewChunk->Header.CacheIndexStart);
 

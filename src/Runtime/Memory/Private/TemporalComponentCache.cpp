@@ -246,6 +246,86 @@ void ComponentCacheBase::ResetAllocators()
 	RenderOffset = 0;
 	DualOffset   = 0;
 	LogicOffset  = 0;
+
+	ActiveAllocations.clear();
+	FreedChunkSlabs.clear();
+	for (uint16_t idx : ValidFields)
+		FieldAllocations[idx].CurrentUsed = 0;
+}
+
+void ComponentCacheBase::NotifyChunkFreed(Chunk* chunk)
+{
+	FreedChunkSlab freed;
+	freed.Owner      = nullptr;
+	freed.CacheStart = chunk->Header.CacheIndexStart;
+
+	for (auto it = ActiveAllocations.begin(); it != ActiveAllocations.end(); )
+	{
+		if (it->OwnerChunk != chunk) { ++it; continue; }
+
+		if (!freed.Owner) freed.Owner = it->Owner;
+
+		// Resolve the FieldPtrs slot index from the owning archetype's layout so
+		// TryReuseFreedSlab can wire it directly without a second scan.
+		uint8_t fieldSlotIndex = 0xFF;
+		const size_t cacheSlot = it->FieldAllocationIndex / MAX_TEMPORAL_FIELDS_PER_COMPONENT;
+		const size_t fieldIdx  = it->FieldAllocationIndex % MAX_TEMPORAL_FIELDS_PER_COMPONENT;
+		for (const auto& [fkey, fdesc] : freed.Owner->ArchetypeFieldLayout)
+		{
+			if (fdesc.temporalComponentIndex == cacheSlot && fdesc.componentSlotIndex == fieldIdx)
+			{
+				fieldSlotIndex = fdesc.fieldSlotIndex;
+				break;
+			}
+		}
+
+		freed.Fields.push_back({
+			static_cast<uint16_t>(it->FieldAllocationIndex),
+			fieldSlotIndex,
+			it->OffsetInFieldZone,
+			it->Size
+		});
+
+		FieldAllocations[it->FieldAllocationIndex].CurrentUsed -= it->Size;
+		it = ActiveAllocations.erase(it);
+	}
+
+	if (freed.Owner) // at least one temporal/volatile field was tracked
+		FreedChunkSlabs.push_back(std::move(freed));
+}
+
+size_t ComponentCacheBase::TryReuseFreedSlab(Chunk* newChunk, Archetype* owner)
+{
+	for (auto it = FreedChunkSlabs.begin(); it != FreedChunkSlabs.end(); ++it)
+	{
+		if (it->Owner != owner) continue;
+
+		// Wire FieldPtrs[] for every field in this cache that the freed slab covers.
+		uint8_t* frame0Data = static_cast<uint8_t*>(SlabPtr) + sizeof(TemporalFrameHeader);
+
+		for (const auto& region : it->Fields)
+		{
+			if (region.FieldSlotIndex == 0xFF) continue; // layout lookup failed at free time
+
+			const FieldAllocationInfo& info = FieldAllocations[region.TableIndex];
+			newChunk->Header.FieldPtrs[region.FieldSlotIndex] =
+				frame0Data + info.OffsetInFrame + region.OffsetInZone;
+
+			// Re-register this allocation under the new chunk so future frees are tracked.
+			FieldAllocations[region.TableIndex].CurrentUsed += region.Size;
+			ActiveAllocations.push_back({
+				owner, newChunk,
+				region.TableIndex,
+				region.OffsetInZone,
+				region.Size
+			});
+		}
+
+		const size_t cacheStart = it->CacheStart;
+		FreedChunkSlabs.erase(it);
+		return cacheStart;
+	}
+	return SIZE_MAX;
 }
 
 void ComponentCacheBase::ClearFrameData()
