@@ -66,7 +66,7 @@ option(TNX_FIXED_IMPLICIT_FLOAT
         "Enable implicit float/double constructors for Fixed32"
         OFF)
 option(TNX_ENABLE_ROLLBACK "Enable N-frame rollback history. Off = TNX_TEMPORAL_FIELDS components use Volatile (5-frame) storage." OFF)
-option(TNX_DETERMINISM "Enable cross-platform determinism: disables FMA/fast-math in the engine and Jolt (JPH_CROSS_PLATFORM_DETERMINISTIC). Automatically forced ON by TNX_ENABLE_ROLLBACK." OFF)
+option(TNX_DETERMINISM "Enable cross-platform determinism: disables FMA/fast-math in the engine and Jolt (JPH_CROSS_PLATFORM_DETERMINISTIC). Independent of TNX_ENABLE_ROLLBACK." OFF)
 option(TNX_DETAILED_METRICS "Log per-frame latency breakdown (Buffer/Pipeline/Scanout). Noisy." OFF)
 if (TNX_DETAILED_METRICS)
     add_compile_definitions(TNX_DETAILED_METRICS)
@@ -162,10 +162,10 @@ endif ()
 if (TNX_ENABLE_ROLLBACK)
     add_compile_definitions(TNX_ENABLE_ROLLBACK)
     message(STATUS "Rollback history: ENABLED")
-    # Rollback requires bit-identical simulation — force determinism on.
+    # Rollback and determinism are independent: without TNX_DETERMINISM, resimulation is reproducible on the same
+    # machine and binary (server-side reconciliation, editor history) but not bit-identical across machines.
     if (NOT TNX_DETERMINISM)
-        message(STATUS "TNX_ENABLE_ROLLBACK forces TNX_DETERMINISM=ON")
-        #set(TNX_DETERMINISM ON CACHE BOOL "" FORCE)
+        message(STATUS "Rollback without TNX_DETERMINISM: resimulation is same-machine reproducible, not cross-machine bit-identical")
     endif ()
 else ()
     message(STATUS "Rollback history: DISABLED (Temporal fields stored in Volatile slab)")

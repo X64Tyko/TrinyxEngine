@@ -206,7 +206,7 @@ void AssetDatabase::Reconcile()
 					// Content changed
 					entry.ContentHash = currentHash;
 					sc.ContentHash    = currentHash;
-					sc.Flags          |= static_cast<uint8_t>(SidecarFlags::Dirty);
+					sc.Flags |= static_cast<uint8_t>(SidecarFlags::Dirty);
 					AssetSidecar::Write(sidecar.c_str(), sc);
 					LOG_ENG_INFO_F("[AssetDB] Asset modified: %s", relPath.c_str());
 				}
@@ -265,7 +265,7 @@ void AssetDatabase::Reconcile()
 			seen.push_back(true);
 
 			LOG_ENG_INFO_F("[AssetDB] New asset imported: %s (UUID: %lld)", relPath.c_str(),
-						   static_cast<long long>(uuid));
+				static_cast<long long>(uuid));
 		}
 	}
 
@@ -330,7 +330,7 @@ bool AssetDatabase::Load()
 	if (!file.is_open()) return false;
 
 	std::string contents((std::istreambuf_iterator<char>(file)),
-						 std::istreambuf_iterator<char>());
+		std::istreambuf_iterator<char>());
 
 	JsonValue root = JsonParse(contents);
 	if (!root.IsObject()) return false;
@@ -355,8 +355,8 @@ bool AssetDatabase::Load()
 
 		if (!uuid || !path) continue;
 
-		entry.ID = AssetID::Create(static_cast<int64_t>(uuid->AsNumber()),
-								   type ? static_cast<AssetType>(type->AsInt()) : AssetType::Invalid);
+		entry.ID            = AssetID::Create(static_cast<int64_t>(uuid->AsNumber()),
+			type ? static_cast<AssetType>(type->AsInt()) : AssetType::Invalid);
 		std::string nameStr = (name && name->IsString()) ? name->AsString() : std::string{};
 		if (nameStr.empty()) nameStr = NameFromPath(path->AsString());
 		entry.Name        = TnxName(nameStr.c_str());

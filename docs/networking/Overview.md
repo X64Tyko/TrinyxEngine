@@ -44,7 +44,7 @@ Server timestamps (`server_time_us`) replace frame numbers as the primary packet
 - Uncapped renderer interpolates smoothly between 30Hz snapshots regardless of local frame rate
 - Suited for co-op, casual games, or games with variable client performance expectations
 
-The `TNet` policy axis encodes which mode a given build uses. `AuthoritySim` and `OwnerSim` currently implement Deterministic Mode only. Non-Deterministic Mode requires a separate rewrite of those paths — see [Known Gaps](#known-gaps).
+The `TNet` policy axis encodes which mode a given build uses. `AuthoritySim` and `OwnerSim` currently implement Deterministic Mode only. Non-Deterministic Mode requires a separate rewrite of those paths — see [Networking Without Rollback](#networking-without-rollback--current-state-and-direction) and [Known Gaps](#known-gaps).
 
 ---
 
@@ -311,6 +311,52 @@ No logical host/client split exists internally — preallocated slabs make doubl
 
 ---
 
+## Networking Without Rollback — Current State and Direction
+
+Deterministic lockstep with rollback is implemented and proven. Games that don't want rollback — co-op, casual, or
+titles with variable client performance — currently get the lockstep path with rollback compiled out (`NoRollback`),
+**not** a purpose-built non-deterministic mode. The holes below are known; each lists the intended direction.
+
+| # | Hole | Where | Effect | Intended direction |
+|---|---|---|---|---|
+| 1 | **No reconciliation for the controlled entity.** With rollback off, a `StateCorrection` (already RTT/2 old) is written straight into the current write frame for every entity, including the local player's. Unacknowledged inputs are never replayed. | `OwnerNet::HandleStateCorrections` (non-rollback branch) | Rubber-banding proportional to latency. `CVisualTransform` hides the pop, not the pull-back. | Owner-only prediction ring: keep input + state history for predicted entities only; on correction for frame F, restore those entities to the server state at F and replay inputs F+1..now. Same machinery as the planned dirty-propagation resim, applied to a handful of entities. |
+| 2 | **One lagging client stalls the whole server.** `AuthoritySim` freezes the sim for everyone when any player's input is more than `MaxClientInputLead` frames behind (default 16 ≈ 31ms), in every build mode. | `AuthoritySim::RunSimInput` | One bad connection or slow machine freezes all players. Correct for lockstep, wrong otherwise. | The stall becomes a lockstep-only policy. Other modes use a per-client missing-input policy (repeat last input for a bounded window, then idle) and never stall globally. |
+| 3 | **Late input is recorded but not acted on.** The server always keeps a rolling per-player input log (`PlayerInputLog`, one slot per sim frame, depth = `TemporalFrameCount`). Late input lands in the log and requests a rollback — a no-op under `NoRollback`, so the server keeps its predicted input for that frame. | `AuthoritySim::RunSimInput`, `PlayerInputLog` | The client's real input never affects the authoritative sim; divergence surfaces as corrections (and rubber-banding via #1). | **Server-only rollback** (below): the server re-simulates from its input log while clients stay rollback-free. |
+| 4 | **Fixed 512Hz sim, one-time clock sync.** A client that can't sustain 512Hz runs 8 catch-up steps, then discards time beyond 0.25s and falls behind real time. `FrameOffset` / `InputLead` are set once at the handshake and never adjusted. | `LogicThread` accumulator, `NetThreadBase::TickClockSync` | Only the render rate can vary. A slow or drifting client pushes the server into #2 or #3. | Continuous clock sync and client time dilation (small speed-up / slow-down to hold a target input lead). The variable-rate model is an open decision: fixed sim rate with integer divisors for weak clients (keeps frame math integer and replay simple) vs. timestamp-based variable rate (`SimFrame`, designed but not wired into `PacketHeader`). |
+| 5 | **No lag compensation.** No server-side rewind for hit validation; without rollback the server has no history deeper than the 3-frame Volatile buffer. | — | Hitscan and melee can't be validated fairly at real-world latency. | Server keeps hit-validation history — naturally provided by server-only rollback's Temporal ring. Tied to the open remote-representation design below. |
+| 6 | **Remote entity representation is open.** Echo entities take corrections as they arrive, smoothed only by `CVisualTransform` easing. No buffered interpolation, no extrapolation policy. | `CVisualTransform` | Uneven motion under jitter. | **Open design** — see [Remote Entity Representation](#open-design-remote-entity-representation). |
+| 7 | **Physics-driven owned entities** get a Jolt teleport override on each correction, with no prediction replay. | Correction path | Jitter; corrections fight the solver. | Deferred until the Trinyx physics solver — see [Physics](../gameplay/Physics.md#long-term-trinyx-physics-solver). |
+| 8 | **Discrete input events aren't injected on the server** — only held-key state. | `AuthorityNet.cpp` (`TODO: inject discrete events`) | Mostly harmless at 512Hz input frames; a trap for press/release-triggered actions. | Inject per-frame discrete events from the input log. |
+| 9 | **`PlayerInputLog` is unsynchronized.** NetThread writes and the Logic thread reads without a lock; safe only while their phases don't overlap. | `PlayerInputLog.h` header note | Latent data race. | Lightweight per-log spinlock or a lock-free handoff. |
+
+### Server-Only Rollback (Planned)
+
+The Authority can run with rollback enabled while Owners run without it. The server keeps the Temporal ring, Jolt
+snapshots, and its per-player input log, and re-simulates when late input arrives. Owners run the non-rollback
+prediction-and-replay path (#1) and apply corrections normally; they already ignore the `ResimFrameDelta` annotation
+when rollback is off.
+
+Server re-simulation only has to reproduce the server's **own** results (same process, same binary), not match other
+machines bit-for-bit, so server-only rollback doesn't require `TNX_DETERMINISM` — and the two flags are already
+independent in the build. The PIE server already runs this way (editor builds force rollback on). What remains is
+wiring shipped server builds with rollback against client builds without it.
+
+The same server history supports lag compensation (#5).
+
+### Open Design: Remote Entity Representation
+
+Every client sees remote players in the past: network latency plus whatever interpolation delay smooths their motion.
+Players end up aiming at a **shadow of the target**. The standard fix — lag compensation that rewinds the server to what
+the shooter saw — favors the shooter and moves the unfairness onto the target: shots that land after the target reached
+cover, and peeker's advantage.
+
+Trinyx intends to address this rather than adopt snapshot interpolation plus lag compensation as-is. The engine has
+unusual tools to work with: a 512Hz simulation, microsecond-timestamped inputs, a rolling per-player input log on the
+server, Temporal history, and rollback. **Status: open — not yet designed.** Buffered interpolation, extrapolation
+policy, and lag-compensation rules are deliberately left undecided until this design exists.
+
+---
+
 ## Known Gaps
 
 - No interest management / relevancy culling — Authority sends all entities to all Owners today
@@ -318,4 +364,4 @@ No logical host/client split exists internally — preallocated slabs make doubl
 - `ListenNet` (`ListenSim`) TNet policy not yet implemented — `AuthorityClass` tagging and runtime override table pending
 - Host migration designed but not implemented — requires snapshot serialization path
 - Disconnect policy designed but not implemented — `ClientHealthMetrics` structs not wired
-- Deterministic/Non-Deterministic mode split is a planned netcode rewrite; current code is Deterministic only
+- Deterministic/Non-Deterministic mode split is a planned netcode rewrite; current code is Deterministic only. Holes in the rollback-disabled path, server-only rollback, and the open remote-representation design are listed in [Networking Without Rollback](#networking-without-rollback--current-state-and-direction)

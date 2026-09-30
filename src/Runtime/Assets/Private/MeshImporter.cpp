@@ -56,8 +56,8 @@ static void GenerateTangents(std::vector<Vertex>& vertices, const std::vector<ui
 
 		float dx1 = v1.px - v0.px, dy1 = v1.py - v0.py, dz1 = v1.pz - v0.pz;
 		float dx2 = v2.px - v0.px, dy2 = v2.py - v0.py, dz2 = v2.pz - v0.pz;
-		float du1 = v1.u - v0.u, dv1   = v1.v - v0.v;
-		float du2 = v2.u - v0.u, dv2   = v2.v - v0.v;
+		float du1 = v1.u - v0.u, dv1 = v1.v - v0.v;
+		float du2 = v2.u - v0.u, dv2 = v2.v - v0.v;
 
 		float r = du1 * dv2 - du2 * dv1;
 		if (fabsf(r) < 1e-12f) r = 1.0f;
@@ -69,8 +69,8 @@ static void GenerateTangents(std::vector<Vertex>& vertices, const std::vector<ui
 
 		for (int j = 0; j < 3; ++j)
 		{
-			uint32_t idx      = indices[i + j];
-			tan1[idx * 3]     += tx;
+			uint32_t idx = indices[i + j];
+			tan1[idx * 3] += tx;
 			tan1[idx * 3 + 1] += ty;
 			tan1[idx * 3 + 2] += tz;
 		}
@@ -85,9 +85,9 @@ static void GenerateTangents(std::vector<Vertex>& vertices, const std::vector<ui
 
 		// Gram-Schmidt orthogonalize
 		float dot = nx * tx + ny * ty + nz * tz;
-		tx        -= nx * dot;
-		ty        -= ny * dot;
-		tz        -= nz * dot;
+		tx -= nx * dot;
+		ty -= ny * dot;
+		tz -= nz * dot;
 
 		float len = sqrtf(tx * tx + ty * ty + tz * tz);
 		if (len > 1e-6f)
@@ -190,17 +190,23 @@ static bool ImportPrimitive(
 		const auto& attr = prim.attributes[i];
 		switch (attr.type)
 		{
-			case cgltf_attribute_type_position: posAcc = attr.data;
+			case cgltf_attribute_type_position:
+				posAcc = attr.data;
 				break;
-			case cgltf_attribute_type_normal: normAcc = attr.data;
+			case cgltf_attribute_type_normal:
+				normAcc = attr.data;
 				break;
-			case cgltf_attribute_type_texcoord: if (attr.index == 0) uvAcc = attr.data; // TEXCOORD_0 only
+			case cgltf_attribute_type_texcoord:
+				if (attr.index == 0) uvAcc = attr.data; // TEXCOORD_0 only
 				break;
-			case cgltf_attribute_type_tangent: if (attr.index == 0) tanAcc = attr.data;
+			case cgltf_attribute_type_tangent:
+				if (attr.index == 0) tanAcc = attr.data;
 				break;
-			case cgltf_attribute_type_joints:  if (attr.index == 0) jointsAcc  = attr.data;
+			case cgltf_attribute_type_joints:
+				if (attr.index == 0) jointsAcc = attr.data;
 				break;
-			case cgltf_attribute_type_weights: if (attr.index == 0) weightsAcc = attr.data;
+			case cgltf_attribute_type_weights:
+				if (attr.index == 0) weightsAcc = attr.data;
 				break;
 			default: break;
 		}
@@ -235,7 +241,7 @@ static bool ImportPrimitive(
 			aabbMax[a] = std::max(aabbMax[a], worldPos[a]);
 		}
 
-		float norm[3] = {0.0f, 1.0f, 0.0f};
+		float norm[3] = { 0.0f, 1.0f, 0.0f };
 		if (normAcc) ReadFloat3(normAcc, i, norm);
 		float worldNorm[3];
 		TransformDir(worldMatrix, norm, worldNorm);
@@ -248,7 +254,7 @@ static bool ImportPrimitive(
 
 		if (tanAcc)
 		{
-			float tan4[4] = {1.0f, 0.0f, 0.0f, 1.0f};
+			float tan4[4] = { 1.0f, 0.0f, 0.0f, 1.0f };
 			ReadFloat4(tanAcc, i, tan4);
 			float worldTan[3];
 			TransformDir(worldMatrix, tan4, worldTan);
@@ -287,13 +293,14 @@ static bool ImportPrimitive(
 		rawIndices.resize(idxStart + prim.indices->count);
 		for (cgltf_size i = 0; i < prim.indices->count; ++i)
 			rawIndices[idxStart + i] = baseVertex
-				+ static_cast<uint32_t>(cgltf_accessor_read_index(prim.indices, i));
+									   + static_cast<uint32_t>(cgltf_accessor_read_index(prim.indices, i));
 	}
 	else
 	{
 		size_t idxStart = rawIndices.size();
 		rawIndices.resize(idxStart + vertCount);
-		for (size_t i = 0; i < vertCount; ++i) rawIndices[idxStart + i] = baseVertex + static_cast<uint32_t>(i);
+		for (size_t i = 0; i < vertCount; ++i)
+			rawIndices[idxStart + i] = baseVertex + static_cast<uint32_t>(i);
 	}
 
 	return true;
@@ -340,8 +347,8 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 	std::vector<Vertex> rawVerts;
 	std::vector<uint32_t> rawIndices;
 	std::vector<SkinWeights> rawSkin;
-	float aabbMin[3]        = {1e30f, 1e30f, 1e30f};
-	float aabbMax[3]        = {-1e30f, -1e30f, -1e30f};
+	float aabbMin[3]        = { 1e30f, 1e30f, 1e30f };
+	float aabbMax[3]        = { -1e30f, -1e30f, -1e30f };
 	bool anyMissingTangents = false;
 	size_t totalPrimitives  = 0;
 
@@ -368,21 +375,21 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 		if (node->camera || node->light) return true;
 		const char* name = node->name ? node->name : "";
 		return ContainsCI(name, "armature") || ContainsCI(name, "skeleton")
-			|| ContainsCI(name, "gizmo") || ContainsCI(name, "helper")
-			|| ContainsCI(name, "ctrl") || ContainsCI(name, "control")
-			|| ContainsCI(name, "locator") || ContainsCI(name, "dummy")
-			|| ContainsCI(name, "floor") || ContainsCI(name, "ground")
-			|| ContainsCI(name, "UCX_") || ContainsCI(name, "collision");
+			   || ContainsCI(name, "gizmo") || ContainsCI(name, "helper")
+			   || ContainsCI(name, "ctrl") || ContainsCI(name, "control")
+			   || ContainsCI(name, "locator") || ContainsCI(name, "dummy")
+			   || ContainsCI(name, "floor") || ContainsCI(name, "ground")
+			   || ContainsCI(name, "UCX_") || ContainsCI(name, "collision");
 	};
 
 	auto ShouldSkipMeshName = [&](const char* name) -> bool
 	{
 		return ContainsCI(name, "armature") || ContainsCI(name, "skeleton")
-			|| ContainsCI(name, "gizmo") || ContainsCI(name, "helper")
-			|| ContainsCI(name, "ctrl") || ContainsCI(name, "control")
-			|| ContainsCI(name, "locator") || ContainsCI(name, "dummy")
-			|| ContainsCI(name, "floor") || ContainsCI(name, "ground")
-			|| ContainsCI(name, "UCX_") || ContainsCI(name, "collision");
+			   || ContainsCI(name, "gizmo") || ContainsCI(name, "helper")
+			   || ContainsCI(name, "ctrl") || ContainsCI(name, "control")
+			   || ContainsCI(name, "locator") || ContainsCI(name, "dummy")
+			   || ContainsCI(name, "floor") || ContainsCI(name, "ground")
+			   || ContainsCI(name, "UCX_") || ContainsCI(name, "collision");
 	};
 
 	// Track which meshes are referenced by nodes so we can catch unreferenced ones
@@ -420,14 +427,14 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 		for (cgltf_size pi = 0; pi < mesh->primitives_count; ++pi)
 		{
 			if (ImportPrimitive(mesh->primitives[pi], worldMatrix, rawVerts, rawIndices, rawSkin,
-								aabbMin, aabbMax, anyMissingTangents))
+					aabbMin, aabbMax, anyMissingTangents))
 			{
 				++totalPrimitives;
 			}
 			else
 			{
 				LOG_ENG_WARN_F("[MeshImporter] Skipped primitive %zu in mesh '%s' (non-triangle or no positions)",
-							   pi, meshName);
+					pi, meshName);
 			}
 		}
 
@@ -436,7 +443,7 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 		if (meshIdx < data->meshes_count) meshImported[meshIdx] = true;
 
 		LOG_ENG_INFO_F("[MeshImporter] Node '%s' mesh '%s': %zu primitives, %zu verts",
-					   nodeName, meshName, mesh->primitives_count, rawVerts.size() - meshVertsBefore);
+			nodeName, meshName, mesh->primitives_count, rawVerts.size() - meshVertsBefore);
 	}
 
 	// Import unreferenced meshes at identity (some exporters store bind-pose
@@ -462,14 +469,14 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 		for (cgltf_size pi = 0; pi < mesh.primitives_count; ++pi)
 		{
 			if (ImportPrimitive(mesh.primitives[pi], identity, rawVerts, rawIndices, rawSkin,
-								aabbMin, aabbMax, anyMissingTangents))
+					aabbMin, aabbMax, anyMissingTangents))
 			{
 				++totalPrimitives;
 			}
 		}
 
 		LOG_ENG_INFO_F("[MeshImporter] Unreferenced mesh %zu '%s': %zu verts (identity transform)",
-					   mi, meshName, rawVerts.size() - meshVertsBefore);
+			mi, meshName, rawVerts.size() - meshVertsBefore);
 	}
 
 	if (rawVerts.empty())
@@ -480,7 +487,7 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 	}
 
 	const size_t totalRawVerts = rawVerts.size();
-	const bool hasSkin = !rawSkin.empty() && rawSkin.size() == rawVerts.size();
+	const bool hasSkin         = !rawSkin.empty() && rawSkin.size() == rawVerts.size();
 
 	// Zero tangent fields before dedup so they don't affect vertex identity
 	// when tangents will be regenerated.
@@ -489,7 +496,7 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 		for (auto& v : rawVerts)
 		{
 			v.t_oct16x2 = 0;
-			v.flags     &= ~1u;
+			v.flags &= ~1u;
 		}
 	}
 
@@ -526,13 +533,13 @@ bool ImportGLTFToAsset(const std::string& srcPath, MeshAsset& outAsset)
 	std::memcpy(outAsset.AABBMax, aabbMax, sizeof(float) * 3);
 
 	LOG_ENG_INFO_F("[MeshImporter] Imported '%s': %zu meshes, %zu primitives, %zu verts, %zu indices (deduped from %zu)%s",
-				   srcPath.c_str(), data->meshes_count, totalPrimitives,
-			   outAsset.Vertices.size(), outAsset.Indices.size(), totalRawVerts,
-			   hasSkin ? " [skinned]" : "");
+		srcPath.c_str(), data->meshes_count, totalPrimitives,
+		outAsset.Vertices.size(), outAsset.Indices.size(), totalRawVerts,
+		hasSkin ? " [skinned]" : "");
 	LOG_ENG_INFO_F("[MeshImporter] AABB: min(%.3f, %.3f, %.3f) max(%.3f, %.3f, %.3f) size(%.3f, %.3f, %.3f)",
-				   aabbMin[0], aabbMin[1], aabbMin[2],
-			   aabbMax[0], aabbMax[1], aabbMax[2],
-			   aabbMax[0]-aabbMin[0], aabbMax[1]-aabbMin[1], aabbMax[2]-aabbMin[2]);
+		aabbMin[0], aabbMin[1], aabbMin[2],
+		aabbMax[0], aabbMax[1], aabbMax[2],
+		aabbMax[0] - aabbMin[0], aabbMax[1] - aabbMin[1], aabbMax[2] - aabbMin[2]);
 
 	cgltf_free(data);
 	return true;

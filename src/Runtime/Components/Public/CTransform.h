@@ -33,8 +33,8 @@ struct CTransform : ComponentView<CTransform, WIDTH>
 
 	// Nested accessors — hide FieldProxy plumbing from entity authors.
 	// References point to sibling fields; no data duplication.
-	Vec3Accessor<WIDTH> Position{PosX, PosY, PosZ};
-	QuatAccessor<WIDTH> Rotation{RotQx, RotQy, RotQz, RotQw};
+	Vec3Accessor<WIDTH> Position{ PosX, PosY, PosZ };
+	QuatAccessor<WIDTH> Rotation{ RotQx, RotQy, RotQz, RotQw };
 
 	static uint8_t GetTemporalIndex() { return 1; }
 };

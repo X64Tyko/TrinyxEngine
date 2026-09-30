@@ -27,39 +27,39 @@ enum class CoreAffinity : uint8_t
  */
 namespace TrinyxThreading
 {
-	/// Scan CPU topology and build the core assignment list.
-	/// Must be called once before any PinThread() calls.
-	void Initialize();
+/// Scan CPU topology and build the core assignment list.
+/// Must be called once before any PinThread() calls.
+void Initialize();
 
-	/// Pin the given thread to the next best available core.
-	/// Assigns physical cores before SMT siblings. Thread-safe.
-	void PinThread(std::thread & t);
+/// Pin the given thread to the next best available core.
+/// Assigns physical cores before SMT siblings. Thread-safe.
+void PinThread(std::thread& t);
 
-	/// Pin the calling thread to a specific core (e.g. for the main/Sentinel thread).
-	void PinCurrentThread(uint32_t coreId);
+/// Pin the calling thread to a specific core (e.g. for the main/Sentinel thread).
+void PinCurrentThread(uint32_t coreId);
 
-	/// Number of physical (processor) cores detected.
-	uint32_t GetPhysicalCoreCount();
+/// Number of physical (processor) cores detected.
+uint32_t GetPhysicalCoreCount();
 
-	/// Number of logical cores detected (physical + SMT).
-	uint32_t GetLogicalCoreCount();
+/// Number of logical cores detected (physical + SMT).
+uint32_t GetLogicalCoreCount();
 
-	/// How many cores are available for the worker pool
-	/// (logical cores minus the 3 reserved coordinator cores).
-	uint32_t GetWorkerThreadCapacity();
+/// How many cores are available for the worker pool
+/// (logical cores minus the 3 reserved coordinator cores).
+uint32_t GetWorkerThreadCapacity();
 
-	/** Return the ideal core for the requested affinity based on capacity and SMT.
-	 *
-	 */
-	uint32_t GetIdealCore(CoreAffinity affinity);
+/** Return the ideal core for the requested affinity based on capacity and SMT.
+ *
+ */
+uint32_t GetIdealCore(CoreAffinity affinity);
 
-	/// Whether the CPU has SMT (hyperthreading) enabled.
-	bool HasSMT();
+/// Whether the CPU has SMT (hyperthreading) enabled.
+bool HasSMT();
 
-	/// Enable or disable thread pinning globally.
-	/// Disable in PIE/editor builds where multiple worlds oversubscribe available cores.
-	/// Must be called before any PinThread() or PinCurrentThread() calls take effect.
-	/// Default: enabled. Set false before starting threads to make all pin calls no-ops.
-	void SetPinningEnabled(bool enabled);
-	bool IsPinningEnabled();
-}
+/// Enable or disable thread pinning globally.
+/// Disable in PIE/editor builds where multiple worlds oversubscribe available cores.
+/// Must be called before any PinThread() or PinCurrentThread() calls take effect.
+/// Default: enabled. Set false before starting threads to make all pin calls no-ops.
+void SetPinningEnabled(bool enabled);
+bool IsPinningEnabled();
+} // namespace TrinyxThreading

@@ -10,7 +10,7 @@ template <
 	uint32_t MaxKey, // e.g. 1u << 24
 	typename TValue,
 	uint32_t EntriesPerPage = 4096 // must be power of two
->
+	>
 class PagedMap
 {
 	static_assert(std::is_trivially_copyable_v<TValue>, "PagedMap TValue must be trivially copyable");
@@ -31,7 +31,7 @@ public:
 
 	PagedMap(const PagedMap&)            = delete;
 	PagedMap& operator=(const PagedMap&) = delete;
-	
+
 	FORCE_INLINE Value operator[](Key key) const { return get(key); }
 	FORCE_INLINE Value* operator[](Key key) { return try_get_ptr(key); }
 
@@ -110,7 +110,8 @@ private:
 	{
 		uint32_t s = 0;
 		uint32_t n = EntriesPerPage;
-		while ((n >>= 1) != 0) ++s;
+		while ((n >>= 1) != 0)
+			++s;
 		return s;
 	}();
 	static constexpr uint32_t PageMask = EntriesPerPage - 1;
@@ -122,7 +123,8 @@ private:
 	{
 		Value* page = new Value[EntriesPerPage];
 		// Fill with sentinel invalid value
-		for (uint32_t i = 0; i < EntriesPerPage; ++i) page[i] = TValue{};
+		for (uint32_t i = 0; i < EntriesPerPage; ++i)
+			page[i] = TValue{};
 		m_pages[pageIndex] = page;
 		return page;
 	}

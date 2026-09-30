@@ -1,5 +1,5 @@
 #pragma once
-#include "AnimConstruct.h"  // AnimConstruct, AnimationAsset, SkeletonAsset, AssetRegistry, AssetTypes
+#include "AnimConstruct.h" // AnimConstruct, AnimationAsset, SkeletonAsset, AssetRegistry, AssetTypes
 #include "Construct.h"
 #include "ConstructView.h"
 #include "EPlayerCharacter.h"
@@ -45,7 +45,7 @@ public:
 		{
 			Body.Initialize(this);
 
-			Vector3 spawnPos{SpawnPosX, SpawnPosY, SpawnPosZ};
+			Vector3 spawnPos{ SpawnPosX, SpawnPosY, SpawnPosZ };
 			Body.SetPosition(spawnPos);
 			Body.Transform.Rotation.SetIdentity();
 
@@ -60,7 +60,8 @@ public:
 		Body.SkeletonRef.SetSkeleton(TNX_NAME("BrainStem"));
 		Body.VisTransform.VisBlend = SimFloat(1.f);
 
-		if (auto skelRef = AssetRegistry::Get().GetAssetData<SkeletonAsset>(TNX_NAME("BrainStem"))) RegisterSockets(skelRef);
+		if (auto skelRef = AssetRegistry::Get().GetAssetData<SkeletonAsset>(TNX_NAME("BrainStem")))
+			RegisterSockets(skelRef);
 		else
 			LOG_WARN("[BrainStemConstruct] Skeleton not yet loaded — call PreloadAssets() before spawning");
 	}
@@ -79,8 +80,8 @@ public:
 
 		// Base layer — wrap on loop
 		const AssetDataRef<AnimationAsset> AssetRef = AssetRegistry::Get().GetAssetData<AnimationAsset>(AssetType::Animation, baseAnimID);
-		const float baseDur = AssetRef->duration;
-		SimFloat baseT      = Body.AnimBase.GetBaseTimestamp();
+		const float baseDur                         = AssetRef->duration;
+		SimFloat baseT                              = Body.AnimBase.GetBaseTimestamp();
 		if (WrapTimestamp(baseT, baseDur, /*loops=*/true))
 		{
 			NotifyState.ClearLoopedRecords(0, SimFloat(baseDur));
@@ -91,8 +92,8 @@ public:
 		if (Body.AnimBase.HasFade())
 		{
 			const AssetDataRef<AnimationAsset> FadeRef = AssetRegistry::Get().GetAssetData<AnimationAsset>(AssetType::Animation, Body.AnimBase.FadeAnimID);
-			const float fadeDur   = FadeRef->duration;
-			SimFloat fadeT        = Body.AnimBase.GetFadeTimestamp();
+			const float fadeDur                        = FadeRef->duration;
+			SimFloat fadeT                             = Body.AnimBase.GetFadeTimestamp();
 			if (WrapTimestamp(fadeT, fadeDur, Body.AnimBase.GetFadeLoop()))
 			{
 				NotifyState.ClearLoopedRecords(1, SimFloat(fadeDur));
@@ -145,7 +146,7 @@ private:
 				LOG_INFO_F("[BrainStem] Skeleton boneCount=%u", skelRef->boneCount);
 				for (uint32_t i = 0; i < skelRef->boneCount; ++i)
 					LOG_INFO_F("[BrainStem]   bone[%2u] %-32s  parent=%u",
-						   i, skelRef->bones[i].name.GetStr(), skelRef->bones[i].parentIndex);
+						i, skelRef->bones[i].name.GetStr(), skelRef->bones[i].parentIndex);
 				SkeletonDumped = true;
 			}
 		}
@@ -154,7 +155,7 @@ private:
 
 		const float tF = t.ToFloat();
 		LOG_INFO_F("[BrainStem] animSlot=%u  t=%.3f / %.3f s  (%.1f%%)",
-				   animID, tF, dur, dur > 0.f ? 100.f * tF / dur : 0.f);
+			animID, tF, dur, dur > 0.f ? 100.f * tF / dur : 0.f);
 
 		static constexpr uint32_t kTrackedBone = 1;
 		auto animRef                           = AssetRegistry::Get().GetAssetData<AnimationAsset>(AssetType::Animation, animID);
@@ -164,9 +165,9 @@ private:
 		{
 			BoneTransform b = animRef->EvaluateBone(kTrackedBone, tF);
 			LOG_INFO_F("[BrainStem]   bone[%u] tx=%.4f ty=%.4f tz=%.4f  rx=%.4f ry=%.4f rz=%.4f rw=%.4f",
-					   kTrackedBone,
-					   b.tx.ToFloat(), b.ty.ToFloat(), b.tz.ToFloat(),
-					   b.rx.ToFloat(), b.ry.ToFloat(), b.rz.ToFloat(), b.rw.ToFloat());
+				kTrackedBone,
+				b.tx.ToFloat(), b.ty.ToFloat(), b.tz.ToFloat(),
+				b.rx.ToFloat(), b.ry.ToFloat(), b.rz.ToFloat(), b.rw.ToFloat());
 		}
 		else
 		{

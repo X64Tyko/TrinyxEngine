@@ -40,7 +40,7 @@ public:
 		Flow->SetGameMode("ArenaMode");
 
 		std::string sceneName = cfg->DefaultScene;
-		auto dot = sceneName.rfind('.');
+		auto dot              = sceneName.rfind('.');
 		if (dot != std::string::npos) sceneName = sceneName.substr(0, dot);
 		Flow->LoadLevelByName(sceneName.c_str());
 
@@ -66,7 +66,7 @@ public:
 
 	StateRequirements GetRequirements() const override
 	{
-		return {.NeedsWorld = true, .NeedsLevel = true};
+		return { .NeedsWorld = true, .NeedsLevel = true };
 	}
 
 	const char* GetName() const override { return "GameplayState"; }

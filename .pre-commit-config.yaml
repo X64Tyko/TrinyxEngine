@@ -1,0 +1,43 @@
+# Pre-commit / pre-push hooks. Works the same on Windows and Linux.
+#   python -m pip install -r scripts/requirements-dev.txt
+#   pre-commit install        (once per OS — installs both pre-commit and pre-push hooks)
+#
+# pre-commit: whitespace/EOL hygiene + clang-format on staged files (auto-fixes; re-stage and commit again)
+# pre-push:   scripts/presubmit.py — clang-tidy on changed files, build Testbed, run it headless
+# Skip the push gate in an emergency with: TNX_SKIP_PRESUBMIT=1 git push   (or git push --no-verify)
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+exclude: ^(libs|vendor)/
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-merge-conflict
+      - id: check-case-conflict   # the working tree is shared with Windows (case-insensitive)
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: [--maxkb=5120]
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v23.1.1   # keep in sync with scripts/requirements-dev.txt and scripts/presubmit.py
+    hooks:
+      - id: clang-format
+        types_or: [c, c++]
+
+  - repo: local
+    hooks:
+      - id: presubmit
+        name: presubmit (clang-tidy, build, Testbed)
+        entry: python scripts/presubmit.py --skip-format
+        language: python
+        additional_dependencies: [clang-tidy==22.1.8]
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

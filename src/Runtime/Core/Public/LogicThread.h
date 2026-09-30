@@ -73,14 +73,14 @@ public:
 	 * @param jobsInitialized Engine jobs-ready gate; Brain spins on this before draining the queue.
 	 */
 	void Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
-					InputBuffer* simInput, InputBuffer* vizInput,
-					TrinyxJobs::WorldQueueHandle worldQueue,
-					const std::atomic<bool>* jobsInitialized,
-					int windowWidth, int windowHeight) override;
+		InputBuffer* simInput, InputBuffer* vizInput,
+		TrinyxJobs::WorldQueueHandle worldQueue,
+		const std::atomic<bool>* jobsInitialized,
+		int windowWidth, int windowHeight) override;
 
 	void Start() override; ///< @brief Spawn the Brain thread and begin the fixed-rate loop.
-	void Stop()  override; ///< @brief Signal the Brain thread to exit after the current frame.
-	void Join()  override; ///< @brief Block the caller until the Brain thread exits.
+	void Stop() override;  ///< @brief Signal the Brain thread to exit after the current frame.
+	void Join() override;  ///< @brief Block the caller until the Brain thread exits.
 
 	/// @brief Expose the concrete net policy so AuthorityNet/OwnerNet can call Bind() after world creation.
 	TNet& GetNetMode() { return NetMode; }
@@ -108,16 +108,12 @@ private:
 
 	void PhysicsLoop(SimFloat fixedStepTime);
 	bool FixedUpdate(uint64_t perfFrequency, SimFloat fixedStepTime, int maxPhysSubSteps,
-					 uint64_t frameStartCounter);
+		uint64_t frameStartCounter);
 
-	[[no_unique_address]] TNet      NetMode;   ///< Net policy — zero size for SoloSim.
-	[[no_unique_address]] TRollback Rollback;  ///< Rollback policy — zero size for NoRollback.
-	[[no_unique_address]] TFrame    FrameMode; ///< Frame policy — zero size (tag type only).
+	[[no_unique_address]] TNet NetMode;       ///< Net policy — zero size for SoloSim.
+	[[no_unique_address]] TRollback Rollback; ///< Rollback policy — zero size for NoRollback.
+	[[no_unique_address]] TFrame FrameMode;   ///< Frame policy — zero size (tag type only).
 };
-
-#ifdef TNX_ENABLE_ROLLBACK
-#include "Policies/RollbackImpl.h"
-#endif
 
 // Explicit instantiations live in LogicThread.cpp. Suppress implicit instantiation
 // in all other TUs so LogicThread<>'s vtable has exactly one home.

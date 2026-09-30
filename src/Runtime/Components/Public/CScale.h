@@ -17,7 +17,7 @@ struct CScale : ComponentView<CScale, WIDTH>
 	FloatProxy<WIDTH> ScaleY;
 	FloatProxy<WIDTH> ScaleZ;
 
-	Vec3Accessor<WIDTH> Value{ScaleX, ScaleY, ScaleZ};
+	Vec3Accessor<WIDTH> Value{ ScaleX, ScaleY, ScaleZ };
 };
 
 TNX_REGISTER_COMPONENT(CScale)

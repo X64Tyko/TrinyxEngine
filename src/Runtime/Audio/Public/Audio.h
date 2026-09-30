@@ -24,43 +24,46 @@ class AudioManager;
 
 namespace Audio
 {
-	// --- Fire-and-forget play ------------------------------------------------
+// --- Fire-and-forget play ------------------------------------------------
 
-	SoundHandle Play(TnxName name, PlayParams params = {});
-	SoundHandle Play(AssetID id, PlayParams params = {});
+SoundHandle Play(TnxName name, PlayParams params = {});
+SoundHandle Play(AssetID id, PlayParams params = {});
 
-	// Play via registered audio event (falls back to direct asset lookup).
-	SoundHandle Trigger(TnxName name, PlayParams overrides = {});
+// Play via registered audio event (falls back to direct asset lookup).
+SoundHandle Trigger(TnxName name, PlayParams overrides = {});
 
-	// --- Handle-based control ------------------------------------------------
+// --- Handle-based control ------------------------------------------------
 
-	void Stop(SoundHandle handle);
-	void FadeOut(SoundHandle handle, float durationSeconds);
-	void SetVolume(SoundHandle handle, float volume);
-	bool IsPlaying(SoundHandle handle);
+void Stop(SoundHandle handle);
+void FadeOut(SoundHandle handle, float durationSeconds);
+void SetVolume(SoundHandle handle, float volume);
+bool IsPlaying(SoundHandle handle);
 
-	// --- Event registration --------------------------------------------------
+// --- Event registration --------------------------------------------------
 
-	void RegisterEvent(TnxName eventName, AssetID asset, PlayParams defaults = {});
+void RegisterEvent(TnxName eventName, AssetID asset, PlayParams defaults = {});
 
-	// Resolve asset by name — eventName and assetName must differ.
-	void RegisterEvent(TnxName eventName, TnxName assetName, PlayParams defaults = {});
+// Resolve asset by name — eventName and assetName must differ.
+void RegisterEvent(TnxName eventName, TnxName assetName, PlayParams defaults = {});
 
-	void UpdateEvent(TnxName eventName, PlayParams defaults);
-	void DeregisterEvent(TnxName eventName);
+void UpdateEvent(TnxName eventName, PlayParams defaults);
+void DeregisterEvent(TnxName eventName);
 
-	// -------------------------------------------------------------------------
-	// Shared state — definition lives here so both Audio.h and AudioInternal.h
-	// reference the same static-local instance across translation units.
+// -------------------------------------------------------------------------
+// Shared state — definition lives here so both Audio.h and AudioInternal.h
+// reference the same static-local instance across translation units.
 
-	namespace Detail
-	{
-		inline AudioManager*& ManagerPtr() noexcept
-		{
-			static AudioManager* s_Manager = nullptr;
-			return s_Manager;
-		}
-	}
-
-	inline AudioManager* GetManager() noexcept { return Detail::ManagerPtr(); }
+namespace Detail
+{
+inline AudioManager*& ManagerPtr() noexcept
+{
+	static AudioManager* s_Manager = nullptr;
+	return s_Manager;
 }
+} // namespace Detail
+
+inline AudioManager* GetManager() noexcept
+{
+	return Detail::ManagerPtr();
+}
+} // namespace Audio

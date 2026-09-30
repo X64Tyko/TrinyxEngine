@@ -11,12 +11,12 @@ TEST(Config_FillFrom)
 	// --- FillFrom: set field survives, Unset field gets filled ---
 	{
 		EngineConfig dst;
-		dst.FixedUpdateHz = 512;        // explicitly set
+		dst.FixedUpdateHz   = 512;                 // explicitly set
 		dst.NetworkUpdateHz = EngineConfig::Unset; // unset — should be filled
 
 		EngineConfig src;
-		src.FixedUpdateHz   = 64;   // lower value — must NOT overwrite dst
-		src.NetworkUpdateHz = 20;   // should fill dst
+		src.FixedUpdateHz   = 64; // lower value — must NOT overwrite dst
+		src.NetworkUpdateHz = 20; // should fill dst
 
 		dst.FillFrom(src);
 
@@ -72,16 +72,16 @@ TEST(Config_FillFrom)
 
 		// Engine defaults (least specific)
 		EngineConfig engine;
-		engine.FixedUpdateHz   = 128;
-		engine.NetworkUpdateHz = 30;
+		engine.FixedUpdateHz       = 128;
+		engine.NetworkUpdateHz     = 30;
 		engine.MAX_CACHED_ENTITIES = 50000;
 
 		// Cascade: project fills from engine for anything still Unset
 		project.FillFrom(engine);
 		project.ApplyDefaults();
 
-		ASSERT_EQ(project.FixedUpdateHz, 512);          // project wins
-		ASSERT_EQ(project.NetworkUpdateHz, 30);          // engine filled it
-		ASSERT_EQ(project.MAX_CACHED_ENTITIES, 50000);   // engine filled it
+		ASSERT_EQ(project.FixedUpdateHz, 512);         // project wins
+		ASSERT_EQ(project.NetworkUpdateHz, 30);        // engine filled it
+		ASSERT_EQ(project.MAX_CACHED_ENTITIES, 50000); // engine filled it
 	}
 }

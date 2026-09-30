@@ -10,16 +10,16 @@
 #include "Registry.h"
 
 Archetype::Archetype(const Signature& sig, const ClassID& id, const char* debugName)
-	: ArchSignature(sig)
-	, ArchClassID(id)
-	, DebugName(debugName)
+	: ArchSignature(sig),
+	  ArchClassID(id),
+	  DebugName(debugName)
 {
 }
 
 Archetype::Archetype(const ArchetypeKey& archKey, const char* debugName)
-	: ArchSignature(archKey.Sig)
-	, ArchClassID(archKey.ID)
-	, DebugName(debugName)
+	: ArchSignature(archKey.Sig),
+	  ArchClassID(archKey.ID),
+	  DebugName(debugName)
 {
 }
 
@@ -78,20 +78,19 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& c
 		{
 			const FieldMeta& field = (*fields)[fieldIdx];
 			currentOffset          = AlignOffset(currentOffset, FIELD_ARRAY_ALIGNMENT);
-			currentOffset          += field.Size * EntitiesPerChunk;
+			currentOffset += field.Size * EntitiesPerChunk;
 
-			FieldKey key{typeID, cacheSlotID, static_cast<uint32_t>(fieldIdx)};
+			FieldKey key{ typeID, cacheSlotID, static_cast<uint32_t>(fieldIdx) };
 			ArchetypeFieldLayout.insert_or_assign(key, FieldDescriptor{
-													  ArchfieldIndex++,
-													  fieldIdx,
-													  cacheSlotID,
-													  typeID,
-													  temporalTier,
-													  field.ValueType,
-													  field.RefAssetType,
-													  field.Size,
-													  temporalCache ? true : false
-												  });
+														   ArchfieldIndex++,
+														   fieldIdx,
+														   cacheSlotID,
+														   typeID,
+														   temporalTier,
+														   field.ValueType,
+														   field.RefAssetType,
+														   field.Size,
+														   temporalCache ? true : false });
 		}
 	}
 
@@ -99,7 +98,7 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& c
 	TotalChunkDataSize                    = std::max(currentOffset, MinEntitySize);
 
 	LOG_ENG_INFO_F("Archetype layout: %zu field arrays, %zu bytes, %u entities/chunk",
-				   ArchetypeFieldLayout.count(), TotalChunkDataSize, EntitiesPerChunk);
+		ArchetypeFieldLayout.count(), TotalChunkDataSize, EntitiesPerChunk);
 
 	// Validate temporal field count doesn't exceed chunk header capacity
 	assert(ArchetypeFieldLayout.count() <= Chunk::MAX_CHUNK_FIELDS);
@@ -109,7 +108,7 @@ void Archetype::BuildLayout(Registry* reg, const std::vector<ComponentMetaEx>& c
 // Frame stride and count are queried from the cache once — not stored per-field.
 // Cold fields (tier == None): stride=0, count=1, so math degenerates to base+0.
 void Archetype::BuildFieldDualArrayTable(Chunk* chunk, void** outDualArrayTable,
-										 uint32_t absoluteFrame, uint32_t volatileAbsoluteFrame) const
+	uint32_t absoluteFrame, uint32_t volatileAbsoluteFrame) const
 {
 	// Hoist cache queries outside the loop — all fields sharing a tier use the same stride/count.
 	const auto* tc    = Reg->GetCache(CacheTier::Temporal);
@@ -121,8 +120,8 @@ void Archetype::BuildFieldDualArrayTable(Chunk* chunk, void** outDualArrayTable,
 
 	for (const auto& [fkey, fdesc] : ArchetypeFieldLayout)
 	{
-		const size_t idx   = fdesc.fieldSlotIndex;
-		auto* base         = static_cast<uint8_t*>(chunk->Header.FieldPtrs[idx]);
+		const size_t idx      = fdesc.fieldSlotIndex;
+		auto* base            = static_cast<uint8_t*>(chunk->Header.FieldPtrs[idx]);
 		const bool isTemporal = (fdesc.tier == CacheTier::Temporal);
 		const uint32_t frame  = isTemporal ? absoluteFrame : volatileAbsoluteFrame;
 		const size_t stride   = fdesc.bIsTemporal ? (isTemporal ? tStr : vStr) : 0;
@@ -136,7 +135,7 @@ void Archetype::BuildFieldDualArrayTable(Chunk* chunk, void** outDualArrayTable,
 // Build single field array table for a specific frame (update dispatch, serialization).
 // Cold fields resolve to base+0.
 void Archetype::BuildFieldArrayTable(Chunk* chunk, void** outFieldArrayTable,
-									 uint32_t absoluteFrame, uint32_t volatileAbsoluteFrame) const
+	uint32_t absoluteFrame, uint32_t volatileAbsoluteFrame) const
 {
 	const auto* tc    = Reg->GetCache(CacheTier::Temporal);
 	const auto* vc    = Reg->GetCache(CacheTier::Volatile);
@@ -247,7 +246,7 @@ void Archetype::RemoveEntity(size_t chunkIndex, uint32_t localIndex, uint32_t ar
 	{
 		Chunk* chunk                = Chunks[chunkIndex];
 		ComponentTypeID flagsTypeID = CacheSlotMeta<>::StaticTypeID();
-		FieldKey flagKey{flagsTypeID, ReflectionRegistry::Get().GetCacheSlotIndex(flagsTypeID), 0};
+		FieldKey flagKey{ flagsTypeID, ReflectionRegistry::Get().GetCacheSlotIndex(flagsTypeID), 0 };
 		auto* flagDesc = ArchetypeFieldLayout.find(flagKey);
 		assert(flagDesc && "Flags field missing from archetype layout");
 
@@ -289,7 +288,7 @@ std::vector<void*> Archetype::GetFieldArrays(Chunk* targetChunk, ComponentTypeID
 
 	for (size_t fieldIdx = 0; fieldIdx < fields->size(); ++fieldIdx)
 	{
-		FieldKey key{typeID, cfr.GetCacheSlotIndex(typeID), static_cast<uint32_t>(fieldIdx)};
+		FieldKey key{ typeID, cfr.GetCacheSlotIndex(typeID), static_cast<uint32_t>(fieldIdx) };
 		auto it = ArchetypeFieldLayout.find(key);
 		if (it)
 		{
@@ -375,7 +374,7 @@ Chunk* Archetype::AllocateChunk()
 		{
 			currentOffset                                    = AlignOffset(currentOffset, FIELD_ARRAY_ALIGNMENT);
 			NewChunk->Header.FieldPtrs[fdesc.fieldSlotIndex] = chunkBase + currentOffset;
-			currentOffset                                    += fdesc.fieldSize * EntitiesPerChunk;
+			currentOffset += fdesc.fieldSize * EntitiesPerChunk;
 		}
 	}
 
@@ -415,7 +414,7 @@ Chunk* Archetype::AllocateChunk()
 		{
 			char buffer[256];
 			snprintf(buffer, sizeof(buffer), "Large gap detected: %ti KB between chunk %u and %u",
-					 gap / 1024, chunkCount - 1, chunkCount);
+				gap / 1024, chunkCount - 1, chunkCount);
 			TNX_ZONE_TEXT(buffer, strlen(buffer));
 		}
 	}
@@ -438,11 +437,11 @@ Chunk* Archetype::AllocateChunk()
 // For cold fields, copies the inline chunk array element.
 // Registry::ExecuteDefragMove must update all bookkeeping before or after this call.
 void Archetype::MoveEntitySlot(const EntitySlot& src, const EntitySlot& dst,
-                                ComponentCacheBase* temporalCache,
-                                ComponentCacheBase* volatileCache)
+	ComponentCacheBase* temporalCache,
+	ComponentCacheBase* volatileCache)
 {
-	const size_t tStr = temporalCache ? temporalCache->GetFrameStride()     : 0;
-	const size_t vStr = volatileCache ? volatileCache->GetFrameStride()     : 0;
+	const size_t tStr = temporalCache ? temporalCache->GetFrameStride() : 0;
+	const size_t vStr = volatileCache ? volatileCache->GetFrameStride() : 0;
 	const size_t tN   = temporalCache ? temporalCache->GetTotalFrameCount() : 1;
 	const size_t vN   = volatileCache ? volatileCache->GetTotalFrameCount() : 1;
 
@@ -453,23 +452,23 @@ void Archetype::MoveEntitySlot(const EntitySlot& src, const EntitySlot& dst,
 
 		if (fdesc.bIsTemporal)
 		{
-			const bool   isTemporal = (fdesc.tier == CacheTier::Temporal);
-			const size_t stride     = isTemporal ? tStr : vStr;
-			const size_t frames     = isTemporal ? tN   : vN;
+			const bool isTemporal = (fdesc.tier == CacheTier::Temporal);
+			const size_t stride   = isTemporal ? tStr : vStr;
+			const size_t frames   = isTemporal ? tN : vN;
 
 			for (size_t f = 0; f < frames; ++f)
 			{
 				const size_t off = f * stride;
 				std::memcpy(dstBase + off + dst.LocalIndex * fdesc.fieldSize,
-				            srcBase + off + src.LocalIndex * fdesc.fieldSize,
-				            fdesc.fieldSize);
+					srcBase + off + src.LocalIndex * fdesc.fieldSize,
+					fdesc.fieldSize);
 			}
 		}
 		else
 		{
 			std::memcpy(dstBase + dst.LocalIndex * fdesc.fieldSize,
-			            srcBase + src.LocalIndex * fdesc.fieldSize,
-			            fdesc.fieldSize);
+				srcBase + src.LocalIndex * fdesc.fieldSize,
+				fdesc.fieldSize);
 		}
 	}
 }

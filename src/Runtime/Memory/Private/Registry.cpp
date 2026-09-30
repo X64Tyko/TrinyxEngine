@@ -20,8 +20,9 @@
 
 Registry::Registry()
 	: NextRecordIndex(1) // Start at 1 (0 is reserved for Invalid)
-	, NextLocalIndex(1)
-	, NextNetIndex(1)
+	  ,
+	  NextLocalIndex(1),
+	  NextNetIndex(1)
 {
 	TNX_ZONE_N("Registry::Constructor");
 }
@@ -73,7 +74,7 @@ EntityHandle Registry::MakeEntityHandle(GlobalEntityHandle gHandle, ClassID clas
 EntityHandle Registry::CreateByClassID(ClassID classID)
 {
 	GlobalEntityHandle GHandle;
-	CreateInternal(classID, {&GHandle, 1});
+	CreateInternal(classID, { &GHandle, 1 });
 	return MakeEntityHandle(GHandle, classID);
 }
 
@@ -83,7 +84,8 @@ std::vector<EntityHandle> Registry::CreateByClassID(ClassID classID, size_t coun
 	CreateInternal(classID, GHandles);
 
 	std::vector<EntityHandle> handles(count);
-	for (size_t i = 0; i < count; ++i) handles[i] = MakeEntityHandle(GHandles[i], classID);
+	for (size_t i = 0; i < count; ++i)
+		handles[i] = MakeEntityHandle(GHandles[i], classID);
 	return handles;
 }
 
@@ -105,7 +107,7 @@ void Registry::RecreateAs(EntityHandle& inHandle, const EntityHandle& asHandle)
 	ClassID classID = asHandle.GetTypeID() != inHandle.GetTypeID()
 						  ? asHandle.GetTypeID()
 						  : inHandle.GetTypeID();
-	inHandle = CreateByClassID(classID);
+	inHandle        = CreateByClassID(classID);
 }
 
 Archetype* Registry::GetOrCreateArchetype(const Signature& sig, const ClassID& id)
@@ -262,7 +264,8 @@ void Registry::RequestLocalRecycle(uint32_t localIndex)
 
 void Registry::ConfirmLocalRecycles()
 {
-	for (uint32_t Index : PendingLocalRecycles) FreeLocalIndices.push(Index);
+	for (uint32_t Index : PendingLocalRecycles)
+		FreeLocalIndices.push(Index);
 	PendingLocalRecycles.clear();
 }
 
@@ -304,7 +307,7 @@ void Registry::ConfirmTombstone(uint32_t recordIndex)
 bool Registry::IsTombstoned(uint32_t recordIndex) const
 {
 	return std::find(TombstoneRecordIndices.begin(), TombstoneRecordIndices.end(), recordIndex)
-		!= TombstoneRecordIndices.end();
+		   != TombstoneRecordIndices.end();
 }
 
 // --- Net handle index allocation ---
@@ -327,7 +330,8 @@ void Registry::RequestNetRecycle(uint32_t netIndex)
 
 void Registry::ConfirmNetRecycles()
 {
-	for (uint32_t Index : PendingNetRecycles) FreeNetIndices.push(Index);
+	for (uint32_t Index : PendingNetRecycles)
+		FreeNetIndices.push(Index);
 	PendingNetRecycles.clear();
 }
 
@@ -347,7 +351,7 @@ void Registry::CreateInternal(ClassID classID, std::span<GlobalEntityHandle> out
 	{
 		const char* name = (classID < 4096) ? MR.EntityGetters[classID].Name : nullptr;
 		LOG_ENG_ERROR_F("CreateInternal: ClassID %u ('%s') not registered",
-						classID, name ? name : "unknown");
+			classID, name ? name : "unknown");
 		assert(false && "Entity ClassID not registered");
 		return;
 	}
@@ -494,7 +498,7 @@ void Registry::ProcessDeferredDestructions()
 			auto* flags                = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
 			if (flags)
 			{
-				// If replication is active, leave replicated entities for the ReplicationSystem           
+				// If replication is active, leave replicated entities for the ReplicationSystem
 				if (ReplicationActive)
 				{
 					const bool isReplicated = (flags[record->CacheEntityIndex] & static_cast<int32_t>(TemporalFlagBits::Replicated)) != 0;
@@ -664,11 +668,11 @@ void Registry::PropagateFrame(uint32_t currentFrame, bool bPreserveDirtiedFrame)
 			// MAX_CACHED_ENTITIES worth of int32_t flags in the slab.
 			// Iterate the full range — bitplane scan over gaps costs ~microseconds.
 			const size_t entityCount = flagsCache->GetMaxCachedEntityCount();
-			using FlagTraits        = SIMDTraits<int32_t, FieldWidth::Wide>;
-			using FlagVec           = typename FlagTraits::VecType;
-			const size_t stride     = kSIMDWide32Lanes;
-			const size_t simdCount  = entityCount / stride;
-			const size_t remainder  = entityCount % stride;
+			using FlagTraits         = SIMDTraits<int32_t, FieldWidth::Wide>;
+			using FlagVec            = typename FlagTraits::VecType;
+			const size_t stride      = kSIMDWide32Lanes;
+			const size_t simdCount   = entityCount / stride;
+			const size_t remainder   = entityCount % stride;
 
 			const FlagVec vMask = FlagTraits::set1(clearMask);
 			for (size_t i = 0; i < simdCount; ++i)
@@ -694,14 +698,14 @@ void Registry::ClearDirtiedFrameBits()
 
 	if (!flags) return;
 
-	const size_t entityCount    = flagsCache->GetMaxCachedEntityCount();
-	using FlagTraits            = SIMDTraits<int32_t, FieldWidth::Wide>;
-	using FlagVec               = typename FlagTraits::VecType;
-	const size_t stride         = kSIMDWide32Lanes;
-	const size_t simdCount      = entityCount / stride;
-	const size_t remainder      = entityCount % stride;
-	const int32_t clearMask     = ~static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
-	const FlagVec vMask         = FlagTraits::set1(clearMask);
+	const size_t entityCount = flagsCache->GetMaxCachedEntityCount();
+	using FlagTraits         = SIMDTraits<int32_t, FieldWidth::Wide>;
+	using FlagVec            = typename FlagTraits::VecType;
+	const size_t stride      = kSIMDWide32Lanes;
+	const size_t simdCount   = entityCount / stride;
+	const size_t remainder   = entityCount % stride;
+	const int32_t clearMask  = ~static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
+	const FlagVec vMask      = FlagTraits::set1(clearMask);
 
 	for (size_t i = 0; i < simdCount; ++i)
 	{
@@ -724,9 +728,12 @@ void Registry::ResetRegistry()
 	GlobalEntityRegistry.LocalToRecord.clear_all();
 	GlobalEntityRegistry.CacheToRecord.clear_all();
 
-	while (!FreeRecordIndices.empty()) FreeRecordIndices.pop();
-	while (!FreeLocalIndices.empty()) FreeLocalIndices.pop();
-	while (!FreeNetIndices.empty()) FreeNetIndices.pop();
+	while (!FreeRecordIndices.empty())
+		FreeRecordIndices.pop();
+	while (!FreeLocalIndices.empty())
+		FreeLocalIndices.pop();
+	while (!FreeNetIndices.empty())
+		FreeNetIndices.pop();
 	PendingLocalRecycles.clear();
 	PendingNetRecycles.clear();
 	TombstoneRecordIndices.clear();
@@ -745,7 +752,8 @@ void Registry::ResetRegistry()
 	VolatileSlab.ResetAllocators();
 	VolatileSlab.ClearFrameData();
 
-	for (auto& arch : Archetypes) arch.second->FreeAllChunks();
+	for (auto& arch : Archetypes)
+		arch.second->FreeAllChunks();
 }
 
 int Registry::SweepAliveFlagsToActive()
@@ -767,26 +775,26 @@ int Registry::SweepAliveFlagsToActive()
 	const uint32_t activeShift     = TNX_CTZ32(activeBit);
 	const uint32_t tombstoneShift  = TNX_CTZ32(tombstoneBit);
 
-	using Traits             = SIMDTraits<int32_t, FieldWidth::Wide>;
-	using VecType            = typename Traits::VecType;
-	const VecType vAlive     = Traits::set1(static_cast<int32_t>(aliveBit));
+	using Traits               = SIMDTraits<int32_t, FieldWidth::Wide>;
+	using VecType              = typename Traits::VecType;
+	const VecType vAlive       = Traits::set1(static_cast<int32_t>(aliveBit));
 	const VecType vActiveDirty = Traits::set1(static_cast<int32_t>(activeBit | dirtyBit | dirtiedFrameBit));
-	const VecType vZero      = Traits::set1(0);
-	const VecType vTombstone = Traits::set1(static_cast<int32_t>(tombstoneBit));
-	VecType vCount           = vZero;
-	const uint32_t stride    = static_cast<uint32_t>(kSIMDWide32Lanes);
-	const uint32_t wideMax   = max & ~(stride - 1u);
+	const VecType vZero        = Traits::set1(0);
+	const VecType vTombstone   = Traits::set1(static_cast<int32_t>(tombstoneBit));
+	VecType vCount             = vZero;
+	const uint32_t stride      = static_cast<uint32_t>(kSIMDWide32Lanes);
+	const uint32_t wideMax     = max & ~(stride - 1u);
 	for (uint32_t i = 0; i < wideMax; i += stride)
 	{
-		const VecType f     = Traits::load(flags + i);
+		const VecType f = Traits::load(flags + i);
 		// Skip tombstoned entities
 		VecType isTombstone = Traits::srl(Traits::bitand_(f, vTombstone), tombstoneShift);
 		VecType shift       = Traits::srl(Traits::bitand_(f, vAlive), aliveShift); // 0 or 1
 		VecType neg         = Traits::sub(vZero, shift);                           // 0 or 0xFFFFFFFF
 		VecType toSet       = Traits::bitand_(vActiveDirty, neg);                  // activeBit | dirtyBit | dirtiedFrameBit or 0
 		// Only set active if not tombstoned
-		toSet               = Traits::bitandnot(isTombstone, toSet);
-		vCount              = Traits::add(vCount, Traits::srl(Traits::bitandnot(f, toSet), activeShift));
+		toSet  = Traits::bitandnot(isTombstone, toSet);
+		vCount = Traits::add(vCount, Traits::srl(Traits::bitandnot(f, toSet), activeShift));
 		Traits::store(flags + i, WideMaskType{}, Traits::bitor_(f, toSet));
 	}
 
@@ -796,13 +804,12 @@ int Registry::SweepAliveFlagsToActive()
 	{
 		const uint32_t f    = static_cast<uint32_t>(flags[i]);
 		const uint32_t mask = -((f & aliveBit) >> aliveShift);
-		// Skip tombstoned entities                                                                        
+		// Skip tombstoned entities
 		const bool isTombstone = (f & tombstoneBit) != 0;
 		if (!isTombstone)
 		{
 			sweepCount += static_cast<int>((activeBit & mask & ~f) >> activeShift);
-			flags[i]   = static_cast<int32_t>(f | ((activeBit | dirtyBit | dirtiedFrameBit) &
-				mask));
+			flags[i] = static_cast<int32_t>(f | ((activeBit | dirtyBit | dirtiedFrameBit) & mask));
 		}
 	}
 
@@ -847,12 +854,12 @@ bool Registry::CheckAndCorrectEntityTransform(const EntityTransformCorrection& c
 
 	void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 	arch->BuildFieldArrayTable(chunk, fieldArrayTable,
-							   GetTemporalCache()->GetActiveWriteFrame(),
-							   GetVolatileCache()->GetActiveWriteFrame());
+		GetTemporalCache()->GetActiveWriteFrame(),
+		GetVolatileCache()->GetActiveWriteFrame());
 
 	// Read the resimmed position from the current write frame
 	constexpr SimFloat kThresholdSq = SimFloat(0.01f * 0.01f); // 1cm
-	SimFloat predictedX             = SimFloat(0.f), predictedY = SimFloat(0.f), predictedZ = SimFloat(0.f);
+	SimFloat predictedX = SimFloat(0.f), predictedY = SimFloat(0.f), predictedZ = SimFloat(0.f);
 	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 	{
 		if (fdesc.componentID != CTransform<>::StaticTypeID()) continue;
@@ -861,11 +868,14 @@ bool Registry::CheckAndCorrectEntityTransform(const EntityTransformCorrection& c
 		auto* fa = static_cast<SimFloat*>(base);
 		switch (fdesc.componentSlotIndex)
 		{
-			case 0: predictedX = fa[localIdx];
+			case 0:
+				predictedX = fa[localIdx];
 				break;
-			case 1: predictedY = fa[localIdx];
+			case 1:
+				predictedY = fa[localIdx];
 				break;
-			case 2: predictedZ = fa[localIdx];
+			case 2:
+				predictedZ = fa[localIdx];
 				break;
 			default: break;
 		}
@@ -878,17 +888,17 @@ bool Registry::CheckAndCorrectEntityTransform(const EntityTransformCorrection& c
 
 	// Still divergent after resim — write server-authoritative transform.
 	WriteEntityTransformFields(fieldArrayTable, arch, localIdx,
-	                           correction.PosX, correction.PosY, correction.PosZ,
-	                           correction.RotQx, correction.RotQy, correction.RotQz, correction.RotQw);
+		correction.PosX, correction.PosY, correction.PosZ,
+		correction.RotQx, correction.RotQy, correction.RotQz, correction.RotQw);
 
 	return true;
 }
 #endif
 
 void Registry::WriteEntityTransformFields(void* const* fieldArrayTable, const Archetype* arch,
-                                          uint32_t localIdx,
-                                          SimFloat posX, SimFloat posY, SimFloat posZ,
-                                          SimFloat rotQx, SimFloat rotQy, SimFloat rotQz, SimFloat rotQw)
+	uint32_t localIdx,
+	SimFloat posX, SimFloat posY, SimFloat posZ,
+	SimFloat rotQx, SimFloat rotQy, SimFloat rotQz, SimFloat rotQw)
 {
 	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 	{
@@ -898,9 +908,9 @@ void Registry::WriteEntityTransformFields(void* const* fieldArrayTable, const Ar
 		auto* fa = static_cast<SimFloat*>(base);
 		switch (fdesc.componentSlotIndex)
 		{
-			case 0: fa[localIdx] = posX;  break;
-			case 1: fa[localIdx] = posY;  break;
-			case 2: fa[localIdx] = posZ;  break;
+			case 0: fa[localIdx] = posX; break;
+			case 1: fa[localIdx] = posY; break;
+			case 2: fa[localIdx] = posZ; break;
 			case 3: fa[localIdx] = rotQx; break;
 			case 4: fa[localIdx] = rotQy; break;
 			case 5: fa[localIdx] = rotQz; break;
@@ -912,7 +922,7 @@ void Registry::WriteEntityTransformFields(void* const* fieldArrayTable, const Ar
 	auto* flagsArr = static_cast<int32_t*>(fieldArrayTable[0]);
 	if (flagsArr)
 		flagsArr[localIdx] |= static_cast<int32_t>(TemporalFlagBits::Dirty)
-		                    | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
+							  | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
 }
 
 #ifdef TNX_ENABLE_ROLLBACK
@@ -937,46 +947,45 @@ void Registry::PushEntityReinitEvent(GlobalEntityHandle gHandle, uint32_t frame)
 
 	void* table[MAX_FIELDS_PER_ARCHETYPE] = {};
 	arch->BuildFieldArrayTable(rec->TargetChunk, table,
-							   GetTemporalCache()->GetActiveWriteFrame(),
-							   GetVolatileCache()->GetActiveWriteFrame());
+		GetTemporalCache()->GetActiveWriteFrame(),
+		GetVolatileCache()->GetActiveWriteFrame());
 
 	for (const auto& [fkey, fdesc] : arch->ArchetypeFieldLayout)
 	{
 		void* base = table[fdesc.fieldSlotIndex];
 		if (!base) continue;
 		const uint8_t* src = static_cast<const uint8_t*>(base) + localIdx * fdesc.fieldSize;
-		snaps.push_back({fkey, {src, src + fdesc.fieldSize}});
+		snaps.push_back({ fkey, { src, src + fdesc.fieldSize } });
 	}
 
-	PushServerEvent({
-		frame, [this, gHandle, arch, snaps = std::move(snaps)]() mutable
+	// Captured from the current write frame: the effect is already in the ring at `frame`.
+	ServerEvents.push_back({ frame, [this, gHandle, arch, snaps = std::move(snaps)]() mutable
+	{
+		EntityRecord* r = GlobalEntityRegistry.Records[gHandle.GetIndex()];
+		if (!r || !r->IsValid()) return;
+
+		void* t[MAX_FIELDS_PER_ARCHETYPE] = {};
+		arch->BuildFieldArrayTable(r->TargetChunk, t,
+			GetTemporalCache()->GetActiveWriteFrame(),
+			GetVolatileCache()->GetActiveWriteFrame());
+
+		for (const auto& snap : snaps)
 		{
-			EntityRecord* r = GlobalEntityRegistry.Records[gHandle.GetIndex()];
-			if (!r || !r->IsValid()) return;
-
-			void* t[MAX_FIELDS_PER_ARCHETYPE] = {};
-			arch->BuildFieldArrayTable(r->TargetChunk, t,
-									   GetTemporalCache()->GetActiveWriteFrame(),
-									   GetVolatileCache()->GetActiveWriteFrame());
-
-			for (const auto& snap : snaps)
-			{
-				const auto* fdesc = arch->ArchetypeFieldLayout.find(snap.key);
-				if (!fdesc) continue;
-				void* base = t[fdesc->fieldSlotIndex];
-				if (!base) continue;
-				uint8_t* dst = static_cast<uint8_t*>(base) + r->LocalIndex * fdesc->fieldSize;
-				std::memcpy(dst, snap.data.data(), snap.data.size());
-			}
-
-			// The snapshot memcpy restores the flags field to its snapshotted state, which may
-			// have had Dirty/DirtiedFrame cleared. Re-assert both so the render and sweep see it.
-			auto* flagsArr = static_cast<int32_t*>(t[0]);
-			if (flagsArr)
-				flagsArr[r->LocalIndex] |= static_cast<int32_t>(TemporalFlagBits::Dirty)
-				                         | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
+			const auto* fdesc = arch->ArchetypeFieldLayout.find(snap.key);
+			if (!fdesc) continue;
+			void* base = t[fdesc->fieldSlotIndex];
+			if (!base) continue;
+			uint8_t* dst = static_cast<uint8_t*>(base) + r->LocalIndex * fdesc->fieldSize;
+			std::memcpy(dst, snap.data.data(), snap.data.size());
 		}
-	});
+
+		// The snapshot memcpy restores the flags field to its snapshotted state, which may
+		// have had Dirty/DirtiedFrame cleared. Re-assert both so the render and sweep see it.
+		auto* flagsArr = static_cast<int32_t*>(t[0]);
+		if (flagsArr)
+			flagsArr[r->LocalIndex] |= static_cast<int32_t>(TemporalFlagBits::Dirty)
+									   | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
+	}, true });
 }
 
 void Registry::PushServerEvent(ServerEventEntry entry)
@@ -984,16 +993,40 @@ void Registry::PushServerEvent(ServerEventEntry entry)
 	ServerEvents.push_back(std::move(entry));
 }
 
+void Registry::PushAppliedServerEvent(std::function<void()> replay)
+{
+	// World-queue jobs drain at the top of a logic frame, after the previous frame published.
+	ServerEvents.push_back({ LastPublishedFrame + 1, std::move(replay), true });
+}
+
 void Registry::ReplayServerEventsAt(uint32_t frame)
 {
-	for (auto& ev : ServerEvents) if (ev.Frame == frame && ev.Replay) ev.Replay();
+	for (auto& ev : ServerEvents)
+	{
+		if (ev.Frame != frame || !ev.Replay) continue;
+		ev.Replay();
+		ev.bApplied = true;
+	}
+}
+
+void Registry::ApplyPendingServerEventsBefore(uint32_t frame)
+{
+	for (auto& ev : ServerEvents)
+	{
+		if (ev.bApplied || ev.Frame >= frame || !ev.Replay) continue;
+		ev.Replay();
+		ev.bApplied = true;
+	}
 }
 
 void Registry::PruneServerEvents(uint32_t oldestFrame)
 {
 	ServerEvents.erase(
 		std::remove_if(ServerEvents.begin(), ServerEvents.end(),
-					   [oldestFrame](const ServerEventEntry& ev) { return ev.Frame < oldestFrame; }),
+			[oldestFrame](const ServerEventEntry& ev)
+	{
+		return ev.bApplied && ev.Frame < oldestFrame;
+	}),
 		ServerEvents.end());
 }
 #endif
@@ -1012,11 +1045,10 @@ void Registry::ForceDefragSync()
 	for (const auto& [key, arch] : Archetypes)
 	{
 		if (arch->TotalEntityCount < DefragSystem::MinLiveEntities) continue;
-		if (arch->AllocatedEntityCount == 0)                        continue;
-		if (arch->InactiveEntitySlots.empty())                      continue;
+		if (arch->AllocatedEntityCount == 0) continue;
+		if (arch->InactiveEntitySlots.empty()) continue;
 
-		float holeRatio = 1.0f - static_cast<float>(arch->TotalEntityCount)
-		                       / static_cast<float>(arch->AllocatedEntityCount);
+		float holeRatio = 1.0f - static_cast<float>(arch->TotalEntityCount) / static_cast<float>(arch->AllocatedEntityCount);
 		if (holeRatio < DefragSystem::HoleThreshold) continue;
 
 		// Loop: MaxMovesPerTick entities are processed per ProcessMoves call.
@@ -1027,33 +1059,32 @@ void Registry::ForceDefragSync()
 			Defrag.ProcessMoves(*this, arch, estimatedMoves, TrinyxJobs::InvalidWorldQueue);
 
 			if (arch->AllocatedEntityCount == 0) break;
-			holeRatio = 1.0f - static_cast<float>(arch->TotalEntityCount)
-			                 / static_cast<float>(arch->AllocatedEntityCount);
+			holeRatio = 1.0f - static_cast<float>(arch->TotalEntityCount) / static_cast<float>(arch->AllocatedEntityCount);
 		}
 	}
 }
 
 void Registry::ExecuteDefragMove(Archetype* arch,
-                                  const Archetype::EntitySlot& src,
-                                  const Archetype::EntitySlot& dst)
+	const Archetype::EntitySlot& src,
+	const Archetype::EntitySlot& dst)
 {
 	GlobalEntityHandle gHandle = GlobalEntityRegistry.LookupGlobalHandle(
-	    static_cast<EntityCacheHandle>(src.CacheIndex));
+		static_cast<EntityCacheHandle>(src.CacheIndex));
 	EntityRecord* record = GlobalEntityRegistry.Records[gHandle.GetIndex()];
 	if (!record || !record->IsValid()) return;
 
 	// Copy all field data: cold fields in-chunk, temporal/volatile across every slab frame.
 	arch->MoveEntitySlot(src, dst,
-	                     GetCache(CacheTier::Temporal),
-	                     GetCache(CacheTier::Volatile));
+		GetCache(CacheTier::Temporal),
+		GetCache(CacheTier::Volatile));
 
 	// Update location fields in the EntityRecord.
 	const EntityCacheHandle oldCacheIndex = record->CacheEntityIndex;
-	record->ArchIndex        = dst.ArchIndex;
-	record->ChunkIndex       = dst.ChunkIndex;
-	record->LocalIndex       = dst.LocalIndex;
-	record->TargetChunk      = dst.TargetChunk;
-	record->CacheEntityIndex = static_cast<EntityCacheHandle>(dst.CacheIndex);
+	record->ArchIndex                     = dst.ArchIndex;
+	record->ChunkIndex                    = dst.ChunkIndex;
+	record->LocalIndex                    = dst.LocalIndex;
+	record->TargetChunk                   = dst.TargetChunk;
+	record->CacheEntityIndex              = static_cast<EntityCacheHandle>(dst.CacheIndex);
 
 	// Remap the CacheToRecord lookup so render/network threads that resolve by
 	// cache index find the entity at its new position.
@@ -1073,20 +1104,22 @@ void Registry::TrimTailChunks(Archetype* arch)
 	LOG_ENG_INFO_F("Trimming tail chunks for archetype with %u entities", arch->AllocatedEntityCount);
 	while (!arch->Chunks.empty() && arch->ChunkLiveCounts.back() == 0)
 	{
-		const uint32_t lastChunkIdx     = static_cast<uint32_t>(arch->Chunks.size()) - 1;
-		const uint32_t prevAllocCount   = lastChunkIdx * arch->EntitiesPerChunk;
+		const uint32_t lastChunkIdx       = static_cast<uint32_t>(arch->Chunks.size()) - 1;
+		const uint32_t prevAllocCount     = lastChunkIdx * arch->EntitiesPerChunk;
 		const uint32_t lastChunkAllocated = arch->AllocatedEntityCount - prevAllocCount;
 
 		// Drop all inactive slot entries that reference this chunk — they're gone.
 		arch->InactiveEntitySlots.erase(
-		    std::remove_if(arch->InactiveEntitySlots.begin(), arch->InactiveEntitySlots.end(),
-		                   [lastChunkIdx](const Archetype::EntitySlot& s)
-		                   { return s.ChunkIndex == lastChunkIdx; }),
-		    arch->InactiveEntitySlots.end());
+			std::remove_if(arch->InactiveEntitySlots.begin(), arch->InactiveEntitySlots.end(),
+				[lastChunkIdx](const Archetype::EntitySlot& s)
+		{
+			return s.ChunkIndex == lastChunkIdx;
+		}),
+			arch->InactiveEntitySlots.end());
 
 		// Shrink ActiveEntitySlots to match the reduced AllocatedEntityCount.
 		arch->ActiveEntitySlots.resize(
-		    arch->ActiveEntitySlots.size() - lastChunkAllocated);
+			arch->ActiveEntitySlots.size() - lastChunkAllocated);
 
 		// Phase-2 slab defrag: reclaim this chunk's slab allocations before freeing
 		// the chunk struct.  NotifyChunkFreed removes entries from ActiveAllocations,
@@ -1110,7 +1143,198 @@ void Registry::TrimTailChunks(Archetype* arch)
 #endif
 		arch->Chunks.pop_back();
 		arch->ChunkLiveCounts.pop_back();
-		
+
 		arch->AllocatedEntityCount -= lastChunkAllocated;
 	}
+}
+
+void Registry::InvokeScalarUpdate(SimFloat dt)
+{
+	TNX_ZONE_C(TNX_COLOR_LOGIC);
+
+	uint32_t hisWrite = 0;
+#ifdef TNX_ENABLE_ROLLBACK
+	if (!HistorySlab.TryLockFrameForWrite(hisWrite))
+	{
+		LOG_ENG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
+		return;
+	}
+#endif
+	uint32_t volWrite = 0;
+	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
+	{
+		LOG_ENG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
+#ifdef TNX_ENABLE_ROLLBACK
+		HistorySlab.UnlockFrameWrite();
+#endif
+		return;
+	}
+#ifndef TNX_ENABLE_ROLLBACK
+	hisWrite = volWrite; // Without rollback, Temporal fields share the VolatileSlab — match frame indices.
+#endif
+
+	TrinyxJobs::JobCounter ScalarUpdateCounter;
+
+	for (auto& [sig, arch] : Archetypes)
+	{
+		UpdateFunc ScalarUpdate = ReflectionRegistry::Get().EntityGetters[sig.ID].ScalarUpdate;
+		if (!ScalarUpdate) continue;
+
+		size_t size = arch->Chunks.size();
+
+		for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
+		{
+			TrinyxJobs::Dispatch(
+				[ScalarUpdate, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
+			{
+				Chunk* chunk         = arch->Chunks[chunkIdx];
+				uint32_t entityCount = arch->GetAllocatedChunkCount(chunkIdx);
+				if (entityCount == 0) return;
+
+				void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+				arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
+
+				ScalarUpdate(dt, fieldArrayTable, fieldArrayTable[0], entityCount);
+			},
+				&ScalarUpdateCounter, TrinyxJobs::Queue::Logic);
+		}
+	}
+
+	TrinyxJobs::WaitForCounter(&ScalarUpdateCounter, TrinyxJobs::Queue::Logic);
+
+#ifdef TNX_ENABLE_ROLLBACK
+	HistorySlab.UnlockFrameWrite();
+#endif
+	VolatileSlab.UnlockFrameWrite();
+}
+
+void Registry::InvokePrePhys(SimFloat dt)
+{
+	TNX_ZONE_C(TNX_COLOR_LOGIC);
+
+	uint32_t hisWrite = 0;
+#ifdef TNX_ENABLE_ROLLBACK
+	if (!HistorySlab.TryLockFrameForWrite(hisWrite))
+	{
+		LOG_ENG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
+		return;
+	}
+#endif
+	uint32_t volWrite = 0;
+	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
+	{
+		LOG_ENG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
+#ifdef TNX_ENABLE_ROLLBACK
+		HistorySlab.UnlockFrameWrite();
+#endif
+		return;
+	}
+#ifndef TNX_ENABLE_ROLLBACK
+	hisWrite = volWrite;
+#endif
+
+	TrinyxJobs::JobCounter prePhysCounter;
+
+	for (auto& [sig, arch] : Archetypes)
+	{
+#ifdef TNX_ENABLE_ROLLBACK
+		const EntityMeta& meta = ReflectionRegistry::Get().EntityGetters[sig.ID];
+		UpdateFunc prePhys     = (bResimMode && meta.PrePhysResim) ? meta.PrePhysResim : meta.PrePhys;
+#else
+		UpdateFunc prePhys = ReflectionRegistry::Get().EntityGetters[sig.ID].PrePhys;
+#endif
+		if (!prePhys) continue;
+
+		// Capture only what fits in 48 bytes: 5 pointers/values = 40 bytes
+		size_t chunkCount = arch->Chunks.size();
+
+		for (size_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx)
+		{
+			TrinyxJobs::Dispatch(
+				[prePhys, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
+			{
+				Chunk* chunk         = arch->Chunks[chunkIdx];
+				uint32_t entityCount = arch->GetAllocatedChunkCount(chunkIdx);
+				if (entityCount == 0) return;
+
+				void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+				arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
+
+				prePhys(dt, fieldArrayTable, fieldArrayTable[0], entityCount);
+			},
+				&prePhysCounter, TrinyxJobs::Queue::Logic);
+		}
+	}
+
+	TrinyxJobs::WaitForCounter(&prePhysCounter, TrinyxJobs::Queue::Logic);
+
+#ifdef TNX_ENABLE_ROLLBACK
+	HistorySlab.UnlockFrameWrite();
+#endif
+	VolatileSlab.UnlockFrameWrite();
+}
+
+void Registry::InvokePostPhys(SimFloat dt)
+{
+	TNX_ZONE_C(TNX_COLOR_LOGIC);
+
+	uint32_t hisWrite = 0;
+#ifdef TNX_ENABLE_ROLLBACK
+	if (!HistorySlab.TryLockFrameForWrite(hisWrite))
+	{
+		LOG_ENG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
+		return;
+	}
+#endif
+	uint32_t volWrite = 0;
+	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
+	{
+		LOG_ENG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
+#ifdef TNX_ENABLE_ROLLBACK
+		HistorySlab.UnlockFrameWrite();
+#endif
+		return;
+	}
+#ifndef TNX_ENABLE_ROLLBACK
+	hisWrite = volWrite;
+#endif
+
+	TrinyxJobs::JobCounter postPhysCounter;
+
+	for (auto& [sig, arch] : Archetypes)
+	{
+#ifdef TNX_ENABLE_ROLLBACK
+		const EntityMeta& meta = ReflectionRegistry::Get().EntityGetters[sig.ID];
+		UpdateFunc PostPhys    = (bResimMode && meta.PostPhysResim) ? meta.PostPhysResim : meta.PostPhys;
+#else
+		UpdateFunc PostPhys = ReflectionRegistry::Get().EntityGetters[sig.ID].PostPhys;
+#endif
+		if (!PostPhys) continue;
+
+		size_t size = arch->Chunks.size();
+
+		for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
+		{
+			TrinyxJobs::Dispatch(
+				[PostPhys, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
+			{
+				Chunk* chunk         = arch->Chunks[chunkIdx];
+				uint32_t entityCount = arch->GetAllocatedChunkCount(chunkIdx);
+				if (entityCount == 0) return;
+
+				void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
+				arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
+
+				PostPhys(dt, fieldArrayTable, fieldArrayTable[0], entityCount);
+			},
+				&postPhysCounter, TrinyxJobs::Queue::Logic);
+		}
+	}
+
+	TrinyxJobs::WaitForCounter(&postPhysCounter, TrinyxJobs::Queue::Logic);
+
+#ifdef TNX_ENABLE_ROLLBACK
+	HistorySlab.UnlockFrameWrite();
+#endif
+	VolatileSlab.UnlockFrameWrite();
 }

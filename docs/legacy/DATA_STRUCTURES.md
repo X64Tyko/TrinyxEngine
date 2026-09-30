@@ -40,7 +40,7 @@ struct FieldProxy : FieldProxyMask<WIDTH>
     FieldProxy& operator-=(T value) { WriteArray[index] -= value; return *this; }
     FieldProxy& operator*=(T value) { WriteArray[index] *= value; return *this; }
 
-    // Bind: 
+    // Bind:
     void Bind(T* write, uint32_t idx);
 
     // Advance: increment index

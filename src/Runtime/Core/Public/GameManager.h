@@ -32,7 +32,8 @@ public:
 	/// @note Use this to parse game-specific CLI arguments before any engine system starts.
 	void PreInitialize(int argc, char* argv[])
 	{
-		(void)argc; (void)argv;
+		(void)argc;
+		(void)argv;
 	}
 
 	/// @brief Called once all engine threads, renderer, and registry are ready.
@@ -56,11 +57,11 @@ public:
 	int GetExitCode() const { return 0; }
 
 	const char* GetWindowTitle() const { return "Trinyx Game"; } ///< Override to set window title.
-	int GetWindowWidth()  const { return 1920; } ///< Override to set initial window width.
-	int GetWindowHeight() const { return 1080; } ///< Override to set initial window height.
+	int GetWindowWidth() const { return 1920; }                  ///< Override to set initial window width.
+	int GetWindowHeight() const { return 1080; }                 ///< Override to set initial window height.
 
 protected:
-	Derived&       Self()       { return static_cast<Derived&>(*this); }       ///< CRTP downcast.
+	Derived& Self() { return static_cast<Derived&>(*this); }                   ///< CRTP downcast.
 	const Derived& Self() const { return static_cast<const Derived&>(*this); } ///< CRTP downcast (const).
 };
 
@@ -75,27 +76,30 @@ protected:
 #define TNX_PROJECT_DIR ""
 #endif
 
-#define TNX_IMPLEMENT_GAME(GameClass)                                                    \
-	int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])                   \
-	{                                                                                    \
-		TrinyxEngine& engine = TrinyxEngine::Get();                                      \
-		engine.ParseCommandLine(argc, argv);                                             \
-		GameClass game;                                                                  \
-		game.PreInitialize(argc, argv);                                                  \
-		int exitCode = 1;                                                                \
-		if (engine.Initialize(game.GetWindowTitle(),                                     \
-		                      game.GetWindowWidth(),                                     \
-		                      game.GetWindowHeight(),                                    \
-		                      TNX_PROJECT_DIR))                                           \
-		{                                                                                \
-			if (game.PostInitialize(engine))                                             \
-			{                                                                            \
-				engine.Run(game);                                                        \
-				exitCode = game.GetExitCode();                                           \
-			}                                                                            \
-			else { exitCode = 1; }                                                       \
-		}                                                                                \
-		return exitCode;                                                                 \
+#define TNX_IMPLEMENT_GAME(GameClass)                                  \
+	int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) \
+	{                                                                  \
+		TrinyxEngine& engine = TrinyxEngine::Get();                    \
+		engine.ParseCommandLine(argc, argv);                           \
+		GameClass game;                                                \
+		game.PreInitialize(argc, argv);                                \
+		int exitCode = 1;                                              \
+		if (engine.Initialize(game.GetWindowTitle(),                   \
+				game.GetWindowWidth(),                                 \
+				game.GetWindowHeight(),                                \
+				TNX_PROJECT_DIR))                                      \
+		{                                                              \
+			if (game.PostInitialize(engine))                           \
+			{                                                          \
+				engine.Run(game);                                      \
+				exitCode = game.GetExitCode();                         \
+			}                                                          \
+			else                                                       \
+			{                                                          \
+				exitCode = 1;                                          \
+			}                                                          \
+		}                                                              \
+		return exitCode;                                               \
 	}
 
 /** @} */

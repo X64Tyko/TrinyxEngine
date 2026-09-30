@@ -9,11 +9,11 @@
 
 struct SkeletalImportResult
 {
-	MeshAsset    mesh;     // geometry + skin weights (mesh.IsSkinned() == true on success)
+	MeshAsset mesh; // geometry + skin weights (mesh.IsSkinned() == true on success)
 	SkeletonAsset skeleton;
 
 	std::vector<AnimationAsset> animations;
-	std::vector<TnxName>        animNames;  // animNames[i] matches animations[i]
+	std::vector<TnxName> animNames; // animNames[i] matches animations[i]
 
 	bool IsValid() const { return mesh.IsValid() && mesh.IsSkinned() && skeleton.boneCount > 0; }
 };

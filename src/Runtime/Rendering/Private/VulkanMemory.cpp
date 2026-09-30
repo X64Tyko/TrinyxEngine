@@ -36,9 +36,9 @@ bool VulkanMemory::Initialize(const VulkanContext& ctx)
 	}
 
 	LOG_ENG_INFO_F("[VulkanMemory] Initialized (ReBAR: %s, BDA: %s, HostImageCopy: %s)",
-				   bHasReBAR ? "YES" : "NO",
-			   bBDA ? "YES" : "NO",
-			   bHostImageCopy ? "YES" : "NO");
+		bHasReBAR ? "YES" : "NO",
+		bBDA ? "YES" : "NO",
+		bHostImageCopy ? "YES" : "NO");
 	return true;
 }
 
@@ -52,9 +52,9 @@ void VulkanMemory::Shutdown()
 }
 
 VulkanBuffer VulkanMemory::AllocateBuffer(VkDeviceSize size,
-										  VkBufferUsageFlags usage,
-										  GpuMemoryDomain domain,
-										  bool requestDeviceAddress)
+	VkBufferUsageFlags usage,
+	GpuMemoryDomain domain,
+	bool requestDeviceAddress)
 {
 	VulkanBuffer out{};
 	out.Size      = size;
@@ -80,10 +80,8 @@ VulkanBuffer VulkanMemory::AllocateBuffer(VkDeviceSize size,
 			{
 				// Primary path: direct CPU→VRAM writes with no staging.
 				vmaInfo.usage         = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-				vmaInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-					VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-				vmaInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
-					VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+				vmaInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+				vmaInfo.flags         = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 			}
 			else
 			{
@@ -99,21 +97,21 @@ VulkanBuffer VulkanMemory::AllocateBuffer(VkDeviceSize size,
 			break;
 	}
 
-	VkBuffer      rawBuffer = VK_NULL_HANDLE;
+	VkBuffer rawBuffer = VK_NULL_HANDLE;
 	VmaAllocationInfo allocResult{};
 	VkResult result = vmaCreateBuffer(Allocator, &bufInfo, &vmaInfo,
-									  &rawBuffer, &out.Allocation, &allocResult);
+		&rawBuffer, &out.Allocation, &allocResult);
 	if (result != VK_SUCCESS)
 	{
 		LOG_ENG_ERROR_F("[VulkanMemory] vmaCreateBuffer failed (size=%llu domain=%d): %d",
-						static_cast<unsigned long long>(size),
-					static_cast<int>(domain),
-					result);
+			static_cast<unsigned long long>(size),
+			static_cast<int>(domain),
+			result);
 		out.Allocator = VK_NULL_HANDLE; // prevent double-free in destructor
 		return out;
 	}
 
-	out.Buffer = vk::Buffer{rawBuffer};
+	out.Buffer = vk::Buffer{ rawBuffer };
 
 	if (domain == GpuMemoryDomain::PersistentMapped || domain == GpuMemoryDomain::Staging)
 		out.MappedPtr = allocResult.pMappedData;
@@ -130,9 +128,9 @@ VulkanBuffer VulkanMemory::AllocateBuffer(VkDeviceSize size,
 }
 
 VulkanImage VulkanMemory::AllocateImage(VkExtent2D extent,
-										VkFormat format,
-										VkImageUsageFlags usage,
-										VkImageAspectFlags aspectMask)
+	VkFormat format,
+	VkImageUsageFlags usage,
+	VkImageAspectFlags aspectMask)
 {
 	VulkanImage out{};
 	out.Format    = format;
@@ -144,7 +142,7 @@ VulkanImage VulkanMemory::AllocateImage(VkExtent2D extent,
 	imgInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 	imgInfo.imageType     = VK_IMAGE_TYPE_2D;
 	imgInfo.format        = format;
-	imgInfo.extent        = {extent.width, extent.height, 1};
+	imgInfo.extent        = { extent.width, extent.height, 1 };
 	imgInfo.mipLevels     = 1;
 	imgInfo.arrayLayers   = 1;
 	imgInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
@@ -156,18 +154,18 @@ VulkanImage VulkanMemory::AllocateImage(VkExtent2D extent,
 	VmaAllocationCreateInfo vmaInfo{};
 	vmaInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-	VkImage   rawImage = VK_NULL_HANDLE;
-	VkResult result = vmaCreateImage(Allocator, &imgInfo, &vmaInfo,
-									 &rawImage, &out.Allocation, nullptr);
+	VkImage rawImage = VK_NULL_HANDLE;
+	VkResult result  = vmaCreateImage(Allocator, &imgInfo, &vmaInfo,
+		&rawImage, &out.Allocation, nullptr);
 	if (result != VK_SUCCESS)
 	{
 		LOG_ENG_ERROR_F("[VulkanMemory] vmaCreateImage failed (format=%d): %d",
-						static_cast<int>(format), result);
+			static_cast<int>(format), result);
 		out.Allocator = VK_NULL_HANDLE;
 		return out;
 	}
 
-	out.Image = vk::Image{rawImage};
+	out.Image = vk::Image{ rawImage };
 
 	VkImageViewCreateInfo viewInfo{};
 	viewInfo.sType                       = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -179,7 +177,7 @@ VulkanImage VulkanMemory::AllocateImage(VkExtent2D extent,
 	viewInfo.subresourceRange.layerCount = 1;
 
 	VkImageView rawView = VK_NULL_HANDLE;
-	result = vkCreateImageView(DeviceCache, &viewInfo, nullptr, &rawView);
+	result              = vkCreateImageView(DeviceCache, &viewInfo, nullptr, &rawView);
 	if (result != VK_SUCCESS)
 	{
 		LOG_ENG_ERROR_F("[VulkanMemory] vkCreateImageView failed: %d", result);
@@ -190,7 +188,7 @@ VulkanImage VulkanMemory::AllocateImage(VkExtent2D extent,
 		return out;
 	}
 
-	out.View = vk::ImageView{rawView};
+	out.View = vk::ImageView{ rawView };
 	return out;
 }
 
@@ -198,10 +196,10 @@ VulkanImage VulkanMemory::AllocateImage(VkExtent2D extent,
 // UploadImage  (Vulkan 1.4 host image copy — no staging buffer needed)
 // -----------------------------------------------------------------------
 bool VulkanMemory::UploadImage(VulkanImage& image,
-							   const void* pixels,
-							   VkDeviceSize /*byteSize*/,
-							   uint32_t width,
-							   uint32_t height)
+	const void* pixels,
+	VkDeviceSize /*byteSize*/,
+	uint32_t width,
+	uint32_t height)
 {
 	if (!bHostImageCopy)
 	{
@@ -217,14 +215,14 @@ bool VulkanMemory::UploadImage(VulkanImage& image,
 	transitionInfo.image            = static_cast<VkImage>(image.Image);
 	transitionInfo.oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
 	transitionInfo.newLayout        = VK_IMAGE_LAYOUT_GENERAL;
-	transitionInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+	transitionInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 	vkTransitionImageLayout(DeviceCache, 1, &transitionInfo);
 
 	VkMemoryToImageCopy region{};
-	region.sType             = VK_STRUCTURE_TYPE_MEMORY_TO_IMAGE_COPY;
-	region.pHostPointer      = pixels;
-	region.imageSubresource  = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-	region.imageExtent       = {width, height, 1};
+	region.sType            = VK_STRUCTURE_TYPE_MEMORY_TO_IMAGE_COPY;
+	region.pHostPointer     = pixels;
+	region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+	region.imageExtent      = { width, height, 1 };
 
 	VkCopyMemoryToImageInfo copyInfo{};
 	copyInfo.sType          = VK_STRUCTURE_TYPE_COPY_MEMORY_TO_IMAGE_INFO;

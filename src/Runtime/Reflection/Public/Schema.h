@@ -6,7 +6,7 @@
 #include "ReflectionRegistry.h"
 
 #define REGISTER_ENTITY_PREPHYS(Type, ClassID) \
-    case ClassID: InvokePrePhysicsImpl<Type>(dt, fieldArrayTable, componentCount); break;
+	case ClassID: InvokePrePhysicsImpl<Type>(dt, fieldArrayTable, componentCount); break;
 
 // The container for member pointers
 template <typename... Members>
@@ -37,8 +37,7 @@ struct SchemaDefinition
 		{
 			// ...and rebuild a NEW SchemaDefinition
 			return SchemaDefinition<decltype(ResolveReplacement(args, target, replacement))...>(
-				ResolveReplacement(args, target, replacement)...
-			);
+				ResolveReplacement(args, target, replacement)...);
 		}, members);
 	}
 

@@ -27,10 +27,10 @@ struct AuthoritySim
 	bool OnSimInput(uint32_t frameNumber, TLogic& logic)
 	{
 		uint32_t rollbackFrame = UINT32_MAX;
-		const bool stall = RunSimInput(frameNumber,
-		                               logic.IsResimulating(),
-		                               logic.GetLastCompletedFrame(),
-		                               rollbackFrame);
+		const bool stall       = RunSimInput(frameNumber,
+			logic.IsResimulating(),
+			logic.GetLastCompletedFrame(),
+			rollbackFrame);
 		if (rollbackFrame != UINT32_MAX)
 			logic.RequestRollback(rollbackFrame);
 		return stall;
@@ -57,7 +57,7 @@ private:
 	// outRollbackFrame is set to the frame that should be passed to
 	// logic.RequestRollback(); UINT32_MAX means no rollback this tick.
 	bool RunSimInput(uint32_t frameNumber, bool isResimulating,
-	                 uint32_t lastCompleted, uint32_t& outRollbackFrame);
+		uint32_t lastCompleted, uint32_t& outRollbackFrame);
 
 	// Helper: look up the PlayerInputLog for ownerID via the replication channel.
 	PlayerInputLog* GetInputLog(uint8_t ownerID)
@@ -70,7 +70,7 @@ private:
 	ReplicationSystem* Replicator = nullptr;
 	NetConnectionManager* ConnMgr = nullptr;
 	const EngineConfig* Config    = nullptr;
-	WorldBase* NetWorld               = nullptr;
+	WorldBase* NetWorld           = nullptr;
 
 	// Coalesced rollback target: the earliest input-mismatch frame seen during
 	// Pass 2 injection this tick.

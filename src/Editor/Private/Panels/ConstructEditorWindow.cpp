@@ -28,38 +28,38 @@ static const char* SlotNames[] = { "Pre-Physics", "Physics Step", "Post-Physics"
 #include "TrinyxParser.h"
 
 void BuildGraphFromParsedMethod(const TrinyxParser::ParsedMethod& method,
-                                 NodeGraphCanvas& g,
-                                 int entryNodeID,
-                                 int entryExecPinID);
+	NodeGraphCanvas& g,
+	int entryNodeID,
+	int entryExecPinID);
 
 static NodeGraphCanvas::NodeKind LifecycleToEventKind(TrinyxParser::LifecycleEvent lc)
 {
-    using LE = TrinyxParser::LifecycleEvent;
-    using NK = NodeGraphCanvas::NodeKind;
-    switch (lc)
-    {
-        case LE::PrePhysics:   return NK::Event_OnPrePhysics;
-        case LE::PhysicsStep:  return NK::Event_OnPhysicsStep;
-        case LE::PostPhysics:  return NK::Event_OnPostPhysics;
-        case LE::ScalarUpdate: return NK::Event_OnUpdate;
-        case LE::OnSpawn:      return NK::Event_OnSpawn;
-        case LE::OnDestroy:    return NK::Event_OnDestroy;
-        default:               return NK::Event_OnUpdate;
-    }
+	using LE = TrinyxParser::LifecycleEvent;
+	using NK = NodeGraphCanvas::NodeKind;
+	switch (lc)
+	{
+		case LE::PrePhysics: return NK::Event_OnPrePhysics;
+		case LE::PhysicsStep: return NK::Event_OnPhysicsStep;
+		case LE::PostPhysics: return NK::Event_OnPostPhysics;
+		case LE::ScalarUpdate: return NK::Event_OnUpdate;
+		case LE::OnSpawn: return NK::Event_OnSpawn;
+		case LE::OnDestroy: return NK::Event_OnDestroy;
+		default: return NK::Event_OnUpdate;
+	}
 }
 
 static int LifecycleToSlotIndex(TrinyxParser::LifecycleEvent lc)
 {
-    using LE = TrinyxParser::LifecycleEvent;
-    using TS = ConstructDoc::TickSlot;
-    switch (lc)
-    {
-        case LE::PrePhysics:   return static_cast<int>(TS::PrePhysics);
-        case LE::PhysicsStep:  return static_cast<int>(TS::PhysicsStep);
-        case LE::PostPhysics:  return static_cast<int>(TS::PostPhysics);
-        case LE::ScalarUpdate: return static_cast<int>(TS::ScalarUpdate);
-        default:               return -1;
-    }
+	using LE = TrinyxParser::LifecycleEvent;
+	using TS = ConstructDoc::TickSlot;
+	switch (lc)
+	{
+		case LE::PrePhysics: return static_cast<int>(TS::PrePhysics);
+		case LE::PhysicsStep: return static_cast<int>(TS::PhysicsStep);
+		case LE::PostPhysics: return static_cast<int>(TS::PostPhysics);
+		case LE::ScalarUpdate: return static_cast<int>(TS::ScalarUpdate);
+		default: return -1;
+	}
 }
 
 #if 0
@@ -836,123 +836,123 @@ static void ParseMethodIntoGraph(const std::string& src, const char* signature,
 
 static void ParseConstructFile(const char* filePath, ConstructDoc& doc)
 {
-    std::ifstream f(filePath, std::ios::binary);
-    if (!f.is_open()) return;
-    std::string src((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+	std::ifstream f(filePath, std::ios::binary);
+	if (!f.is_open()) return;
+	std::string src((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
 
-    auto extractWord = [&](size_t pos) -> std::pair<std::string, size_t>
-    {
-        while (pos < src.size() && std::isspace((unsigned char)src[pos])) ++pos;
-        size_t start = pos;
-        while (pos < src.size() && (std::isalnum((unsigned char)src[pos]) || src[pos] == '_')) ++pos;
-        return { src.substr(start, pos - start), pos };
-    };
+	auto extractWord = [&](size_t pos) -> std::pair<std::string, size_t>
+	{
+		while (pos < src.size() && std::isspace((unsigned char)src[pos]))
+			++pos;
+		size_t start = pos;
+		while (pos < src.size() && (std::isalnum((unsigned char)src[pos]) || src[pos] == '_'))
+			++pos;
+		return { src.substr(start, pos - start), pos };
+	};
 
-    // ConstructView<T> Name
-    {
-        const std::string key = "ConstructView<";
-        size_t pos = 0;
-        while ((pos = src.find(key, pos)) != std::string::npos)
-        {
-            pos += key.size();
-            size_t gtPos = src.find('>', pos);
-            if (gtPos == std::string::npos) break;
-            std::string typeName = src.substr(pos, gtPos - pos);
-            auto [memberName, next] = extractWord(gtPos + 1);
-            if (!typeName.empty() && !memberName.empty())
-            {
-                ConstructDoc::ViewEntry v = {};
-                strncpy(v.TypeName,   typeName.c_str(),   sizeof(v.TypeName)   - 1);
-                strncpy(v.MemberName, memberName.c_str(), sizeof(v.MemberName) - 1);
-                doc.Views.push_back(v);
-            }
-            pos = gtPos + 1;
-        }
-    }
+	// ConstructView<T> Name
+	{
+		const std::string key = "ConstructView<";
+		size_t pos            = 0;
+		while ((pos = src.find(key, pos)) != std::string::npos)
+		{
+			pos += key.size();
+			size_t gtPos = src.find('>', pos);
+			if (gtPos == std::string::npos) break;
+			std::string typeName    = src.substr(pos, gtPos - pos);
+			auto [memberName, next] = extractWord(gtPos + 1);
+			if (!typeName.empty() && !memberName.empty())
+			{
+				ConstructDoc::ViewEntry v = {};
+				strncpy(v.TypeName, typeName.c_str(), sizeof(v.TypeName) - 1);
+				strncpy(v.MemberName, memberName.c_str(), sizeof(v.MemberName) - 1);
+				doc.Views.push_back(v);
+			}
+			pos = gtPos + 1;
+		}
+	}
 
-    // Owned<T> Name
-    {
-        const std::string key = "Owned<";
-        size_t pos = 0;
-        while ((pos = src.find(key, pos)) != std::string::npos)
-        {
-            pos += key.size();
-            size_t gtPos = src.find('>', pos);
-            if (gtPos == std::string::npos) break;
-            std::string typeName = src.substr(pos, gtPos - pos);
-            auto [memberName, next] = extractWord(gtPos + 1);
-            if (!typeName.empty() && !memberName.empty())
-            {
-                ConstructDoc::OwnedEntry o = {};
-                strncpy(o.TypeName,   typeName.c_str(),   sizeof(o.TypeName)   - 1);
-                strncpy(o.MemberName, memberName.c_str(), sizeof(o.MemberName) - 1);
-                doc.Owned.push_back(o);
-            }
-            pos = gtPos + 1;
-        }
-    }
+	// Owned<T> Name
+	{
+		const std::string key = "Owned<";
+		size_t pos            = 0;
+		while ((pos = src.find(key, pos)) != std::string::npos)
+		{
+			pos += key.size();
+			size_t gtPos = src.find('>', pos);
+			if (gtPos == std::string::npos) break;
+			std::string typeName    = src.substr(pos, gtPos - pos);
+			auto [memberName, next] = extractWord(gtPos + 1);
+			if (!typeName.empty() && !memberName.empty())
+			{
+				ConstructDoc::OwnedEntry o = {};
+				strncpy(o.TypeName, typeName.c_str(), sizeof(o.TypeName) - 1);
+				strncpy(o.MemberName, memberName.c_str(), sizeof(o.MemberName) - 1);
+				doc.Owned.push_back(o);
+			}
+			pos = gtPos + 1;
+		}
+	}
 
-    // Scan for lifecycle hooks and TNXFUNC methods via TrinyxParser DLL
-    auto funcs = TrinyxParser::ScanFile(src);
+	// Scan for lifecycle hooks and TNXFUNC methods via TrinyxParser DLL
+	auto funcs = TrinyxParser::ScanFile(src);
 
-    for (int i = 0; i < static_cast<int>(ConstructDoc::TickSlot::Count); ++i)
-        doc.Graphs[i].Clear();
-    doc.UserFuncs.clear();
+	for (int i = 0; i < static_cast<int>(ConstructDoc::TickSlot::Count); ++i)
+		doc.Graphs[i].Clear();
+	doc.UserFuncs.clear();
 
-    for (const auto& func : funcs)
-    {
-        if (func.IsLifecycle)
-        {
-            int slot = LifecycleToSlotIndex(func.Lifecycle);
-            if (slot < 0) continue;
-            NodeGraphCanvas::NodeKind ek = LifecycleToEventKind(func.Lifecycle);
-            doc.Graphs[slot].AddEventNode(ek, 80.0f, 120.0f);
+	for (const auto& func : funcs)
+	{
+		if (func.IsLifecycle)
+		{
+			int slot = LifecycleToSlotIndex(func.Lifecycle);
+			if (slot < 0) continue;
+			NodeGraphCanvas::NodeKind ek = LifecycleToEventKind(func.Lifecycle);
+			doc.Graphs[slot].AddEventNode(ek, 80.0f, 120.0f);
 
-            int entryNodeID = -1, entryExecPinID = -1;
-            for (const auto& n : doc.Graphs[slot].Nodes)
-            {
-                if (n.Kind == ek)
-                {
-                    entryNodeID = n.ID;
-                    for (const auto& p : n.Pins)
-                        if (p.Dir == NodeGraphCanvas::PinDir::Output &&
-                            p.Type == NodeGraphCanvas::PinType::Exec)
-                            entryExecPinID = p.ID;
-                    break;
-                }
-            }
+			int entryNodeID = -1, entryExecPinID = -1;
+			for (const auto& n : doc.Graphs[slot].Nodes)
+			{
+				if (n.Kind == ek)
+				{
+					entryNodeID = n.ID;
+					for (const auto& p : n.Pins)
+						if (p.Dir == NodeGraphCanvas::PinDir::Output && p.Type == NodeGraphCanvas::PinType::Exec)
+							entryExecPinID = p.ID;
+					break;
+				}
+			}
 
-            TrinyxParser::ParsedMethod pm = TrinyxParser::ParseMethodBody(src, func.Signature);
-            BuildGraphFromParsedMethod(pm, doc.Graphs[slot], entryNodeID, entryExecPinID);
-        }
-        else
-        {
-            ConstructDoc::UserFuncTab tab;
-            tab.Name        = func.Name;
-            tab.DisplayName = func.DisplayName;
-            tab.Signature   = func.Signature;
-            tab.Graph.Clear();
-            tab.Graph.AddFuncEntryNode(func.DisplayName.c_str(), 80.0f, 120.0f);
+			TrinyxParser::ParsedMethod pm = TrinyxParser::ParseMethodBody(src, func.Signature);
+			BuildGraphFromParsedMethod(pm, doc.Graphs[slot], entryNodeID, entryExecPinID);
+		}
+		else
+		{
+			ConstructDoc::UserFuncTab tab;
+			tab.Name        = func.Name;
+			tab.DisplayName = func.DisplayName;
+			tab.Signature   = func.Signature;
+			tab.Graph.Clear();
+			tab.Graph.AddFuncEntryNode(func.DisplayName.c_str(), 80.0f, 120.0f);
 
-            int entryNodeID = -1, entryExecPinID = -1;
-            for (const auto& n : tab.Graph.Nodes)
-            {
-                if (n.Kind == NodeGraphCanvas::NodeKind::FuncEntry)
-                {
-                    entryNodeID = n.ID;
-                    for (const auto& p : n.Pins)
-                        if (p.Dir == NodeGraphCanvas::PinDir::Output &&
-                            p.Type == NodeGraphCanvas::PinType::Exec)
-                            entryExecPinID = p.ID;
-                    break;
-                }
-            }
+			int entryNodeID = -1, entryExecPinID = -1;
+			for (const auto& n : tab.Graph.Nodes)
+			{
+				if (n.Kind == NodeGraphCanvas::NodeKind::FuncEntry)
+				{
+					entryNodeID = n.ID;
+					for (const auto& p : n.Pins)
+						if (p.Dir == NodeGraphCanvas::PinDir::Output && p.Type == NodeGraphCanvas::PinType::Exec)
+							entryExecPinID = p.ID;
+					break;
+				}
+			}
 
-            TrinyxParser::ParsedMethod pm = TrinyxParser::ParseMethodBody(src, func.Signature);
-            BuildGraphFromParsedMethod(pm, tab.Graph, entryNodeID, entryExecPinID);
-            doc.UserFuncs.push_back(std::move(tab));
-        }
-    }
+			TrinyxParser::ParsedMethod pm = TrinyxParser::ParseMethodBody(src, func.Signature);
+			BuildGraphFromParsedMethod(pm, tab.Graph, entryNodeID, entryExecPinID);
+			doc.UserFuncs.push_back(std::move(tab));
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -960,30 +960,30 @@ static void ParseConstructFile(const char* filePath, ConstructDoc& doc)
 // ---------------------------------------------------------------------------
 
 ConstructDoc::ConstructDoc(const char* typeName, const char* filePath)
-    : TypeName(typeName)
+	: TypeName(typeName)
 {
-    for (int i = 0; i < static_cast<int>(TickSlot::Count); ++i)
-        Graphs[i].Clear();
+	for (int i = 0; i < static_cast<int>(TickSlot::Count); ++i)
+		Graphs[i].Clear();
 
-    if (filePath && filePath[0])
-    {
-        FilePath = filePath;
-        strncpy(OutputPath, filePath, sizeof(OutputPath) - 1);
-        ParseConstructFile(filePath, *this);
-    }
-    else
-    {
-        // New construct — seed all slots with default event nodes.
-        using NK = NodeGraphCanvas::NodeKind;
-        static const NK SlotEvents[] = {
-            NK::Event_OnPrePhysics,
-            NK::Event_OnPhysicsStep,
-            NK::Event_OnPostPhysics,
-            NK::Event_OnUpdate,
-        };
-        for (int i = 0; i < static_cast<int>(TickSlot::Count); ++i)
-            Graphs[i].AddEventNode(SlotEvents[i], 80.0f, 120.0f);
-    }
+	if (filePath && filePath[0])
+	{
+		FilePath = filePath;
+		strncpy(OutputPath, filePath, sizeof(OutputPath) - 1);
+		ParseConstructFile(filePath, *this);
+	}
+	else
+	{
+		// New construct — seed all slots with default event nodes.
+		using NK                     = NodeGraphCanvas::NodeKind;
+		static const NK SlotEvents[] = {
+			NK::Event_OnPrePhysics,
+			NK::Event_OnPhysicsStep,
+			NK::Event_OnPostPhysics,
+			NK::Event_OnUpdate,
+		};
+		for (int i = 0; i < static_cast<int>(TickSlot::Count); ++i)
+			Graphs[i].AddEventNode(SlotEvents[i], 80.0f, 120.0f);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -991,19 +991,24 @@ ConstructDoc::ConstructDoc(const char* typeName, const char* filePath)
 // ---------------------------------------------------------------------------
 
 ConstructEditorWindow::ConstructEditorWindow()
-    : EditorPanel("Construct Editor")
+	: EditorPanel("Construct Editor")
 {
 }
 
 void ConstructEditorWindow::OpenConstruct(const char* typeName, const char* filePath)
 {
-    for (int i = 0; i < static_cast<int>(Docs.size()); ++i)
-    {
-        if (Docs[i].TypeName == typeName) { ActiveTab = i; bVisible = true; return; }
-    }
-    Docs.emplace_back(typeName, filePath);
-    ActiveTab = static_cast<int>(Docs.size()) - 1;
-    bVisible  = true;
+	for (int i = 0; i < static_cast<int>(Docs.size()); ++i)
+	{
+		if (Docs[i].TypeName == typeName)
+		{
+			ActiveTab = i;
+			bVisible  = true;
+			return;
+		}
+	}
+	Docs.emplace_back(typeName, filePath);
+	ActiveTab = static_cast<int>(Docs.size()) - 1;
+	bVisible  = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1012,244 +1017,264 @@ void ConstructEditorWindow::OpenConstruct(const char* typeName, const char* file
 
 void ConstructEditorWindow::Draw(EditorState& state)
 {
-    if (!BeginPadded(ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
-    { ImGui::End(); return; }
+	if (!BeginPadded(ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
+	{
+		ImGui::End();
+		return;
+	}
 
-    TnxWidgets::PanelHeader(nullptr, "Construct Editor");
+	TnxWidgets::PanelHeader(nullptr, "Construct Editor");
 
-    // --- Top toolbar ---
-    if (ImGui::Button("+ New"))
-        bShowNewDialog = true;
+	// --- Top toolbar ---
+	if (ImGui::Button("+ New"))
+		bShowNewDialog = true;
 
-    if (bShowNewDialog)
-    {
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("##NewName", NewTypeBuf, sizeof(NewTypeBuf));
-        ImGui::SameLine();
-        if (ImGui::Button("Create"))
-        {
-            if (NewTypeBuf[0] != '\0') { OpenConstruct(NewTypeBuf); bShowNewDialog = false; }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel")) bShowNewDialog = false;
-    }
+	if (bShowNewDialog)
+	{
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(160.0f);
+		ImGui::InputText("##NewName", NewTypeBuf, sizeof(NewTypeBuf));
+		ImGui::SameLine();
+		if (ImGui::Button("Create"))
+		{
+			if (NewTypeBuf[0] != '\0')
+			{
+				OpenConstruct(NewTypeBuf);
+				bShowNewDialog = false;
+			}
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) bShowNewDialog = false;
+	}
 
-    if (Docs.empty())
-    {
-        ImGui::Separator();
-        ImGui::TextDisabled("No Constructs open. Click '+ New' or open one from the Content Browser.");
-        ImGui::End();
-        return;
-    }
+	if (Docs.empty())
+	{
+		ImGui::Separator();
+		ImGui::TextDisabled("No Constructs open. Click '+ New' or open one from the Content Browser.");
+		ImGui::End();
+		return;
+	}
 
-    // --- Tab bar + pane toggles on the same line ---
-    DrawTabBar();
+	// --- Tab bar + pane toggles on the same line ---
+	DrawTabBar();
 
-    if (ActiveTab < 0 || ActiveTab >= static_cast<int>(Docs.size()))
-    { ImGui::End(); return; }
+	if (ActiveTab < 0 || ActiveTab >= static_cast<int>(Docs.size()))
+	{
+		ImGui::End();
+		return;
+	}
 
-    ConstructDoc& doc = Docs[static_cast<size_t>(ActiveTab)];
+	ConstructDoc& doc = Docs[static_cast<size_t>(ActiveTab)];
 
-    // Pane toggle buttons — drawn on their own line, right-aligned before the separator.
-    {
-        float spacing = ImGui::GetStyle().ItemSpacing.x;
-        float btnW    = ImGui::CalcTextSize("[ Comp ]").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        float totalBtns = btnW * 2.0f + spacing;
-        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - totalBtns);
-        if (ImGui::SmallButton(bLeftPaneVisible  ? "[ Comp ]" : "[ > ]")) bLeftPaneVisible  = !bLeftPaneVisible;
-        ImGui::SameLine();
-        if (ImGui::SmallButton(bRightPaneVisible ? "[ Info ]" : "[ < ]")) bRightPaneVisible = !bRightPaneVisible;
-    }
+	// Pane toggle buttons — drawn on their own line, right-aligned before the separator.
+	{
+		float spacing   = ImGui::GetStyle().ItemSpacing.x;
+		float btnW      = ImGui::CalcTextSize("[ Comp ]").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+		float totalBtns = btnW * 2.0f + spacing;
+		ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - totalBtns);
+		if (ImGui::SmallButton(bLeftPaneVisible ? "[ Comp ]" : "[ > ]")) bLeftPaneVisible = !bLeftPaneVisible;
+		ImGui::SameLine();
+		if (ImGui::SmallButton(bRightPaneVisible ? "[ Info ]" : "[ < ]")) bRightPaneVisible = !bRightPaneVisible;
+	}
 
-    ImGui::Separator();
+	ImGui::Separator();
 
-    // --- Three-column layout: Composition | Node Graph | Info ---
-    float totalH = ImGui::GetContentRegionAvail().y;
+	// --- Three-column layout: Composition | Node Graph | Info ---
+	float totalH = ImGui::GetContentRegionAvail().y;
 
-    if (bLeftPaneVisible)
-    {
-        DrawCompositionPanel(doc, totalH);
-        ImGui::SameLine();
-    }
-    DrawSlotTabs(doc, 0.0f, totalH);
-    if (bRightPaneVisible)
-    {
-        ImGui::SameLine();
-        DrawInfoPanel(doc, totalH, state);
-    }
+	if (bLeftPaneVisible)
+	{
+		DrawCompositionPanel(doc, totalH);
+		ImGui::SameLine();
+	}
+	DrawSlotTabs(doc, 0.0f, totalH);
+	if (bRightPaneVisible)
+	{
+		ImGui::SameLine();
+		DrawInfoPanel(doc, totalH, state);
+	}
 
-    ImGui::End();
+	ImGui::End();
 }
 
 void ConstructEditorWindow::DrawTabBar()
 {
-    if (ImGui::BeginTabBar("##ConstructTabs"))
-    {
-        for (int i = 0; i < static_cast<int>(Docs.size()); ++i)
-        {
-            bool open = true;
-            ImGuiTabItemFlags flags = (i == ActiveTab) ? ImGuiTabItemFlags_SetSelected : 0;
-            if (ImGui::BeginTabItem(Docs[static_cast<size_t>(i)].TypeName.c_str(), &open, flags))
-            {
-                ActiveTab = i;
-                ImGui::EndTabItem();
-            }
-            if (!open)
-            {
-                Docs.erase(Docs.begin() + i);
-                if (ActiveTab >= static_cast<int>(Docs.size())) ActiveTab = static_cast<int>(Docs.size()) - 1;
-                break;
-            }
-        }
-        ImGui::EndTabBar();
-    }
+	if (ImGui::BeginTabBar("##ConstructTabs"))
+	{
+		for (int i = 0; i < static_cast<int>(Docs.size()); ++i)
+		{
+			bool open               = true;
+			ImGuiTabItemFlags flags = (i == ActiveTab) ? ImGuiTabItemFlags_SetSelected : 0;
+			if (ImGui::BeginTabItem(Docs[static_cast<size_t>(i)].TypeName.c_str(), &open, flags))
+			{
+				ActiveTab = i;
+				ImGui::EndTabItem();
+			}
+			if (!open)
+			{
+				Docs.erase(Docs.begin() + i);
+				if (ActiveTab >= static_cast<int>(Docs.size())) ActiveTab = static_cast<int>(Docs.size()) - 1;
+				break;
+			}
+		}
+		ImGui::EndTabBar();
+	}
 }
 
 void ConstructEditorWindow::DrawCompositionPanel(ConstructDoc& doc, float height)
 {
-    ImGui::BeginChild("##ConstructComp", ImVec2(180.0f, height), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeX);
+	ImGui::BeginChild("##ConstructComp", ImVec2(180.0f, height), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeX);
 
-    ImGui::TextDisabled("Views");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("+##AddView"))
-        doc.Views.push_back({});
-    ImGui::Separator();
+	ImGui::TextDisabled("Views");
+	ImGui::SameLine();
+	if (ImGui::SmallButton("+##AddView"))
+		doc.Views.push_back({});
+	ImGui::Separator();
 
-    for (int i = 0; i < static_cast<int>(doc.Views.size()); ++i)
-    {
-        auto& v = doc.Views[static_cast<size_t>(i)];
-        ImGui::PushID(i);
-        ImGui::SetNextItemWidth(80.0f);
-        ImGui::InputText("##VType", v.TypeName, sizeof(v.TypeName));
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(60.0f);
-        ImGui::InputText("##VName", v.MemberName, sizeof(v.MemberName));
-        ImGui::SameLine();
-        if (ImGui::SmallButton("x")) { doc.Views.erase(doc.Views.begin() + i); ImGui::PopID(); break; }
-        ImGui::PopID();
-    }
+	for (int i = 0; i < static_cast<int>(doc.Views.size()); ++i)
+	{
+		auto& v = doc.Views[static_cast<size_t>(i)];
+		ImGui::PushID(i);
+		ImGui::SetNextItemWidth(80.0f);
+		ImGui::InputText("##VType", v.TypeName, sizeof(v.TypeName));
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(60.0f);
+		ImGui::InputText("##VName", v.MemberName, sizeof(v.MemberName));
+		ImGui::SameLine();
+		if (ImGui::SmallButton("x"))
+		{
+			doc.Views.erase(doc.Views.begin() + i);
+			ImGui::PopID();
+			break;
+		}
+		ImGui::PopID();
+	}
 
-    ImGui::Spacing();
-    ImGui::TextDisabled("Owned<T>");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("+##AddOwned"))
-        doc.Owned.push_back({});
-    ImGui::Separator();
+	ImGui::Spacing();
+	ImGui::TextDisabled("Owned<T>");
+	ImGui::SameLine();
+	if (ImGui::SmallButton("+##AddOwned"))
+		doc.Owned.push_back({});
+	ImGui::Separator();
 
-    for (int i = 0; i < static_cast<int>(doc.Owned.size()); ++i)
-    {
-        auto& o = doc.Owned[static_cast<size_t>(i)];
-        ImGui::PushID(1000 + i);
-        ImGui::SetNextItemWidth(80.0f);
-        ImGui::InputText("##OType", o.TypeName, sizeof(o.TypeName));
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(60.0f);
-        ImGui::InputText("##OName", o.MemberName, sizeof(o.MemberName));
-        ImGui::SameLine();
-        if (ImGui::SmallButton("x")) { doc.Owned.erase(doc.Owned.begin() + i); ImGui::PopID(); break; }
-        ImGui::PopID();
-    }
+	for (int i = 0; i < static_cast<int>(doc.Owned.size()); ++i)
+	{
+		auto& o = doc.Owned[static_cast<size_t>(i)];
+		ImGui::PushID(1000 + i);
+		ImGui::SetNextItemWidth(80.0f);
+		ImGui::InputText("##OType", o.TypeName, sizeof(o.TypeName));
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(60.0f);
+		ImGui::InputText("##OName", o.MemberName, sizeof(o.MemberName));
+		ImGui::SameLine();
+		if (ImGui::SmallButton("x"))
+		{
+			doc.Owned.erase(doc.Owned.begin() + i);
+			ImGui::PopID();
+			break;
+		}
+		ImGui::PopID();
+	}
 
-    ImGui::EndChild();
+	ImGui::EndChild();
 }
 
 void ConstructEditorWindow::DrawSlotTabs(ConstructDoc& doc, float /*width*/, float height)
 {
-    ImGui::BeginChild("##ConstructCenter", ImVec2(0.0f, height), ImGuiChildFlags_ResizeX,
-                      ImGuiWindowFlags_NoScrollbar);
+	ImGui::BeginChild("##ConstructCenter", ImVec2(0.0f, height), ImGuiChildFlags_ResizeX,
+		ImGuiWindowFlags_NoScrollbar);
 
-    if (ImGui::BeginTabBar("##SlotTabs"))
-    {
-        for (int s = 0; s < static_cast<int>(ConstructDoc::TickSlot::Count); ++s)
-        {
-            if (ImGui::BeginTabItem(SlotNames[s]))
-            {
-                doc.ActiveSlot    = s;
-                doc.ActiveUserFunc = -1;
-                ImGui::EndTabItem();
-            }
-        }
-        for (int u = 0; u < static_cast<int>(doc.UserFuncs.size()); ++u)
-        {
-            const char* label = doc.UserFuncs[static_cast<size_t>(u)].DisplayName.c_str();
-            if (ImGui::BeginTabItem(label))
-            {
-                doc.ActiveSlot    = -1;
-                doc.ActiveUserFunc = u;
-                ImGui::EndTabItem();
-            }
-        }
-        ImGui::EndTabBar();
-    }
+	if (ImGui::BeginTabBar("##SlotTabs"))
+	{
+		for (int s = 0; s < static_cast<int>(ConstructDoc::TickSlot::Count); ++s)
+		{
+			if (ImGui::BeginTabItem(SlotNames[s]))
+			{
+				doc.ActiveSlot     = s;
+				doc.ActiveUserFunc = -1;
+				ImGui::EndTabItem();
+			}
+		}
+		for (int u = 0; u < static_cast<int>(doc.UserFuncs.size()); ++u)
+		{
+			const char* label = doc.UserFuncs[static_cast<size_t>(u)].DisplayName.c_str();
+			if (ImGui::BeginTabItem(label))
+			{
+				doc.ActiveSlot     = -1;
+				doc.ActiveUserFunc = u;
+				ImGui::EndTabItem();
+			}
+		}
+		ImGui::EndTabBar();
+	}
 
-    float graphH = ImGui::GetContentRegionAvail().y;
-    float graphW = ImGui::GetContentRegionAvail().x;
+	float graphH = ImGui::GetContentRegionAvail().y;
+	float graphW = ImGui::GetContentRegionAvail().x;
 
-    // Select the active graph: lifecycle slot or user func
-    NodeGraphCanvas* activeGraph = nullptr;
-    char canvasID[64];
-    if (doc.ActiveUserFunc >= 0 && doc.ActiveUserFunc < static_cast<int>(doc.UserFuncs.size()))
-    {
-        activeGraph = &doc.UserFuncs[static_cast<size_t>(doc.ActiveUserFunc)].Graph;
-        snprintf(canvasID, sizeof(canvasID), "ce_%p_u%d", (void*)&doc, doc.ActiveUserFunc);
-    }
-    else if (doc.ActiveSlot >= 0 && doc.ActiveSlot < static_cast<int>(ConstructDoc::TickSlot::Count))
-    {
-        activeGraph = &doc.Graphs[doc.ActiveSlot];
-        snprintf(canvasID, sizeof(canvasID), "ce_%p_%d", (void*)&doc, doc.ActiveSlot);
-    }
+	// Select the active graph: lifecycle slot or user func
+	NodeGraphCanvas* activeGraph = nullptr;
+	char canvasID[64];
+	if (doc.ActiveUserFunc >= 0 && doc.ActiveUserFunc < static_cast<int>(doc.UserFuncs.size()))
+	{
+		activeGraph = &doc.UserFuncs[static_cast<size_t>(doc.ActiveUserFunc)].Graph;
+		snprintf(canvasID, sizeof(canvasID), "ce_%p_u%d", (void*)&doc, doc.ActiveUserFunc);
+	}
+	else if (doc.ActiveSlot >= 0 && doc.ActiveSlot < static_cast<int>(ConstructDoc::TickSlot::Count))
+	{
+		activeGraph = &doc.Graphs[doc.ActiveSlot];
+		snprintf(canvasID, sizeof(canvasID), "ce_%p_%d", (void*)&doc, doc.ActiveSlot);
+	}
 
-    if (activeGraph)
-        activeGraph->DrawCanvas(canvasID, graphW, graphH);
+	if (activeGraph)
+		activeGraph->DrawCanvas(canvasID, graphW, graphH);
 
-    ImGui::EndChild();
+	ImGui::EndChild();
 }
 
 void ConstructEditorWindow::DrawInfoPanel(ConstructDoc& doc, float height, EditorState& state)
 {
-    ImGui::BeginChild("##ConstructInfo", ImVec2(0.0f, height), ImGuiChildFlags_Borders);
+	ImGui::BeginChild("##ConstructInfo", ImVec2(0.0f, height), ImGuiChildFlags_Borders);
 
-    ImGui::TextDisabled("Type");
-    ImGui::TextUnformatted(doc.TypeName.c_str());
-    ImGui::Spacing();
+	ImGui::TextDisabled("Type");
+	ImGui::TextUnformatted(doc.TypeName.c_str());
+	ImGui::Spacing();
 
-    ImGui::TextDisabled("Output Path");
-    ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputText("##OutPathCE", doc.OutputPath, sizeof(doc.OutputPath));
+	ImGui::TextDisabled("Output Path");
+	ImGui::SetNextItemWidth(-1.0f);
+	ImGui::InputText("##OutPathCE", doc.OutputPath, sizeof(doc.OutputPath));
 
-    ImGui::Spacing();
-    if (ImGui::Button("Export .h##CEExp", ImVec2(-1.0f, 0.0f)))
-    {
-        // TODO: code generation from node graphs
-        snprintf(doc.StatusMsg, sizeof(doc.StatusMsg), "Code gen not yet implemented.");
-        doc.bStatusError = true;
-    }
+	ImGui::Spacing();
+	if (ImGui::Button("Export .h##CEExp", ImVec2(-1.0f, 0.0f)))
+	{
+		// TODO: code generation from node graphs
+		snprintf(doc.StatusMsg, sizeof(doc.StatusMsg), "Code gen not yet implemented.");
+		doc.bStatusError = true;
+	}
 
-    if (doc.StatusMsg[0] != '\0')
-    {
-        ImVec4 col = doc.bStatusError ? ImVec4(1.0f, 0.35f, 0.35f, 1.0f) : ImVec4(0.35f, 1.0f, 0.35f, 1.0f);
-        ImGui::TextColored(col, "%s", doc.StatusMsg);
-    }
+	if (doc.StatusMsg[0] != '\0')
+	{
+		ImVec4 col = doc.bStatusError ? ImVec4(1.0f, 0.35f, 0.35f, 1.0f) : ImVec4(0.35f, 1.0f, 0.35f, 1.0f);
+		ImGui::TextColored(col, "%s", doc.StatusMsg);
+	}
 
-    ImGui::Spacing();
-    ImGui::TextDisabled("Tick slots");
-    for (int s = 0; s < static_cast<int>(ConstructDoc::TickSlot::Count); ++s)
-    {
-        int nodeCount = static_cast<int>(doc.Graphs[s].Nodes.size());
-        ImGui::Text("  %s: %d node%s", SlotNames[s], nodeCount, nodeCount == 1 ? "" : "s");
-    }
+	ImGui::Spacing();
+	ImGui::TextDisabled("Tick slots");
+	for (int s = 0; s < static_cast<int>(ConstructDoc::TickSlot::Count); ++s)
+	{
+		int nodeCount = static_cast<int>(doc.Graphs[s].Nodes.size());
+		ImGui::Text("  %s: %d node%s", SlotNames[s], nodeCount, nodeCount == 1 ? "" : "s");
+	}
 
-    if (!doc.UserFuncs.empty())
-    {
-        ImGui::Spacing();
-        ImGui::TextDisabled("TNXFUNC methods");
-        for (const auto& f : doc.UserFuncs)
-        {
-            int nodeCount = static_cast<int>(f.Graph.Nodes.size());
-            ImGui::Text("  %s: %d node%s", f.DisplayName.c_str(), nodeCount, nodeCount == 1 ? "" : "s");
-        }
-    }
+	if (!doc.UserFuncs.empty())
+	{
+		ImGui::Spacing();
+		ImGui::TextDisabled("TNXFUNC methods");
+		for (const auto& f : doc.UserFuncs)
+		{
+			int nodeCount = static_cast<int>(f.Graph.Nodes.size());
+			ImGui::Text("  %s: %d node%s", f.DisplayName.c_str(), nodeCount, nodeCount == 1 ? "" : "s");
+		}
+	}
 
-    ImGui::EndChild();
+	ImGui::EndChild();
 }

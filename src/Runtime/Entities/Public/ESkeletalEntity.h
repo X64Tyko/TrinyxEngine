@@ -29,36 +29,36 @@
 template <template <FieldWidth> class Derived, FieldWidth WIDTH = FieldWidth::Scalar>
 class ESkeletalEntity : public EInterpEntity<Derived, WIDTH>
 {
-    TNX_REGISTER_SUPER_SCHEMA(ESkeletalEntity, EInterpEntity, Mesh, Color, Scale, SkeletonRef, AnimBase, AnimLayer)
+	TNX_REGISTER_SUPER_SCHEMA(ESkeletalEntity, EInterpEntity, Mesh, Color, Scale, SkeletonRef, AnimBase, AnimLayer)
 
 public:
-    CMeshRef<WIDTH>     Mesh;
-    CColor<WIDTH>       Color;
-    CScale<WIDTH>       Scale;
-    CSkeletonRef<WIDTH> SkeletonRef;
-    CAnimBase<WIDTH>    AnimBase;
-    CAnimLayer<WIDTH>   AnimLayer;
+	CMeshRef<WIDTH> Mesh;
+	CColor<WIDTH> Color;
+	CScale<WIDTH> Scale;
+	CSkeletonRef<WIDTH> SkeletonRef;
+	CAnimBase<WIDTH> AnimBase;
+	CAnimLayer<WIDTH> AnimLayer;
 
-    void Initialize()
-    {
-        EInterpEntity<Derived, WIDTH>::Initialize();
-        Color.R = SimFloat(1.f);
-        Color.G = SimFloat(1.f);
-        Color.B = SimFloat(1.f);
-        Color.A = SimFloat(1.f);
-        Scale.ScaleX = SimFloat(1.f);
-        Scale.ScaleY = SimFloat(1.f);
-        Scale.ScaleZ = SimFloat(1.f);
-        AnimBase.Clear();
-        AnimLayer.Clear();
-    }
+	void Initialize()
+	{
+		EInterpEntity<Derived, WIDTH>::Initialize();
+		Color.R      = SimFloat(1.f);
+		Color.G      = SimFloat(1.f);
+		Color.B      = SimFloat(1.f);
+		Color.A      = SimFloat(1.f);
+		Scale.ScaleX = SimFloat(1.f);
+		Scale.ScaleY = SimFloat(1.f);
+		Scale.ScaleZ = SimFloat(1.f);
+		AnimBase.Clear();
+		AnimLayer.Clear();
+	}
 
-    void PostPhysics(SimFloat dt)
-    {
-		AnimBase.BaseTimestamp    += dt;
-		AnimBase.FadeTimestamp    += dt;
+	void PostPhysics(SimFloat dt)
+	{
+		AnimBase.BaseTimestamp += dt;
+		AnimBase.FadeTimestamp += dt;
 		AnimLayer.LayerTimestamp0 += dt;
 		AnimLayer.LayerTimestamp1 += dt;
 		EInterpEntity<Derived, WIDTH>::PostPhysics(dt);
-    }
+	}
 };

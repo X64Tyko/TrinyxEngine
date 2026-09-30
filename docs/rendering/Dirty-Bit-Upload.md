@@ -122,20 +122,22 @@ The same `Dirty` bit (bit 30) drives both GPU upload and rollback blast radius.
 All entity flags live in one place:
 
 ```cpp
-enum class TemporalFlagBits : uint32_t
+enum class TemporalFlagBits : int32_t
 {
-    Active        = 1u << 31,  // entity renders and simulates
-    Dirty         = 1u << 30,  // cumulative: needs GPU upload
-    DirtiedFrame  = 1u << 29,  // per-frame: wrote this tick
-    Replicated    = 1u << 28,  // net: Authority has assigned a net handle
-    Alive         = 1u << 27,  // in Alive state (spawned but not yet Active)
-    Tombstone     = 1u << 26,  // deferred destruction pending
+    Active           = 1u << 31, // entity ticks, renders, and simulates
+    Dirty            = 1u << 30, // cumulative: needs GPU upload until render acknowledges
+    DirtiedFrame     = 1u << 29, // per-frame: written this tick
+    Replicated       = 1u << 28, // net: this entity replicates
+    Alive            = 1u << 27, // data valid, slot cannot be reclaimed
+    // bit 26 — unused (proposed: Discontinuity)
     NetConfirmedDead = 1u << 25, // despawn confirmed by Authority
-    PrePhysSkip   = 1u << 24,  // skip PrePhysics sweep for this entity
-    PostPhysSkip  = 1u << 23,  // skip PostPhysics sweep for this entity
-    ScalarSkip    = 1u << 22,  // skip ScalarUpdate sweep for this entity
-    ASleep        = 1u << 21,  // physics body is sleeping
-    // bits [20:17] — 4-bit attachment depth (depthMask)
+    // bits [24:21] — 4-bit attachment depth (depthMask)
+    PrePhysSkip      = 1u << 20, // skip PrePhysics sweep for this entity
+    PostPhysSkip     = 1u << 19, // skip PostPhysics sweep for this entity
+    ScalarSkip       = 1u << 18, // skip ScalarUpdate sweep for this entity
+    ASleep           = 1u << 17, // physics body is sleeping
+    Tombstone        = 1u << 16, // deferred destruction pending
+    // bits [15:0] — available for game-layer flags
 };
 ```
 

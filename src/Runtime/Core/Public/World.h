@@ -28,57 +28,57 @@ template <typename TNet, typename TRollback, typename TFrame>
 class World : public WorldBase
 {
 public:
-using LogicType = LogicThread<TNet, TRollback, TFrame>; ///< Fully-typed logic thread for this world.
+	using LogicType = LogicThread<TNet, TRollback, TFrame>; ///< Fully-typed logic thread for this world.
 
-// Defined in World.cpp alongside explicit instantiations — NOT inline.
-bool Initialize(const EngineConfig& config, ConstructRegistry* constructRegistry,
-                int windowWidth = 1920, int windowHeight = 1080);
+	// Defined in World.cpp alongside explicit instantiations — NOT inline.
+	bool Initialize(const EngineConfig& config, ConstructRegistry* constructRegistry,
+		int windowWidth = 1920, int windowHeight = 1080);
 
-/// @brief Returns the typed logic thread pointer (non-owning; WorldBase::Logic owns it).
-LogicType* GetTypedLogicThread() const { return TypedLogic; }
+	/// @brief Returns the typed logic thread pointer (non-owning; WorldBase::Logic owns it).
+	LogicType* GetTypedLogicThread() const { return TypedLogic; }
 
-/// @brief Forwards transform corrections to the rollback subsystem; no-op when TRollback::Enabled is false.
-void EnqueueCorrections(std::vector<EntityTransformCorrection> corrections,
-						uint32_t earliestClientFrame) override
-{
-	if constexpr (TRollback::Enabled) TypedLogic->Rollback.EnqueueCorrections(std::move(corrections), earliestClientFrame);
-}
+	/// @brief Forwards transform corrections to the rollback subsystem; no-op when TRollback::Enabled is false.
+	void EnqueueCorrections(std::vector<EntityTransformCorrection> corrections,
+		uint32_t earliestClientFrame) override
+	{
+		if constexpr (TRollback::Enabled) TypedLogic->Rollback.EnqueueCorrections(std::move(corrections), earliestClientFrame);
+	}
 
-/// @brief Forwards predicted corrections to the rollback subsystem; no-op when TRollback::Enabled is false.
-void EnqueuePredictedCorrections(std::vector<EntityTransformCorrection> corrections) override
-{
-	if constexpr (TRollback::Enabled) TypedLogic->Rollback.EnqueuePredictedCorrections(std::move(corrections));
-}
+	/// @brief Forwards predicted corrections to the rollback subsystem; no-op when TRollback::Enabled is false.
+	void EnqueuePredictedCorrections(std::vector<EntityTransformCorrection> corrections) override
+	{
+		if constexpr (TRollback::Enabled) TypedLogic->Rollback.EnqueuePredictedCorrections(std::move(corrections));
+	}
 
-/// @brief Enqueues a spawn-triggered rollback to the given client frame; no-op when rollback is disabled.
-void EnqueueSpawnRollback(uint32_t clientFrame) override
-{
-	if constexpr (TRollback::Enabled) TypedLogic->Rollback.EnqueueSpawnRollback(*TypedLogic, clientFrame);
-}
+	/// @brief Enqueues a spawn-triggered rollback to the given client frame; no-op when rollback is disabled.
+	void EnqueueSpawnRollback(uint32_t clientFrame) override
+	{
+		if constexpr (TRollback::Enabled) TypedLogic->Rollback.EnqueueSpawnRollback(*TypedLogic, clientFrame);
+	}
 
-/// @brief Binds the AuthorityNet handler; no-op on non-Authority builds.
-void BindAuthorityNet(AuthorityNet* net, NetConnectionManager* connMgr) override
-{
-	if constexpr (std::is_same_v<TNet, AuthoritySim>) TypedLogic->GetNetMode().Bind(*this, connMgr);
-}
+	/// @brief Binds the AuthorityNet handler; no-op on non-Authority builds.
+	void BindAuthorityNet(AuthorityNet* net, NetConnectionManager* connMgr) override
+	{
+		if constexpr (std::is_same_v<TNet, AuthoritySim>) TypedLogic->GetNetMode().Bind(*this, connMgr);
+	}
 
 private:
-LogicType* TypedLogic = nullptr; ///< Non-owning alias into WorldBase::Logic.
+	LogicType* TypedLogic = nullptr; ///< Non-owning alias into WorldBase::Logic.
 };
 
 // Explicit instantiations live in World.cpp. Suppress implicit instantiation in all
 // other TUs so the World<> vtable has exactly one home. AuthoritySim/OwnerSim variants
 // depend on Net/Private symbols and only exist when networking is enabled.
-extern template class World<SoloSim,      NoRollback,  GameFrame>;
+extern template class World<SoloSim, NoRollback, GameFrame>;
 #ifdef TNX_ENABLE_NETWORK
-extern template class World<AuthoritySim, NoRollback,  GameFrame>;
-extern template class World<OwnerSim,     NoRollback,  GameFrame>;
+extern template class World<AuthoritySim, NoRollback, GameFrame>;
+extern template class World<OwnerSim, NoRollback, GameFrame>;
 #endif
 #ifdef TNX_ENABLE_ROLLBACK
-extern template class World<SoloSim,      RollbackSim, GameFrame>;
+extern template class World<SoloSim, RollbackSim, GameFrame>;
 #ifdef TNX_ENABLE_NETWORK
 extern template class World<AuthoritySim, RollbackSim, GameFrame>;
-extern template class World<OwnerSim,     RollbackSim, GameFrame>;
+extern template class World<OwnerSim, RollbackSim, GameFrame>;
 #endif
 #endif
 

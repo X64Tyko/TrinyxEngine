@@ -28,14 +28,14 @@ constexpr uint32_t TnxAnimVersion = 1;
 
 struct TnxAnimHeader
 {
-	uint32_t Magic          = TnxAnimMagic;
-	uint32_t Version        = TnxAnimVersion;
-	uint32_t BoneCount      = 0;
-	uint32_t KeyframeCount  = 0;
-	float    Duration       = 0.f;
-	uint32_t NotifyCount    = 0;
-	uint8_t  HasRootMotion  = 0;
-	uint8_t  Reserved[39]{};
+	uint32_t Magic         = TnxAnimMagic;
+	uint32_t Version       = TnxAnimVersion;
+	uint32_t BoneCount     = 0;
+	uint32_t KeyframeCount = 0;
+	float Duration         = 0.f;
+	uint32_t NotifyCount   = 0;
+	uint8_t HasRootMotion  = 0;
+	uint8_t Reserved[39]{};
 };
 
 static_assert(sizeof(TnxAnimHeader) == 64, "TnxAnimHeader must be exactly 64 bytes");
@@ -60,10 +60,10 @@ static_assert(sizeof(AnimKeyframeDisk) == 32);
 struct AnimNotifyDisk // M2+
 {
 	uint32_t idHash;
-	float    triggerTime;
-	float    duration;     // 0 = instant, >0 = state notify
+	float triggerTime;
+	float duration; // 0 = instant, >0 = state notify
 	uint32_t nameHash;
-	char     nameStr[32];  // editor only
+	char nameStr[32]; // editor only
 };
 
 static_assert(sizeof(AnimNotifyDisk) == 48);
@@ -84,24 +84,24 @@ struct AnimKeyframe
 struct AnimNotifyDef
 {
 	NotifyID id;
-	float    triggerTime;
-	float    duration;    // 0 = instant, >0 = state notify
-	TnxName  name;
+	float triggerTime;
+	float duration; // 0 = instant, >0 = state notify
+	TnxName name;
 };
 
 /// Runtime animation clip loaded from a .tnxanim file.
 /// Holds per-bone keyframe tracks plus optional notify and root-motion data (M2+).
 struct AnimationAsset
 {
-	float    duration  = 0.f;
+	float duration     = 0.f;
 	uint32_t boneCount = 0;
 
 	std::vector<AnimBoneTrack> boneTracks;
-	std::vector<AnimKeyframe>  keyframes;
+	std::vector<AnimKeyframe> keyframes;
 
-	std::vector<AnimNotifyDef> notifies;         // M2+
-	bool                       hasRootMotion = false; // M2+
-	std::vector<AnimKeyframe>  rootMotionTrack;  // M2+; bone-0 extracted from main tracks
+	std::vector<AnimNotifyDef> notifies;       // M2+
+	bool hasRootMotion = false;                // M2+
+	std::vector<AnimKeyframe> rootMotionTrack; // M2+; bone-0 extracted from main tracks
 
 	/// M1: linear keyframe interp. M3: replaced by CurveHandle evaluation.
 	BoneTransform EvaluateBone(uint32_t boneIndex, float timestamp) const;

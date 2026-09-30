@@ -29,12 +29,12 @@ bool SaveMeshAsset(const MeshAsset& asset, const std::string& path)
 
 	file.write(reinterpret_cast<const char*>(&header), sizeof(header));
 	file.write(reinterpret_cast<const char*>(asset.Vertices.data()),
-			   asset.Vertices.size() * sizeof(Vertex));
+		asset.Vertices.size() * sizeof(Vertex));
 	file.write(reinterpret_cast<const char*>(asset.Indices.data()),
-			   asset.Indices.size() * sizeof(uint32_t));
+		asset.Indices.size() * sizeof(uint32_t));
 	if (asset.IsSkinned())
 		file.write(reinterpret_cast<const char*>(asset.Skin.data()),
-				   asset.Skin.size() * sizeof(SkinWeights));
+			asset.Skin.size() * sizeof(SkinWeights));
 
 	if (!file.good())
 	{
@@ -43,8 +43,8 @@ bool SaveMeshAsset(const MeshAsset& asset, const std::string& path)
 	}
 
 	LOG_ENG_INFO_F("[MeshAsset] Saved '%s' (%u verts, %u indices%s)",
-				   path.c_str(), header.VertexCount, header.IndexCount,
-				   asset.IsSkinned() ? ", skinned" : "");
+		path.c_str(), header.VertexCount, header.IndexCount,
+		asset.IsSkinned() ? ", skinned" : "");
 	return true;
 }
 
@@ -71,7 +71,7 @@ bool LoadMeshAsset(MeshAsset& outAsset, const std::string& path)
 	if (header.Version != 1 && header.Version != TnxMeshVersion)
 	{
 		LOG_ENG_WARN_F("[MeshAsset] Stale version %u in '%s' — caller should reimport from source",
-		               header.Version, path.c_str());
+			header.Version, path.c_str());
 		return false;
 	}
 
@@ -87,16 +87,16 @@ bool LoadMeshAsset(MeshAsset& outAsset, const std::string& path)
 	std::memcpy(outAsset.AABBMax, header.AABBMax, sizeof(float) * 3);
 
 	file.read(reinterpret_cast<char*>(outAsset.Vertices.data()),
-			  header.VertexCount * sizeof(Vertex));
+		header.VertexCount * sizeof(Vertex));
 	file.read(reinterpret_cast<char*>(outAsset.Indices.data()),
-			  header.IndexCount * sizeof(uint32_t));
+		header.IndexCount * sizeof(uint32_t));
 
 	const bool skinned = (header.Version >= 2) && (header.Flags & TnxMeshFlag_Skinned);
 	if (skinned)
 	{
 		outAsset.Skin.resize(header.VertexCount);
 		file.read(reinterpret_cast<char*>(outAsset.Skin.data()),
-				  header.VertexCount * sizeof(SkinWeights));
+			header.VertexCount * sizeof(SkinWeights));
 	}
 
 	if (!file.good())
@@ -107,7 +107,7 @@ bool LoadMeshAsset(MeshAsset& outAsset, const std::string& path)
 	}
 
 	LOG_ENG_INFO_F("[MeshAsset] Loaded '%s' (%u verts, %u indices%s)",
-				   path.c_str(), header.VertexCount, header.IndexCount,
-				   skinned ? ", skinned" : "");
+		path.c_str(), header.VertexCount, header.IndexCount,
+		skinned ? ", skinned" : "");
 	return true;
 }

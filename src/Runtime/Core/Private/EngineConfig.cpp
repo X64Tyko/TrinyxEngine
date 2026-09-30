@@ -23,7 +23,10 @@ static int ParseLogLevel(const std::string& val)
 	if (val == "Error") return 4;
 	if (val == "Fatal") return 5;
 	// Accept raw integers too
-	try { return std::stoi(val); }
+	try
+	{
+		return std::stoi(val);
+	}
 	catch (...)
 	{
 	}
@@ -76,27 +79,48 @@ static void FillFromFile(const char* path, EngineConfig& cfg)
 		if (val.empty()) continue;
 
 		// Only fill if the field is still unset
-		if (key == "TargetFPS" && cfg.TargetFPS == EngineConfig::Unset) cfg.TargetFPS = std::stoi(val);
-		else if (key == "FixedUpdateHz" && cfg.FixedUpdateHz == EngineConfig::Unset) cfg.FixedUpdateHz = std::stoi(val);
-		else if (key == "NetworkUpdateHz" && cfg.NetworkUpdateHz == EngineConfig::Unset) cfg.NetworkUpdateHz = std::stoi(val);
-		else if (key == "InputPollHz" && cfg.InputPollHz == EngineConfig::Unset) cfg.InputPollHz = std::stoi(val);
-		else if (key == "InputNetHz" && cfg.InputNetHz == EngineConfig::Unset) cfg.InputNetHz = std::stoi(val);
-		else if (key == "InputDelayFrames" && cfg.InputDelayFrames == 0) cfg.InputDelayFrames = std::stoi(val);
-		else if (key == "MaxRenderableEntities" && cfg.MAX_RENDERABLE_ENTITIES == EngineConfig::Unset) cfg.MAX_RENDERABLE_ENTITIES = std::stoi(val);
-		else if (key == "MaxCachedEntities" && cfg.MAX_CACHED_ENTITIES == EngineConfig::Unset) cfg.MAX_CACHED_ENTITIES = std::stoi(val);
-		else if (key == "MaxJoltBodies" && cfg.MAX_JOLT_BODIES == EngineConfig::Unset) cfg.MAX_JOLT_BODIES = std::stoi(val);
-		else if (key == "TemporalFrameCount" && cfg.TemporalFrameCount == EngineConfig::Unset) cfg.TemporalFrameCount = std::stoi(val);
-		else if (key == "JobCacheSize" && cfg.JobCacheSize == EngineConfig::Unset) cfg.JobCacheSize = std::stoi(val);
-		else if (key == "PhysicsUpdateInterval" && cfg.PhysicsUpdateInterval == EngineConfig::Unset) cfg.PhysicsUpdateInterval = std::stoi(val);
-		else if (key == "DefaultScene" && cfg.DefaultScene[0] == '\0') snprintf(cfg.DefaultScene, sizeof(cfg.DefaultScene), "%s", val.c_str());
-		else if (key == "DefaultState" && cfg.DefaultState[0] == '\0') snprintf(cfg.DefaultState, sizeof(cfg.DefaultState), "%s", val.c_str());
-		else if (key == "EngineLogLevel" && cfg.EngineLogLevel == EngineConfig::Unset) cfg.EngineLogLevel = ParseLogLevel(val);
-		else if (key == "GameLogLevel" && cfg.GameLogLevel == EngineConfig::Unset) cfg.GameLogLevel = ParseLogLevel(val);
-		else if (key == "AudioUpdateHz" && cfg.AudioUpdateHz == EngineConfig::Unset) cfg.AudioUpdateHz = std::stoi(val);
-		else if (key == "MaxAudioVoices" && cfg.MaxAudioVoices == EngineConfig::Unset) cfg.MaxAudioVoices = std::stoi(val);
-		else if (key == "NoNagle" && !cfg.NoNagle) cfg.NoNagle = (val == "1" || val == "true" || val == "True");
-		else if (key == "SendRateMin" && cfg.SendRateMin == EngineConfig::Unset) cfg.SendRateMin = std::stoi(val);
-		else if (key == "SendRateMax" && cfg.SendRateMax == EngineConfig::Unset) cfg.SendRateMax = std::stoi(val);
+		if (key == "TargetFPS" && cfg.TargetFPS == EngineConfig::Unset)
+			cfg.TargetFPS = std::stoi(val);
+		else if (key == "FixedUpdateHz" && cfg.FixedUpdateHz == EngineConfig::Unset)
+			cfg.FixedUpdateHz = std::stoi(val);
+		else if (key == "NetworkUpdateHz" && cfg.NetworkUpdateHz == EngineConfig::Unset)
+			cfg.NetworkUpdateHz = std::stoi(val);
+		else if (key == "InputPollHz" && cfg.InputPollHz == EngineConfig::Unset)
+			cfg.InputPollHz = std::stoi(val);
+		else if (key == "InputNetHz" && cfg.InputNetHz == EngineConfig::Unset)
+			cfg.InputNetHz = std::stoi(val);
+		else if (key == "InputDelayFrames" && cfg.InputDelayFrames == 0)
+			cfg.InputDelayFrames = std::stoi(val);
+		else if (key == "MaxRenderableEntities" && cfg.MAX_RENDERABLE_ENTITIES == EngineConfig::Unset)
+			cfg.MAX_RENDERABLE_ENTITIES = std::stoi(val);
+		else if (key == "MaxCachedEntities" && cfg.MAX_CACHED_ENTITIES == EngineConfig::Unset)
+			cfg.MAX_CACHED_ENTITIES = std::stoi(val);
+		else if (key == "MaxJoltBodies" && cfg.MAX_JOLT_BODIES == EngineConfig::Unset)
+			cfg.MAX_JOLT_BODIES = std::stoi(val);
+		else if (key == "TemporalFrameCount" && cfg.TemporalFrameCount == EngineConfig::Unset)
+			cfg.TemporalFrameCount = std::stoi(val);
+		else if (key == "JobCacheSize" && cfg.JobCacheSize == EngineConfig::Unset)
+			cfg.JobCacheSize = std::stoi(val);
+		else if (key == "PhysicsUpdateInterval" && cfg.PhysicsUpdateInterval == EngineConfig::Unset)
+			cfg.PhysicsUpdateInterval = std::stoi(val);
+		else if (key == "DefaultScene" && cfg.DefaultScene[0] == '\0')
+			snprintf(cfg.DefaultScene, sizeof(cfg.DefaultScene), "%s", val.c_str());
+		else if (key == "DefaultState" && cfg.DefaultState[0] == '\0')
+			snprintf(cfg.DefaultState, sizeof(cfg.DefaultState), "%s", val.c_str());
+		else if (key == "EngineLogLevel" && cfg.EngineLogLevel == EngineConfig::Unset)
+			cfg.EngineLogLevel = ParseLogLevel(val);
+		else if (key == "GameLogLevel" && cfg.GameLogLevel == EngineConfig::Unset)
+			cfg.GameLogLevel = ParseLogLevel(val);
+		else if (key == "AudioUpdateHz" && cfg.AudioUpdateHz == EngineConfig::Unset)
+			cfg.AudioUpdateHz = std::stoi(val);
+		else if (key == "MaxAudioVoices" && cfg.MaxAudioVoices == EngineConfig::Unset)
+			cfg.MaxAudioVoices = std::stoi(val);
+		else if (key == "NoNagle" && !cfg.NoNagle)
+			cfg.NoNagle = (val == "1" || val == "true" || val == "True");
+		else if (key == "SendRateMin" && cfg.SendRateMin == EngineConfig::Unset)
+			cfg.SendRateMin = std::stoi(val);
+		else if (key == "SendRateMax" && cfg.SendRateMax == EngineConfig::Unset)
+			cfg.SendRateMax = std::stoi(val);
 	}
 }
 

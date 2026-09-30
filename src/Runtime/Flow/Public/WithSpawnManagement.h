@@ -26,38 +26,41 @@ struct PlayerBeginRequestPayload;
 class WithSpawnManagement
 {
 public:
-static constexpr uint8_t MixinID = 16;
+	static constexpr uint8_t MixinID = 16;
 
-virtual ~WithSpawnManagement() = default;
+	virtual ~WithSpawnManagement() = default;
 
-// Server: return the prefab UUID to spawn for this Soul.
-// Pure virtual — the engine has no default spawn policy.
-virtual int64_t GetCharacterPrefab(const Soul& soul) const = 0;
+	// Server: return the prefab UUID to spawn for this Soul.
+	// Pure virtual — the engine has no default spawn policy.
+	virtual int64_t GetCharacterPrefab(const Soul& soul) const = 0;
 
-// Server: return true to allow the spawn, false to issue PlayerBeginReject.
-// Override to enforce cooldowns, team limits, phase gates, etc.
-virtual bool ValidateSpawn(const Soul& soul, const PlayerBeginRequestPayload& req)
-{
-(void)soul; (void)req; return true;
-}
+	// Server: return true to allow the spawn, false to issue PlayerBeginReject.
+	// Override to enforce cooldowns, team limits, phase gates, etc.
+	virtual bool ValidateSpawn(const Soul& soul, const PlayerBeginRequestPayload& req)
+	{
+		(void)soul;
+		(void)req;
+		return true;
+	}
 
-// Both: called when a body is confirmed live (Soul::ClaimBody already called).
-virtual void OnSpawnConfirmed(Soul& soul, ConstructRef bodyRef)
-{
-(void)soul; (void)bodyRef;
-}
+	// Both: called when a body is confirmed live (Soul::ClaimBody already called).
+	virtual void OnSpawnConfirmed(Soul& soul, ConstructRef bodyRef)
+	{
+		(void)soul;
+		(void)bodyRef;
+	}
 
-// Both: called when a body is lost (Soul::ReleaseBody already called).
-virtual void OnSpawnLost(Soul& soul) { (void)soul; }
+	// Both: called when a body is lost (Soul::ReleaseBody already called).
+	virtual void OnSpawnLost(Soul& soul) { (void)soul; }
 
 protected:
-WithSpawnManagement()
-{
-static bool registered = []
-{
-ReflectionRegistry::Get().RegisterMixin("WithSpawnManagement", MixinID, /*isUserDefined=*/false);
-return true;
-}();
-(void)registered;
-}
+	WithSpawnManagement()
+	{
+		static bool registered = []
+		{
+			ReflectionRegistry::Get().RegisterMixin("WithSpawnManagement", MixinID, /*isUserDefined=*/false);
+			return true;
+		}();
+		(void)registered;
+	}
 };

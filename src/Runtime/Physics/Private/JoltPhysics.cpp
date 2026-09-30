@@ -51,21 +51,43 @@ static void JoltTraceImpl(const char* inFMT, ...)
 }
 
 static bool JoltAssertFailedImpl(const char* inExpression, const char* inMessage,
-								 const char* inFile, JPH::uint inLine)
+	const char* inFile, JPH::uint inLine)
 {
 	LOG_ENG_ERROR_F("[Jolt] ASSERT FAILED: %s:%u: (%s) %s",
-					inFile, inLine, inExpression, inMessage ? inMessage : "");
+		inFile, inLine, inExpression, inMessage ? inMessage : "");
 	return true; // trigger debugger breakpoint
 }
 #endif
 
-// Using the Table implementations — no virtual overrides needed, just a lookup table.
-// These must outlive the PhysicsSystem, so they're file-static and manually managed.
-// Lifetime: Initialize() allocates, Shutdown() frees. No re-entrant use across worlds.
-// TODO: wrap in unique_ptr once Jolt backend is swappable (Stage 2 hardening).
-static JPH::BroadPhaseLayerInterfaceTable* s_BPLayerInterface   = nullptr;
-static JPH::ObjectVsBroadPhaseLayerFilterTable* s_ObjVsBPFilter = nullptr;
-static JPH::ObjectLayerPairFilterTable* s_ObjPairFilter         = nullptr;
+// Jolt's allocator hooks, Factory, and type registry are process-global, while several worlds
+// can own a JoltPhysics at once (PIE: edit + server + clients). Register them exactly once for
+// the process: the function-local static gives one-time, thread-safe setup with no lock after
+// it, and its destructor runs at exit, after every world has shut its physics down.
+namespace
+{
+struct JoltGlobals
+{
+	JoltGlobals()
+	{
+		JPH::RegisterDefaultAllocator();
+		JPH_IF_ENABLE_ASSERTS(JPH::Trace = JoltTraceImpl;)
+		JPH_IF_ENABLE_ASSERTS(JPH::AssertFailed = JoltAssertFailedImpl;)
+		JPH::Factory::sInstance = new JPH::Factory();
+		JPH::RegisterTypes();
+	}
+	~JoltGlobals()
+	{
+		JPH::UnregisterTypes();
+		delete JPH::Factory::sInstance;
+		JPH::Factory::sInstance = nullptr;
+	}
+};
+
+void EnsureJoltGlobals()
+{
+	static JoltGlobals globals;
+}
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -180,13 +202,7 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 	TNX_ZONE_N("JoltPhysics_Init");
 	ConfigPtr = config;
 
-	// --- Jolt global init (idempotent) ---
-	JPH::RegisterDefaultAllocator();
-	JPH_IF_ENABLE_ASSERTS(JPH::Trace = JoltTraceImpl;)
-	JPH_IF_ENABLE_ASSERTS(JPH::AssertFailed = JoltAssertFailedImpl;)
-
-	JPH::Factory::sInstance = new JPH::Factory();
-	JPH::RegisterTypes();
+	EnsureJoltGlobals();
 
 	// --- Temp allocator: 32 MB pre-allocated scratch space ---
 	TempAllocator = std::make_unique<JPH::TempAllocatorImpl>(2048 * config->MAX_JOLT_BODIES);
@@ -197,25 +213,18 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 	JobSystem                       = std::make_unique<JoltJobSystemAdapter>(MaxJobs, MaxBarriers, &JoltPhysCounter);
 
 	// --- Layer configuration (table-based, no virtual overrides) ---
-	s_BPLayerInterface = new JPH::BroadPhaseLayerInterfaceTable(
+	BPLayerInterface = std::make_unique<JPH::BroadPhaseLayerInterfaceTable>(
 		JoltLayers::NumLayers, JoltBroadPhaseLayers::NumLayers);
-	s_BPLayerInterface->MapObjectToBroadPhaseLayer(JoltLayers::Static, JoltBroadPhaseLayers::Static);
-	s_BPLayerInterface->MapObjectToBroadPhaseLayer(JoltLayers::Dynamic, JoltBroadPhaseLayers::Dynamic);
+	BPLayerInterface->MapObjectToBroadPhaseLayer(JoltLayers::Static, JoltBroadPhaseLayers::Static);
+	BPLayerInterface->MapObjectToBroadPhaseLayer(JoltLayers::Dynamic, JoltBroadPhaseLayers::Dynamic);
 
-	s_ObjVsBPFilter = new JPH::ObjectVsBroadPhaseLayerFilterTable(
-		*s_BPLayerInterface, JoltBroadPhaseLayers::NumLayers,
-		*new JPH::ObjectLayerPairFilterTable(JoltLayers::NumLayers), // temporary for construction
-		JoltLayers::NumLayers);
+	ObjPairFilter = std::make_unique<JPH::ObjectLayerPairFilterTable>(JoltLayers::NumLayers);
+	ObjPairFilter->EnableCollision(JoltLayers::Static, JoltLayers::Dynamic);
+	ObjPairFilter->EnableCollision(JoltLayers::Dynamic, JoltLayers::Dynamic);
 
-	s_ObjPairFilter = new JPH::ObjectLayerPairFilterTable(JoltLayers::NumLayers);
-	s_ObjPairFilter->EnableCollision(JoltLayers::Static, JoltLayers::Dynamic);
-	s_ObjPairFilter->EnableCollision(JoltLayers::Dynamic, JoltLayers::Dynamic);
-
-	// Rebuild the broadphase filter with the real pair filter
-	delete s_ObjVsBPFilter;
-	s_ObjVsBPFilter = new JPH::ObjectVsBroadPhaseLayerFilterTable(
-		*s_BPLayerInterface, JoltBroadPhaseLayers::NumLayers,
-		*s_ObjPairFilter, JoltLayers::NumLayers);
+	ObjVsBPFilter = std::make_unique<JPH::ObjectVsBroadPhaseLayerFilterTable>(
+		*BPLayerInterface, JoltBroadPhaseLayers::NumLayers,
+		*ObjPairFilter, JoltLayers::NumLayers);
 
 	// --- Physics system ---
 	const JPH::uint cMaxBodies             = static_cast<JPH::uint>(config->MAX_JOLT_BODIES);
@@ -225,7 +234,7 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 
 	PhysSystem = std::make_unique<JPH::PhysicsSystem>();
 	PhysSystem->Init(cMaxBodies, cNumBodyMutexes, cMaxBodyPairs, cMaxContactConstraints,
-					 *s_BPLayerInterface, *s_ObjVsBPFilter, *s_ObjPairFilter);
+		*BPLayerInterface, *ObjVsBPFilter, *ObjPairFilter);
 
 	PhysSystem->SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f));
 	JPH::PhysicsSettings settings;
@@ -243,8 +252,8 @@ bool JoltPhysics::Initialize(const EngineConfig* config)
 	BodyToEntity.resize(config->MAX_JOLT_BODIES, InvalidEntityIndex);
 
 	LOG_ENG_INFO_F("[JoltPhysics] Initialized — maxBodies=%u, tempAlloc=%uMB, maxConcurrency=%d",
-				   cMaxBodies, (2048 * config->MAX_JOLT_BODIES) / (1024 * 1024),
-				   JobSystem->GetMaxConcurrency());
+		cMaxBodies, (2048 * config->MAX_JOLT_BODIES) / (1024 * 1024),
+		JobSystem->GetMaxConcurrency());
 
 	for (auto& vec : fieldScratch)
 	{
@@ -273,7 +282,7 @@ void JoltPhysics::RegisterCharacter(JoltCharacter* ch)
 void JoltPhysics::UnregisterCharacter(JoltCharacter* ch)
 {
 	ActiveCharacters.erase(std::remove(ActiveCharacters.begin(), ActiveCharacters.end(), ch),
-	                       ActiveCharacters.end());
+		ActiveCharacters.end());
 }
 
 void JoltPhysics::Shutdown()
@@ -298,17 +307,9 @@ void JoltPhysics::Shutdown()
 	JobSystem.reset();
 	TempAllocator.reset();
 
-	JPH::UnregisterTypes();
-
-	delete JPH::Factory::sInstance;
-	JPH::Factory::sInstance = nullptr;
-
-	delete s_ObjVsBPFilter;
-	s_ObjVsBPFilter = nullptr;
-	delete s_ObjPairFilter;
-	s_ObjPairFilter = nullptr;
-	delete s_BPLayerInterface;
-	s_BPLayerInterface = nullptr;
+	ObjVsBPFilter.reset();
+	ObjPairFilter.reset();
+	BPLayerInterface.reset();
 
 	LOG_ENG_INFO("[JoltPhysics] Shutdown complete");
 }
@@ -320,7 +321,7 @@ void JoltPhysics::Step(float dt)
 	// Jolt recommends 1 collision step per 1/60s. At 128Hz that's ~2 steps,
 	// but we're already substepping in the engine's accumulator loop, so
 	// each call here is exactly one fixed step.
-	//constexpr int cCollisionSteps = 1; // Leaving this at 1 even though the default fixed steps per physics is 8 so that physics is running at 64Hz
+	// constexpr int cCollisionSteps = 1; // Leaving this at 1 even though the default fixed steps per physics is 8 so that physics is running at 64Hz
 
 	// manual calculation based on update rates.
 	static int cCollisionSteps = std::max(1, ConfigPtr->FixedUpdateHz / ConfigPtr->PhysicsUpdateInterval / 64);
@@ -428,8 +429,10 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 
 		// Guard against zero/denorm quaternions (zero-initialized fields
 		// or imprecise scene file values). Jolt asserts on unnormalized quats.
-		if (rot.LengthSq() < 1.0e-6f) rot = JPH::Quat::sIdentity();
-		else rot                          = rot.Normalized();
+		if (rot.LengthSq() < 1.0e-6f)
+			rot = JPH::Quat::sIdentity();
+		else
+			rot = rot.Normalized();
 
 		// Create shape
 		JPH::RefConst<JPH::Shape> shape = CreateShapeFromSettings(shapeType, hx, hy, hz);
@@ -488,7 +491,7 @@ void JoltPhysics::FlushPendingBodies(Registry* reg)
 		{
 			uint32_t bit = TNX_CTZ64(deadMask);
 			uint32_t idx = static_cast<uint32_t>(word * 64 + bit);
-			deadMask     &= deadMask - 1;
+			deadMask &= deadMask - 1;
 
 			if (idx < physStart || idx >= physEnd) continue;
 			if (idx >= EntityToBody.size()) break;
@@ -539,8 +542,10 @@ void JoltPhysics::PushKinematicTransforms(Registry* reg, float dt)
 		JPH::RVec3 pos(posX[idx].ToFloat(), posY[idx].ToFloat(), posZ[idx].ToFloat());
 		JPH::Quat rot(rotX[idx].ToFloat(), rotY[idx].ToFloat(), rotZ[idx].ToFloat(), rotW[idx].ToFloat());
 
-		if (rot.LengthSq() < 1.0e-6f) rot = JPH::Quat::sIdentity();
-		else rot                          = rot.Normalized();
+		if (rot.LengthSq() < 1.0e-6f)
+			rot = JPH::Quat::sIdentity();
+		else
+			rot = rot.Normalized();
 
 		bi.MoveKinematic(EntityToBody[idx], pos, rot, dt);
 	}
@@ -560,7 +565,7 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 
 	for (int32_t i = 0; i < activeCount; ++i)
 	{
-		syncList[i] = {activeIDs[i], GetBodyOwner(activeIDs[i])};
+		syncList[i] = { activeIDs[i], GetBodyOwner(activeIDs[i]) };
 	}
 
 	// Sort by offset for strictly ascending memory writes later!
@@ -622,7 +627,10 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 	ComponentCacheBase* TC = reg->GetTemporalCache();
 
 	uint32_t writeFrame = 0;
-	while (!TC->TryLockFrameForWrite(writeFrame)) { _mm_pause(); }
+	while (!TC->TryLockFrameForWrite(writeFrame))
+	{
+		_mm_pause();
+	}
 
 	TrinyxJobs::JobCounter writebackCounter;
 
@@ -632,7 +640,7 @@ void JoltPhysics::PullActiveTransforms(Registry* reg)
 		TrinyxJobs::Dispatch([this, TC, i, fieldPtr](uint32_t)
 		{
 			SimFloat* fieldArr = static_cast<SimFloat*>(TC->GetFieldData(TC->GetFrameHeader(), CTransform<>::StaticTemporalIndex(), i));
-			int idx         = 0;
+			int idx            = 0;
 			for (auto& Entity : syncList)
 			{
 				if (Entity.offset == InvalidEntityIndex)
@@ -788,9 +796,9 @@ void JoltPhysics::ProcessContacts(const Registry* Reg)
 		// Entity path uses the cache record. Construct path uses the registered tables.
 		// Both can be valid simultaneously (a construct with a representingEntity set).
 		const EntityHandle e1 = hasEntityCb1 ? Reg->GetRecordByCache(ci1).LHandle
-		                       : (bid1 < ConstructBodyEntityHandles.size() ? ConstructBodyEntityHandles[bid1] : EntityHandle{});
+											 : (bid1 < ConstructBodyEntityHandles.size() ? ConstructBodyEntityHandles[bid1] : EntityHandle{});
 		const EntityHandle e2 = hasEntityCb2 ? Reg->GetRecordByCache(ci2).LHandle
-		                       : (bid2 < ConstructBodyEntityHandles.size() ? ConstructBodyEntityHandles[bid2] : EntityHandle{});
+											 : (bid2 < ConstructBodyEntityHandles.size() ? ConstructBodyEntityHandles[bid2] : EntityHandle{});
 
 		void* c1 = bid1 < ConstructBodyOwnerPtrs.size() ? ConstructBodyOwnerPtrs[bid1] : nullptr;
 		void* c2 = bid2 < ConstructBodyOwnerPtrs.size() ? ConstructBodyOwnerPtrs[bid2] : nullptr;
@@ -799,8 +807,8 @@ void JoltPhysics::ProcessContacts(const Registry* Reg)
 		{
 			case PhysicsContactEventType::OnHit:
 			{
-				PhysicsOnHitData hit12{e2, c2,  cevent.ContactInfo.WorldSpaceNormal,  cevent.ContactInfo.PenetrationDepth};
-				PhysicsOnHitData hit21{e1, c1, -cevent.ContactInfo.WorldSpaceNormal,  cevent.ContactInfo.PenetrationDepth};
+				PhysicsOnHitData hit12{ e2, c2, cevent.ContactInfo.WorldSpaceNormal, cevent.ContactInfo.PenetrationDepth };
+				PhysicsOnHitData hit21{ e1, c1, -cevent.ContactInfo.WorldSpaceNormal, cevent.ContactInfo.PenetrationDepth };
 				if (hasEntityCb1 && ci1 < OnHitCallbacks.size()) OnHitCallbacks[ci1](hit12);
 				if (hasEntityCb2 && ci2 < OnHitCallbacks.size()) OnHitCallbacks[ci2](hit21);
 				if (hasConstructCb1) ConstructHitCallbacks[bid1](hit12);
@@ -809,8 +817,8 @@ void JoltPhysics::ProcessContacts(const Registry* Reg)
 			}
 			case PhysicsContactEventType::OnOverlapBegin:
 			{
-				PhysicsOverlapData ov12{e2, c2};
-				PhysicsOverlapData ov21{e1, c1};
+				PhysicsOverlapData ov12{ e2, c2 };
+				PhysicsOverlapData ov21{ e1, c1 };
 				if (hasEntityCb1 && ci1 < OnOverlapBeginCallbacks.size()) OnOverlapBeginCallbacks[ci1](ov12);
 				if (hasEntityCb2 && ci2 < OnOverlapBeginCallbacks.size()) OnOverlapBeginCallbacks[ci2](ov21);
 				if (bid1 < ConstructOverlapBeginCallbacks.size()) ConstructOverlapBeginCallbacks[bid1](ov12);
@@ -819,8 +827,8 @@ void JoltPhysics::ProcessContacts(const Registry* Reg)
 			}
 			case PhysicsContactEventType::OnOverlapEnded:
 			{
-				PhysicsOverlapData ov12{e2, c2};
-				PhysicsOverlapData ov21{e1, c1};
+				PhysicsOverlapData ov12{ e2, c2 };
+				PhysicsOverlapData ov21{ e1, c1 };
 				if (hasEntityCb1 && ci1 < OnOverlapEndCallbacks.size()) OnOverlapEndCallbacks[ci1](ov12);
 				if (hasEntityCb2 && ci2 < OnOverlapEndCallbacks.size()) OnOverlapEndCallbacks[ci2](ov21);
 				if (bid1 < ConstructOverlapEndCallbacks.size()) ConstructOverlapEndCallbacks[bid1](ov12);
@@ -856,7 +864,7 @@ bool JoltPhysics::RestoreSnapshot(uint32_t frameNumber)
 	if (slot.FrameNumber != frameNumber)
 	{
 		LOG_ENG_WARN_F("[JoltPhysics] Snapshot for frame %u not found (slot has frame %u)",
-					   frameNumber, slot.FrameNumber);
+			frameNumber, slot.FrameNumber);
 		return false;
 	}
 
@@ -870,8 +878,57 @@ bool JoltPhysics::RestoreSnapshot(uint32_t frameNumber)
 uint32_t JoltPhysics::GetOldestSnapshotFrame() const
 {
 	uint32_t oldest = UINT32_MAX;
-	for (const auto& slot : SnapshotRing) if (slot.FrameNumber != UINT32_MAX && slot.FrameNumber < oldest) oldest = slot.FrameNumber;
+	for (const auto& slot : SnapshotRing)
+		if (slot.FrameNumber != UINT32_MAX && slot.FrameNumber < oldest) oldest = slot.FrameNumber;
 	return oldest;
 }
 
 #endif // TNX_ENABLE_ROLLBACK
+
+void JoltPhysics::UnbindConstructContacts(JPH::BodyID id, void* ctx)
+{
+	uint32_t idx = id.GetIndex();
+	if (idx < ConstructHitCallbacks.size()) ConstructHitCallbacks[idx].UnbindByContext(ctx);
+	if (idx < ConstructOverlapBeginCallbacks.size()) ConstructOverlapBeginCallbacks[idx].UnbindByContext(ctx);
+	if (idx < ConstructOverlapEndCallbacks.size()) ConstructOverlapEndCallbacks[idx].UnbindByContext(ctx);
+}
+
+void JoltPhysics::ClearConstructContacts(JPH::BodyID id)
+{
+	uint32_t idx = id.GetIndex();
+	if (idx < ConstructHitCallbacks.size()) ConstructHitCallbacks[idx].Reset();
+	if (idx < ConstructOverlapBeginCallbacks.size()) ConstructOverlapBeginCallbacks[idx].Reset();
+	if (idx < ConstructOverlapEndCallbacks.size()) ConstructOverlapEndCallbacks[idx].Reset();
+	if (idx < ConstructBodyOwnerPtrs.size()) ConstructBodyOwnerPtrs[idx] = nullptr;
+	if (idx < ConstructBodyEntityHandles.size()) ConstructBodyEntityHandles[idx] = EntityHandle{};
+}
+
+void JoltPhysics::EnsureEntityCallbackSize(EntityCacheHandle idx)
+{
+	size_t needed = static_cast<size_t>(idx) + 1;
+	if (OnHitCallbacks.size() < needed) OnHitCallbacks.resize(needed);
+	if (OnOverlapBeginCallbacks.size() < needed) OnOverlapBeginCallbacks.resize(needed);
+	if (OnOverlapEndCallbacks.size() < needed) OnOverlapEndCallbacks.resize(needed);
+}
+
+void JoltPhysics::EnsureConstructCallbackSize(uint32_t idx)
+{
+	size_t needed = static_cast<size_t>(idx) + 1;
+	if (ConstructHitCallbacks.size() < needed) ConstructHitCallbacks.resize(needed);
+	if (ConstructOverlapBeginCallbacks.size() < needed) ConstructOverlapBeginCallbacks.resize(needed);
+	if (ConstructOverlapEndCallbacks.size() < needed) ConstructOverlapEndCallbacks.resize(needed);
+	if (ConstructBodyOwnerPtrs.size() < needed) ConstructBodyOwnerPtrs.resize(needed, nullptr);
+	if (ConstructBodyEntityHandles.size() < needed) ConstructBodyEntityHandles.resize(needed);
+}
+
+void JoltPhysics::UnbindContacts(EntityHandle handle, Registry* reg, void* ctx)
+{
+	UnbindContacts(reg->GetRecord(handle).CacheEntityIndex, ctx);
+}
+
+void JoltPhysics::UnbindContacts(EntityCacheHandle idx, void* ctx)
+{
+	if (idx < OnHitCallbacks.size()) OnHitCallbacks[idx].UnbindByContext(ctx);
+	if (idx < OnOverlapBeginCallbacks.size()) OnOverlapBeginCallbacks[idx].UnbindByContext(ctx);
+	if (idx < OnOverlapEndCallbacks.size()) OnOverlapEndCallbacks[idx].UnbindByContext(ctx);
+}

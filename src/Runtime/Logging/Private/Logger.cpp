@@ -2,6 +2,29 @@
 #include <iostream>
 #include <filesystem>
 
+#if defined(_WIN32)
+extern "C" __declspec(dllimport) int __stdcall IsDebuggerPresent();
+#elif defined(__linux__)
+#include <fstream>
+#include <string>
+#endif
+
+bool Logger::IsDebuggerAttached()
+{
+#if defined(_WIN32)
+	return IsDebuggerPresent() != 0;
+#elif defined(__linux__)
+	// A tracer (gdb, lldb, rr) shows up as a non-zero TracerPid.
+	std::ifstream status("/proc/self/status");
+	std::string line;
+	while (std::getline(status, line))
+		if (line.rfind("TracerPid:", 0) == 0) return std::stoi(line.substr(10)) != 0;
+	return false;
+#else
+	return false;
+#endif
+}
+
 void Logger::Init(const std::string& logFilePath, LogLevel inMinLevel)
 {
 	std::lock_guard<std::mutex> lock(Mutex);
@@ -11,7 +34,8 @@ void Logger::Init(const std::string& logFilePath, LogLevel inMinLevel)
 		return;
 	}
 
-	for (auto& ml : MinLevel) ml = inMinLevel;
+	for (auto& ml : MinLevel)
+		ml = inMinLevel;
 
 	// Open log file in append mode
 	LogFile.open(logFilePath, std::ios::out | std::ios::app);
@@ -72,10 +96,7 @@ void Logger::Log(LogLevel level, LogChannel channel, const char* file, int line,
 	std::string filename = std::filesystem::path(file).filename().string();
 
 	// Format: [Timestamp] [LEVEL] (file:line) message
-	std::string logEntry = "[" + GetTimestamp() + "] " +
-		"[" + LevelToString(level) + "] " +
-		"(" + filename + ":" + std::to_string(line) + ") " +
-		message;
+	std::string logEntry = "[" + GetTimestamp() + "] " + "[" + LevelToString(level) + "] " + "(" + filename + ":" + std::to_string(line) + ") " + message;
 
 	// Console output with color
 	std::cout << LevelToColor(level) << logEntry << "\033[0m" << std::endl;
@@ -100,7 +121,8 @@ std::string Logger::GetTimestamp()
 	auto now  = std::chrono::system_clock::now();
 	auto time = std::chrono::system_clock::to_time_t(now);
 	auto ms   = std::chrono::duration_cast<std::chrono::milliseconds>(
-		now.time_since_epoch()) % 1000;
+					now.time_since_epoch())
+				% 1000;
 
 	std::tm tm;
 #ifdef _WIN32

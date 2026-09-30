@@ -1,0 +1,6 @@
+# Developer tooling for formatting, linting and presubmit. Same versions on Windows and Linux.
+#   python -m pip install -r scripts/requirements-dev.txt
+#   pre-commit install
+pre-commit==4.6.2
+clang-format==23.1.1
+clang-tidy==22.1.8

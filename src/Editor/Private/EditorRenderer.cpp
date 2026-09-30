@@ -64,7 +64,7 @@ struct ImGuiEventQueue
 
 	// Drain events: feed to ImGui and collect any dropped file paths.
 	// Returns the last dropped file path (empty if none).
-	std::string DrainIntoImGui()
+	std::string DrainIntoImGui(float& relX, float& relY, float& wheel)
 	{
 		std::string droppedFile;
 		std::lock_guard lock(Mutex);
@@ -72,6 +72,14 @@ struct ImGuiEventQueue
 		{
 			SDL_Event& ev = Events[Tail];
 			ImGui_ImplSDL3_ProcessEvent(&ev);
+			// Relative motion survives relative mouse mode, where absolute positions stop moving.
+			if (ev.type == SDL_EVENT_MOUSE_MOTION)
+			{
+				relX += ev.motion.xrel;
+				relY += ev.motion.yrel;
+			}
+			else if (ev.type == SDL_EVENT_MOUSE_WHEEL)
+				wheel += ev.wheel.y;
 			if (ev.type == SDL_EVENT_DROP_FILE) droppedFile = std::move(PendingDropPath);
 			Tail = (Tail + 1) % Capacity;
 		}
@@ -150,11 +158,11 @@ bool EditorRenderer::CreateGradientPipeline()
 	viewportState.scissorCount  = 1;
 
 	VkPipelineRasterizationStateCreateInfo raster{};
-	raster.sType     = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	raster.sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
 	raster.polygonMode = VK_POLYGON_MODE_FILL;
-	raster.cullMode  = VK_CULL_MODE_NONE;
-	raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-	raster.lineWidth = 1.0f;
+	raster.cullMode    = VK_CULL_MODE_NONE;
+	raster.frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+	raster.lineWidth   = 1.0f;
 
 	VkPipelineMultisampleStateCreateInfo multisample{};
 	multisample.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -164,8 +172,7 @@ bool EditorRenderer::CreateGradientPipeline()
 	depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
 
 	VkPipelineColorBlendAttachmentState blendAttach{};
-	blendAttach.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-	                             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	blendAttach.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
 	VkPipelineColorBlendStateCreateInfo colorBlend{};
 	colorBlend.sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -212,8 +219,16 @@ bool EditorRenderer::CreateGradientPipeline()
 
 void EditorRenderer::DestroyGradientShaders()
 {
-	if (GradientVertShader) { vkDestroyShaderModule(Device, GradientVertShader, nullptr); GradientVertShader = VK_NULL_HANDLE; }
-	if (GradientFragShader) { vkDestroyShaderModule(Device, GradientFragShader, nullptr); GradientFragShader = VK_NULL_HANDLE; }
+	if (GradientVertShader)
+	{
+		vkDestroyShaderModule(Device, GradientVertShader, nullptr);
+		GradientVertShader = VK_NULL_HANDLE;
+	}
+	if (GradientFragShader)
+	{
+		vkDestroyShaderModule(Device, GradientFragShader, nullptr);
+		GradientFragShader = VK_NULL_HANDLE;
+	}
 }
 
 void EditorRenderer::OnPostStart()
@@ -254,7 +269,7 @@ void EditorRenderer::RecordOverlay(VkCommandBuffer cmd)
 bool EditorRenderer::InitImGui()
 {
 	VkDescriptorPoolSize poolSizes[] = {
-		{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16},
+		{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 },
 	};
 
 	VkDescriptorPoolCreateInfo poolCI{};
@@ -273,7 +288,7 @@ bool EditorRenderer::InitImGui()
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 
-	ImGuiIO& io    = ImGui::GetIO();
+	ImGuiIO& io = ImGui::GetIO();
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
@@ -284,14 +299,19 @@ bool EditorRenderer::InitImGui()
 
 	// Locate engine root by walking up from the project dir (same anchor as config loading).
 	const char* projectDir = (EnginePtr && EnginePtr->GetConfig()->ProjectDir[0] != '\0')
-	                             ? EnginePtr->GetConfig()->ProjectDir : nullptr;
+								 ? EnginePtr->GetConfig()->ProjectDir
+								 : nullptr;
 	std::string engineRoot;
 	{
-		namespace fs = std::filesystem;
+		namespace fs    = std::filesystem;
 		fs::path search = projectDir ? fs::path(projectDir) : fs::current_path();
 		for (int d = 0; d < 10; ++d)
 		{
-			if (fs::exists(search / "TrinyxDefaults.ini")) { engineRoot = search.string(); break; }
+			if (fs::exists(search / "TrinyxDefaults.ini"))
+			{
+				engineRoot = search.string();
+				break;
+			}
 			fs::path parent = search.parent_path();
 			if (parent == search) break;
 			search = parent;
@@ -397,7 +417,10 @@ void EditorRenderer::PushImGuiEvent(const SDL_Event& event)
 void EditorRenderer::DrainImGuiEvents()
 {
 	if (!EventQueue) return;
-	std::string dropped = EventQueue->DrainIntoImGui();
+	MouseRelX           = 0.0f;
+	MouseRelY           = 0.0f;
+	MouseWheel          = 0.0f;
+	std::string dropped = EventQueue->DrainIntoImGui(MouseRelX, MouseRelY, MouseWheel);
 	if (!dropped.empty() && Editor) Editor->HandleDroppedFile(dropped);
 }
 
@@ -470,8 +493,8 @@ void EditorRenderer::AddViewport(WorldViewport* vp)
 {
 	ActiveViewports.push_back(vp);
 	LOG_ENG_INFO_F("[EditorRenderer] Added viewport %p (world %p), %u active",
-				   static_cast<void*>(vp), static_cast<void*>(vp->TargetWorld),
-			   static_cast<uint32_t>(ActiveViewports.size()));
+		static_cast<void*>(vp), static_cast<void*>(vp->TargetWorld),
+		static_cast<uint32_t>(ActiveViewports.size()));
 }
 
 void EditorRenderer::RemoveViewport(WorldViewport* vp)
@@ -481,8 +504,8 @@ void EditorRenderer::RemoveViewport(WorldViewport* vp)
 	{
 		ActiveViewports.erase(it);
 		LOG_ENG_INFO_F("[EditorRenderer] Removed viewport %p, %u remaining",
-					   static_cast<void*>(vp),
-				   static_cast<uint32_t>(ActiveViewports.size()));
+			static_cast<void*>(vp),
+			static_cast<uint32_t>(ActiveViewports.size()));
 	}
 }
 
@@ -494,14 +517,14 @@ void EditorRenderer::AllocateViewportResources(WorldViewport* vp, uint32_t width
 	// Offscreen color target — must match the pipeline's color attachment format (swapchain format).
 	VkFormat swapchainFmt = static_cast<VkFormat>(VkCtx->GetSwapchain().Format);
 	vp->ColorTarget       = VkMem->AllocateImage(
-		{width, height},
+		{ width, height },
 		swapchainFmt,
 		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 		VK_IMAGE_ASPECT_COLOR_BIT);
 
 	// Offscreen depth target
 	vp->DepthTarget = VkMem->AllocateImage(
-		{width, height},
+		{ width, height },
 		DepthFormat,
 		VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
 		VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
@@ -509,7 +532,7 @@ void EditorRenderer::AllocateViewportResources(WorldViewport* vp, uint32_t width
 #ifdef TNX_GPU_PICKING
 	// Pick attachment — R32_UINT, one pixel readback per click
 	vp->PickTarget = VkMem->AllocateImage(
-		{width, height},
+		{ width, height },
 		VK_FORMAT_R32_UINT,
 		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
 		VK_IMAGE_ASPECT_COLOR_BIT);
@@ -517,7 +540,7 @@ void EditorRenderer::AllocateViewportResources(WorldViewport* vp, uint32_t width
 
 	// Per-world field slabs — same layout as main renderer, all 35 fields (render + anim).
 	const VkDeviceSize slabSize = static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES)
-		* sizeof(float) * GpuTotalFieldCount;
+								  * sizeof(float) * GpuTotalFieldCount;
 	for (auto& slab : vp->FieldSlabs)
 	{
 		slab = VkMem->AllocateBuffer(
@@ -580,8 +603,10 @@ void EditorRenderer::FreeViewportResources(WorldViewport* vp)
 	vp->FreeDirtyPlanes();
 
 	// Free field slabs and GpuData
-	for (auto& slab : vp->FieldSlabs) slab.Free();
-	for (auto& gd : vp->GpuData) gd.Free();
+	for (auto& slab : vp->FieldSlabs)
+		slab.Free();
+	for (auto& gd : vp->GpuData)
+		gd.Free();
 
 	// Free offscreen images
 	vp->ColorTarget.Free();
@@ -669,8 +694,8 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 	auto resolveVPField = [&](const GpuSlabFieldDesc& desc)
 		-> std::pair<ComponentCacheBase*, TemporalFrameHeader*>
 	{
-		if (desc.tier == GpuSlabTier::Temporal) return {temporalC, temporalHdr};
-		return {volatileC, volatileHdr};
+		if (desc.tier == GpuSlabTier::Temporal) return { temporalC, temporalHdr };
+		return { volatileC, volatileHdr };
 	};
 
 	auto flushImmediate = [&]()
@@ -688,7 +713,7 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 
 	// ── Step 1: Scan flags → build dirty snapshot, count dirty entities ──
 	uint32_t dirtyEntityCount = 0;
-	const auto* flagsSrc = static_cast<const int32_t*>(
+	const auto* flagsSrc      = static_cast<const int32_t*>(
 		temporalC->GetFieldData(temporalHdr, static_cast<uint8_t>(SlabFieldDescs[0].slot), 0));
 
 	if (flagsSrc)
@@ -734,13 +759,17 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 			{
 				if (!isSF)
 				{
-					if (src) std::memcpy(dst, src, static_cast<size_t>(fieldStride));
-					else std::memset(dst, 0, static_cast<size_t>(fieldStride));
+					if (src)
+						std::memcpy(dst, src, static_cast<size_t>(fieldStride));
+					else
+						std::memset(dst, 0, static_cast<size_t>(fieldStride));
 				}
 				else if constexpr (std::is_same_v<SimFloat, SimFloatImpl<float>>)
 				{
-					if (src) std::memcpy(dst, src, static_cast<size_t>(fieldStride));
-					else std::memset(dst, 0, static_cast<size_t>(fieldStride));
+					if (src)
+						std::memcpy(dst, src, static_cast<size_t>(fieldStride));
+					else
+						std::memset(dst, 0, static_cast<size_t>(fieldStride));
 				}
 				else
 				{
@@ -749,9 +778,11 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 						const Fixed32* fsrc = static_cast<const Fixed32*>(src);
 						float* fdst         = reinterpret_cast<float*>(dst);
 						const size_t count  = static_cast<size_t>(fieldStride) / sizeof(float);
-						for (size_t i = 0; i < count; ++i) fdst[i] = fsrc[i].ToFloat();
+						for (size_t i = 0; i < count; ++i)
+							fdst[i] = fsrc[i].ToFloat();
 					}
-					else std::memset(dst, 0, static_cast<size_t>(fieldStride));
+					else
+						std::memset(dst, 0, static_cast<size_t>(fieldStride));
 				}
 			}, &counter, TrinyxJobs::Queue::Render);
 		}
@@ -770,8 +801,8 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 		{
 			const GpuSlabFieldDesc& desc = SlabFieldDescs[f];
 			if (desc.kind == GpuSlabKind::EntityIndex) continue;
-			auto [cache, hdr]            = resolveVPField(desc);
-			const auto* src              = static_cast<const uint8_t*>(
+			auto [cache, hdr] = resolveVPField(desc);
+			const auto* src   = static_cast<const uint8_t*>(
 				cache->GetFieldData(hdr, static_cast<uint8_t>(desc.slot), desc.fi));
 			uint8_t* dst = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
 			if (!src) continue;
@@ -787,7 +818,7 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 					{
 						const uint32_t idx = w * 64 + TNX_CTZ64(bits);
 						fdst[idx]          = ssrc[idx].ToFloat();
-						bits              &= bits - 1;
+						bits &= bits - 1;
 					}
 				}
 			}
@@ -802,12 +833,12 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 					{
 						const uint32_t idx = w * 64 + TNX_CTZ64(bits);
 						udst[idx]          = usrc[idx];
-						bits              &= bits - 1;
+						bits &= bits - 1;
 					}
 				}
 			}
 		}
-		
+
 		flushImmediate();
 		return;
 	}
@@ -815,16 +846,20 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 	for (uint32_t f = 0; f < GpuTotalFieldCount; ++f)
 	{
 		const GpuSlabFieldDesc& desc = SlabFieldDescs[f];
-		if (desc.kind == GpuSlabKind::EntityIndex) { vp->VpUploadFields[f].src = nullptr; continue; }
-		auto [cache, hdr]              = resolveVPField(desc);
-		vp->VpUploadFields[f].src       = static_cast<const uint8_t*>(
+		if (desc.kind == GpuSlabKind::EntityIndex)
+		{
+			vp->VpUploadFields[f].src = nullptr;
+			continue;
+		}
+		auto [cache, hdr]         = resolveVPField(desc);
+		vp->VpUploadFields[f].src = static_cast<const uint8_t*>(
 			cache->GetFieldData(hdr, static_cast<uint8_t>(desc.slot), desc.fi));
-		vp->VpUploadFields[f].dst       = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
-		vp->VpUploadFields[f].kind      = desc.kind;
+		vp->VpUploadFields[f].dst  = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
+		vp->VpUploadFields[f].kind = desc.kind;
 	}
 
 	const uint64_t* capturedPlane = plane;
-	const uint32_t  capturedWords = vp->DirtyWordCount;
+	const uint32_t capturedWords  = vp->DirtyWordCount;
 
 	if (dirtyEntityCount < singleJobThreshold)
 	{
@@ -841,7 +876,12 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 					for (uint32_t w = 0; w < capturedWords; ++w)
 					{
 						uint64_t bits = capturedPlane[w];
-						while (bits) { const uint32_t idx = w * 64 + TNX_CTZ64(bits); fdst[idx] = ssrc[idx].ToFloat(); bits &= bits - 1; }
+						while (bits)
+						{
+							const uint32_t idx = w * 64 + TNX_CTZ64(bits);
+							fdst[idx]          = ssrc[idx].ToFloat();
+							bits &= bits - 1;
+						}
 					}
 				}
 				else
@@ -851,7 +891,12 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 					for (uint32_t w = 0; w < capturedWords; ++w)
 					{
 						uint64_t bits = capturedPlane[w];
-						while (bits) { const uint32_t idx = w * 64 + TNX_CTZ64(bits); udst[idx] = usrc[idx]; bits &= bits - 1; }
+						while (bits)
+						{
+							const uint32_t idx = w * 64 + TNX_CTZ64(bits);
+							udst[idx]          = usrc[idx];
+							bits &= bits - 1;
+						}
 					}
 				}
 			}
@@ -872,7 +917,12 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 					for (uint32_t w = 0; w < capturedWords; ++w)
 					{
 						uint64_t bits = capturedPlane[w];
-						while (bits) { const uint32_t idx = w * 64 + TNX_CTZ64(bits); fdst[idx] = ssrc[idx].ToFloat(); bits &= bits - 1; }
+						while (bits)
+						{
+							const uint32_t idx = w * 64 + TNX_CTZ64(bits);
+							fdst[idx]          = ssrc[idx].ToFloat();
+							bits &= bits - 1;
+						}
 					}
 				}
 				else
@@ -882,7 +932,12 @@ void EditorRenderer::WriteToViewportSlab(WorldViewport* vp)
 					for (uint32_t w = 0; w < capturedWords; ++w)
 					{
 						uint64_t bits = capturedPlane[w];
-						while (bits) { const uint32_t idx = w * 64 + TNX_CTZ64(bits); udst[idx] = usrc[idx]; bits &= bits - 1; }
+						while (bits)
+						{
+							const uint32_t idx = w * 64 + TNX_CTZ64(bits);
+							udst[idx]          = usrc[idx];
+							bits &= bits - 1;
+						}
 					}
 				}
 			}, &vp->SlabUploadCounter, TrinyxJobs::Queue::Render);
@@ -929,29 +984,26 @@ void EditorRenderer::FillGpuFrameDataForViewport(WorldViewport* vp, FrameSync& f
 	ComponentCacheBase* tc   = reg->GetTemporalCache();
 	TemporalFrameHeader* hdr = tc->GetFrameHeader(vp->LastTemporalFrame);
 
-	// Current camera state
-	data->Position[0] = hdr->CameraPosition.x.ToFloat();
-	data->Position[1] = hdr->CameraPosition.y.ToFloat();
-	data->Position[2] = hdr->CameraPosition.z.ToFloat();
-	data->FoV         = hdr->CameraFoV.ToFloat();
+	const ViewCamera cam = ResolveViewCamera(*vp, *hdr);
 
-	const Quatf rot   = hdr->CameraRotation.ToFloat();
-	data->Rotation[0] = rot.x;
-	data->Rotation[1] = rot.y;
-	data->Rotation[2] = rot.z;
-	data->Rotation[3] = rot.w;
+	data->Position[0] = cam.Position[0];
+	data->Position[1] = cam.Position[1];
+	data->Position[2] = cam.Position[2];
+	data->FoV         = cam.FoVDeg;
+	data->Rotation[0] = cam.Rotation.x;
+	data->Rotation[1] = cam.Rotation.y;
+	data->Rotation[2] = cam.Rotation.z;
+	data->Rotation[3] = cam.Rotation.w;
 
 	// Previous camera state (for GPU interpolation)
-	data->OldPosition[0] = hdr->PrevCameraPosition.x.ToFloat();
-	data->OldPosition[1] = hdr->PrevCameraPosition.y.ToFloat();
-	data->OldPosition[2] = hdr->PrevCameraPosition.z.ToFloat();
-	data->OldFoV         = hdr->PrevCameraFoV.ToFloat();
-
-	const Quatf oldRot   = hdr->PrevCameraRotation.ToFloat();
-	data->OldRotation[0] = oldRot.x;
-	data->OldRotation[1] = oldRot.y;
-	data->OldRotation[2] = oldRot.z;
-	data->OldRotation[3] = oldRot.w;
+	data->OldPosition[0] = cam.PrevPosition[0];
+	data->OldPosition[1] = cam.PrevPosition[1];
+	data->OldPosition[2] = cam.PrevPosition[2];
+	data->OldFoV         = cam.PrevFoVDeg;
+	data->OldRotation[0] = cam.PrevRotation.x;
+	data->OldRotation[1] = cam.PrevRotation.y;
+	data->OldRotation[2] = cam.PrevRotation.z;
+	data->OldRotation[3] = cam.PrevRotation.w;
 
 	data->AspectRatio = vp->Width > 0 ? static_cast<float>(vp->Width) / static_cast<float>(vp->Height) : 1.0f;
 
@@ -968,16 +1020,16 @@ void EditorRenderer::FillGpuFrameDataForViewport(WorldViewport* vp, FrameSync& f
 	data->MeshCount             = MeshManager::Get().GetMeshCount();
 
 	LogicThreadBase* logic = vp->TargetWorld->GetLogicThread();
-	data->Alpha          = logic ? static_cast<float>(std::clamp(logic->GetFixedAlpha(), 0.0, 1.0)) : 1.0f;
-	data->EntityCount    = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
-	data->OutFieldStride = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
+	data->Alpha            = logic ? static_cast<float>(std::clamp(logic->GetFixedAlpha(), 0.0, 1.0)) : 1.0f;
+	data->EntityCount      = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
+	data->OutFieldStride   = static_cast<uint32_t>(ConfigPtr->MAX_CACHED_ENTITIES);
 
 	// +1 for the always-on EntityCacheIdx slot (GpuTotalFieldCount slab fields + 1).
 	// Scatter iterates FieldCount; missing this entry skips SemEntityCacheIdx, which
 	// means it never writes entity cache indices to the sorted SoA (breaking GPU picking)
 	// and never registers skeletal entities in SkeletalIdxByEntityAddr (breaking LBS).
 	constexpr uint32_t kFieldCount = GpuTotalFieldCount + 1;
-	data->FieldCount = kFieldCount;
+	data->FieldCount               = kFieldCount;
 
 	data->SkinMatrixAddr           = Skinning.GetSkinMatrixAddr();
 	data->SkeletalListAddr         = Skinning.GetSkeletalListAddr();
@@ -1018,12 +1070,16 @@ void EditorRenderer::FillGpuFrameDataForViewport(WorldViewport* vp, FrameSync& f
 	vp->GPUPrevFrame   = vp->PrevFieldSlab;
 
 	// Viewport background gradient colors (written once per frame, read by gradient shader via BDA)
-	const ImVec4 ic = LINEAR_FROM_SRGB(TnxStyle::Color::ViewportInner);
-	const ImVec4 oc = LINEAR_FROM_SRGB(TnxStyle::Color::ViewportOuter);
-	data->BgInnerColor[0] = ic.x; data->BgInnerColor[1] = ic.y;
-	data->BgInnerColor[2] = ic.z; data->BgInnerColor[3] = ic.w;
-	data->BgOuterColor[0] = oc.x; data->BgOuterColor[1] = oc.y;
-	data->BgOuterColor[2] = oc.z; data->BgOuterColor[3] = oc.w;
+	const ImVec4 ic       = LINEAR_FROM_SRGB(TnxStyle::Color::ViewportInner);
+	const ImVec4 oc       = LINEAR_FROM_SRGB(TnxStyle::Color::ViewportOuter);
+	data->BgInnerColor[0] = ic.x;
+	data->BgInnerColor[1] = ic.y;
+	data->BgInnerColor[2] = ic.z;
+	data->BgInnerColor[3] = ic.w;
+	data->BgOuterColor[0] = oc.x;
+	data->BgOuterColor[1] = oc.y;
+	data->BgOuterColor[2] = oc.z;
+	data->BgOuterColor[3] = oc.w;
 
 #ifdef TNX_DEBUG_RENDERING
 	data->DebugDrawMode = Editor ? Editor->GetState().DebugDrawMode : 0u;
@@ -1037,12 +1093,12 @@ void EditorRenderer::FillGpuFrameDataForViewport(WorldViewport* vp, FrameSync& f
 
 void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& frame, WorldViewport* vp)
 {
-	const VkExtent2D ext = {vp->Width, vp->Height};
+	const VkExtent2D ext = { vp->Width, vp->Height };
 
 #ifdef TNX_GPU_PICKING
 	// Only pick for the editor viewport — PIE viewports don't have a pick target.
 	const bool bIsEditorVP = (vp == &EditorViewport);
-	bool bDoPick = false;
+	bool bDoPick           = false;
 	int32_t pickX = 0, pickY = 0;
 
 #if defined(TNX_GPU_PICKING_FAST)
@@ -1083,18 +1139,17 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 		barriers[0].oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
 		barriers[0].newLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		barriers[0].image            = static_cast<VkImage>(vp->ColorTarget.Image);
-		barriers[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+		barriers[0].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-		barriers[1].sType         = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-		barriers[1].srcStageMask  = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
-		barriers[1].srcAccessMask = 0;
-		barriers[1].dstStageMask  = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
-		barriers[1].dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
-			VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+		barriers[1].sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+		barriers[1].srcStageMask     = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+		barriers[1].srcAccessMask    = 0;
+		barriers[1].dstStageMask     = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
+		barriers[1].dstAccessMask    = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
 		barriers[1].oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
 		barriers[1].newLayout        = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 		barriers[1].image            = static_cast<VkImage>(vp->DepthTarget.Image);
-		barriers[1].subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1};
+		barriers[1].subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 };
 
 #ifdef TNX_GPU_PICKING
 		if (bDoPick && vp->PickTarget.IsValid())
@@ -1107,7 +1162,7 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 			barriers[2].oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
 			barriers[2].newLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 			barriers[2].image            = static_cast<VkImage>(vp->PickTarget.Image);
-			barriers[2].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+			barriers[2].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 			barrierCount                 = 3;
 		}
 #endif
@@ -1144,7 +1199,7 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 		// SkeletalIdxByEntity cleared to UINT32_MAX so non-skeletal entities keep the sentinel.
 		vkCmdFillBuffer(cmd, static_cast<VkBuffer>(frame.CompactCounterBuffer.Buffer), 0, sizeof(uint32_t), 0u);
 		vkCmdFillBuffer(cmd, static_cast<VkBuffer>(frame.MeshHistogramBuffer.Buffer), 0,
-						MaxMeshSlots * sizeof(uint32_t), 0u);
+			MaxMeshSlots * sizeof(uint32_t), 0u);
 		vkCmdFillBuffer(cmd, Skinning.GetSkeletalDispatchBuffer(), 0, sizeof(uint32_t), 0u);
 		vkCmdFillBuffer(cmd, Skinning.GetSkeletalIdxByEntityBuffer(), 0, VK_WHOLE_SIZE, 0xFFFFFFFFu);
 		{
@@ -1162,8 +1217,8 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 		}
 
 		vkCmdPushConstants(cmd, *PipelineLayout,
-						   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-						   0, sizeof(uint64_t), &gpuDataAddr);
+			VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+			0, sizeof(uint64_t), &gpuDataAddr);
 
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, PredicatePipeline);
 		vkCmdDispatch(cmd, dispatchX, 1, 1);
@@ -1175,7 +1230,7 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 
 #ifdef TNX_GPU_PICKING
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-						  bDoPick ? ScatterPickPipeline : ScatterPipeline);
+			bDoPick ? ScatterPickPipeline : ScatterPipeline);
 #else
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ScatterPipeline);
 #endif
@@ -1188,7 +1243,7 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 
 #ifdef TNX_GPU_PICKING
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-						  bDoPick ? SortPickPipeline : SortInstancesPipeline);
+			bDoPick ? SortPickPipeline : SortInstancesPipeline);
 #else
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, SortInstancesPipeline);
 #endif
@@ -1200,10 +1255,8 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 			mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
 			mb.srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
 			mb.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-			mb.dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
-				VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
-			mb.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
-				VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+			mb.dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+			mb.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
 			VkDependencyInfo d{};
 			d.sType              = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
 			d.memoryBarrierCount = 1;
@@ -1223,10 +1276,8 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 			mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
 			mb.srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
 			mb.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-			mb.dstStageMask  = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-				VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
-			mb.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
-				VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+			mb.dstStageMask  = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+			mb.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
 			VkDependencyInfo d{};
 			d.sType              = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
 			d.memoryBarrierCount = 1;
@@ -1262,7 +1313,7 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 
 		VkRenderingInfo gradRI{};
 		gradRI.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
-		gradRI.renderArea           = {{0, 0}, ext};
+		gradRI.renderArea           = { { 0, 0 }, ext };
 		gradRI.layerCount           = 1;
 		gradRI.colorAttachmentCount = 1;
 		gradRI.pColorAttachments    = &gradColorAttach;
@@ -1281,7 +1332,7 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 		gradBarrier.oldLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		gradBarrier.newLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		gradBarrier.image            = static_cast<VkImage>(vp->ColorTarget.Image);
-		gradBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+		gradBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 		VkDependencyInfo gradDep{};
 		gradDep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
 		gradDep.imageMemoryBarrierCount = 1;
@@ -1298,14 +1349,14 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 		colorClear.color.float32[3] = TnxStyle::Color::BgViewport.w;
 
 		VkClearValue depthClear{};
-		depthClear.depthStencil = {1.0f, 0};
+		depthClear.depthStencil = { 1.0f, 0 };
 
 		VkRenderingAttachmentInfo colorAttach{};
 		colorAttach.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
 		colorAttach.imageView   = static_cast<VkImageView>(vp->ColorTarget.View);
 		colorAttach.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		colorAttach.loadOp      = bDrawGradient ? VK_ATTACHMENT_LOAD_OP_LOAD
-		                                        : VK_ATTACHMENT_LOAD_OP_CLEAR;
+												: VK_ATTACHMENT_LOAD_OP_CLEAR;
 		colorAttach.storeOp     = VK_ATTACHMENT_STORE_OP_STORE;
 		colorAttach.clearValue  = colorClear;
 
@@ -1341,7 +1392,7 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 
 		VkRenderingInfo ri{};
 		ri.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
-		ri.renderArea           = {{0, 0}, ext};
+		ri.renderArea           = { { 0, 0 }, ext };
 		ri.layerCount           = 1;
 		ri.colorAttachmentCount = colorAttachCount;
 		ri.pColorAttachments    = colorAttachments;
@@ -1349,7 +1400,7 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 #else
 		VkRenderingInfo ri{};
 		ri.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
-		ri.renderArea           = {{0, 0}, ext};
+		ri.renderArea           = { { 0, 0 }, ext };
 		ri.layerCount           = 1;
 		ri.colorAttachmentCount = 1;
 		ri.pColorAttachments    = &colorAttach;
@@ -1360,7 +1411,7 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 
 #ifdef TNX_GPU_PICKING
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-						  (bDoPick && vp->PickTarget.IsValid()) ? *PickPipeline : *Pipeline);
+			(bDoPick && vp->PickTarget.IsValid()) ? *PickPipeline : *Pipeline);
 #else
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, *Pipeline);
 #endif
@@ -1370,7 +1421,7 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 
 		VkBuffer drawBuf = static_cast<VkBuffer>(frame.DrawArgsBuffer.Buffer);
 		vkCmdDrawIndexedIndirect(cmd, drawBuf, 0, MeshManager::Get().GetMeshCount(),
-								 sizeof(VkDrawIndexedIndirectCommand));
+			sizeof(VkDrawIndexedIndirectCommand));
 
 		vkCmdEndRendering(cmd);
 	}
@@ -1379,7 +1430,7 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 	// Copy clicked pixel from pick attachment to readback buffer
 	if (bDoPick && vp->PickTarget.IsValid())
 	{
-		int32_t px = (pickX >= 0 && pickX < static_cast<int32_t>(ext.width))  ? pickX : 0;
+		int32_t px = (pickX >= 0 && pickX < static_cast<int32_t>(ext.width)) ? pickX : 0;
 		int32_t py = (pickY >= 0 && pickY < static_cast<int32_t>(ext.height)) ? pickY : 0;
 
 		VkImageMemoryBarrier2 pickToTransfer{};
@@ -1391,7 +1442,7 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 		pickToTransfer.oldLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		pickToTransfer.newLayout        = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 		pickToTransfer.image            = static_cast<VkImage>(vp->PickTarget.Image);
-		pickToTransfer.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+		pickToTransfer.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
 		VkDependencyInfo pickDep{};
 		pickDep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -1402,9 +1453,9 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 		VkBufferImageCopy2 copyRegion{};
 		copyRegion.sType            = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2;
 		copyRegion.bufferOffset     = 0;
-		copyRegion.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-		copyRegion.imageOffset      = {px, py, 0};
-		copyRegion.imageExtent      = {1, 1, 1};
+		copyRegion.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+		copyRegion.imageOffset      = { px, py, 0 };
+		copyRegion.imageExtent      = { 1, 1, 1 };
 
 		VkCopyImageToBufferInfo2 copyInfo{};
 		copyInfo.sType          = VK_STRUCTURE_TYPE_COPY_IMAGE_TO_BUFFER_INFO_2;
@@ -1430,7 +1481,7 @@ void EditorRenderer::RecordViewportScenePass(VkCommandBuffer cmd, FrameSync& fra
 		barrier.oldLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		barrier.newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		barrier.image            = static_cast<VkImage>(vp->ColorTarget.Image);
-		barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+		barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
 		VkDependencyInfo dep{};
 		dep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -1510,7 +1561,7 @@ void EditorRenderer::RecordPIEFrame(FrameSync& frame, uint32_t imageIndex)
 			barrier.oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
 			barrier.newLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 			barrier.image            = static_cast<VkImage>(vp->ColorTarget.Image);
-			barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+			barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 			VkDependencyInfo dep{};
 			dep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
 			dep.imageMemoryBarrierCount = 1;
@@ -1523,9 +1574,9 @@ void EditorRenderer::RecordPIEFrame(FrameSync& frame, uint32_t imageIndex)
 		clearVal.float32[1] = TnxStyle::SrgbChan(TnxStyle::Color::BgViewport.y);
 		clearVal.float32[2] = TnxStyle::SrgbChan(TnxStyle::Color::BgViewport.z);
 		clearVal.float32[3] = TnxStyle::Color::BgViewport.w;
-		VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+		VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 		vkCmdClearColorImage(cmd, static_cast<VkImage>(vp->ColorTarget.Image),
-		                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearVal, 1, &range);
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearVal, 1, &range);
 
 		// TRANSFER_DST → SHADER_READ_ONLY for ImGui sampling.
 		{
@@ -1538,7 +1589,7 @@ void EditorRenderer::RecordPIEFrame(FrameSync& frame, uint32_t imageIndex)
 			barrier.oldLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 			barrier.newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 			barrier.image            = static_cast<VkImage>(vp->ColorTarget.Image);
-			barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+			barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 			VkDependencyInfo dep{};
 			dep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
 			dep.imageMemoryBarrierCount = 1;
@@ -1558,7 +1609,7 @@ void EditorRenderer::RecordPIEFrame(FrameSync& frame, uint32_t imageIndex)
 		barrier.oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
 		barrier.newLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		barrier.image            = swapImg;
-		barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+		barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
 		VkDependencyInfo dep{};
 		dep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -1585,7 +1636,7 @@ void EditorRenderer::RecordPIEFrame(FrameSync& frame, uint32_t imageIndex)
 
 		VkRenderingInfo ri{};
 		ri.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
-		ri.renderArea           = {{0, 0}, {ext.width, ext.height}};
+		ri.renderArea           = { { 0, 0 }, { ext.width, ext.height } };
 		ri.layerCount           = 1;
 		ri.colorAttachmentCount = 1;
 		ri.pColorAttachments    = &colorAttach;
@@ -1606,7 +1657,7 @@ void EditorRenderer::RecordPIEFrame(FrameSync& frame, uint32_t imageIndex)
 		barrier.oldLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		barrier.newLayout        = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 		barrier.image            = swapImg;
-		barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+		barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
 		VkDependencyInfo dep{};
 		dep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;

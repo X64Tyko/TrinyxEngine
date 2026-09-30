@@ -11,7 +11,7 @@
 | Option | Default | Purpose |
 |---|---|---|
 | `TNX_ENABLE_EDITOR` | OFF | ImGui editor, GPU picking, PIE |
-| `TNX_ENABLE_ROLLBACK` | OFF | N-frame rollback for netcode (forces `TNX_DETERMINISM`) |
+| `TNX_ENABLE_ROLLBACK` | OFF | N-frame rollback history (independent of `TNX_DETERMINISM`; forced on by the editor) |
 | `TNX_DETERMINISM` | OFF | Cross-platform determinism: Fixed32 math, disables defrag |
 | `TNX_ENABLE_NETWORK` | ON | GNS + Protobuf — disable for offline-only builds |
 | `TNX_NET_MODEL` | Client | `PIE` / `Server` / `Client` — baked into build |
@@ -47,7 +47,7 @@ cmake -B build-editor -DTNX_ENABLE_EDITOR=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
 
 ### `TNX_ENABLE_ROLLBACK`
 
-Enables the N-frame rollback ring buffer (Temporal tier) and Jolt physics snapshots for deterministic resimulation. Automatically implies `TNX_DETERMINISM` and enables `JPH_CROSS_PLATFORM_DETERMINISTIC` on Jolt.
+Enables the N-frame rollback ring buffer (Temporal tier) and Jolt physics snapshots for resimulation. Independent of `TNX_DETERMINISM`: without it, resimulation is reproducible on the same machine and binary (enough for server-side reconciliation and editor history); cross-machine bit-identical results also need `TNX_DETERMINISM`, which enables Fixed32 math and `JPH_CROSS_PLATFORM_DETERMINISTIC` on Jolt. Forced on in editor builds.
 
 When disabled: Temporal components are treated as Volatile (3-frame buffer). Games that don't need rollback pay zero memory cost.
 

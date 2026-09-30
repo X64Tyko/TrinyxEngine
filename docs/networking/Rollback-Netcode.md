@@ -62,6 +62,24 @@ Two paths trigger rollback:
 
 ---
 
+## Server Events — Replaying Discrete Changes
+
+Spawns, activations and Alive→Active sweeps are not inputs, so the resim cannot regenerate them. Each is recorded in
+the `Registry` event log and replayed when the resim passes its frame. One rule keeps them from being lost:
+**an event is keyed at the frame its effect is written into.**
+
+- **Deferred effects** (replicated `EntitySpawn`) write nothing now. They are pushed unapplied at their spawn frame and
+  request a rollback there; the resim writes them into the ring.
+- **Applied-now effects** (ServerReady sweep, `EntityActivate`, streamed-chunk activation, level reinit snapshots) are
+  already in the current write frame, so they are keyed at that frame (`PushAppliedServerEvent`).
+- **Unreachable frames.** A rollback can land later than an unapplied event's frame: level-load floor, oldest Jolt
+  snapshot, ring depth. At the rewind point, `ApplyPendingServerEventsBefore` applies such events, late but never lost.
+  Pruning never drops an unapplied event.
+- **Order at the rewind point.** The old timeline's `DirtiedFrame` bits are cleared *before* events replay, because
+  the resim propagates only entities marked in the new timeline.
+
+---
+
 ## `StateCorrectionEntry` — Resim Annotation
 
 ```cpp
@@ -96,6 +114,29 @@ Physics runs at `logic_rate / PhysDivisor` (default 64Hz at 512Hz logic). For ro
 | 104 | 104 | 0 frames |
 
 The 7-frame maximum approximation means that after a rollback, up to 7 frames of physics diverge from what they would have been if Jolt had a per-frame snapshot. In practice, at 64Hz physics, 7 frames ≈ 109ms — acceptable because physics corrections at this timescale are visually imperceptible.
+
+---
+
+## Server Input Log
+
+The Authority always keeps a rolling per-player input log (`PlayerInputLog` in each `ServerClientChannel`), independent
+of whether rollback is compiled in. It holds one slot per sim frame, depth = `TemporalFrameCount`, indexed 1:1 with the
+slab. Missing frames are extrapolated by repeating the last held state (discrete events are never extrapolated). Late
+input is stored and triggers `RequestRollback` — which only has an effect when the server runs with rollback.
+
+View angles are carried as **absolute** yaw/pitch in every input frame, not as mouse deltas. An extrapolated frame
+therefore keeps the Owner's last known facing (its mouse delta is zeroed), and a late frame with a different facing
+marks the log dirty like any other input change. Rollback records and replays the angles with the rest of the frame
+input, so resimulated movement faces the same way it did the first time.
+
+## Server-Only Rollback (Planned)
+
+The Authority can enable rollback while Owners don't: the server re-simulates from its input log; Owners use
+non-rollback prediction and replay. Server re-simulation only needs to reproduce its own results, so it doesn't
+require `TNX_DETERMINISM` — and the two flags are already independent in the build. PIE already runs its server this
+way (editor builds force rollback on). What's missing is a server-rollback / client-no-rollback split for shipped
+server and client builds. See
+[Networking Without Rollback](Overview.md#networking-without-rollback--current-state-and-direction).
 
 ---
 

@@ -16,8 +16,8 @@ union ConstructNetManifest
 	struct
 	{
 		uint32_t PrefabIndex : TypeKey_Bits; // Index into AssetRegistry loaded prefab table (not a raw AssetID)
-		uint32_t NetFlags    : 8;            // Spawn/mutation flags
-		uint32_t reserved    : 8;
+		uint32_t NetFlags : 8;               // Spawn/mutation flags
+		uint32_t reserved : 8;
 	};
 
 	// Signifies that this manifest is for a predicted Construct creation
@@ -36,10 +36,10 @@ protected:
 
 	struct
 	{
-		uint64_t Index       : UniqueIndex_Bits; // Index into ConstructArchive::Records
-		uint64_t Generation  : Generation_Bits;  // ABA protection — compare against ConstructRecord::Generation
-		uint64_t PrefabIndex : 16;               // Index into AssetRegistry loaded prefab table (for ref counting)
-		uint64_t reserved    : 8;
+		uint64_t Index : UniqueIndex_Bits;     // Index into ConstructArchive::Records
+		uint64_t Generation : Generation_Bits; // ABA protection — compare against ConstructRecord::Generation
+		uint64_t PrefabIndex : 16;             // Index into AssetRegistry loaded prefab table (for ref counting)
+		uint64_t reserved : 8;
 	};
 
 public:
@@ -49,9 +49,9 @@ public:
 	}
 
 	GlobalConstructHandle(uint32_t index, uint32_t generation, uint32_t prefabIndex)
-		: Index(index)
-		, Generation(generation)
-		, PrefabIndex(prefabIndex)
+		: Index(index),
+		  Generation(generation),
+		  PrefabIndex(prefabIndex)
 	{
 	}
 
@@ -89,4 +89,3 @@ struct ConstructRecord
 	uint8_t GetGeneration() const { return Generation; }
 	uint32_t GetOwnerID() const { return NetworkID.GetOwnerID(); }
 };
-

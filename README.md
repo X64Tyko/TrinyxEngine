@@ -36,7 +36,7 @@ Sync and Build: [docs/BUILD_OPTIONS.md](docs/legacy/BUILD_OPTIONS.md)
 
 ---
 
-## Current Status (2026-05)
+## Current Status (2026-09)
 
 **Performance:**
 
@@ -63,15 +63,16 @@ Sync and Build: [docs/BUILD_OPTIONS.md](docs/legacy/BUILD_OPTIONS.md)
 - ✅ EntityView hydration (zero virtual calls)
 - ✅ SIMD-friendly batch processing (AVX2)
 - ✅ Dirty-bit selective GPU upload (RenderAck handshake, 5 dirty bitplanes, AVX2 scan)
-- ✅ GPU-driven compute pipeline (predicate → prefix_sum → scatter, Slang shaders)
+- ✅ GPU-driven compute pipeline (predicate → prefix_sum → scatter → build_draws → sort_instances, per-mesh indirect draws, GPU skinning, Slang shaders)
 - ✅ Temporal component N-frame buffer (TemporalComponentCache)
 - ✅ Lock-free job system (MPMC ring buffers, futex-based wake, per-chunk dispatch)
 - ✅ Tiered storage (dual-ended arena partition layout, 4 tiers: Cold/Static/Volatile/Temporal)
 - ✅ Jolt Physics v5.5.0 (slab-direct iteration, awake-only pull, 512Hz/64Hz lockstep)
-- ✅ Rollback substrate (ECS + Jolt byte-perfect snapshot ring buffer — delta compression and rollback netcode pending)
+- ✅ Rollback netcode (ECS + Jolt byte-perfect snapshot rings, correction injection with resim roots, delta compression)
 - ✅ Construct/View OOP layer (Construct<T>, Owned<T>, ConstructView<TEntity>, JoltCharacter)
-- ✅ Editor (bare-bones): scene hierarchy, entity inspection, reflected properties, save/load, PIE
-- ✅ Networking: GNS, entity spawn replication, state corrections, PIE loopback
+- ✅ Editor (bare-bones): scene hierarchy, entity inspection, reflected properties, save/load, PIE, Construct / Entity / Prefab editors
+- ✅ Networking: GNS, entity and Construct replication (incl. late join/rejoin), state corrections, delta compression, PIE loopback
+- 🔧 Animation: rollback-safe replicated animation components, GPU blendspaces, layers, state machine, root motion, GPU skinning. In progress.
 - 🔧 Game flow: FlowManager, GameState, GameMode. Toolbox travel model (composable primitives, not single policy). In
   progress.
 
@@ -167,16 +168,20 @@ See [Architecture Documentation](docs/legacy/ARCHITECTURE.md) for full details.
 
 ### GPU-Driven Rendering Pipeline
 
-A 3-pass compute pipeline processes entity data on the GPU each frame:
+A compute pipeline processes entity data on the GPU each frame:
 
 1. **Predicate** — reads flags from field slab (`CurrFieldAddrs[0]`, bit 31 = active), writes `scan[i] = 0 or 1`
 2. **Prefix Sum** — Option-B scan (subgroup lanes + one `atomicAdd` per workgroup)
-3. **Scatter** — lerp fields between current and previous slab for GPU interpolation, write to InstanceBuffer SoA, set
-   `DrawArgs.instanceCount`
+3. **Scatter** — lerp fields between current and previous slab for GPU interpolation, write to InstanceBuffer SoA, and
+   build the per-mesh histogram
+4. **Build Draws** — per-mesh prefix sum; one `VkDrawIndexedIndirectCommand` per mesh type
+5. **Sort Instances** — reorder instances by mesh so each mesh draws a contiguous range
+
+Skeletal entities additionally run a GPU skinning compute pass with indirect dispatch.
 
 The render thread copies SoA field arrays from the temporal/volatile caches into one of 5 PersistentMapped
 field slabs when a new logic frame is detected. The GPU reads the current and previous slabs via BDA for
-interpolation. 3 field slabs cycle independently of the 2 GPU frame-in-flight slots, decoupling VSync
+interpolation. The 5 field slabs cycle independently of the 2 GPU frame-in-flight slots, decoupling VSync
 from the logic thread. Dirty-bit-driven partial upload is operational — only modified entities are uploaded per frame.
 
 ### Data-Oriented Components
@@ -382,6 +387,11 @@ cmake --build build --config RelWithDebInfo
 .\build\Testbed\RelWithDebInfo\Testbed.exe
 ```
 
+**Windows build location:** the Windows CMake presets build on the system drive at `C:\TrinyxBuild\<preset>` rather
+than inside the checkout (which may live on a drive shared with Linux). A directory junction
+`cmake-build-windows -> C:\TrinyxBuild` makes them browsable from the repo:
+`mklink /J cmake-build-windows C:\TrinyxBuild`.
+
 ### Build Options
 
 | Option | Default | Description |
@@ -399,6 +409,36 @@ cmake --build build
 ```
 
 See [docs/BUILD_OPTIONS.md](docs/legacy/BUILD_OPTIONS.md) for complete configuration reference.
+
+### Formatting, Linting & Presubmit
+
+Style comes from the existing code, falling back to the Unreal Engine coding standard: tabs, Allman braces,
+PascalCase types/functions/members (`b` prefix for bools), camelCase locals and parameters.
+
+| File                      | Purpose                                                                 |
+|---------------------------|-------------------------------------------------------------------------|
+| `.clang-format`           | C/C++ layout. Pinned to clang-format 23.1.1.                            |
+| `.clang-tidy`             | Lint + naming rules. CLion runs these live.                             |
+| `.editorconfig`           | Tabs for C/C++, spaces elsewhere, LF line endings.                      |
+| `.pre-commit-config.yaml` | Git hooks — same behaviour on Windows and Linux.                        |
+| `scripts/presubmit.py`    | clang-format check, clang-tidy on changed files, build + run Testbed.   |
+
+One-time setup:
+```bash
+python -m pip install -r scripts/requirements-dev.txt   # on every OS you work from
+python -m pre_commit install                             # once per clone
+```
+In a working tree shared between Windows and Linux, run `pre_commit install` from one OS only; on the other OS the
+hooks fall back to the `pre-commit` found on `PATH`, so that OS just needs the pip install (with its scripts dir on `PATH`).
+
+- **On commit:** whitespace/EOF fixes and clang-format on staged files. If a hook changes a file, re-stage and commit again.
+- **On push:** `scripts/presubmit.py` runs clang-tidy on changed files (bug-class findings block the push), then the
+  full local configuration array: headless, networked without rollback, windowed Debug (Testbed in a real window), and
+  an editor build. CI can only run headless; locally everything runs. Skip in an emergency with `git push --no-verify`.
+- **By hand:** `python scripts/presubmit.py` (all steps), `--fix` to apply formatting, `--skip-tests` for lint only,
+  `--quick` for lint + the headless config, `--configs a,b` to pick configs, `--all` to clang-tidy every file.
+
+**CI** runs on every push and PR, and can be started manually from the Actions tab.
 
 ---
 

@@ -2,6 +2,7 @@
 
 #include "EngineConfig.h"
 #include "FlowManagerBase.h"
+#include "InputWindowCodec.h"
 #include "LogicThread.h"
 #include "NetChannel.h"
 #include "NetConnectionManager.h"
@@ -21,7 +22,7 @@
 // ---------------------------------------------------------------------------
 
 bool AuthoritySim::RunSimInput(uint32_t frameNumber, bool isResimulating,
-                               uint32_t lastCompleted, uint32_t& outRollbackFrame)
+	uint32_t lastCompleted, uint32_t& outRollbackFrame)
 {
 	ReplicationSystem* repl = Replicator;
 
@@ -59,14 +60,14 @@ bool AuthoritySim::RunSimInput(uint32_t frameNumber, bool isResimulating,
 			if (frameNumber > log->LastReceivedFrame + static_cast<uint32_t>(maxLead))
 			{
 				const bool shouldLog = (log->LastStallLogFrame == UINT32_MAX)
-					|| (frameNumber >= log->LastStallLogFrame + 512);
+									   || (frameNumber >= log->LastStallLogFrame + 512);
 				if (shouldLog)
 				{
 					log->LastStallLogFrame = frameNumber;
 					FlowManagerBase* flow  = NetWorld ? NetWorld->GetFlowManager() : nullptr;
 					Soul* soul             = flow ? flow->GetSoul(ownerID) : nullptr;
 					LOG_NET_WARN_F(soul, "[ServerNet] Stalling sim for ownerID %u: frame %u, lastReceived %u, lastConsumed %u, lead %d",
-								   ownerID, frameNumber, log->LastReceivedFrame, log->LastConsumedFrame, maxLead);
+						ownerID, frameNumber, log->LastReceivedFrame, log->LastConsumedFrame, maxLead);
 				}
 				return true;
 			}
@@ -89,15 +90,17 @@ bool AuthoritySim::RunSimInput(uint32_t frameNumber, bool isResimulating,
 			if (buf)
 			{
 				buf->InjectState(result.Entry->State.KeyState,
-								 result.Entry->State.MouseDX,
-								 result.Entry->State.MouseDY,
-								 result.Entry->State.MouseButtons);
+					result.Entry->State.MouseDX,
+					result.Entry->State.MouseDY,
+					result.Entry->State.MouseButtons);
+				buf->SetViewAngles(result.Entry->State.ViewYaw, result.Entry->State.ViewPitch);
 				if (InputBuffer* viz = NetWorld->GetPlayerVizInput(ownerID))
 				{
 					viz->InjectState(result.Entry->State.KeyState,
-									 result.Entry->State.MouseDX,
-									 result.Entry->State.MouseDY,
-									 result.Entry->State.MouseButtons);
+						result.Entry->State.MouseDX,
+						result.Entry->State.MouseDY,
+						result.Entry->State.MouseButtons);
+					viz->SetViewAngles(result.Entry->State.ViewYaw, result.Entry->State.ViewPitch);
 					viz->Swap();
 				}
 				// TODO: inject discrete events into player event queue
@@ -107,10 +110,10 @@ bool AuthoritySim::RunSimInput(uint32_t frameNumber, bool isResimulating,
 			{
 				const char* tag = (result.Reason == InputMissReason::Hit) ? "Hit" : "Predicted";
 				LOG_ENG_DEBUG_F("[Injector] ownerID=%u frame=%u %s anyKey=%d k[0]=0x%02X k[3]=0x%02X lastRecv=%u lastConsumed=%u",
-								ownerID, frameNumber, tag,
-								(result.Entry->State.KeyState[0] || result.Entry->State.KeyState[3]) ? 1 : 0,
-								result.Entry->State.KeyState[0], result.Entry->State.KeyState[3],
-								log->LastReceivedFrame, log->LastConsumedFrame);
+					ownerID, frameNumber, tag,
+					(result.Entry->State.KeyState[0] || result.Entry->State.KeyState[3]) ? 1 : 0,
+					result.Entry->State.KeyState[0], result.Entry->State.KeyState[3],
+					log->LastReceivedFrame, log->LastConsumedFrame);
 			}
 		}
 		else if (result.Reason == InputMissReason::LateOrAliased)
@@ -147,7 +150,7 @@ bool AuthoritySim::RunSimInput(uint32_t frameNumber, bool isResimulating,
 				FlowManagerBase* flow = NetWorld ? NetWorld->GetFlowManager() : nullptr;
 				Soul* soul            = flow ? flow->GetSoul(ownerID) : nullptr;
 				LOG_NET_WARN_F(soul, "[ServerNet] Input correction for ownerID %u too old (frame %u, window [%u..%u]) — accepting divergence",
-							   ownerID, resimFrom, lastCompleted >= ringDepth ? lastCompleted - ringDepth : 0u, lastCompleted);
+					ownerID, resimFrom, lastCompleted >= ringDepth ? lastCompleted - ringDepth : 0u, lastCompleted);
 			}
 		}
 	}
@@ -161,31 +164,32 @@ bool AuthoritySim::RunSimInput(uint32_t frameNumber, bool isResimulating,
 
 void AuthorityNet::BindSoulCallbacks()
 {
-if (!ConnectionMgr || !AuthorityWorld) return;
+	if (!ConnectionMgr || !AuthorityWorld) return;
 
-ConnectionMgr->OnClientDisconnected.Bind<AuthorityNet, &AuthorityNet::OnClientDisconnectedCB>(this);
+	ConnectionMgr->OnClientDisconnected.Bind<AuthorityNet, &AuthorityNet::OnClientDisconnectedCB>(this);
 }
 
 void AuthorityNet::OnClientDisconnectedCB(uint8_t ownerID)
 {
-if (ownerID != 0 && ownerID < MaxOwnerIDs && Replicator) Replicator->CloseChannel(ownerID);
+	if (ownerID != 0 && ownerID < MaxOwnerIDs && Replicator) Replicator->CloseChannel(ownerID);
 
-if (FlowManagerBase* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr) if (ownerID != 0) flow->OnClientDisconnected(ownerID);
+	if (FlowManagerBase* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr)
+		if (ownerID != 0) flow->OnClientDisconnected(ownerID);
 }
 
 void AuthorityNet::CreateInputLog(uint8_t ownerID)
 {
-if (ownerID == 0 || ownerID >= MaxOwnerIDs || !Replicator) return;
+	if (ownerID == 0 || ownerID >= MaxOwnerIDs || !Replicator) return;
 
-const uint32_t temporalFrameCount = (Config && Config->TemporalFrameCount != EngineConfig::Unset)
-? static_cast<uint32_t>(Config->TemporalFrameCount)
-: 32u;
+	const uint32_t temporalFrameCount = (Config && Config->TemporalFrameCount != EngineConfig::Unset)
+											? static_cast<uint32_t>(Config->TemporalFrameCount)
+											: 32u;
 
-const uint32_t maxLead  = static_cast<uint32_t>(Config ? Config->MaxClientInputLead : 16);
-const uint32_t logDepth = std::max(temporalFrameCount, maxLead + 1);
+	const uint32_t maxLead  = static_cast<uint32_t>(Config ? Config->MaxClientInputLead : 16);
+	const uint32_t logDepth = std::max(temporalFrameCount, maxLead + 1);
 
-ConnectionInfo* ci = ConnectionMgr ? ConnectionMgr->FindConnectionByOwnerID(ownerID, /*requireServerSide=*/true) : nullptr;
-Replicator->OpenChannel(ownerID, logDepth, ci, ConnectionMgr);
+	ConnectionInfo* ci = ConnectionMgr ? ConnectionMgr->FindConnectionByOwnerID(ownerID, /*requireServerSide=*/true) : nullptr;
+	Replicator->OpenChannel(ownerID, logDepth, ci, ConnectionMgr);
 }
 
 void AuthorityNet::WireNetMode(WorldBase* world)
@@ -200,380 +204,312 @@ void AuthorityNet::TickDispatch()
 
 void AuthorityNet::TickReplication()
 {
-if (Replicator) Replicator->Flush(ConnectionMgr);
+	if (Replicator) Replicator->Flush(ConnectionMgr);
 
-// Heartbeat ping to each Playing client so AckedClientFrame propagates even during
-// quiet frames (no corrections or spawns). NetChannel::MakeHeader stamps LastAckedClientFrame
-// into every outbound header — the client reads it in HandleMessage before the switch/case.
-if (!ConnectionMgr) return;
-for (const auto& ci : ConnectionMgr->GetConnections())
-{
-if (!ci.bConnected || !ci.bAuthoritySide || ci.OwnerID == 0) continue;
-if (ci.RepState < ClientRepState::Playing) continue;
-ConnectionInfo* mutableCi = ConnectionMgr->FindConnection(ci.Handle);
-if (!mutableCi) continue;
-NetChannel(mutableCi, ConnectionMgr).SendHeaderOnly(NetMessageType::Ping, /*reliable=*/false);
-}
+	// Heartbeat ping to each Playing client so AckedClientFrame propagates even during
+	// quiet frames (no corrections or spawns). NetChannel::MakeHeader stamps LastAckedClientFrame
+	// into every outbound header — the client reads it in HandleMessage before the switch/case.
+	if (!ConnectionMgr) return;
+	for (const auto& ci : ConnectionMgr->GetConnections())
+	{
+		if (!ci.bConnected || !ci.bAuthoritySide || ci.OwnerID == 0) continue;
+		if (ci.RepState < ClientRepState::Playing) continue;
+		ConnectionInfo* mutableCi = ConnectionMgr->FindConnection(ci.Handle);
+		if (!mutableCi) continue;
+		NetChannel(mutableCi, ConnectionMgr).SendHeaderOnly(NetMessageType::Ping, /*reliable=*/false);
+	}
 }
 
 void AuthorityNet::HandleMessage(const ReceivedMessage& msg)
 {
-auto type = static_cast<NetMessageType>(msg.Header.Type);
+	auto type = static_cast<NetMessageType>(msg.Header.Type);
 
-switch (type)
-{
-case NetMessageType::InputFrame:
-{
-if (msg.Payload.size() < sizeof(InputWindowPacket))
-{
-LOG_ENG_WARN_F("[ServerNet] InputFrame payload too small (%zu)", msg.Payload.size());
-break;
-}
-const uint8_t ownerID = msg.Header.SenderID;
-const auto* payload   = reinterpret_cast<const InputWindowPacket*>(msg.Payload.data());
-
-PlayerInputLog* log = GetInputLog(ownerID);
-if (!log)
-{
-LOG_ENG_WARN_F("[ServerNet] InputFrame from OwnerID %u — no log (not connected?)", ownerID);
-break;
-}
-
-log->Store(*payload);
-
-// Immediately ACK the new floor so the client can advance its drop window
-// without waiting for the next injection pass or state-correction heartbeat.
-if (ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection))
-{
-ci->LastAckedClientFrame = static_cast<uint32_t>(static_cast<int64_t>(log->LastReceivedFrame) - log->FrameOffset);
-NetChannel(ci, ConnectionMgr).SendHeaderOnly(NetMessageType::InputFrame, /*reliable=*/false);
-}
-break;
-}
-
-case NetMessageType::InputFrameDelta:
-{
-	if (msg.Payload.size() < sizeof(InputDeltaPacketHeader) + sizeof(NetInputFrame))
+	switch (type)
 	{
-		LOG_ENG_WARN_F("[ServerNet] InputFrameDelta payload too small (%zu)", msg.Payload.size());
-		break;
-	}
-	const uint8_t ownerID = msg.Header.SenderID;
-	PlayerInputLog* log = GetInputLog(ownerID);
-	if (!log)
-	{
-		LOG_ENG_WARN_F("[ServerNet] InputFrameDelta from OwnerID %u — no log (not connected?)", ownerID);
-		break;
-	}
-
-	const uint8_t* p   = msg.Payload.data();
-	const uint8_t* end = p + msg.Payload.size();
-
-	const auto* deltaHdr  = reinterpret_cast<const InputDeltaPacketHeader*>(p);
-	p += sizeof(InputDeltaPacketHeader);
-	const uint32_t frameCount = deltaHdr->FrameCount;
-	if (frameCount == 0 || frameCount > MaxWindowFrames) break;
-
-	InputWindowPacket reconstructed{};
-	reconstructed.FirstFrame = deltaHdr->FirstFrame;
-	reconstructed.FrameCount = frameCount;
-
-	// Base frame — full NetInputFrame.
-	std::memcpy(&reconstructed.Frames[0], p, sizeof(NetInputFrame));
-	p += sizeof(NetInputFrame);
-
-	// Delta frames.
-	bool parseOk = true;
-	for (uint32_t i = 1; i < frameCount && parseOk; ++i)
-	{
-		if (p + 5 > end) { parseOk = false; break; } // Frame(4) + Flags(1)
-
-		const NetInputFrame& prev = reconstructed.Frames[i - 1];
-		NetInputFrame& cur        = reconstructed.Frames[i];
-
-		// Inherit persistent state; zero per-frame analogs.
-		cur.State           = prev.State;
-		cur.State.MouseDX   = SimFloat(0.f);
-		cur.State.MouseDY   = SimFloat(0.f);
-		cur.EventCount      = 0;
-
-		std::memcpy(&cur.Frame, p, 4); p += 4;
-		const uint8_t flags = *p++;
-
-		if (flags & InputDeltaFlags::HasKeyState)
+		case NetMessageType::InputFrame:
 		{
-			if (p + 64 > end) { parseOk = false; break; }
-			std::memcpy(cur.State.KeyState, p, 64); p += 64;
+			if (msg.Payload.size() < sizeof(InputWindowPacket))
+			{
+				LOG_ENG_WARN_F("[ServerNet] InputFrame payload too small (%zu)", msg.Payload.size());
+				break;
+			}
+			const uint8_t ownerID = msg.Header.SenderID;
+			const auto* payload   = reinterpret_cast<const InputWindowPacket*>(msg.Payload.data());
+
+			PlayerInputLog* log = GetInputLog(ownerID);
+			if (!log)
+			{
+				LOG_ENG_WARN_F("[ServerNet] InputFrame from OwnerID %u — no log (not connected?)", ownerID);
+				break;
+			}
+
+			log->Store(*payload);
+
+			// Immediately ACK the new floor so the client can advance its drop window
+			// without waiting for the next injection pass or state-correction heartbeat.
+			if (ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection))
+			{
+				ci->LastAckedClientFrame = static_cast<uint32_t>(static_cast<int64_t>(log->LastReceivedFrame) - log->FrameOffset);
+				NetChannel(ci, ConnectionMgr).SendHeaderOnly(NetMessageType::InputFrame, /*reliable=*/false);
+			}
+			break;
 		}
-		if (flags & InputDeltaFlags::HasMouseDX)
+
+		case NetMessageType::InputFrameDelta:
 		{
-			if (p + 4 > end) { parseOk = false; break; }
-			std::memcpy(&cur.State.MouseDX, p, 4); p += 4;
+			const uint8_t ownerID = msg.Header.SenderID;
+			PlayerInputLog* log   = GetInputLog(ownerID);
+			if (!log)
+			{
+				LOG_ENG_WARN_F("[ServerNet] InputFrameDelta from OwnerID %u — no log (not connected?)", ownerID);
+				break;
+			}
+
+			InputWindowPacket reconstructed{};
+			if (!InputWindowCodec::Decode(msg.Payload.data(), msg.Payload.size(), reconstructed))
+			{
+				LOG_ENG_WARN_F("[ServerNet] InputFrameDelta malformed (ownerID=%u, %zu bytes)", ownerID, msg.Payload.size());
+				break;
+			}
+
+			log->Store(reconstructed);
+
+			if (ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection))
+			{
+				ci->LastAckedClientFrame = static_cast<uint32_t>(static_cast<int64_t>(log->LastReceivedFrame) - log->FrameOffset);
+				NetChannel(ci, ConnectionMgr).SendHeaderOnly(NetMessageType::InputFrame, /*reliable=*/false);
+			}
+			break;
 		}
-		if (flags & InputDeltaFlags::HasMouseDY)
+
+		case NetMessageType::Ping:
 		{
-			if (p + 4 > end) { parseOk = false; break; }
-			std::memcpy(&cur.State.MouseDY, p, 4); p += 4;
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (ci) NetChannel(ci, ConnectionMgr).SendPong(msg.Header);
+			break;
 		}
-		if (flags & InputDeltaFlags::HasMouseButtons)
+
+		case NetMessageType::Pong:
 		{
-			if (p + 1 > end) { parseOk = false; break; }
-			cur.State.MouseButtons = *p++;
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (ci)
+			{
+				const uint16_t now  = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
+				const uint16_t sent = msg.Header.Timestamp;
+				const SimFloat rtt  = SimFloat(static_cast<uint16_t>(now - sent));
+				if (ci->RTT_ms <= 0.0f)
+					ci->RTT_ms = rtt;
+				else
+					ci->RTT_ms = ci->RTT_ms * SimFloat(0.875f) + rtt * SimFloat(0.125f);
+			}
+			break;
 		}
-		if (flags & InputDeltaFlags::HasEvents)
+
+		case NetMessageType::ConnectionHandshake:
 		{
-			if (p + 1 > end) { parseOk = false; break; }
-			cur.EventCount = *p++;
-			if (cur.EventCount > 8) cur.EventCount = 8;
-			const size_t evBytes = cur.EventCount * sizeof(NetInputEvent);
-			if (p + evBytes > end) { parseOk = false; break; }
-			std::memcpy(cur.Events, p, evBytes);
-			p += evBytes;
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (!ci)
+			{
+				LOG_ENG_WARN_F("[ServerNet] ConnectionHandshake from unknown connection %u", msg.Connection);
+				break;
+			}
+
+			if (msg.Header.SenderID != 0)
+			{
+				LOG_ENG_WARN_F("[ServerNet] ConnectionHandshake from client with existing ownerID %u", msg.Header.SenderID);
+				break;
+			}
+
+			ConnectionMgr->GenerateNetID(msg.Connection);
+
+			if (AuthorityWorld) AuthorityWorld->EnsurePlayerInputSlot(ci->OwnerID);
+
+			const uint32_t serverFrame = (AuthorityWorld && AuthorityWorld->GetLogicThread())
+											 ? AuthorityWorld->GetLogicThread()->GetLastCompletedFrame()
+											 : 0;
+			ci->ServerFrameAtHandshake = serverFrame;
+
+			CreateInputLog(ci->OwnerID);
+			ci->RepState = ClientRepState::Synchronizing;
+
+			HandshakePayload hsPay{};
+			hsPay.TickRate = static_cast<uint32_t>(
+				Config->FixedUpdateHz == EngineConfig::Unset ? 128 : Config->FixedUpdateHz);
+			hsPay.ServerFrame = serverFrame;
+
+			NetChannel(ci, ConnectionMgr).Send(NetMessageType::ConnectionHandshake, hsPay, /*reliable=*/true, serverFrame);
+
+			{
+				Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
+								 ? AuthorityWorld->GetFlowManager()->GetSoul(ci->OwnerID)
+								 : nullptr;
+				LOG_NET_INFO_F(soul, "[ServerNet] HandshakeAccept → OwnerID=%u frame=%u tickRate=%u",
+					ci->OwnerID, serverFrame, hsPay.TickRate);
+			}
+			break;
 		}
+
+		case NetMessageType::ClockSync:
+		{
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (!ci) break;
+
+			if (msg.Payload.size() < sizeof(ClockSyncPayload))
+			{
+				LOG_ENG_WARN_F("[ServerNet] ClockSync payload too small (%zu)", msg.Payload.size());
+				break;
+			}
+
+			const auto* req = reinterpret_cast<const ClockSyncPayload*>(msg.Payload.data());
+
+			ci->ClientLocalFrameAtHandshake = req->LocalFrameAtHandshake;
+			if (PlayerInputLog* log = GetInputLog(ci->OwnerID)) log->FrameOffset = ci->GetFrameOffset();
+
+			const uint32_t serverFrame = (AuthorityWorld && AuthorityWorld->GetLogicThread())
+											 ? AuthorityWorld->GetLogicThread()->GetLastCompletedFrame()
+											 : 0;
+
+			ClockSyncPayload resp{};
+			resp.ClientTimestamp = req->ClientTimestamp;
+			resp.ServerFrame     = serverFrame;
+
+			NetChannel ch(ci, ConnectionMgr);
+			ch.Send(NetMessageType::ClockSync, resp, /*reliable=*/false, serverFrame);
+
+			const std::string localPath = (AuthorityWorld && AuthorityWorld->GetFlowManager())
+											  ? AuthorityWorld->GetFlowManager()->GetActiveLevelLocalPath()
+											  : std::string{};
+			if (!localPath.empty())
+			{
+				TravelPayload travelMsg{};
+				travelMsg.PathLength = static_cast<uint8_t>(std::min(localPath.size(), size_t(254)));
+				if (localPath.size() > 254)
+					LOG_ENG_WARN_F("[ServerNet] Level path truncated: %s", localPath.c_str());
+				std::memcpy(travelMsg.LevelPath, localPath.c_str(), travelMsg.PathLength);
+				travelMsg.LevelPath[travelMsg.PathLength] = '\0';
+
+				ch.Send(NetMessageType::TravelNotify, travelMsg, /*reliable=*/true, serverFrame);
+
+				ci->RepState = ClientRepState::LevelLoading;
+				{
+					Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
+									 ? AuthorityWorld->GetFlowManager()->GetSoul(ci->OwnerID)
+									 : nullptr;
+					LOG_NET_INFO_F(soul, "[ServerNet] ClockSyncResponse + TravelNotify → LevelLoading (frame=%u, level=%s)",
+						serverFrame, travelMsg.LevelPath);
+				}
+			}
+			else
+			{
+				ci->RepState = ClientRepState::Loading;
+				{
+					Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
+									 ? AuthorityWorld->GetFlowManager()->GetSoul(ci->OwnerID)
+									 : nullptr;
+					LOG_NET_INFO_F(soul, "[ServerNet] ClockSyncResponse → Loading (frame=%u) [no level loaded]", serverFrame);
+				}
+			}
+			break;
+		}
+
+		case NetMessageType::LevelReady:
+		{
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (!ci) break;
+
+			if (ci->RepState == ClientRepState::LevelLoading)
+			{
+				ci->RepState = ClientRepState::LevelLoaded;
+				if (FlowManagerBase* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr) flow->OnClientLoaded(ci->OwnerID);
+
+				Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
+								 ? AuthorityWorld->GetFlowManager()->GetSoul(ci->OwnerID)
+								 : nullptr;
+				LOG_NET_INFO_F(soul, "[ServerNet] LevelReady received — client LevelLoaded (ownerID=%u)", ci->OwnerID);
+			}
+			break;
+		}
+
+		case NetMessageType::StreamReady:
+		{
+			if (msg.Payload.size() < sizeof(StreamReadyPayload)) break;
+			const auto* pl = reinterpret_cast<const StreamReadyPayload*>(msg.Payload.data());
+
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (!ci) break;
+
+			Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
+							 ? AuthorityWorld->GetFlowManager()->GetSoul(ci->OwnerID)
+							 : nullptr;
+			LOG_NET_INFO_F(soul, "[ServerNet] StreamReady (assetID=%ld, inst=%u, ownerID=%u) — call SendChunkActivate when ready",
+				pl->AssetID, static_cast<unsigned>(pl->InstanceIndex), ci->OwnerID);
+
+			if (AuthorityWorld && AuthorityWorld->GetFlowManager())
+				AuthorityWorld->GetFlowManager()->OnStreamReady(pl->AssetID, pl->InstanceIndex, ci->OwnerID);
+			break;
+		}
+
+		case NetMessageType::EntityDestroy:
+			// TODO
+			break;
+
+		case NetMessageType::SoulRPC:
+		{
+			LOG_ENG_INFO("Received Soul RPC");
+
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (!ci) break;
+
+			if (msg.Payload.size() >= sizeof(RPCHeader))
+			{
+				const auto* rpcHdrPeek = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
+				LOG_ENG_INFO_F("[ServerNet] SoulRPC received: ownerID=%u methodID=%u repState=%d",
+					ci->OwnerID, rpcHdrPeek->MethodID, static_cast<int>(ci->RepState));
+			}
+
+			if (msg.Payload.size() < sizeof(RPCHeader))
+			{
+				LOG_ENG_WARN_F("[ServerNet] SoulRPC payload too small (%zu bytes)", msg.Payload.size());
+				break;
+			}
+
+			const auto* rpcHdr      = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
+			const uint8_t* params   = msg.Payload.data() + sizeof(RPCHeader);
+			const size_t paramBytes = msg.Payload.size() - sizeof(RPCHeader);
+
+			if (paramBytes < rpcHdr->ParamSize)
+			{
+				LOG_ENG_WARN_F("[ServerNet] SoulRPC param underrun (MethodID=%u, want=%u, got=%zu)",
+					rpcHdr->MethodID, rpcHdr->ParamSize, paramBytes);
+				break;
+			}
+
+			{
+				if (FlowManagerBase* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr)
+				{
+					if (Soul* soul = flow->GetSoul(ci->OwnerID))
+					{
+						RPCContext ctx{ ci, ConnectionMgr };
+						soul->DispatchServerRPC(ctx, *rpcHdr, params);
+					}
+					else
+					{
+						LOG_NET_WARN_F(soul, "[ServerNet] SoulRPC: no Soul for ownerID=%u (MethodID=%u)",
+							ci->OwnerID, rpcHdr->MethodID);
+					}
+				}
+			}
+			break;
+		}
+
+		case NetMessageType::PlayerBeginRequest:
+			LOG_ENG_WARN("[ServerNet] Received legacy PlayerBeginRequest — client should use SoulRPC");
+			break;
+
+		default:
+			LOG_ENG_WARN_F("[ServerNet] Unhandled message type %u", msg.Header.Type);
+			break;
 	}
-
-	if (!parseOk)
-	{
-		LOG_ENG_WARN_F("[ServerNet] InputFrameDelta truncated (ownerID=%u)", ownerID);
-		break;
-	}
-
-	log->Store(reconstructed);
-
-	if (ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection))
-	{
-		ci->LastAckedClientFrame = static_cast<uint32_t>(static_cast<int64_t>(log->LastReceivedFrame) - log->FrameOffset);
-		NetChannel(ci, ConnectionMgr).SendHeaderOnly(NetMessageType::InputFrame, /*reliable=*/false);
-	}
-	break;
-}
-
-case NetMessageType::Ping:
-{
-ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-if (ci) NetChannel(ci, ConnectionMgr).SendPong(msg.Header);
-break;
-}
-
-case NetMessageType::Pong:
-{
-ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-if (ci)
-{
-const uint16_t now  = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
-const uint16_t sent = msg.Header.Timestamp;
-const SimFloat rtt  = SimFloat(static_cast<uint16_t>(now - sent));
-if (ci->RTT_ms <= 0.0f) ci->RTT_ms = rtt;
-else ci->RTT_ms                    = ci->RTT_ms * SimFloat(0.875f) + rtt * SimFloat(0.125f);
-}
-break;
-}
-
-case NetMessageType::ConnectionHandshake:
-{
-ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-if (!ci)
-{
-LOG_ENG_WARN_F("[ServerNet] ConnectionHandshake from unknown connection %u", msg.Connection);
-break;
-}
-
-if (msg.Header.SenderID != 0)
-{
-LOG_ENG_WARN_F("[ServerNet] ConnectionHandshake from client with existing ownerID %u", msg.Header.SenderID);
-break;
-}
-
-ConnectionMgr->GenerateNetID(msg.Connection);
-
-if (AuthorityWorld) AuthorityWorld->EnsurePlayerInputSlot(ci->OwnerID);
-
-const uint32_t serverFrame = (AuthorityWorld && AuthorityWorld->GetLogicThread())
- ? AuthorityWorld->GetLogicThread()->GetLastCompletedFrame()
- : 0;
-ci->ServerFrameAtHandshake = serverFrame;
-
-CreateInputLog(ci->OwnerID);
-ci->RepState = ClientRepState::Synchronizing;
-
-HandshakePayload hsPay{};
-hsPay.TickRate = static_cast<uint32_t>(
-Config->FixedUpdateHz == EngineConfig::Unset ? 128 : Config->FixedUpdateHz);
-hsPay.ServerFrame = serverFrame;
-
-NetChannel(ci, ConnectionMgr).Send(
-NetMessageType::ConnectionHandshake, hsPay, /*reliable=*/true, serverFrame);
-
-{
-Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
- ? AuthorityWorld->GetFlowManager()->GetSoul(ci->OwnerID)
- : nullptr;
-LOG_NET_INFO_F(soul, "[ServerNet] HandshakeAccept → OwnerID=%u frame=%u tickRate=%u",
-   ci->OwnerID, serverFrame, hsPay.TickRate);
-}
-break;
-}
-
-case NetMessageType::ClockSync:
-{
-ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-if (!ci) break;
-
-if (msg.Payload.size() < sizeof(ClockSyncPayload))
-{
-LOG_ENG_WARN_F("[ServerNet] ClockSync payload too small (%zu)", msg.Payload.size());
-break;
-}
-
-const auto* req = reinterpret_cast<const ClockSyncPayload*>(msg.Payload.data());
-
-ci->ClientLocalFrameAtHandshake = req->LocalFrameAtHandshake;
-if (PlayerInputLog* log = GetInputLog(ci->OwnerID)) log->FrameOffset = ci->GetFrameOffset();
-
-const uint32_t serverFrame = (AuthorityWorld && AuthorityWorld->GetLogicThread())
- ? AuthorityWorld->GetLogicThread()->GetLastCompletedFrame()
- : 0;
-
-ClockSyncPayload resp{};
-resp.ClientTimestamp = req->ClientTimestamp;
-resp.ServerFrame     = serverFrame;
-
-NetChannel ch(ci, ConnectionMgr);
-ch.Send(NetMessageType::ClockSync, resp, /*reliable=*/false, serverFrame);
-
-const std::string localPath = (AuthorityWorld && AuthorityWorld->GetFlowManager())
-  ? AuthorityWorld->GetFlowManager()->GetActiveLevelLocalPath()
-  : std::string{};
-if (!localPath.empty())
-{
-TravelPayload travelMsg{};
-travelMsg.PathLength = static_cast<uint8_t>(std::min(localPath.size(), size_t(254)));
-if (localPath.size() > 254)
-LOG_ENG_WARN_F("[ServerNet] Level path truncated: %s", localPath.c_str());
-std::memcpy(travelMsg.LevelPath, localPath.c_str(), travelMsg.PathLength);
-travelMsg.LevelPath[travelMsg.PathLength] = '\0';
-
-ch.Send(NetMessageType::TravelNotify, travelMsg, /*reliable=*/true, serverFrame);
-
-ci->RepState = ClientRepState::LevelLoading;
-{
-Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
- ? AuthorityWorld->GetFlowManager()->GetSoul(ci->OwnerID)
- : nullptr;
-LOG_NET_INFO_F(soul, "[ServerNet] ClockSyncResponse + TravelNotify → LevelLoading (frame=%u, level=%s)",
-   serverFrame, travelMsg.LevelPath);
-}
-}
-else
-{
-ci->RepState = ClientRepState::Loading;
-{
-Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
- ? AuthorityWorld->GetFlowManager()->GetSoul(ci->OwnerID)
- : nullptr;
-LOG_NET_INFO_F(soul, "[ServerNet] ClockSyncResponse → Loading (frame=%u) [no level loaded]", serverFrame);
-}
-}
-break;
-}
-
-case NetMessageType::LevelReady:
-{
-ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-if (!ci) break;
-
-if (ci->RepState == ClientRepState::LevelLoading)
-{
-ci->RepState = ClientRepState::LevelLoaded;
-if (FlowManagerBase* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr) flow->OnClientLoaded(ci->OwnerID);
-
-Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
- ? AuthorityWorld->GetFlowManager()->GetSoul(ci->OwnerID)
- : nullptr;
-LOG_NET_INFO_F(soul, "[ServerNet] LevelReady received — client LevelLoaded (ownerID=%u)", ci->OwnerID);
-}
-break;
-}
-
-case NetMessageType::StreamReady:
-{
-	if (msg.Payload.size() < sizeof(StreamReadyPayload)) break;
-	const auto* pl = reinterpret_cast<const StreamReadyPayload*>(msg.Payload.data());
-
-	ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-	if (!ci) break;
-
-	Soul* soul = (AuthorityWorld && AuthorityWorld->GetFlowManager())
-		? AuthorityWorld->GetFlowManager()->GetSoul(ci->OwnerID) : nullptr;
-	LOG_NET_INFO_F(soul, "[ServerNet] StreamReady (assetID=%ld, inst=%u, ownerID=%u) — call SendChunkActivate when ready",
-				   pl->AssetID, static_cast<unsigned>(pl->InstanceIndex), ci->OwnerID);
-
-	if (AuthorityWorld && AuthorityWorld->GetFlowManager())
-		AuthorityWorld->GetFlowManager()->OnStreamReady(pl->AssetID, pl->InstanceIndex, ci->OwnerID);
-	break;
-}
-
-case NetMessageType::EntityDestroy:
-// TODO
-break;
-
-case NetMessageType::SoulRPC:
-{
-LOG_ENG_INFO("Received Soul RPC");
-
-ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-if (!ci) break;
-
-if (msg.Payload.size() >= sizeof(RPCHeader))
-{
-const auto* rpcHdrPeek = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
-LOG_ENG_INFO_F("[ServerNet] SoulRPC received: ownerID=%u methodID=%u repState=%d",
-   ci->OwnerID, rpcHdrPeek->MethodID, static_cast<int>(ci->RepState));
-}
-
-if (msg.Payload.size() < sizeof(RPCHeader))
-{
-LOG_ENG_WARN_F("[ServerNet] SoulRPC payload too small (%zu bytes)", msg.Payload.size());
-break;
-}
-
-const auto* rpcHdr      = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
-const uint8_t* params   = msg.Payload.data() + sizeof(RPCHeader);
-const size_t paramBytes = msg.Payload.size() - sizeof(RPCHeader);
-
-if (paramBytes < rpcHdr->ParamSize)
-{
-LOG_ENG_WARN_F("[ServerNet] SoulRPC param underrun (MethodID=%u, want=%u, got=%zu)",
-   rpcHdr->MethodID, rpcHdr->ParamSize, paramBytes);
-break;
-}
-
-{
-	if (FlowManagerBase* flow = AuthorityWorld ? AuthorityWorld->GetFlowManager() : nullptr)
-{
-if (Soul* soul = flow->GetSoul(ci->OwnerID))
-{
-RPCContext ctx{ci, ConnectionMgr};
-soul->DispatchServerRPC(ctx, *rpcHdr, params);
-}
-else
-{
-LOG_NET_WARN_F(soul, "[ServerNet] SoulRPC: no Soul for ownerID=%u (MethodID=%u)",
-   ci->OwnerID, rpcHdr->MethodID);
-}
-}
-}
-break;
-}
-
-case NetMessageType::PlayerBeginRequest:
-LOG_ENG_WARN("[ServerNet] Received legacy PlayerBeginRequest — client should use SoulRPC");
-break;
-
-default:
-LOG_ENG_WARN_F("[ServerNet] Unhandled message type %u", msg.Header.Type);
-break;
-}
 }
 
 void AuthorityNet::SendStreamLoad(uint8_t ownerID, int64_t assetIDRaw, uint16_t instanceIndex, bool bAutoActivate)
@@ -588,7 +524,8 @@ void AuthorityNet::SendStreamLoad(uint8_t ownerID, int64_t assetIDRaw, uint16_t 
 	pl.bAutoActivate = bAutoActivate ? 1u : 0u;
 
 	const uint32_t frame = AuthorityWorld && AuthorityWorld->GetLogicThread()
-		? AuthorityWorld->GetLogicThread()->GetLastCompletedFrame() : 0;
+							   ? AuthorityWorld->GetLogicThread()->GetLastCompletedFrame()
+							   : 0;
 	NetChannel(ci, ConnectionMgr).Send(NetMessageType::StreamLoad, pl, /*reliable=*/true, frame);
 }
 
@@ -603,6 +540,7 @@ void AuthorityNet::SendChunkActivate(uint8_t ownerID, int64_t assetIDRaw, uint16
 	pl.InstanceIndex = instanceIndex;
 
 	const uint32_t frame = AuthorityWorld && AuthorityWorld->GetLogicThread()
-		? AuthorityWorld->GetLogicThread()->GetLastCompletedFrame() : 0;
+							   ? AuthorityWorld->GetLogicThread()->GetLastCompletedFrame()
+							   : 0;
 	NetChannel(ci, ConnectionMgr).Send(NetMessageType::ChunkActivate, pl, /*reliable=*/true, frame);
 }

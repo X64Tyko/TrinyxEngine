@@ -20,10 +20,10 @@ struct CMeshRef : ComponentView<CMeshRef, WIDTH>
 
 	// Per-field asset type annotation — editor displays name instead of raw index
 	static constexpr auto FieldRefTypes = std::array{
-		AssetType::Mesh, // MeshID
-		AssetType::Material,   // MaterialID
-		AssetType::Invalid,    // LODCount
-		AssetType::Invalid,    // CastShadow
+		AssetType::Mesh,     // MeshID
+		AssetType::Material, // MaterialID
+		AssetType::Invalid,  // LODCount
+		AssetType::Invalid,  // CastShadow
 	};
 
 	TNX_VOLATILE_FIELDS(CMeshRef, Render, MeshID, MaterialID, LODCount, CastShadow)
@@ -31,7 +31,8 @@ struct CMeshRef : ComponentView<CMeshRef, WIDTH>
 	// --- Init-lambda assignment API (Scalar only) ---
 
 	// Checks out MeshID and, if the entry has a DefaultMaterial and MaterialID is unset, a MaterialID checkout.
-	void SetMesh(TnxName name) requires (WIDTH == FieldWidth::Scalar)
+	void SetMesh(TnxName name)
+		requires(WIDTH == FieldWidth::Scalar)
 	{
 		const AssetEntry* entry = AssetRegistry::Get().FindByTNameAndType(name, AssetType::Mesh);
 		if (!entry)
@@ -52,7 +53,8 @@ struct CMeshRef : ComponentView<CMeshRef, WIDTH>
 	}
 
 	// Checks out MaterialID only.
-	void SetMaterial(TnxName name) requires (WIDTH == FieldWidth::Scalar)
+	void SetMaterial(TnxName name)
+		requires(WIDTH == FieldWidth::Scalar)
 	{
 		OnMatLoad.Bind<CMeshRef, &CMeshRef::SetMaterialID>(this);
 		OnMatEvict.Bind<CMeshRef, &CMeshRef::ResetMaterialID>(this);
@@ -60,28 +62,57 @@ struct CMeshRef : ComponentView<CMeshRef, WIDTH>
 	}
 
 	// Dispatches to SetMesh or SetMaterial based on the catalogued asset type.
-	CMeshRef& operator=(TnxName name) requires (WIDTH == FieldWidth::Scalar)
+	CMeshRef& operator=(TnxName name)
+		requires(WIDTH == FieldWidth::Scalar)
 	{
 		auto entries = AssetRegistry::Get().GetAssetsByName(name);
 		for (const AssetEntry* entry : entries)
 		{
-			if (entry->Type == AssetType::Mesh)     { SetMesh(name);     return *this; }
-			if (entry->Type == AssetType::Material) { SetMaterial(name); return *this; }
+			if (entry->Type == AssetType::Mesh)
+			{
+				SetMesh(name);
+				return *this;
+			}
+			if (entry->Type == AssetType::Material)
+			{
+				SetMaterial(name);
+				return *this;
+			}
 		}
 		LOG_ENG_WARN_F("CMeshRef::operator= - no mesh or material named '%s' found", name.GetStr());
 		return *this;
 	}
 
 private:
-	AssetLoad  OnMeshLoad;
+	AssetLoad OnMeshLoad;
 	AssetEvict OnMeshEvict;
-	AssetLoad  OnMatLoad;
+	AssetLoad OnMatLoad;
 	AssetEvict OnMatEvict;
 
-	void SetMeshID(uint32_t id)     requires (WIDTH == FieldWidth::Scalar) { MeshID     = id;  OnMeshLoad.Reset(); }
-	void ResetMeshID()              requires (WIDTH == FieldWidth::Scalar) { MeshID     = 0u;  OnMeshEvict.Reset(); }
-	void SetMaterialID(uint32_t id) requires (WIDTH == FieldWidth::Scalar) { MaterialID = id;  OnMatLoad.Reset(); }
-	void ResetMaterialID()          requires (WIDTH == FieldWidth::Scalar) { MaterialID = 0u;  OnMatEvict.Reset(); }
+	void SetMeshID(uint32_t id)
+		requires(WIDTH == FieldWidth::Scalar)
+	{
+		MeshID = id;
+		OnMeshLoad.Reset();
+	}
+	void ResetMeshID()
+		requires(WIDTH == FieldWidth::Scalar)
+	{
+		MeshID = 0u;
+		OnMeshEvict.Reset();
+	}
+	void SetMaterialID(uint32_t id)
+		requires(WIDTH == FieldWidth::Scalar)
+	{
+		MaterialID = id;
+		OnMatLoad.Reset();
+	}
+	void ResetMaterialID()
+		requires(WIDTH == FieldWidth::Scalar)
+	{
+		MaterialID = 0u;
+		OnMatEvict.Reset();
+	}
 };
 
 TNX_REGISTER_COMPONENT(CMeshRef)

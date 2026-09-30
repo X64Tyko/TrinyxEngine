@@ -10,6 +10,12 @@ The editor is enabled by `-DTNX_ENABLE_EDITOR=ON`. It runs on the Encoder (rende
 
 **Panels (8):** World Outliner, Details, Content Browser, Engine Stats, Log, Node Script, Component Generator, Debugger
 
+**Editor windows (3):** Construct Editor, Entity Editor, Prefab Editor — authoring windows for Constructs, entity types,
+and prefabs. The Construct Editor uses `TrinyxParser` to turn annotated Construct C++ methods into node graphs.
+
+**Windowing:** everything lives in one main window. ImGui multi-viewport support is disabled (`f095d3b`) — see
+[Known Issues](../reference/Known-Issues.md) #14.
+
 ---
 
 ## Core Components

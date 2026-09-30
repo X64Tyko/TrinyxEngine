@@ -36,17 +36,17 @@ public:
 		result.Accepted = true;
 
 		static constexpr SimFloat SpawnPoints[2][3] = {
-			{SimFloat(2.0f), SimFloat(5.0f), SimFloat(0.0f)},
-			{SimFloat(-2.0f), SimFloat(5.0f), SimFloat(0.0f)},
+			{ SimFloat(2.0f), SimFloat(5.0f), SimFloat(0.0f) },
+			{ SimFloat(-2.0f), SimFloat(5.0f), SimFloat(0.0f) },
 		};
-		const uint8_t idx  = SpawnCounter.fetch_add(1, std::memory_order_relaxed) % 2;
-		result.PosX = SpawnPoints[idx][0];
-		result.PosY = SpawnPoints[idx][1];
-		result.PosZ = SpawnPoints[idx][2];
+		const uint8_t idx = SpawnCounter.fetch_add(1, std::memory_order_relaxed) % 2;
+		result.PosX       = SpawnPoints[idx][0];
+		result.PosY       = SpawnPoints[idx][1];
+		result.PosZ       = SpawnPoints[idx][2];
 
-		WorldBase* world    = GetWorld();
-		ReplicationSystem* repl     = world->GetReplicationSystem();
-		const uint16_t     typeHash = ReflectionRegistry::ConstructTypeHashFromName("PlayerConstruct");
+		WorldBase* world        = GetWorld();
+		ReplicationSystem* repl = world->GetReplicationSystem();
+		const uint16_t typeHash = ReflectionRegistry::ConstructTypeHashFromName("PlayerConstruct");
 
 		// Spawn lambda must be trivially copyable (ValidJobLambda contract) and
 		// synchronous (SpawnAndWait) so bodyRef is populated before ClaimBody.
@@ -54,7 +54,7 @@ public:
 		ConstructRef bodyRef{};
 		ConstructRef* bodyRefPtr = &bodyRef;
 		Soul* soulPtr            = &soul;
-		SimFloat posX            = result.PosX, posY = result.PosY, posZ = result.PosZ;
+		SimFloat posX = result.PosX, posY = result.PosY, posZ = result.PosZ;
 
 		world->SpawnAndWait([world, repl, soulPtr, typeHash, posX, posY, posZ, bodyRefPtr](uint32_t)
 		{
@@ -66,7 +66,7 @@ public:
 				p->SpawnPosZ = posZ;
 				p->SetOwnerSoul(soulPtr);
 			});
-			*bodyRefPtr = repl->RegisterConstruct(reg, player, soulPtr->GetOwnerID(), typeHash, 0);
+			*bodyRefPtr             = repl->RegisterConstruct(reg, player, soulPtr->GetOwnerID(), typeHash, 0);
 		});
 
 		soul.ClaimBody(bodyRef);
@@ -75,7 +75,7 @@ public:
 	}
 
 private:
-	std::atomic<uint8_t> SpawnCounter{0};
+	std::atomic<uint8_t> SpawnCounter{ 0 };
 };
 
 TNX_REGISTER_MODE(TestNetGameMode)
@@ -118,7 +118,8 @@ public:
 		if (!SelectedTests.empty())
 		{
 			std::cout << "\nRunning " << SelectedTests.size() << " selected test(s):\n";
-			for (const auto& n : SelectedTests) std::cout << "  " << n << "\n";
+			for (const auto& n : SelectedTests)
+				std::cout << "  " << n << "\n";
 		}
 
 		const int failed = TestRegistry::Instance().RunFiltered(engine, SelectedTests);
@@ -127,50 +128,50 @@ public:
 
 	void PostStart(TrinyxEngine& engine)
 	{
-        // Watchdog: abort if the Logic thread stops advancing frames.
-        // GetLastCompletedFrame() ticks at 512 Hz — any genuine progress resets the clock.
-        // The threshold only needs to cover the longest single-tick operation (e.g. a full
-        // rollback resim in a debug build).
+		// Watchdog: abort if the Logic thread stops advancing frames.
+		// GetLastCompletedFrame() ticks at 512 Hz — any genuine progress resets the clock.
+		// The threshold only needs to cover the longest single-tick operation (e.g. a full
+		// rollback resim in a debug build).
 #ifdef NDEBUG
-        constexpr auto kStuckThreshold = std::chrono::seconds(30);
+		constexpr auto kStuckThreshold = std::chrono::seconds(30);
 #else
-        constexpr auto kStuckThreshold = std::chrono::seconds(60);
+		constexpr auto kStuckThreshold = std::chrono::seconds(60);
 #endif
-        static std::atomic<bool> suiteDone{false};
-        std::thread watchdog([&]()
-        {
-            uint32_t lastFrame = 0;
-            auto lastTick = std::chrono::steady_clock::now();
+		static std::atomic<bool> suiteDone{ false };
+		std::thread watchdog([&]()
+		{
+			uint32_t lastFrame = 0;
+			auto lastTick      = std::chrono::steady_clock::now();
 
-            while (!suiteDone.load(std::memory_order_acquire))
-            {
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-                if (suiteDone.load(std::memory_order_acquire)) break;
+			while (!suiteDone.load(std::memory_order_acquire))
+			{
+				std::this_thread::sleep_for(std::chrono::seconds(1));
+				if (suiteDone.load(std::memory_order_acquire)) break;
 
-                WorldBase* world = engine.GetDefaultWorld();
-                LogicThreadBase* logic = world ? world->GetLogicThread() : nullptr;
-                if (!logic) continue;
+				WorldBase* world       = engine.GetDefaultWorld();
+				LogicThreadBase* logic = world ? world->GetLogicThread() : nullptr;
+				if (!logic) continue;
 
-                const uint32_t frame = logic->GetLastCompletedFrame();
-                if (frame != lastFrame)
-                {
-                    lastFrame = frame;
-                    lastTick = std::chrono::steady_clock::now();
-                }
-                else if (std::chrono::steady_clock::now() - lastTick >= kStuckThreshold)
-                {
-                    std::cout << "\n[Testbed] Logic thread stuck at frame " << lastFrame << " — aborting.\n";
-                    std::cout.flush();
-                    std::exit(1);
-                }
-            }
-        });
+				const uint32_t frame = logic->GetLastCompletedFrame();
+				if (frame != lastFrame)
+				{
+					lastFrame = frame;
+					lastTick  = std::chrono::steady_clock::now();
+				}
+				else if (std::chrono::steady_clock::now() - lastTick >= kStuckThreshold)
+				{
+					std::cout << "\n[Testbed] Logic thread stuck at frame " << lastFrame << " — aborting.\n";
+					std::cout.flush();
+					std::exit(1);
+				}
+			}
+		});
 
-        RuntimeFailures = RuntimeTestRegistry::Instance().RunFiltered(engine, SelectedTests);
+		RuntimeFailures = RuntimeTestRegistry::Instance().RunFiltered(engine, SelectedTests);
 
-        suiteDone.store(true, std::memory_order_release);
-        watchdog.join();
-    }
+		suiteDone.store(true, std::memory_order_release);
+		watchdog.join();
+	}
 
 	int GetExitCode() const { return RuntimeFailures > 0 ? 1 : 0; }
 
@@ -181,4 +182,3 @@ private:
 };
 
 TNX_IMPLEMENT_GAME(TestbedGame)
-

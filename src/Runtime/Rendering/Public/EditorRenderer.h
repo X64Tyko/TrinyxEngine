@@ -34,6 +34,16 @@ public:
 	bool EditorOwnsKeyboard() const { return bEditorOwnsKeyboard.load(std::memory_order_relaxed); }
 	void SetEditorOwnsKeyboard(bool owns) { bEditorOwnsKeyboard.store(owns, std::memory_order_relaxed); }
 
+	/// True while an editor tool (viewport fly) needs relative mouse mode without routing input
+	/// to the engine. Sentinel applies it alongside EditorOwnsKeyboard.
+	bool EditorCapturesMouse() const { return bEditorCapturesMouse.load(std::memory_order_relaxed); }
+	void SetEditorCapturesMouse(bool captures) { bEditorCapturesMouse.store(captures, std::memory_order_relaxed); }
+
+	/// Relative mouse motion and wheel accumulated from this frame's drained events. Render thread only.
+	float GetMouseRelX() const { return MouseRelX; }
+	float GetMouseRelY() const { return MouseRelY; }
+	float GetMouseWheel() const { return MouseWheel; }
+
 
 	// ── Editor viewport ──────────────────────────────────────────────────
 	/// Called by EditorContext when the "Viewport" panel resizes.
@@ -45,6 +55,9 @@ public:
 	/// Enable or disable rendering the editor world. Call with false during PIE to
 	/// avoid running the full compute pipeline for a world that isn't displayed.
 	void SetEditorViewportActive(bool active) { EditorViewport.bActive = active; }
+
+	/// The editor's main viewport — owns the edit camera. Render thread only.
+	WorldViewport& GetEditorViewport() { return EditorViewport; }
 
 	// ── Multi-viewport (PIE) ────────────────────────────────────────────
 	void AddViewport(WorldViewport* vp);
@@ -86,7 +99,7 @@ private:
 	// Viewport gradient pre-pass pipeline
 	VkShaderModule GradientVertShader = VK_NULL_HANDLE;
 	VkShaderModule GradientFragShader = VK_NULL_HANDLE;
-	vk::raii::Pipeline GradientPipeline{nullptr};
+	vk::raii::Pipeline GradientPipeline{ nullptr };
 
 	// Editor-specific state
 	VkDescriptorPool ImGuiDescriptorPool = VK_NULL_HANDLE;
@@ -94,7 +107,11 @@ private:
 	ImGuiEventQueue* EventQueue          = nullptr;
 	EditorContext* Editor                = nullptr;
 	TrinyxEngine* EnginePtr              = nullptr;
-	std::atomic<bool> bEditorOwnsKeyboard{true};
+	std::atomic<bool> bEditorOwnsKeyboard{ true };
+	std::atomic<bool> bEditorCapturesMouse{ false };
+	float MouseRelX  = 0.0f;
+	float MouseRelY  = 0.0f;
+	float MouseWheel = 0.0f;
 
 	// Editor's own persistent viewport (always active, main world)
 	WorldViewport EditorViewport;

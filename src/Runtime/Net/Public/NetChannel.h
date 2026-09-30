@@ -35,9 +35,9 @@ public:
 	NetChannel() = default;
 
 	NetChannel(ConnectionInfo* ci, NetConnectionManager* mgr, Soul* soul = nullptr)
-		: CI(ci)
-		, Mgr(mgr)
-		, NetSoul(soul)
+		: CI(ci),
+		  Mgr(mgr),
+		  NetSoul(soul)
 	{
 	}
 
@@ -62,7 +62,7 @@ public:
 	bool Send(const TPayload& payload, bool reliable, uint32_t frameNumber = 0)
 	{
 		static_assert(std::is_base_of_v<BaseNetPayload<TPayload>, TPayload>,
-					  "TPayload must derive from BaseNetPayload<TPayload>");
+			"TPayload must derive from BaseNetPayload<TPayload>");
 		TPayload::ValidateTrivial();
 		constexpr uint16_t size = TPayload::PayloadSize;
 		PacketHeader hdr        = MakeHeader(MsgType, size, frameNumber);
@@ -75,7 +75,7 @@ public:
 	static bool ValidatePayload(const PacketHeader& hdr)
 	{
 		static_assert(std::is_base_of_v<BaseNetPayload<TPayload>, TPayload>,
-					  "TPayload must derive from BaseNetPayload<TPayload>");
+			"TPayload must derive from BaseNetPayload<TPayload>");
 		TPayload::ValidateTrivial();
 		return hdr.PayloadSize == TPayload::PayloadSize;
 	}
@@ -89,19 +89,18 @@ public:
 
 	// Send a SoulRPC — packs RPCHeader + TParams into one contiguous payload.
 	// TParams must be trivially copyable (enforced by the TNX_IMPL_* macros).
-	template<typename TParams>
+	template <typename TParams>
 	bool SendRPC(const RPCHeader& rpcHdr, const TParams& params,
-	             bool reliable = true, uint32_t frameNumber = 0)
+		bool reliable = true, uint32_t frameNumber = 0)
 	{
 		// Stack-allocate the combined payload: RPCHeader followed by TParams bytes.
 		constexpr uint16_t totalSize = static_cast<uint16_t>(sizeof(RPCHeader) + sizeof(TParams));
 		alignas(alignof(RPCHeader)) uint8_t buf[totalSize];
-		std::memcpy(buf,                  &rpcHdr, sizeof(RPCHeader));
+		std::memcpy(buf, &rpcHdr, sizeof(RPCHeader));
 		std::memcpy(buf + sizeof(RPCHeader), &params, sizeof(TParams));
 		PacketHeader hdr = MakeHeader(NetMessageType::SoulRPC, totalSize, frameNumber);
 		return SendInternal(hdr, buf, totalSize, reliable);
 	}
-
 
 
 	// Send a Pong echoing the sequence and frame from the received Ping header.
@@ -116,8 +115,8 @@ public:
 		return MakeHeader(type, payloadSize, frameNumber);
 	}
 
-	bool     IsValid()  const { return CI != nullptr && Mgr != nullptr; }
-	uint8_t  OwnerID()  const { return CI ? CI->OwnerID : 0; }
+	bool IsValid() const { return CI != nullptr && Mgr != nullptr; }
+	uint8_t OwnerID() const { return CI ? CI->OwnerID : 0; }
 
 private:
 	PacketHeader MakeHeader(NetMessageType type, uint16_t payloadSize, uint32_t frameNumber) const;

@@ -6,7 +6,7 @@
 
 ## Overview
 
-The current GPU pipeline is a 3-pass Slang compute pipeline that converts the SoA entity slab into a compacted, interpolated InstanceBuffer for draw. All slab data is accessed via Vulkan Buffer Device Address — no per-frame descriptor set updates.
+The current GPU pipeline is a 5-pass Slang compute pipeline that converts the SoA entity slab into a compacted, interpolated, mesh-sorted InstanceBuffer with one indirect draw per mesh type. Skeletal entities add a GPU skinning pass. All slab data is accessed via Vulkan Buffer Device Address — no per-frame descriptor set updates.
 
 ```
 Slab (SoA field arrays)
@@ -18,17 +18,26 @@ Slab (SoA field arrays)
 2. prefix_sum.slang  → compacted offsets  (subgroup prefix + one atomicAdd/workgroup)
         │
         ▼
-3. scatter.slang     → InstanceBuffer     (GPU interpolation + compacted SoA)
+3. scatter.slang     → InstanceBuffer     (GPU interpolation + compacted SoA + per-mesh histogram)
         │
         ▼
-DrawIndexedIndirect  ← DrawArgs.instanceCount (written by scatter)
+4. build_draws.slang → per-mesh offsets + one VkDrawIndexedIndirectCommand per mesh type
+        │
+        ▼
+5. sort_instances.slang → InstanceBuffer sorted by MeshID (contiguous range per mesh)
+        │
+        ▼
+(skinning.slang      → skin matrices for skeletal entities, indirect dispatch)
+        │
+        ▼
+DrawIndexedIndirect  ← one command per mesh type (written by build_draws)
 ```
 
 ---
 
 ## `GpuFrameData`
 
-All BDAs are packed into a single `GpuFrameData` struct pushed as a push constant or set-0 binding. The C++ mirror in `GpuFrameData.h` has a `static_assert` for 3192 bytes.
+All BDAs are packed into a single `GpuFrameData` struct pushed as a push constant or set-0 binding. The C++ mirror in `GpuFrameData.h` has a `static_assert` for 3368 bytes.
 
 ```cpp
 struct GpuFrameData {
@@ -41,7 +50,7 @@ struct GpuFrameData {
 };
 ```
 
-**14 field semantics** are defined: `SemFlags=1` (always index 0 by convention) through `SemColorA=14`, covering Flags, PosXYZ, RotXYZW, ScaleXYZ, ColorRGBA.
+**17 field semantics** are defined after `SemGeneric=0`: `SemFlags=1` (always index 0 by convention) through `SemColorA=15`, then `SemMeshID=16` and `SemEntityCacheIdx=17` — covering Flags, PosXYZ, RotXYZW, ScaleXYZ, ColorRGBA, MeshID, and the entity cache index (used by GPU picking).
 
 ---
 
@@ -63,7 +72,7 @@ scan[i] = (flags >> 31) & 1u;  // Active bit
 
 Converts the `scan[]` array (0/1 per entity) into compacted offsets (exclusive prefix sum). Uses subgroup-level prefix within a workgroup plus one `atomicAdd` per workgroup to accumulate the global count — single dispatch, no second pass needed.
 
-The final accumulated value (`scan[entityCount]` conceptually) is written to `DrawArgs.instanceCount`.
+The final accumulated value (`scan[entityCount]` conceptually) is the total visible instance count. Per-mesh instance counts are written into the indirect draw arguments by `build_draws` (pass 4).
 
 ---
 
@@ -85,6 +94,24 @@ InstanceBuffer[dst].Pos = mix(prevPos, currPos, SubFrameAlpha);
 `SubFrameAlpha` is passed in `GpuFrameData` by the render thread based on the time elapsed since the last logic tick.
 
 The GPU keeps its own previous-frame `InstanceBuffer`. The scatter shader lerps between the *current slab frame* and *previous GPU InstanceBuffer frame* — the CPU never needs to supply two logic frames simultaneously. This is what allows the Volatile tier to be only 3 frames deep instead of 5.
+
+---
+
+## Pass 4 — `build_draws.slang`
+
+A single 256-thread workgroup (one thread per possible mesh type) reads the `MeshHistogram` populated by scatter, computes an exclusive prefix sum to get each mesh's base offset in the sorted buffer, writes one `VkDrawIndexedIndirectCommand` per mesh type, seeds `MeshWriteIdx[meshID]` for the sort pass, and clears the histogram for the next frame.
+
+---
+
+## Pass 5 — `sort_instances.slang`
+
+Reorders the compact instance buffer by `MeshID`: each instance atomically claims a slot in its mesh's range and copies all SoA field slots across. The vertex shader reads the sorted buffer. Order within a mesh range is undefined.
+
+---
+
+## GPU Skinning — `skinning.slang`
+
+`SkinningPass` owns the skin matrix buffer, the skeletal list and per-entity skeletal index buffers (written by scatter), and a persistent-mapped indirect dispatch argument buffer that scatter increments. Skinning runs only for visible skeletal entities, with no CPU readback.
 
 ---
 
@@ -124,12 +151,16 @@ The InstanceBuffer write and the DrawArgs write must both be visible before the 
 
 ```
 shaders/
-  GpuFrameData.slang   — shared struct header; C++ mirror in GpuFrameData.h
-  predicate.slang      — active-flag (+ future: frustum/HZB) → scan[]
-  prefix_sum.slang     — scan[] → compacted offsets, DrawArgs.instanceCount
-  scatter.slang        — compacted + interpolated → InstanceBuffer
-  cube.vert            — vertex shader (reads InstanceBuffer via BDA)
-  cube.frag            — fragment shader
+  common/GpuFrameData.slang   — shared struct header; C++ mirror in GpuFrameData.h
+  compute/predicate.slang     — active-flag (+ future: frustum/HZB) → scan[]
+  compute/prefix_sum.slang    — scan[] → compacted offsets
+  compute/scatter.slang       — compacted + interpolated → InstanceBuffer, mesh histogram
+  compute/build_draws.slang   — per-mesh indirect draw commands
+  compute/sort_instances.slang — mesh-sorted InstanceBuffer
+  compute/skinning.slang      — GPU skinning
+  graphics/cube.vert.slang    — vertex shader (reads InstanceBuffer via BDA)
+  graphics/cube.frag.slang    — fragment shader (single directional light; optional picking output)
+  graphics/viewport_gradient.* — editor viewport background
 ```
 
 CMakeLists invokes `slangc` with `-I shaders` for all shader targets, with `GpuFrameData.slang` in DEPENDS so a header change triggers recompilation.

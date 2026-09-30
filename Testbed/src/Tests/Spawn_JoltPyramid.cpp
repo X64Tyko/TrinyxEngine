@@ -41,15 +41,13 @@ RUNTIME_TEST(Spawn_JoltPyramid)
 		{
 			for (int k = layer / 2; k < cPyramidHeight - (layer + 1) / 2; ++k)
 			{
-				setups.push_back({
-					xOffset + static_cast<SimFloat>(-cPyramidHeight) + cBoxSize * static_cast<SimFloat>(j) + ((layer & 1) ? cHalfBoxSize : SimFloat(0.0f)),
+				setups.push_back({ xOffset + static_cast<SimFloat>(-cPyramidHeight) + cBoxSize * static_cast<SimFloat>(j) + ((layer & 1) ? cHalfBoxSize : SimFloat(0.0f)),
 					yOffset + SimFloat(1.0f) + (cBoxSize + cBoxSeparation) * static_cast<SimFloat>(layer),
 					zOffset + static_cast<SimFloat>(-cPyramidHeight) + cBoxSize * static_cast<SimFloat>(k) + ((layer & 1) ? cHalfBoxSize : SimFloat(0.0f)),
 					cHalfBoxSize, cHalfBoxSize, cHalfBoxSize,
 					SimFloat(1.0f),
 					SimFloat(colorDist(gen)), SimFloat(colorDist(gen)), SimFloat(colorDist(gen)),
-					JoltMotion::Dynamic
-				});
+					JoltMotion::Dynamic });
 			}
 		}
 	}

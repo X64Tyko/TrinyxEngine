@@ -23,7 +23,7 @@ public:
 	TNX_CONSTRUCT_WORLD
 
 	// --- Configuration (set before Initialize via the config lambda) ---
-	SimFloat PosX  = 0.f, PosY  = 0.f, PosZ  = 0.f;
+	SimFloat PosX = 0.f, PosY = 0.f, PosZ = 0.f;
 	SimFloat HalfX = 1.f, HalfY = 1.f, HalfZ = 1.f;
 
 	// --- User-bindable callbacks ---
@@ -36,7 +36,7 @@ public:
 		Body.Initialize(this, [this](EInstanced<>& v)
 		{
 			v.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive | TemporalFlagBits::Replicated);
-			Vector3 SpawnPos { PosX, PosY, PosZ };
+			Vector3 SpawnPos{ PosX, PosY, PosZ };
 			v.SetPosition(SpawnPos);
 			v.VisTransform.VisBlend = SimFloat(1.f);
 			v.Transform.Rotation.SetIdentity();

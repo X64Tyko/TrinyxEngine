@@ -49,11 +49,15 @@ public:
 		Reg->BindOnCacheSlotChange<Self, &Self::OnCacheSlotChanged>(Handle, this);
 
 		// Auto-register with owning Construct
-		owner->RegisterView({
-			this,
-			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); },
-			[](void* ptr) -> EntityHandle { return static_cast<Self*>(ptr)->GetEntityHandle(); }
-		});
+		owner->RegisterView({ this,
+			[](void* ptr)
+		{
+			static_cast<Self*>(ptr)->EnsureHydrated();
+		},
+			[](void* ptr) -> EntityHandle
+		{
+			return static_cast<Self*>(ptr)->GetEntityHandle();
+		} });
 	}
 
 	// Initialize with an init lambda — asset checkouts are drained after fn returns.
@@ -61,7 +65,7 @@ public:
 	void Initialize(TConstruct* owner, Fn&& fn)
 	{
 		Reg         = owner->GetRegistry();
-		Handle      = Reg->Create<TEntity<FieldWidth::Scalar>>(std::forward < Fn > (fn));
+		Handle      = Reg->Create<TEntity<FieldWidth::Scalar>>(std::forward<Fn>(fn));
 		bOwnsEntity = true;
 		RehydrateCursors();
 		this->SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive);
@@ -69,11 +73,15 @@ public:
 		using Self = ConstructView;
 		Reg->BindOnCacheSlotChange<Self, &Self::OnCacheSlotChanged>(Handle, this);
 
-		owner->RegisterView({
-			this,
-			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); },
-			[](void* ptr) -> EntityHandle { return static_cast<Self*>(ptr)->GetEntityHandle(); }
-		});
+		owner->RegisterView({ this,
+			[](void* ptr)
+		{
+			static_cast<Self*>(ptr)->EnsureHydrated();
+		},
+			[](void* ptr) -> EntityHandle
+		{
+			return static_cast<Self*>(ptr)->GetEntityHandle();
+		} });
 	}
 
 	// Initialize from a prefab AssetID — loads JSON, applies fields, wires asset checkouts.
@@ -89,11 +97,15 @@ public:
 		using Self = ConstructView;
 		Reg->BindOnCacheSlotChange<Self, &Self::OnCacheSlotChanged>(Handle, this);
 
-		owner->RegisterView({
-			this,
-			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); },
-			[](void* ptr) -> EntityHandle { return static_cast<Self*>(ptr)->GetEntityHandle(); }
-		});
+		owner->RegisterView({ this,
+			[](void* ptr)
+		{
+			static_cast<Self*>(ptr)->EnsureHydrated();
+		},
+			[](void* ptr) -> EntityHandle
+		{
+			return static_cast<Self*>(ptr)->GetEntityHandle();
+		} });
 	}
 
 	// Attach binds to an existing entity rather than creating a new one.
@@ -109,11 +121,15 @@ public:
 		using Self = ConstructView;
 		Reg->BindOnCacheSlotChange<Self, &Self::OnCacheSlotChanged>(Handle, this);
 
-		owner->RegisterView({
-			this,
-			[](void* ptr) { static_cast<Self*>(ptr)->EnsureHydrated(); },
-			[](void* ptr) -> EntityHandle { return static_cast<Self*>(ptr)->GetEntityHandle(); }
-		});
+		owner->RegisterView({ this,
+			[](void* ptr)
+		{
+			static_cast<Self*>(ptr)->EnsureHydrated();
+		},
+			[](void* ptr) -> EntityHandle
+		{
+			return static_cast<Self*>(ptr)->GetEntityHandle();
+		} });
 	}
 
 	template <typename TConstruct>

@@ -33,10 +33,10 @@
 // ---------------------------------------------------------------------------
 enum class CurveType : uint8_t
 {
-    Linear   = 0,  // Lerp — no table lookup required (CurveHandle.Value == 0)
-    Step     = 1,  // Constant: value of the key at or before t
-    Bezier   = 2,  // Cubic Bezier — keys carry in/out tangent control points
-    Hermite  = 3,  // Cubic Hermite spline — keys carry in/out tangent slopes
+	Linear  = 0, // Lerp — no table lookup required (CurveHandle.Value == 0)
+	Step    = 1, // Constant: value of the key at or before t
+	Bezier  = 2, // Cubic Bezier — keys carry in/out tangent control points
+	Hermite = 3, // Cubic Hermite spline — keys carry in/out tangent slopes
 };
 
 // ---------------------------------------------------------------------------
@@ -51,22 +51,22 @@ enum class CurveType : uint8_t
 // ---------------------------------------------------------------------------
 struct CurveHandle
 {
-    uint32_t Value = 0;
+	uint32_t Value = 0;
 
-    CurveType  GetType()  const { return static_cast<CurveType>((Value >> 28) & 0xF); }
-    uint32_t   GetIndex() const { return Value & 0x0FFF'FFFFu; }
-    bool       IsLinear() const { return Value == 0; }
+	CurveType GetType() const { return static_cast<CurveType>((Value >> 28) & 0xF); }
+	uint32_t GetIndex() const { return Value & 0x0FFF'FFFFu; }
+	bool IsLinear() const { return Value == 0; }
 
-    static CurveHandle Make(CurveType type, uint32_t index)
-    {
-        assert(index <= 0x0FFF'FFFFu && "CurveTable index out of range");
-        return { (static_cast<uint32_t>(type) << 28) | (index & 0x0FFF'FFFFu) };
-    }
+	static CurveHandle Make(CurveType type, uint32_t index)
+	{
+		assert(index <= 0x0FFF'FFFFu && "CurveTable index out of range");
+		return { (static_cast<uint32_t>(type) << 28) | (index & 0x0FFF'FFFFu) };
+	}
 
-    static CurveHandle Linear() { return {}; }
+	static CurveHandle Linear() { return {}; }
 
-    bool operator==(CurveHandle o) const { return Value == o.Value; }
-    bool operator!=(CurveHandle o) const { return Value != o.Value; }
+	bool operator==(CurveHandle o) const { return Value == o.Value; }
+	bool operator!=(CurveHandle o) const { return Value != o.Value; }
 };
 static_assert(sizeof(CurveHandle) == 4, "CurveHandle must be 4 bytes");
 
@@ -83,10 +83,10 @@ static_assert(sizeof(CurveHandle) == 4, "CurveHandle must be 4 bytes");
 template <typename T>
 struct CurveKey
 {
-	SimFloat Time    = 0.0f;
-	T     Value      = {};
-    T     TangentIn  = {};
-    T     TangentOut = {};
+	SimFloat Time = 0.0f;
+	T Value       = {};
+	T TangentIn   = {};
+	T TangentOut  = {};
 };
 
 // ---------------------------------------------------------------------------
@@ -96,8 +96,8 @@ struct CurveKey
 template <typename T>
 struct CurveData
 {
-    std::vector<CurveKey<T>> Keys;
-    CurveType                Type = CurveType::Linear;
+	std::vector<CurveKey<T>> Keys;
+	CurveType Type = CurveType::Linear;
 };
 
 // ---------------------------------------------------------------------------
@@ -112,88 +112,90 @@ struct CurveData
 class CurveTable
 {
 public:
-    static CurveTable& Get()
-    {
-        static CurveTable instance;
-        return instance;
-    }
+	static CurveTable& Get()
+	{
+		static CurveTable instance;
+		return instance;
+	}
 
 	// Register a pre-built SimFloat curve and return its handle.
 	// Called by CurveEditor<SimFloat>::Bake() — not called at runtime.
 	CurveHandle RegisterFloat(CurveData<SimFloat>&& data)
 	{
-        const uint32_t index = static_cast<uint32_t>(FloatCurves.size());
-        CurveType type = data.Type;
-        FloatCurves.push_back(std::move(data));
-        return CurveHandle::Make(type, index);
-    }
+		const uint32_t index = static_cast<uint32_t>(FloatCurves.size());
+		CurveType type       = data.Type;
+		FloatCurves.push_back(std::move(data));
+		return CurveHandle::Make(type, index);
+	}
 
 	// Evaluate a SimFloat curve at normalized t ∈ [0, 1].
 	// CurveHandle::Value == 0 → returns t directly (linear pass-through).
 	SimFloat EvaluateFloat(CurveHandle handle, SimFloat t) const
 	{
-        if (handle.IsLinear()) return t;
-        const uint32_t index = handle.GetIndex();
-        if (index >= FloatCurves.size()) return t;
-        return EvaluateCurve(FloatCurves[index], handle.GetType(), t);
-    }
+		if (handle.IsLinear()) return t;
+		const uint32_t index = handle.GetIndex();
+		if (index >= FloatCurves.size()) return t;
+		return EvaluateCurve(FloatCurves[index], handle.GetType(), t);
+	}
 
 private:
-    CurveTable() = default;
+	CurveTable() = default;
 
-    // Evaluate a typed curve — dispatches by CurveType without virtual calls.
-    template <typename T>
+	// Evaluate a typed curve — dispatches by CurveType without virtual calls.
+	template <typename T>
 	static T EvaluateCurve(const CurveData<T>& curve, CurveType type, SimFloat t)
 	{
-        const auto& keys = curve.Keys;
-        if (keys.empty()) return T{};
-        if (keys.size() == 1) return keys[0].Value;
+		const auto& keys = curve.Keys;
+		if (keys.empty()) return T{};
+		if (keys.size() == 1) return keys[0].Value;
 
-        // Clamp t to key range.
-        if (t <= keys.front().Time) return keys.front().Value;
-        if (t >= keys.back().Time)  return keys.back().Value;
+		// Clamp t to key range.
+		if (t <= keys.front().Time) return keys.front().Value;
+		if (t >= keys.back().Time) return keys.back().Value;
 
-        // Binary search for the segment containing t.
-        uint32_t lo = 0;
-        uint32_t hi = static_cast<uint32_t>(keys.size()) - 1;
-        while (hi - lo > 1)
-        {
-            const uint32_t mid = (lo + hi) / 2;
-            if (keys[mid].Time <= t) lo = mid;
-            else                     hi = mid;
-        }
+		// Binary search for the segment containing t.
+		uint32_t lo = 0;
+		uint32_t hi = static_cast<uint32_t>(keys.size()) - 1;
+		while (hi - lo > 1)
+		{
+			const uint32_t mid = (lo + hi) / 2;
+			if (keys[mid].Time <= t)
+				lo = mid;
+			else
+				hi = mid;
+		}
 
-        const CurveKey<T>& k0 = keys[lo];
-        const CurveKey<T>& k1 = keys[hi];
+		const CurveKey<T>& k0 = keys[lo];
+		const CurveKey<T>& k1 = keys[hi];
 		const SimFloat segLen = k1.Time - k0.Time;
 		const SimFloat s      = segLen > 0.0f ? (t - k0.Time) / segLen : 0.0f;
 
 		switch (type)
-        {
-        case CurveType::Step:
-            return k0.Value;
+		{
+			case CurveType::Step:
+				return k0.Value;
 
-        case CurveType::Hermite:
-            return EvalHermite(k0.Value, k0.TangentOut, k1.Value, k1.TangentIn, s, segLen);
+			case CurveType::Hermite:
+				return EvalHermite(k0.Value, k0.TangentOut, k1.Value, k1.TangentIn, s, segLen);
 
-        case CurveType::Bezier:
-            return EvalBezier(k0.Value, k0.TangentOut, k1.TangentIn, k1.Value, s);
+			case CurveType::Bezier:
+				return EvalBezier(k0.Value, k0.TangentOut, k1.TangentIn, k1.Value, s);
 
-        default: // Linear
-            return Lerp(k0.Value, k1.Value, s);
-        }
-    }
+			default: // Linear
+				return Lerp(k0.Value, k1.Value, s);
+		}
+	}
 
 	// Lerp — requires T supports operator+ and operator* with SimFloat.
 	template <typename T>
 	static T Lerp(const T& a, const T& b, SimFloat t)
 	{
-        return a + (b - a) * t;
-    }
+		return a + (b - a) * t;
+	}
 
-    // Cubic Hermite: p(s) = h00*p0 + h10*m0*d + h01*p1 + h11*m1*d
-    // m0/m1 are tangent slopes (rise over run); d is segment duration.
-    template <typename T>
+	// Cubic Hermite: p(s) = h00*p0 + h10*m0*d + h01*p1 + h11*m1*d
+	// m0/m1 are tangent slopes (rise over run); d is segment duration.
+	template <typename T>
 	static T EvalHermite(const T& p0, const T& m0, const T& p1, const T& m1, SimFloat s, SimFloat d)
 	{
 		const SimFloat s2  = s * s;
@@ -203,10 +205,10 @@ private:
 		const SimFloat h01 = -2 * s3 + 3 * s2;
 		const SimFloat h11 = s3 - s2;
 		return p0 * h00 + m0 * (h10 * d) + p1 * h01 + m1 * (h11 * d);
-    }
+	}
 
-    // Cubic Bezier: B(s) = (1-s)³p0 + 3(1-s)²s·c0 + 3(1-s)s²·c1 + s³p1
-    template <typename T>
+	// Cubic Bezier: B(s) = (1-s)³p0 + 3(1-s)²s·c0 + 3(1-s)s²·c1 + s³p1
+	template <typename T>
 	static T EvalBezier(const T& p0, const T& c0, const T& c1, const T& p1, SimFloat s)
 	{
 		const SimFloat t1 = 1.0f - s;
@@ -215,7 +217,7 @@ private:
 		const SimFloat b2 = 3.0f * t1 * s * s;
 		const SimFloat b3 = s * s * s;
 		return p0 * b0 + c0 * b1 + c1 * b2 + p1 * b3;
-    }
+	}
 
 	std::vector<CurveData<SimFloat>> FloatCurves;
 };
@@ -233,10 +235,13 @@ private:
 template <typename T>
 struct CurveRef
 {
-    CurveHandle Handle;
+	CurveHandle Handle;
 
-    CurveRef() = default;
-    explicit CurveRef(CurveHandle h) : Handle(h) {}
+	CurveRef() = default;
+	explicit CurveRef(CurveHandle h)
+		: Handle(h)
+	{
+	}
 
 	T Evaluate(SimFloat t) const;
 
@@ -247,8 +252,8 @@ struct CurveRef
 template <>
 inline SimFloat CurveRef<SimFloat>::Evaluate(SimFloat t) const
 {
-    if (Handle.IsLinear()) return t;
-    return CurveTable::Get().EvaluateFloat(Handle, t);
+	if (Handle.IsLinear()) return t;
+	return CurveTable::Get().EvaluateFloat(Handle, t);
 }
 
 // ---------------------------------------------------------------------------
@@ -260,26 +265,27 @@ inline SimFloat CurveRef<SimFloat>::Evaluate(SimFloat t) const
 template <typename T>
 struct CurveEditor
 {
-    CurveType            Type = CurveType::Linear;
-    std::vector<CurveKey<T>> Keys;
+	CurveType Type = CurveType::Linear;
+	std::vector<CurveKey<T>> Keys;
 
 	void AddKey(SimFloat time, T value, T tangentIn = {}, T tangentOut = {})
 	{
-        CurveKey<T> k{ time, value, tangentIn, tangentOut };
-        // Insert sorted by time.
-        auto it = Keys.begin();
-        while (it != Keys.end() && it->Time < time) ++it;
-        Keys.insert(it, k);
-    }
+		CurveKey<T> k{ time, value, tangentIn, tangentOut };
+		// Insert sorted by time.
+		auto it = Keys.begin();
+		while (it != Keys.end() && it->Time < time)
+			++it;
+		Keys.insert(it, k);
+	}
 
-    void RemoveKey(uint32_t index)
-    {
-        if (index < Keys.size()) Keys.erase(Keys.begin() + index);
-    }
+	void RemoveKey(uint32_t index)
+	{
+		if (index < Keys.size()) Keys.erase(Keys.begin() + index);
+	}
 
-    void SetType(CurveType type) { Type = type; }
+	void SetType(CurveType type) { Type = type; }
 
-    // Bake into CurveTable and return the runtime handle.
+	// Bake into CurveTable and return the runtime handle.
 	// Only valid for T == SimFloat until CurveTable gains more typed stores.
 	CurveHandle Bake();
 };
@@ -288,9 +294,9 @@ struct CurveEditor
 template <>
 inline CurveHandle CurveEditor<SimFloat>::Bake()
 {
-    if (Keys.empty() || Type == CurveType::Linear) return CurveHandle::Linear();
+	if (Keys.empty() || Type == CurveType::Linear) return CurveHandle::Linear();
 	CurveData<SimFloat> data;
 	data.Type = Type;
-    data.Keys = Keys;
-    return CurveTable::Get().RegisterFloat(std::move(data));
+	data.Keys = Keys;
+	return CurveTable::Get().RegisterFloat(std::move(data));
 }

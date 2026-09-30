@@ -15,7 +15,7 @@ struct CColor : ComponentView<CColor, WIDTH>
 	FloatProxy<WIDTH> B;
 	FloatProxy<WIDTH> A;
 
-	Vec4Accessor<WIDTH> Color{R, G, B, A};
+	Vec4Accessor<WIDTH> Color{ R, G, B, A };
 };
 
 TNX_REGISTER_COMPONENT(CColor)

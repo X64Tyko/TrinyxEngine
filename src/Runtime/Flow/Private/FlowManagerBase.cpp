@@ -53,7 +53,7 @@ FlowManagerBase::~FlowManagerBase()
 // ---------------------------------------------------------------------------
 
 void FlowManagerBase::Initialize(TrinyxEngine* engine, const EngineConfig* config,
-								 int windowWidth, int windowHeight)
+	int windowWidth, int windowHeight)
 {
 	Engine       = engine;
 	Config       = config;
@@ -72,7 +72,7 @@ void FlowManagerBase::RegisterState(const char* name, StateFactory factory)
 		LOG_ENG_ERROR("[FlowManager] Max registered states exceeded");
 		return;
 	}
-	RegisteredStates[RegisteredStateCount++] = {name, std::move(factory)};
+	RegisteredStates[RegisteredStateCount++] = { name, std::move(factory) };
 }
 
 void FlowManagerBase::RegisterMode(const char* name, ModeFactory factory)
@@ -82,7 +82,7 @@ void FlowManagerBase::RegisterMode(const char* name, ModeFactory factory)
 		LOG_ENG_ERROR("[FlowManager] Max registered modes exceeded");
 		return;
 	}
-	RegisteredModes[RegisteredModeCount++] = {name, std::move(factory)};
+	RegisteredModes[RegisteredModeCount++] = { name, std::move(factory) };
 }
 
 // ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ void FlowManagerBase::PopState()
 	StateStackCount--;
 
 	LOG_ENG_INFO_F("[FlowManager] Popped overlay, active: %s",
-				   GetActiveState() ? GetActiveState()->GetName() : "none");
+		GetActiveState() ? GetActiveState()->GetName() : "none");
 }
 
 // ---------------------------------------------------------------------------
@@ -306,8 +306,10 @@ void FlowManagerBase::SetGameMode(const char* modeName)
 	// client connections while assets load from disk.
 	// Initialize() is called from Tick() once preload and uploads are complete.
 	GameMode* mode = PendingMode.get();
-	TrinyxJobs::Dispatch([mode](uint32_t) { mode->OnPreload(); },
-	                     &PendingPreloadCounter, TrinyxJobs::Queue::General);
+	TrinyxJobs::Dispatch([mode](uint32_t)
+	{
+		mode->OnPreload();
+	}, &PendingPreloadCounter, TrinyxJobs::Queue::General);
 
 	LOG_ENG_INFO_F("[FlowManager] GameMode preloading: %s", modeName);
 }
@@ -374,12 +376,12 @@ void FlowManagerBase::CheckPendingMode()
 		ActiveMode->Initialize(ActiveWorld.get());
 
 	// Drain any player joins that arrived while the mode was preloading.
-	uint32_t pending = PendingPlayerJoins;
+	uint32_t pending   = PendingPlayerJoins;
 	PendingPlayerJoins = 0;
 	while (pending)
 	{
-		const uint32_t bit  = pending & (~pending + 1);
-		const uint8_t  oid  = static_cast<uint8_t>(TNX_CTZ32(bit));
+		const uint32_t bit = pending & (~pending + 1);
+		const uint8_t oid  = static_cast<uint8_t>(TNX_CTZ32(bit));
 		if (Souls[oid]) ActiveMode->OnPlayerJoined(*Souls[oid]);
 		pending &= pending - 1;
 	}
@@ -408,8 +410,8 @@ void FlowManagerBase::Tick(SimFloat dt)
 				{
 					const std::string& root = AssetRegistry::Get().GetContentRoot();
 					std::string absPath     = root.empty()
-											  ? PendingTravelPath
-											  : root + "/" + PendingTravelPath;
+												  ? PendingTravelPath
+												  : root + "/" + PendingTravelPath;
 					LoadLevel(absPath.c_str(), /*bBackground=*/true);
 				}
 
@@ -543,7 +545,8 @@ std::optional<PlayerBeginResult> FlowManagerBase::HandlePlayerBeginRequest(Soul*
 	}
 
 	PlayerBeginResult result;
-	if (ActiveMode) result = ActiveMode->OnPlayerBeginRequest(*soul, req);
+	if (ActiveMode)
+		result = ActiveMode->OnPlayerBeginRequest(*soul, req);
 	else
 	{
 		result.Accepted = true;
@@ -583,7 +586,7 @@ void FlowManagerBase::SendPlayerBeginRequest(NetChannel channel, uint32_t frameN
 	ledger.Set(PredictionID, frameNumber, {}, req.PrefabID);
 
 	if (!Souls[ownerID]->PlayerBegin(req)) [[unlikely]]
-	LOG_NET_WARN_F(Souls[ownerID].get(), "[FlowMgr] PlayerBeginRequest send failed (GNS rejected) — ownerID=%u", ownerID);
+		LOG_NET_WARN_F(Souls[ownerID].get(), "[FlowMgr] PlayerBeginRequest send failed (GNS rejected) — ownerID=%u", ownerID);
 }
 #endif // TNX_ENABLE_NETWORK
 
@@ -599,7 +602,7 @@ void FlowManagerBase::PreloadLevelAssets(const char* path)
 	if (!file.is_open()) return;
 
 	std::string contents((std::istreambuf_iterator<char>(file)),
-	                      std::istreambuf_iterator<char>());
+		std::istreambuf_iterator<char>());
 	JsonValue root = JsonParse(contents);
 	if (!root.IsObject()) return;
 

@@ -1,7 +1,10 @@
 #pragma once
 #include <cstdint>
 
-enum class BusID : uint8_t { Master = 0 };
+enum class BusID : uint8_t
+{
+	Master = 0
+};
 
 struct PlayParams
 {

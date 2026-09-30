@@ -14,5 +14,5 @@ struct SoundHandle
 	bool operator==(const SoundHandle& o) const { return Index == o.Index && Generation == o.Generation; }
 	bool operator!=(const SoundHandle& o) const { return !(*this == o); }
 
-	static SoundHandle Invalid() { return {0, 0}; }
+	static SoundHandle Invalid() { return { 0, 0 }; }
 };

@@ -14,7 +14,10 @@ AudioManager* AudioManager::s_Instance = nullptr;
 // ---------------------------------------------------------------------------
 
 AudioManager::AudioManager() = default;
-AudioManager::~AudioManager() { Shutdown(); }
+AudioManager::~AudioManager()
+{
+	Shutdown();
+}
 
 bool AudioManager::Initialize(int maxVoices)
 {
@@ -28,7 +31,7 @@ bool AudioManager::Initialize(int maxVoices)
 
 	// ---- Open default playback device ----------------------------------------
 	// Request float32 stereo 48kHz; SDL will give us the closest available.
-	SDL_AudioSpec desired{SDL_AUDIO_F32, 2, 48000};
+	SDL_AudioSpec desired{ SDL_AUDIO_F32, 2, 48000 };
 	DeviceID = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &desired);
 	if (DeviceID == 0)
 	{
@@ -43,7 +46,7 @@ bool AudioManager::Initialize(int maxVoices)
 	SDL_GetAudioDeviceFormat(DeviceID, &DeviceSpec, &sampleFrames);
 
 	LOG_ENG_INFO_F("[Audio] Device opened: format=%d channels=%d freq=%d (buffer ~%d frames)",
-				   DeviceSpec.format, DeviceSpec.channels, DeviceSpec.freq, sampleFrames);
+		DeviceSpec.format, DeviceSpec.channels, DeviceSpec.freq, sampleFrames);
 
 	// ---- Allocate voice pool ------------------------------------------------
 	MaxVoices = maxVoices;
@@ -153,8 +156,8 @@ uint32_t AudioManager::LoadSound(const char* path, TnxName name, AssetID id, boo
 	}
 
 	LOG_ENG_INFO_F("[Audio] Loaded sound slot %u '%s' (%d frames, %dHz %dch)",
-				   slotID, name.IsValid() ? name.GetStr() : path,
-				   asset->Frames, asset->SampleRate, asset->Channels);
+		slotID, name.IsValid() ? name.GetStr() : path,
+		asset->Frames, asset->SampleRate, asset->Channels);
 	return slotID;
 }
 
@@ -347,7 +350,7 @@ SoundHandle AudioManager::PlayAsset(const SoundAsset* asset, PlayParams params)
 	}
 
 	// Build source spec matching the decoded asset.
-	SDL_AudioSpec srcSpec{SDL_AUDIO_F32, asset->Channels, asset->SampleRate};
+	SDL_AudioSpec srcSpec{ SDL_AUDIO_F32, asset->Channels, asset->SampleRate };
 
 	v->Stream = SDL_CreateAudioStream(&srcSpec, &DeviceSpec);
 	if (!v->Stream)
@@ -365,15 +368,15 @@ SoundHandle AudioManager::PlayAsset(const SoundAsset* asset, PlayParams params)
 
 	// Push the entire PCM buffer.
 	SDL_PutAudioStreamData(v->Stream,
-						   asset->PCM.data(),
-						   static_cast<int>(asset->PCM.size() * sizeof(float)));
+		asset->PCM.data(),
+		static_cast<int>(asset->PCM.size() * sizeof(float)));
 
 	// Assign handle.
 	const uint16_t gen = NextGeneration++;
 	if (NextGeneration == 0) NextGeneration = 1; // wrap: skip 0 so {idx,0} stays invalid
 
 	const uint16_t idx = static_cast<uint16_t>(v - Pool.get());
-	v->Handle          = {idx, gen};
+	v->Handle          = { idx, gen };
 	v->Asset           = asset;
 	v->bLoop           = params.Loop;
 	v->Priority        = params.Priority;
@@ -436,7 +439,7 @@ void AudioManager::Update(float dt)
 		if (v.FadeRate != 0.f)
 		{
 			float vol = v.Volume.load(std::memory_order_relaxed);
-			vol       += v.FadeRate * dt;
+			vol += v.FadeRate * dt;
 
 			if (vol <= v.FadeTarget)
 			{
@@ -461,8 +464,8 @@ void AudioManager::Update(float dt)
 			if (v.bLoop)
 			{
 				SDL_PutAudioStreamData(v.Stream,
-									   v.Asset->PCM.data(),
-									   static_cast<int>(v.Asset->PCM.size() * sizeof(float)));
+					v.Asset->PCM.data(),
+					static_cast<int>(v.Asset->PCM.size() * sizeof(float)));
 			}
 			else
 			{
@@ -547,7 +550,7 @@ void AudioManager::RegisterEventInternal(TnxName eventName, const AssetEntry& as
 		return;
 	}
 
-	Events[EventCount++] = {eventName, asset.ID, defaults};
+	Events[EventCount++] = { eventName, asset.ID, defaults };
 }
 
 void AudioManager::RegisterEvent(TnxName eventName, AssetID id, PlayParams defaults)
@@ -576,7 +579,7 @@ void AudioManager::RegisterEvent(TnxName eventName, TnxName assetName, PlayParam
 		LOG_ENG_WARN_F("[Audio] RegisterEvent: '%s' already registered — use UpdateEvent to change defaults", eventName.GetStr());
 		return;
 	}
-	
+
 	const AssetEntry* entry = AssetRegistry::Get().FindByTNameAndType(assetName, AssetType::Audio);
 	if (!entry)
 	{

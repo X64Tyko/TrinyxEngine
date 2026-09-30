@@ -21,15 +21,15 @@
 #include <intrin.h>
 /// @brief Count trailing zeros (32-bit) — returns the index of the least significant set bit.
 #define TNX_CTZ32(x) ([](uint32_t val) -> uint32_t { \
-	unsigned long idx; \
-	_BitScanForward(&idx, val); \
-	return static_cast<uint32_t>(idx); \
+	unsigned long idx;                               \
+	_BitScanForward(&idx, val);                      \
+	return static_cast<uint32_t>(idx);               \
 }(x))
 /// @brief Count trailing zeros (64-bit) — returns the index of the least significant set bit.
 #define TNX_CTZ64(x) ([](uint64_t val) -> uint32_t { \
-	unsigned long idx; \
-	_BitScanForward64(&idx, val); \
-	return static_cast<uint32_t>(idx); \
+	unsigned long idx;                               \
+	_BitScanForward64(&idx, val);                    \
+	return static_cast<uint32_t>(idx);               \
 }(x))
 #else
 #define TNX_CTZ32(x) __builtin_ctz(x)
@@ -47,7 +47,7 @@
 // Suppress warnings for anonymous structs in unions used by math types.
 #ifdef _MSC_VER
 #pragma warning(push)
-#pragma warning(disable: 4201) // nonstandard extension used: nameless struct/union
+#pragma warning(disable : 4201) // nonstandard extension used: nameless struct/union
 #elif defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
@@ -103,15 +103,19 @@ enum class ConstructLifetime : uint8_t
 
 namespace TVecDetail
 {
-	template <typename Dst, typename Src>
-	FORCE_INLINE Dst ConvertScalar(const Src& s)
-	{
-		if constexpr (std::is_same_v<Dst, Src>) return s;
-		else if constexpr (std::is_same_v<Dst, float>) return s.ToFloat();
-		else if constexpr (std::is_same_v<Src, float>) return Dst(Fixed32::FromFloat(s));
-		else return Dst(Fixed32::FromFloat(s.ToFloat()));
-	}
+template <typename Dst, typename Src>
+FORCE_INLINE Dst ConvertScalar(const Src& s)
+{
+	if constexpr (std::is_same_v<Dst, Src>)
+		return s;
+	else if constexpr (std::is_same_v<Dst, float>)
+		return s.ToFloat();
+	else if constexpr (std::is_same_v<Src, float>)
+		return Dst(Fixed32::FromFloat(s));
+	else
+		return Dst(Fixed32::FromFloat(s.ToFloat()));
 }
+} // namespace TVecDetail
 
 // Forward declaration for Sqrt – defined in SimFloat.h
 template <typename T>
@@ -134,20 +138,19 @@ struct TVector3
 	VecType x, y, z;
 
 	TVector3()
-		: x(0)
-		, y(0)
-		, z(0)
+		: x(0),
+		  y(0),
+		  z(0)
 	{
 	}
 
 	// Variadic ctor — accepts any three arguments convertible to VecType.
 	// Avoids duplicate ctors when SimFloat == float.
 	template <typename... Args,
-			  std::enable_if_t<sizeof...(Args) == 3 &&
-							   (std::is_convertible_v<Args, VecType> && ...), int> = 0>
+		std::enable_if_t<sizeof...(Args) == 3 && (std::is_convertible_v<Args, VecType> && ...), int> = 0>
 	TVector3(Args... args)
 	{
-		VecType arr[] = {static_cast<VecType>(args)...};
+		VecType arr[] = { static_cast<VecType>(args)... };
 		x             = arr[0];
 		y             = arr[1];
 		z             = arr[2];
@@ -183,8 +186,8 @@ struct TVector3
 			TVecDetail::ConvertScalar<Dst>(z));
 	}
 
-	TVector3<float>    ToFloat() const { return CastTo<float>(); }    ///< @brief Convert to float components.
-	TVector3<SimFloat> ToSim()   const { return CastTo<SimFloat>(); }  ///< @brief Convert to SimFloat components.
+	TVector3<float> ToFloat() const { return CastTo<float>(); }     ///< @brief Convert to float components.
+	TVector3<SimFloat> ToSim() const { return CastTo<SimFloat>(); } ///< @brief Convert to SimFloat components.
 
 	TVector3& operator+=(const TVector3& other)
 	{
@@ -244,10 +247,10 @@ struct TVector3
 		return TVector3(s * v.x, s * v.y, s * v.z);
 	}
 
-	VecType LengthSqr()                              const { return x * x + y * y + z * z; }
-	VecType DistanceSqr(const TVector3& o)           const { return (*this - o).LengthSqr(); }
-	VecType Distance(const TVector3& o)              const { return Sqrt(DistanceSqr(o)); }
-	bool    IsNearZero(VecType eps2 = VecType(1e-8f)) const { return LengthSqr() <= eps2; }
+	VecType LengthSqr() const { return x * x + y * y + z * z; }
+	VecType DistanceSqr(const TVector3& o) const { return (*this - o).LengthSqr(); }
+	VecType Distance(const TVector3& o) const { return Sqrt(DistanceSqr(o)); }
+	bool IsNearZero(VecType eps2 = VecType(1e-8f)) const { return LengthSqr() <= eps2; }
 
 	VecType Length() const
 	{
@@ -256,8 +259,10 @@ struct TVector3
 
 	float LengthF() const
 	{
-		if constexpr (std::is_same_v<VecType, SimFloat>) return static_cast<float>(Length());
-		else return static_cast<float>(Length());
+		if constexpr (std::is_same_v<VecType, SimFloat>)
+			return static_cast<float>(Length());
+		else
+			return static_cast<float>(Length());
 	}
 
 	TVector3 Normalized() const
@@ -299,13 +304,25 @@ struct TQuat
 {
 	VecType x, y, z, w;
 
-	TQuat() : x(0), y(0), z(0), w(1) {}
-	TQuat(VecType x_, VecType y_, VecType z_, VecType w_) : x(x_), y(y_), z(z_), w(w_) {}
+	TQuat()
+		: x(0),
+		  y(0),
+		  z(0),
+		  w(1)
+	{
+	}
+	TQuat(VecType x_, VecType y_, VecType z_, VecType w_)
+		: x(x_),
+		  y(y_),
+		  z(z_),
+		  w(w_)
+	{
+	}
 
 	static TQuat Identity() { return TQuat(); }
 
-	TQuat   Conjugate()  const { return TQuat(-x, -y, -z, w); }
-	VecType LengthSqr()  const { return x * x + y * y + z * z + w * w; }
+	TQuat Conjugate() const { return TQuat(-x, -y, -z, w); }
+	VecType LengthSqr() const { return x * x + y * y + z * z + w * w; }
 
 	TQuat Normalized() const
 	{
@@ -326,7 +343,7 @@ struct TQuat
 	/// @brief Rotate vector @p v by this unit quaternion: v + 2w(q×v) + 2(q×(q×v)).
 	TVector3<VecType> Rotate(const TVector3<VecType>& v) const
 	{
-		TVector3<VecType> qv{x, y, z};
+		TVector3<VecType> qv{ x, y, z };
 		TVector3<VecType> t = Cross(qv, v) * VecType(2);
 		return v + t * w + Cross(qv, t);
 	}
@@ -342,8 +359,8 @@ struct TQuat
 			TVecDetail::ConvertScalar<Dst>(w));
 	}
 
-	TQuat<float>    ToFloat() const { return CastTo<float>(); }    ///< @brief Convert to float components.
-	TQuat<SimFloat> ToSim()   const { return CastTo<SimFloat>(); }  ///< @brief Convert to SimFloat components.
+	TQuat<float> ToFloat() const { return CastTo<float>(); }     ///< @brief Convert to float components.
+	TQuat<SimFloat> ToSim() const { return CastTo<SimFloat>(); } ///< @brief Convert to SimFloat components.
 };
 
 using Quat  = TQuat<>;      ///< Simulation-space quaternion (SimFloat components).
@@ -363,7 +380,8 @@ struct TMatrix4
 
 	TMatrix4()
 	{
-		for (int i = 0; i < 16; i++) m[i] = 0;
+		for (int i = 0; i < 16; i++)
+			m[i] = 0;
 		m[0] = m[5] = m[10] = m[15] = 1; // Identity
 	}
 
@@ -377,7 +395,8 @@ struct TMatrix4
 			for (int row = 0; row < 4; ++row)
 			{
 				MatType sum(0);
-				for (int k = 0; k < 4; ++k) sum += a.m[k * 4 + row] * b.m[col * 4 + k];
+				for (int k = 0; k < 4; ++k)
+					sum += a.m[k * 4 + row] * b.m[col * 4 + k];
 				r.m[col * 4 + row] = sum;
 			}
 		return r;
@@ -392,12 +411,13 @@ struct TMatrix4
 	TMatrix4<Dst> CastTo() const
 	{
 		TMatrix4<Dst> r;
-		for (int i = 0; i < 16; ++i) r.m[i] = TVecDetail::ConvertScalar<Dst>(m[i]);
+		for (int i = 0; i < 16; ++i)
+			r.m[i] = TVecDetail::ConvertScalar<Dst>(m[i]);
 		return r;
 	}
 
-	TMatrix4<float>    ToFloat() const { return CastTo<float>(); }    ///< @brief Convert to float elements.
-	TMatrix4<SimFloat> ToSim()   const { return CastTo<SimFloat>(); }  ///< @brief Convert to SimFloat elements.
+	TMatrix4<float> ToFloat() const { return CastTo<float>(); }     ///< @brief Convert to float elements.
+	TMatrix4<SimFloat> ToSim() const { return CastTo<SimFloat>(); } ///< @brief Convert to SimFloat elements.
 };
 
 using Matrix4  = TMatrix4<>;      ///< Simulation-space 4×4 matrix (SimFloat elements).
@@ -409,15 +429,15 @@ using ComponentTypeID = uint32_t; ///< Numeric identifier for a component type.
 /// @note Distinct from ComponentTypeID: slot 0 may refer to different components in different caches.
 using CacheSlotID = uint8_t;
 
-static constexpr size_t MAX_COMPONENTS                    = 256;  ///< Maximum distinct component types.
-static constexpr size_t MAX_TEMPORAL_FIELDS_PER_COMPONENT = 64;   ///< Max decomposed temporal SoA fields per component.
-static constexpr size_t MAX_FIELD_ARRAYS = MAX_COMPONENTS * MAX_TEMPORAL_FIELDS_PER_COMPONENT; ///< Max total field arrays across all components.
+static constexpr size_t MAX_COMPONENTS                    = 256;                                                ///< Maximum distinct component types.
+static constexpr size_t MAX_TEMPORAL_FIELDS_PER_COMPONENT = 64;                                                 ///< Max decomposed temporal SoA fields per component.
+static constexpr size_t MAX_FIELD_ARRAYS                  = MAX_COMPONENTS * MAX_TEMPORAL_FIELDS_PER_COMPONENT; ///< Max total field arrays across all components.
 /// @brief Upper bound on field arrays for any single archetype (temporal + non-temporal).
 static constexpr size_t MAX_FIELDS_PER_ARCHETYPE = 64;
 
-using ComponentSignature = FixedBitset<MAX_COMPONENTS>; ///< Bitmask tracking which component types are present on an archetype.
-using ClassID            = uint16_t;                    ///< Per-Construct-type numeric class identifier.
-static constexpr size_t MAX_CLASS_COUNT = 4096;         ///< Hard limit based on the ClassID field width in Entity headers.
+using ComponentSignature                = FixedBitset<MAX_COMPONENTS>; ///< Bitmask tracking which component types are present on an archetype.
+using ClassID                           = uint16_t;                    ///< Per-Construct-type numeric class identifier.
+static constexpr size_t MAX_CLASS_COUNT = 4096;                        ///< Hard limit based on the ClassID field width in Entity headers.
 
 /// @brief Nominal chunk size in bytes — ~32 entities if each has 64 fields of 4 bytes in chunk storage.
 constexpr uint32_t CHUNK_SIZE = 256 * MAX_FIELDS_PER_ARCHETYPE * 4;
@@ -425,12 +445,12 @@ constexpr uint32_t CHUNK_SIZE = 256 * MAX_FIELDS_PER_ARCHETYPE * 4;
 /// @brief Engine-internal global counters. Do not access directly from gameplay code.
 namespace Internal
 {
-	extern uint32_t g_GlobalComponentCounter; ///< Monotonically increasing component type counter.
-	extern uint8_t  g_GlobalMixinCounter;     ///< User mixin IDs; starts at 128 to avoid collisions with engine mixins.
+extern uint32_t g_GlobalComponentCounter; ///< Monotonically increasing component type counter.
+extern uint8_t g_GlobalMixinCounter;      ///< User mixin IDs; starts at 128 to avoid collisions with engine mixins.
 
-	/// @brief Per-CacheTier component slot counters, indexed by CacheTier value.
-	extern std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> g_TemporalComponentCounter;
-}
+/// @brief Per-CacheTier component slot counters, indexed by CacheTier value.
+extern std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> g_TemporalComponentCounter;
+} // namespace Internal
 
 #ifdef _MSC_VER
 #pragma warning(pop)

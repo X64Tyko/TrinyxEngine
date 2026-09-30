@@ -18,7 +18,7 @@ struct CRotation : ComponentView<CRotation, WIDTH>
 	FloatProxy<WIDTH> RotQz;
 	FloatProxy<WIDTH> RotQw;
 
-	QuatAccessor<WIDTH> Quat{RotQx, RotQy, RotQz, RotQw};
+	QuatAccessor<WIDTH> Quat{ RotQx, RotQy, RotQz, RotQw };
 };
 
 TNX_REGISTER_COMPONENT(CRotation)

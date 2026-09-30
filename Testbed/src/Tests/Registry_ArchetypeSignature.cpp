@@ -23,10 +23,10 @@ TEST(Registry_ArchetypeSignature)
 	// CJoltBody is 1-based; BuildSignature uses StaticTypeID()-1 for bit position.
 	// Use ComponentQuery to test indirectly: JoltBody query should include CubeEntity but not SuperCube.
 	auto JoltArches = Reg->ComponentQuery<CJoltBody<>>();
-	bool cubeFound  = false, superFound = false;
+	bool cubeFound = false, superFound = false;
 	for (auto* arch : JoltArches)
 	{
-		if (arch == CubeArches[0]) cubeFound  = true;
+		if (arch == CubeArches[0]) cubeFound = true;
 		if (arch == SuperArches[0]) superFound = true;
 	}
 

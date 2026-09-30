@@ -3,8 +3,22 @@ name: CI
 on:
   push:
     branches: [ main, Dev-Main ]
+    # CI tags — run CI on demand from a push (for copies where plain pushes skip CI):
+    #   ci-linux-<anything>    Linux jobs only (cheapest)
+    #   ci-windows-<anything>  Windows jobs only (Windows minutes count double)
+    #   ci-all-<anything>      both platforms
+    #   ci-<anything else>     Linux only
+    # e.g.  git tag ci-linux-$(git rev-parse --short HEAD) && git push origin ci-linux-$(git rev-parse --short HEAD)
+    tags: [ 'ci-*' ]
   pull_request:
     branches: [ main, Dev-Main ]
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Platforms to build"
+        type: choice
+        options: [ linux, windows, all ]
+        default: linux
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -31,24 +45,59 @@ concurrency:
 # ---------------------------------------------------------------------------
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Plan — decides whether CI runs and on which platforms.
+  # Public repositories: every push/PR, both platforms.
+  # Private forks (metered Actions minutes): only manual runs and ci-* tags; plain
+  # branch pushes skip everything. Run scripts/presubmit.py locally instead.
+  # ---------------------------------------------------------------------------
+  plan:
+    name: Plan
+    if: ${{ !github.event.repository.private || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/ci-') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      os: ${{ steps.pick.outputs.os }}
+      linux: ${{ steps.pick.outputs.linux }}
+    steps:
+      - id: pick
+        env:
+          INPUT_PLATFORMS: ${{ inputs.platforms }}
+          REF: ${{ github.ref }}
+        run: |
+          platforms="$INPUT_PLATFORMS"
+          if [ -z "$platforms" ]; then
+            case "$REF" in
+              refs/tags/ci-windows*) platforms=windows ;;
+              refs/tags/ci-all*)     platforms=all ;;
+              refs/tags/ci-*)        platforms=linux ;;
+              *)                     platforms=all ;;
+            esac
+          fi
+          case "$platforms" in
+            linux)   os='["ubuntu-24.04"]' ;;
+            windows) os='["windows-latest"]' ;;
+            *)       os='["ubuntu-24.04", "windows-latest"]' ;;
+          esac
+          echo "Platforms: $platforms"
+          echo "os=$os" >> "$GITHUB_OUTPUT"
+          echo "linux=$([ "$platforms" = windows ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
+
   build-and-test:
-    name: "${{ matrix.os_name }} | ${{ matrix.config }}"
+    name: "${{ matrix.os == 'windows-latest' && 'Windows' || 'Linux' }} | ${{ matrix.config }}"
+    needs: plan
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
 
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-24.04, windows-latest ]
+        os: ${{ fromJSON(needs.plan.outputs.os) }}
         config: [ minimal, rollback, network-client, network-client-rollback, network-server, network-server-rollback, align64, tracy ]
 
+        # No per-OS include entries: with a single-OS matrix they would be added as extra,
+        # config-less jobs. The display name is derived from matrix.os instead.
         include:
-          # --- OS display names ---
-          - os: ubuntu-24.04
-            os_name: Linux
-          - os: windows-latest
-            os_name: Windows
-
           # --- Per-config cmake flags and metadata ---
           - config: minimal
             cmake_extra: >-
@@ -222,13 +271,13 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ci-failure-${{ matrix.os_name }}-${{ matrix.config }}
+          name: ci-failure-${{ matrix.os }}-${{ matrix.config }}
           path: |
             cmake-build-ci/**/*.log
             cmake-build-ci/CMakeFiles/CMakeOutput.log
             cmake-build-ci/CMakeFiles/CMakeError.log
           retention-days: 7
-  
+
   # ---------------------------------------------------------------------------
   # Two-process loopback test — Linux only.
   #
@@ -242,6 +291,8 @@ jobs:
   # ---------------------------------------------------------------------------
   network-loopback:
     name: "Linux | network-loopback (two-process)"
+    needs: plan
+    if: ${{ needs.plan.outputs.linux == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
 

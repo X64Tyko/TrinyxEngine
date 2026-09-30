@@ -15,7 +15,7 @@ RUNTIME_TEST(Spawn_SuperCubeGrid)
 	std::mt19937 gen(std::random_device{}());
 	std::uniform_real_distribution<float> colorDist(0.2f, 1.0f);
 
-	constexpr int   Count    = 10000;
+	constexpr int Count         = 10000;
 	constexpr SimFloat Spacing  = SimFloat(3.0f);
 	constexpr SimFloat CubeHalf = SimFloat(0.5f);
 	constexpr SimFloat YBase    = SimFloat(10.0f);
@@ -32,15 +32,13 @@ RUNTIME_TEST(Spawn_SuperCubeGrid)
 	{
 		int row = i / gridSide;
 		int col = i % gridSide;
-		setups.push_back({
-			static_cast<SimFloat>(col) * Spacing - gridHalf,
+		setups.push_back({ static_cast<SimFloat>(col) * Spacing - gridHalf,
 			YBase + static_cast<SimFloat>(row) * Spacing,
 			ZOffset,
 			CubeHalf, CubeHalf, CubeHalf,
 			SimFloat(0.0f),
 			SimFloat(colorDist(gen)), SimFloat(colorDist(gen)), SimFloat(colorDist(gen)),
-			JoltMotion::Static
-		});
+			JoltMotion::Static });
 	}
 
 	Registry* reg         = Engine.GetRegistry();
@@ -55,5 +53,5 @@ RUNTIME_TEST(Spawn_SuperCubeGrid)
 	ASSERT_EQ(reg->GetTotalEntityCount() - before, static_cast<uint32_t>(Count));
 
 	LOG_ENG_ALWAYS_F("[Spawn_SuperCubeGrid] %d entities in %dx%d grid (persistent until shutdown)",
-					 Count, gridSide, gridSide);
+		Count, gridSide, gridSide);
 }

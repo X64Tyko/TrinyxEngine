@@ -1,3 +1,5 @@
+#include <chrono>
+
 #include "TestFramework.h"
 #include "TrinyxEngine.h"
 #include "Registry.h"
@@ -58,21 +60,26 @@ RUNTIME_TEST(Slab_TemporalFrameAdvance)
 	}
 
 #ifdef TNX_ENABLE_ROLLBACK
-	// --- Rollback slab: verify SetActiveWriteFrame test hook (for rollback tests) ---
+	// --- Rollback slab: the ring wraps from the last slot back to 0 ---
+	// The Brain owns ActiveWriteFrame and advances it every step, so the test only observes: it
+	// waits for a stable read where the live write frame is the last slot. Writing the pointer
+	// from here would race the Brain and disturb the running engine.
 	{
 		ComponentCacheBase* Temporal = Reg->GetTemporalCache();
-		const uint32_t frameCount    = Temporal->GetTotalFrameCount();
-		const uint32_t origWrite     = Temporal->GetActiveWriteFrame();
+		const uint32_t lastSlot      = Temporal->GetTotalFrameCount() - 1;
 
-		// Manually advance to the last slot then check wrap-around
-		const uint32_t lastSlot = frameCount - 1;
-		Temporal->SetActiveWriteFrame(lastSlot);
-
-		const uint32_t wrappedNext = Temporal->GetNextWriteFrame();
-		ASSERT_EQ(wrappedNext, 0u); // must wrap to 0
-
-		// Restore original state
-		Temporal->SetActiveWriteFrame(origWrite);
+		bool bObservedWrap  = false;
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+		while (!bObservedWrap && std::chrono::steady_clock::now() < deadline)
+		{
+			const uint32_t before = Temporal->GetActiveWriteFrame();
+			const uint32_t next   = Temporal->GetNextWriteFrame();
+			const uint32_t after  = Temporal->GetActiveWriteFrame();
+			if (before != after || before != lastSlot) continue; // advanced mid-read, or not at the end yet
+			ASSERT_EQ(next, 0u);                                 // must wrap to 0
+			bObservedWrap = true;
+		}
+		ASSERT(bObservedWrap); // the Brain cycles the whole ring many times within the deadline
 	}
 #endif
 }

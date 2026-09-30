@@ -6,7 +6,7 @@
 // Disable MSVC warning for anonymous structs in unions (C++11 standard feature)
 #ifdef _MSC_VER
 #pragma warning(push)
-#pragma warning(disable: 4201) // nonstandard extension used: nameless struct/union
+#pragma warning(disable : 4201) // nonstandard extension used: nameless struct/union
 #elif defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
@@ -29,12 +29,12 @@ union EntitySlotMeta
 	{
 		uint32_t Generation : Generation_Bits; // generation still lives with the entity, usable by logic and renderer
 		uint32_t NetOwnerID : NetOwnerID_Bits; // MaxOwnerIDs possible owner IDs held per entity for comparison
-		uint32_t reserved   : 7;               // genuinely not sure what else they'd need yet
-		uint32_t ValidBit   : 1;               // If the entity is actually alive (bit 31 matches the existing precedent with Flags)
+		uint32_t reserved : 7;                 // genuinely not sure what else they'd need yet
+		uint32_t ValidBit : 1;                 // If the entity is actually alive (bit 31 matches the existing precedent with Flags)
 	};
 
 	// Required interface (for swappability) Don't assume sizes, as they can be customized
-	//uint32_t GetIndex() const { return static_cast<uint32_t>(Index); }
+	// uint32_t GetIndex() const { return static_cast<uint32_t>(Index); }
 	uint32_t GetGeneration() const { return Generation; }
 	uint32_t GetOwnerID() const { return NetOwnerID; }
 
@@ -65,8 +65,8 @@ union EntityNetHandle
 
 	struct
 	{
-		uint32_t NetOwnerID : NetOwnerID_Bits;  // With this in the NetID we have an entity index and an owner, this means that on the server we have a single array of net entities, each owners local entities live contiguously. 0 is global
-		uint32_t NetIndex   : UniqueIndex_Bits; // Net ID size matches the EntityHandle Index. This could probably be smaller to allow packing some other data specifically for networking as 16M networked entities is a lot.
+		uint32_t NetOwnerID : NetOwnerID_Bits; // With this in the NetID we have an entity index and an owner, this means that on the server we have a single array of net entities, each owners local entities live contiguously. 0 is global
+		uint32_t NetIndex : UniqueIndex_Bits;  // Net ID size matches the EntityHandle Index. This could probably be smaller to allow packing some other data specifically for networking as 16M networked entities is a lot.
 	};
 
 	uint32_t GetOwnerID() const { return NetOwnerID; }
@@ -86,8 +86,8 @@ union EntityNetManifest
 	struct
 	{
 		uint32_t ClassType : TypeKey_Bits; // Class type so that creation requests can come directly from a handle and allow handle reuse and mutation by the registry.
-		uint32_t NetFlags  : 8;            // Various flags for net manifest
-		uint32_t reserved  : 8;            // reserved for later
+		uint32_t NetFlags : 8;             // Various flags for net manifest
+		uint32_t reserved : 8;             // reserved for later
 	};
 
 	bool IsPredictedCreation() const { return NetFlags & 0x1; }
@@ -107,7 +107,7 @@ union ConstructNetHandle
 	struct
 	{
 		uint32_t NetOwnerID : NetOwnerID_Bits;
-		uint32_t NetIndex   : UniqueIndex_Bits;
+		uint32_t NetIndex : UniqueIndex_Bits;
 	};
 
 	uint32_t GetOwnerID() const { return NetOwnerID; }

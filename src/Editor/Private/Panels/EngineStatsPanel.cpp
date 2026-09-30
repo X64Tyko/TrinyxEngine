@@ -9,7 +9,11 @@
 
 void EngineStatsPanel::Draw(EditorState& state)
 {
-	if (!BeginPadded()) { ImGui::End(); return; }
+	if (!BeginPadded())
+	{
+		ImGui::End();
+		return;
+	}
 
 	TnxWidgets::PanelHeader(nullptr, "Engine Stats");
 
@@ -28,14 +32,14 @@ void EngineStatsPanel::Draw(EditorState& state)
 		fixedMs  = state.LogicPtr->GetFixedFrameMs();
 	}
 
-	const float fixedBudget  = (fixedFps > 0.f) ? (1000.f / fixedFps) : 1.953f; // 512 Hz default
+	const float fixedBudget   = (fixedFps > 0.f) ? (1000.f / fixedFps) : 1.953f; // 512 Hz default
 	const float encoderBudget = (renderFps > 0.f) ? (1000.f / renderFps) : 16.67f;
 
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 10));
 
 	char fixedHz[32];
 	snprintf(fixedHz, sizeof(fixedHz), "%.0f Hz", fixedFps);
-	TnxWidgets::FrameBudgetBar("Brain",   fixedHz,   fixedMs,  fixedBudget,  TnxStyle::Color::ThBrain,   "Logic thread — fixed-step simulation");
+	TnxWidgets::FrameBudgetBar("Brain", fixedHz, fixedMs, fixedBudget, TnxStyle::Color::ThBrain, "Logic thread — fixed-step simulation");
 	ImGui::Spacing();
 
 	char renderHz[32];
@@ -72,7 +76,7 @@ void EngineStatsPanel::Draw(EditorState& state)
 
 		if (ImGui::BeginTable("cfg", 2, ImGuiTableFlags_SizingFixedFit))
 		{
-			ImGui::TableSetupColumn("key",   ImGuiTableColumnFlags_WidthFixed, 210.f);
+			ImGui::TableSetupColumn("key", ImGuiTableColumnFlags_WidthFixed, 210.f);
 			ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
 
 			auto row = [&](const char* key, const char* fmt, auto... args)
@@ -90,17 +94,17 @@ void EngineStatsPanel::Draw(EditorState& state)
 				ImGui::PopFont();
 			};
 
-			row("TargetFPS",              "%d%s", cfg.TargetFPS, cfg.TargetFPS == 0 ? " (uncapped)" : "");
-			row("FixedUpdateHz",           "%d", cfg.FixedUpdateHz);
-			row("PhysicsUpdateInterval",   "%d  (%.0f Hz)", cfg.PhysicsUpdateInterval,
-			    (double)cfg.FixedUpdateHz / cfg.PhysicsUpdateInterval);
-			row("NetworkUpdateHz",         "%d", cfg.NetworkUpdateHz);
-			row("InputPollHz",             "%d", cfg.InputPollHz);
+			row("TargetFPS", "%d%s", cfg.TargetFPS, cfg.TargetFPS == 0 ? " (uncapped)" : "");
+			row("FixedUpdateHz", "%d", cfg.FixedUpdateHz);
+			row("PhysicsUpdateInterval", "%d  (%.0f Hz)", cfg.PhysicsUpdateInterval,
+				(double)cfg.FixedUpdateHz / cfg.PhysicsUpdateInterval);
+			row("NetworkUpdateHz", "%d", cfg.NetworkUpdateHz);
+			row("InputPollHz", "%d", cfg.InputPollHz);
 			row("MAX_RENDERABLE_ENTITIES", "%d", cfg.MAX_RENDERABLE_ENTITIES);
-			row("MAX_JOLT_BODIES",         "%d", cfg.MAX_JOLT_BODIES);
-			row("MAX_CACHED_ENTITIES",     "%d", cfg.MAX_CACHED_ENTITIES);
-			row("TemporalFrameCount",      "%d", cfg.TemporalFrameCount);
-			row("JobCacheSize",            "%d", cfg.JobCacheSize);
+			row("MAX_JOLT_BODIES", "%d", cfg.MAX_JOLT_BODIES);
+			row("MAX_CACHED_ENTITIES", "%d", cfg.MAX_CACHED_ENTITIES);
+			row("TemporalFrameCount", "%d", cfg.TemporalFrameCount);
+			row("JobCacheSize", "%d", cfg.JobCacheSize);
 
 			ImGui::EndTable();
 		}

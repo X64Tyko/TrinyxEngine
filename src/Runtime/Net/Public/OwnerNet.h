@@ -46,16 +46,16 @@ public:
 
 private:
 	static void WriteEntitySpawnFields(Registry* reg, EntityRecord* record,
-									   const EntitySpawnPayload& payload,
-									   uint32_t temporalFrame, uint32_t volatileFrame);
+		const EntitySpawnPayload& payload,
+		uint32_t temporalFrame, uint32_t volatileFrame);
 	static void HandleEntitySpawn(Registry* reg, const EntitySpawnPayload& payload, uint32_t frame);
 	static void HandleStateCorrections(Registry* reg, const StateCorrectionEntry* entries,
-									   uint32_t count, uint32_t clientFrame,
-									   WorldBase* world, uint32_t lastAckedFrame);
+		uint32_t count, uint32_t clientFrame,
+		WorldBase* world, uint32_t lastAckedFrame);
 	static void HandleEntityDelta(Registry* reg, const uint8_t* payload, uint32_t size);
 	static void HandleEntityActivate(Registry* reg, const uint32_t* netHandles, uint32_t count, uint32_t frame);
 	static bool HandleConstructSpawn(ConstructRegistry* reg, Registry* entityReg,
-									 WorldBase* clientWorld, const uint8_t* data, size_t len);
+		WorldBase* clientWorld, const uint8_t* data, size_t len);
 	/// Hot-path payload — runs on a worker thread. Owns the actual packet build + send.
 	void ExecuteInputSend();
 

@@ -6,7 +6,10 @@
 class DebuggerPanel : public EditorPanel
 {
 public:
-	DebuggerPanel() : EditorPanel("Debugger") {}
+	DebuggerPanel()
+		: EditorPanel("Debugger")
+	{
+	}
 
 	void Draw(EditorState& state) override;
 
@@ -19,6 +22,6 @@ private:
 	std::array<float, HistorySize> LogicMsHistory{};
 	std::array<float, HistorySize> FixedMsHistory{};
 
-	int      HistoryOffset   = 0;
+	int HistoryOffset        = 0;
 	uint32_t LastFrameNumber = 0; // Last FrameNumber we sampled from ReplicationSystem::Stats
 };

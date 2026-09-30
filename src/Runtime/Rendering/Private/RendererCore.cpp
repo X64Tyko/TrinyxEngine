@@ -68,11 +68,11 @@ static std::vector<uint32_t> ReadSPIRV(const char* path)
 
 template <typename Derived>
 void RendererCore<Derived>::Initialize(Registry* registry,
-									   LogicThreadBase* logic,
-									   const EngineConfig* config,
-									   VulkanContext* vkCtx,
-									   VulkanMemory* vkMem,
-									   SDL_Window* window, InputBuffer* vizInput)
+	LogicThreadBase* logic,
+	const EngineConfig* config,
+	VulkanContext* vkCtx,
+	VulkanMemory* vkMem,
+	SDL_Window* window, InputBuffer* vizInput)
 {
 	RegistryPtr = registry;
 	LogicPtr    = logic;
@@ -84,51 +84,52 @@ void RendererCore<Derived>::Initialize(Registry* registry,
 
 	DirtyWordCount = (static_cast<uint32_t>(config->MAX_RENDERABLE_ENTITIES) + 63) / 64;
 	DirtySnapshot  = new uint64_t[DirtyWordCount]();
-	for (auto& plane : DirtyPlanes) plane = new uint64_t[DirtyWordCount]();
+	for (auto& plane : DirtyPlanes)
+		plane = new uint64_t[DirtyWordCount]();
 
 	// Build slab field descriptor table — static per-component slot IDs resolved once.
 	// cache/hdr pointers are NOT stored here; they're resolved at runtime from tier.
-	SlabFieldDescs = {{
-		{GpuSlabTier::Temporal, GpuSlabKind::RawU32,   static_cast<uint32_t>(CacheSlotMeta<>::StaticTemporalIndex()),    0, SemFlags},
-		{GpuSlabTier::Volatile, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CVisualTransform<>::StaticTemporalIndex()), 0, SemPosX},
-		{GpuSlabTier::Volatile, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CVisualTransform<>::StaticTemporalIndex()), 1, SemPosY},
-		{GpuSlabTier::Volatile, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CVisualTransform<>::StaticTemporalIndex()), 2, SemPosZ},
-		{GpuSlabTier::Temporal, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CTransform<>::StaticTemporalIndex()),       3, SemRotQx},
-		{GpuSlabTier::Temporal, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CTransform<>::StaticTemporalIndex()),       4, SemRotQy},
-		{GpuSlabTier::Temporal, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CTransform<>::StaticTemporalIndex()),       5, SemRotQz},
-		{GpuSlabTier::Temporal, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CTransform<>::StaticTemporalIndex()),       6, SemRotQw},
-		{GpuSlabTier::Volatile, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CScale<>::StaticTemporalIndex()),           0, SemScaleX},
-		{GpuSlabTier::Volatile, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CScale<>::StaticTemporalIndex()),           1, SemScaleY},
-		{GpuSlabTier::Volatile, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CScale<>::StaticTemporalIndex()),           2, SemScaleZ},
-		{GpuSlabTier::Volatile, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CColor<>::StaticTemporalIndex()),           0, SemColorR},
-		{GpuSlabTier::Volatile, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CColor<>::StaticTemporalIndex()),           1, SemColorG},
-		{GpuSlabTier::Volatile, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CColor<>::StaticTemporalIndex()),           2, SemColorB},
-		{GpuSlabTier::Volatile, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CColor<>::StaticTemporalIndex()),           3, SemColorA},
-		{GpuSlabTier::Volatile, GpuSlabKind::RawU32,    static_cast<uint32_t>(CMeshRef<>::StaticTemporalIndex()),         0, SemMeshID},
+	SlabFieldDescs = { {
+		{ GpuSlabTier::Temporal, GpuSlabKind::RawU32, static_cast<uint32_t>(CacheSlotMeta<>::StaticTemporalIndex()), 0, SemFlags },
+		{ GpuSlabTier::Volatile, GpuSlabKind::SimFloat, static_cast<uint32_t>(CVisualTransform<>::StaticTemporalIndex()), 0, SemPosX },
+		{ GpuSlabTier::Volatile, GpuSlabKind::SimFloat, static_cast<uint32_t>(CVisualTransform<>::StaticTemporalIndex()), 1, SemPosY },
+		{ GpuSlabTier::Volatile, GpuSlabKind::SimFloat, static_cast<uint32_t>(CVisualTransform<>::StaticTemporalIndex()), 2, SemPosZ },
+		{ GpuSlabTier::Temporal, GpuSlabKind::SimFloat, static_cast<uint32_t>(CTransform<>::StaticTemporalIndex()), 3, SemRotQx },
+		{ GpuSlabTier::Temporal, GpuSlabKind::SimFloat, static_cast<uint32_t>(CTransform<>::StaticTemporalIndex()), 4, SemRotQy },
+		{ GpuSlabTier::Temporal, GpuSlabKind::SimFloat, static_cast<uint32_t>(CTransform<>::StaticTemporalIndex()), 5, SemRotQz },
+		{ GpuSlabTier::Temporal, GpuSlabKind::SimFloat, static_cast<uint32_t>(CTransform<>::StaticTemporalIndex()), 6, SemRotQw },
+		{ GpuSlabTier::Volatile, GpuSlabKind::SimFloat, static_cast<uint32_t>(CScale<>::StaticTemporalIndex()), 0, SemScaleX },
+		{ GpuSlabTier::Volatile, GpuSlabKind::SimFloat, static_cast<uint32_t>(CScale<>::StaticTemporalIndex()), 1, SemScaleY },
+		{ GpuSlabTier::Volatile, GpuSlabKind::SimFloat, static_cast<uint32_t>(CScale<>::StaticTemporalIndex()), 2, SemScaleZ },
+		{ GpuSlabTier::Volatile, GpuSlabKind::SimFloat, static_cast<uint32_t>(CColor<>::StaticTemporalIndex()), 0, SemColorR },
+		{ GpuSlabTier::Volatile, GpuSlabKind::SimFloat, static_cast<uint32_t>(CColor<>::StaticTemporalIndex()), 1, SemColorG },
+		{ GpuSlabTier::Volatile, GpuSlabKind::SimFloat, static_cast<uint32_t>(CColor<>::StaticTemporalIndex()), 2, SemColorB },
+		{ GpuSlabTier::Volatile, GpuSlabKind::SimFloat, static_cast<uint32_t>(CColor<>::StaticTemporalIndex()), 3, SemColorA },
+		{ GpuSlabTier::Volatile, GpuSlabKind::RawU32, static_cast<uint32_t>(CMeshRef<>::StaticTemporalIndex()), 0, SemMeshID },
 		// Animation slab fields (f=16..33). Scatter skips these — SemGeneric routes to
 		// the early-out in scatter.slang. Shaders access via SlabIdx_XXX constants.
-		{GpuSlabTier::Volatile, GpuSlabKind::RawU32,    static_cast<uint32_t>(CSkeletonRef<>::StaticTemporalIndex()),     0, SemGeneric}, // f=16 SlabIdx_SkeletonID
-		{GpuSlabTier::Temporal, GpuSlabKind::RawU32,    static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()),        0, SemGeneric}, // f=17 SlabIdx_BaseAnimID
-		{GpuSlabTier::Temporal, GpuSlabKind::RawU32,    static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()),        1, SemGeneric}, // f=18 SlabIdx_BlendspaceID
-		{GpuSlabTier::Temporal, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()),        2, SemGeneric}, // f=19 SlabIdx_BaseTimestamp
-		{GpuSlabTier::Temporal, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()),        3, SemGeneric}, // f=20 SlabIdx_BlendCoordX
-		{GpuSlabTier::Temporal, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()),        4, SemGeneric}, // f=21 SlabIdx_BlendCoordY
-		{GpuSlabTier::Temporal, GpuSlabKind::RawU32,    static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()),        5, SemGeneric}, // f=22 SlabIdx_FadeAnimID
-		{GpuSlabTier::Temporal, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()),        6, SemGeneric}, // f=23 SlabIdx_FadeTimestamp
-		{GpuSlabTier::Temporal, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()),        7, SemGeneric}, // f=24 SlabIdx_FadeAlpha
-		{GpuSlabTier::Temporal, GpuSlabKind::RawU32,    static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()),        9, SemGeneric}, // f=25 SlabIdx_AnimFlags (fi=9, skips StateNodeID at fi=8)
-		{GpuSlabTier::Temporal, GpuSlabKind::RawU32,    static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()),       0, SemGeneric}, // f=26 SlabIdx_Layer0AnimID
-		{GpuSlabTier::Temporal, GpuSlabKind::RawU32,    static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()),       1, SemGeneric}, // f=27 SlabIdx_Layer1AnimID
-		{GpuSlabTier::Temporal, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()),       2, SemGeneric}, // f=28 SlabIdx_Layer0Timestamp
-		{GpuSlabTier::Temporal, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()),       3, SemGeneric}, // f=29 SlabIdx_Layer1Timestamp
-		{GpuSlabTier::Temporal, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()),       4, SemGeneric}, // f=30 SlabIdx_Layer0Alpha
-		{GpuSlabTier::Temporal, GpuSlabKind::SimFloat,  static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()),       5, SemGeneric}, // f=31 SlabIdx_Layer1Alpha
-		{GpuSlabTier::Temporal, GpuSlabKind::RawU32,    static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()),       6, SemGeneric}, // f=32 SlabIdx_Layer0Config
-		{GpuSlabTier::Temporal, GpuSlabKind::RawU32,    static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()),       7, SemGeneric}, // f=33 SlabIdx_Layer1Config
+		{ GpuSlabTier::Volatile, GpuSlabKind::RawU32, static_cast<uint32_t>(CSkeletonRef<>::StaticTemporalIndex()), 0, SemGeneric }, // f=16 SlabIdx_SkeletonID
+		{ GpuSlabTier::Temporal, GpuSlabKind::RawU32, static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()), 0, SemGeneric },    // f=17 SlabIdx_BaseAnimID
+		{ GpuSlabTier::Temporal, GpuSlabKind::RawU32, static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()), 1, SemGeneric },    // f=18 SlabIdx_BlendspaceID
+		{ GpuSlabTier::Temporal, GpuSlabKind::SimFloat, static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()), 2, SemGeneric },  // f=19 SlabIdx_BaseTimestamp
+		{ GpuSlabTier::Temporal, GpuSlabKind::SimFloat, static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()), 3, SemGeneric },  // f=20 SlabIdx_BlendCoordX
+		{ GpuSlabTier::Temporal, GpuSlabKind::SimFloat, static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()), 4, SemGeneric },  // f=21 SlabIdx_BlendCoordY
+		{ GpuSlabTier::Temporal, GpuSlabKind::RawU32, static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()), 5, SemGeneric },    // f=22 SlabIdx_FadeAnimID
+		{ GpuSlabTier::Temporal, GpuSlabKind::SimFloat, static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()), 6, SemGeneric },  // f=23 SlabIdx_FadeTimestamp
+		{ GpuSlabTier::Temporal, GpuSlabKind::SimFloat, static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()), 7, SemGeneric },  // f=24 SlabIdx_FadeAlpha
+		{ GpuSlabTier::Temporal, GpuSlabKind::RawU32, static_cast<uint32_t>(CAnimBase<>::StaticTemporalIndex()), 9, SemGeneric },    // f=25 SlabIdx_AnimFlags (fi=9, skips StateNodeID at fi=8)
+		{ GpuSlabTier::Temporal, GpuSlabKind::RawU32, static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()), 0, SemGeneric },   // f=26 SlabIdx_Layer0AnimID
+		{ GpuSlabTier::Temporal, GpuSlabKind::RawU32, static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()), 1, SemGeneric },   // f=27 SlabIdx_Layer1AnimID
+		{ GpuSlabTier::Temporal, GpuSlabKind::SimFloat, static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()), 2, SemGeneric }, // f=28 SlabIdx_Layer0Timestamp
+		{ GpuSlabTier::Temporal, GpuSlabKind::SimFloat, static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()), 3, SemGeneric }, // f=29 SlabIdx_Layer1Timestamp
+		{ GpuSlabTier::Temporal, GpuSlabKind::SimFloat, static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()), 4, SemGeneric }, // f=30 SlabIdx_Layer0Alpha
+		{ GpuSlabTier::Temporal, GpuSlabKind::SimFloat, static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()), 5, SemGeneric }, // f=31 SlabIdx_Layer1Alpha
+		{ GpuSlabTier::Temporal, GpuSlabKind::RawU32, static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()), 6, SemGeneric },   // f=32 SlabIdx_Layer0Config
+		{ GpuSlabTier::Temporal, GpuSlabKind::RawU32, static_cast<uint32_t>(CAnimLayer<>::StaticTemporalIndex()), 7, SemGeneric },   // f=33 SlabIdx_Layer1Config
 		// Always-on entity cache index — no slab backing; scatter writes entity loop index directly.
 		// Needed for skinning (LBS reverse LUT) and GPU picking (fragment shader entity ID).
-		{GpuSlabTier::Volatile, GpuSlabKind::EntityIndex, 0, 0, SemEntityCacheIdx},
-	}};
+		{ GpuSlabTier::Volatile, GpuSlabKind::EntityIndex, 0, 0, SemEntityCacheIdx },
+	} };
 
 	LOG_ENG_INFO("[Renderer] Initialized");
 }
@@ -203,7 +204,7 @@ void RendererCore<Derived>::Start()
 	{
 		DisplayRefreshMs = 1000.0 / static_cast<double>(mode->refresh_rate);
 		LOG_ENG_INFO_F("[Renderer] Display refresh: %.1f Hz (%.2f ms scanout offset)",
-					   mode->refresh_rate, DisplayRefreshMs);
+			mode->refresh_rate, DisplayRefreshMs);
 	}
 	else
 	{
@@ -287,8 +288,10 @@ void RendererCore<Derived>::ThreadMain()
 		Self().UpdateViewportSlabs();
 
 		int8_t renderRes = RenderFrame();
-		if (renderRes < 0) break;
-		else if (renderRes == 0) continue;
+		if (renderRes < 0)
+			break;
+		else if (renderRes == 0)
+			continue;
 
 		TrackFPS();
 	}
@@ -451,13 +454,13 @@ int RendererCore<Derived>::RenderFrame()
 	{
 		uint64_t presentTime = SDL_GetPerformanceCounter();
 		double pipelineMs    = static_cast<double>(presentTime - FrameInputTimestamp[CurrentFrame])
-			/ static_cast<double>(SDL_GetPerformanceFrequency()) * 1000.0;
-		double totalMs = pipelineMs + DisplayRefreshMs;
+							   / static_cast<double>(SDL_GetPerformanceFrequency()) * 1000.0;
+		double totalMs       = pipelineMs + DisplayRefreshMs;
 		LatencyAccumMs += totalMs;
 		++LatencySamples;
 #if TNX_DEV_METRICS_DETAILED
 		LOG_ENG_DEBUG_F("[Latency] Pipeline: %.2fms | Scanout: %.2fms | Total: %.2fms",
-						pipelineMs, DisplayRefreshMs, totalMs);
+			pipelineMs, DisplayRefreshMs, totalMs);
 #endif
 	}
 #endif
@@ -501,14 +504,14 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 	static uint32_t pickDebugFrameCounter = 0;
 	if (++pickDebugFrameCounter >= 60)
 	{
-		//LOG_ENG_INFO_F("[Picking] Mouse: (%.1f, %.1f) logical, (%d, %d) physical, DPI scale: %.2f, extent: %ux%u",
+		// LOG_ENG_INFO_F("[Picking] Mouse: (%.1f, %.1f) logical, (%d, %d) physical, DPI scale: %.2f, extent: %ux%u",
 		//		   mx, my, pickX, pickY, dpiScale, ext.width, ext.height);
 		pickDebugFrameCounter = 0;
 	}
 #elif defined(TNX_GPU_PICKING)
 	// On-demand: only pick when requested.
 	const bool bDoPick = bPickRequested.load(std::memory_order_acquire);
-	int32_t pickX      = 0, pickY = 0;
+	int32_t pickX = 0, pickY = 0;
 	if (bDoPick) [[unlikely]]
 	{
 		pickX = PickX.load(std::memory_order_relaxed);
@@ -551,18 +554,17 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 		barriers[0].oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
 		barriers[0].newLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		barriers[0].image            = swapImg;
-		barriers[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+		barriers[0].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-		barriers[1].sType         = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-		barriers[1].srcStageMask  = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
-		barriers[1].srcAccessMask = 0;
-		barriers[1].dstStageMask  = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
-		barriers[1].dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
-			VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+		barriers[1].sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+		barriers[1].srcStageMask     = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+		barriers[1].srcAccessMask    = 0;
+		barriers[1].dstStageMask     = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
+		barriers[1].dstAccessMask    = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
 		barriers[1].oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
 		barriers[1].newLayout        = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 		barriers[1].image            = static_cast<VkImage>(frame.DepthAttachment.Image);
-		barriers[1].subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1};
+		barriers[1].subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 };
 
 #if defined(TNX_GPU_PICKING_FAST)
 		// FAST: pick barrier is unconditional
@@ -574,7 +576,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 		barriers[2].oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
 		barriers[2].newLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		barriers[2].image            = static_cast<VkImage>(frame.PickAttachment.Image);
-		barriers[2].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+		barriers[2].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 #elif defined(TNX_GPU_PICKING)
 		if (bDoPick) [[unlikely]]
 		{
@@ -586,7 +588,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 			barriers[2].oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
 			barriers[2].newLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 			barriers[2].image            = static_cast<VkImage>(frame.PickAttachment.Image);
-			barriers[2].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+			barriers[2].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 			barrierCount                 = 3;
 		}
 #endif
@@ -626,7 +628,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 		// SkeletalIdxByEntity cleared to UINT32_MAX so non-skeletal entities keep the sentinel.
 		vkCmdFillBuffer(cmd, static_cast<VkBuffer>(frame.CompactCounterBuffer.Buffer), 0, sizeof(uint32_t), 0u);
 		vkCmdFillBuffer(cmd, static_cast<VkBuffer>(frame.MeshHistogramBuffer.Buffer), 0,
-						MaxMeshSlots * sizeof(uint32_t), 0u);
+			MaxMeshSlots * sizeof(uint32_t), 0u);
 		vkCmdFillBuffer(cmd, Skinning.GetSkeletalDispatchBuffer(), 0, sizeof(uint32_t), 0u);
 		vkCmdFillBuffer(cmd, Skinning.GetSkeletalIdxByEntityBuffer(), 0, VK_WHOLE_SIZE, 0xFFFFFFFFu);
 		{
@@ -644,7 +646,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 		}
 
 		vkCmdPushConstants(cmd, *PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
-						   0, sizeof(uint64_t), &gpuDataAddr);
+			0, sizeof(uint64_t), &gpuDataAddr);
 
 		// Pass 1: predicate — Active flag → ScanBuffer (0 or 1 per entity)
 		{
@@ -673,7 +675,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ScatterPickPipeline);
 #elif defined(TNX_GPU_PICKING)
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-							  bDoPick ? ScatterPickPipeline : ScatterPipeline);
+				bDoPick ? ScatterPickPipeline : ScatterPipeline);
 #else
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ScatterPipeline);
 #endif
@@ -696,7 +698,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, SortPickPipeline);
 #elif defined(TNX_GPU_PICKING)
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-							  bDoPick ? SortPickPipeline : SortInstancesPipeline);
+				bDoPick ? SortPickPipeline : SortInstancesPipeline);
 #else
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, SortInstancesPipeline);
 #endif
@@ -709,10 +711,8 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 			mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
 			mb.srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
 			mb.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-			mb.dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
-				VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
-			mb.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
-				VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+			mb.dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+			mb.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
 			VkDependencyInfo d{};
 			d.sType              = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
 			d.memoryBarrierCount = 1;
@@ -732,10 +732,8 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 			mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
 			mb.srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
 			mb.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-			mb.dstStageMask  = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-				VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
-			mb.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
-				VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+			mb.dstStageMask  = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+			mb.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
 			VkDependencyInfo d{};
 			d.sType              = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
 			d.memoryBarrierCount = 1;
@@ -755,7 +753,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 		colorClear.color.float32[3] = 1.0f;
 
 		VkClearValue depthClear{};
-		depthClear.depthStencil = {1.0f, 0};
+		depthClear.depthStencil = { 1.0f, 0 };
 
 		VkRenderingAttachmentInfo colorAttach{};
 		colorAttach.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -786,11 +784,11 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 		pickAttach.storeOp     = VK_ATTACHMENT_STORE_OP_STORE;
 		pickAttach.clearValue  = pickClear;
 
-		VkRenderingAttachmentInfo colorAttachments[2] = {colorAttach, pickAttach};
+		VkRenderingAttachmentInfo colorAttachments[2] = { colorAttach, pickAttach };
 
 		VkRenderingInfo renderingInfo{};
 		renderingInfo.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
-		renderingInfo.renderArea           = {{0, 0}, {ext.width, ext.height}};
+		renderingInfo.renderArea           = { { 0, 0 }, { ext.width, ext.height } };
 		renderingInfo.layerCount           = 1;
 		renderingInfo.colorAttachmentCount = 2;
 		renderingInfo.pColorAttachments    = colorAttachments;
@@ -819,7 +817,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 
 		VkRenderingInfo renderingInfo{};
 		renderingInfo.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
-		renderingInfo.renderArea           = {{0, 0}, {ext.width, ext.height}};
+		renderingInfo.renderArea           = { { 0, 0 }, { ext.width, ext.height } };
 		renderingInfo.layerCount           = 1;
 		renderingInfo.colorAttachmentCount = colorAttachCount;
 		renderingInfo.pColorAttachments    = colorAttachments;
@@ -827,7 +825,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 #else
 		VkRenderingInfo renderingInfo{};
 		renderingInfo.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
-		renderingInfo.renderArea           = {{0, 0}, {ext.width, ext.height}};
+		renderingInfo.renderArea           = { { 0, 0 }, { ext.width, ext.height } };
 		renderingInfo.layerCount           = 1;
 		renderingInfo.colorAttachmentCount = 1;
 		renderingInfo.pColorAttachments    = &colorAttach;
@@ -850,7 +848,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 		vkCmdSetViewport(cmd, 0, 1, &viewport);
 
 		VkRect2D scissor{};
-		scissor.extent = {ext.width, ext.height};
+		scissor.extent = { ext.width, ext.height };
 		vkCmdSetScissor(cmd, 0, 1, &scissor);
 
 #if defined(TNX_GPU_PICKING_FAST)
@@ -858,7 +856,8 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 #elif defined(TNX_GPU_PICKING)
 		if (bDoPick) [[unlikely]]
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, *PickPipeline);
-		else vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, *Pipeline);
+		else
+			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, *Pipeline);
 #else
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, *Pipeline);
 #endif
@@ -868,7 +867,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 
 		VkBuffer drawBuf = static_cast<VkBuffer>(frame.DrawArgsBuffer.Buffer);
 		vkCmdDrawIndexedIndirect(cmd, drawBuf, 0, MeshManager::Get().GetMeshCount(),
-								 sizeof(VkDrawIndexedIndirectCommand));
+			sizeof(VkDrawIndexedIndirectCommand));
 	}
 
 	// End the scene render pass (which may have 2 color attachments for picking).
@@ -888,7 +887,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 
 		VkRenderingInfo overlayRI{};
 		overlayRI.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
-		overlayRI.renderArea           = {{0, 0}, {ext.width, ext.height}};
+		overlayRI.renderArea           = { { 0, 0 }, { ext.width, ext.height } };
 		overlayRI.layerCount           = 1;
 		overlayRI.colorAttachmentCount = 1;
 		overlayRI.pColorAttachments    = &overlayAttach;
@@ -913,7 +912,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 		pickToTransfer.oldLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		pickToTransfer.newLayout        = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 		pickToTransfer.image            = static_cast<VkImage>(frame.PickAttachment.Image);
-		pickToTransfer.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+		pickToTransfer.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
 		VkDependencyInfo pickDep{};
 		pickDep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -924,9 +923,9 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 		VkBufferImageCopy2 copyRegion{};
 		copyRegion.sType            = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2;
 		copyRegion.bufferOffset     = 0;
-		copyRegion.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-		copyRegion.imageOffset      = {px, py, 0};
-		copyRegion.imageExtent      = {1, 1, 1};
+		copyRegion.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+		copyRegion.imageOffset      = { px, py, 0 };
+		copyRegion.imageExtent      = { 1, 1, 1 };
 
 		VkCopyImageToBufferInfo2 copyInfo{};
 		copyInfo.sType          = VK_STRUCTURE_TYPE_COPY_IMAGE_TO_BUFFER_INFO_2;
@@ -954,7 +953,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 		pickToTransfer.oldLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		pickToTransfer.newLayout        = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 		pickToTransfer.image            = static_cast<VkImage>(frame.PickAttachment.Image);
-		pickToTransfer.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+		pickToTransfer.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
 		VkDependencyInfo pickDep{};
 		pickDep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -965,9 +964,9 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 		VkBufferImageCopy2 copyRegion{};
 		copyRegion.sType            = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2;
 		copyRegion.bufferOffset     = 0;
-		copyRegion.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-		copyRegion.imageOffset      = {px, py, 0};
-		copyRegion.imageExtent      = {1, 1, 1};
+		copyRegion.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+		copyRegion.imageOffset      = { px, py, 0 };
+		copyRegion.imageExtent      = { 1, 1, 1 };
 
 		VkCopyImageToBufferInfo2 copyInfo{};
 		copyInfo.sType          = VK_STRUCTURE_TYPE_COPY_IMAGE_TO_BUFFER_INFO_2;
@@ -995,7 +994,7 @@ void RendererCore<Derived>::RecordCommandBuffer(FrameSync& frame, uint32_t image
 		barrierToPresent.oldLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		barrierToPresent.newLayout        = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 		barrierToPresent.image            = swapImg;
-		barrierToPresent.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+		barrierToPresent.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
 		VkDependencyInfo dep{};
 		dep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -1032,7 +1031,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 	}
 
 	const vk::SemaphoreCreateInfo semCI{};
-	const vk::FenceCreateInfo fenceCI{vk::FenceCreateFlagBits::eSignaled};
+	const vk::FenceCreateInfo fenceCI{ vk::FenceCreateFlagBits::eSignaled };
 
 	constexpr VkDeviceSize GpuDataSize = sizeof(GpuFrameData);
 
@@ -1046,7 +1045,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 			GpuDataSize,
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 			GpuMemoryDomain::PersistentMapped,
-			/*requestDeviceAddress=*/ true);
+			/*requestDeviceAddress=*/true);
 
 		if (!Frames[i].GpuData.IsValid())
 		{
@@ -1057,7 +1056,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 		const VkDeviceSize ScanSize =
 			static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(uint32_t);
 		Frames[i].ScanBuffer = VkMem->AllocateBuffer(ScanSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-													 GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+			GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/true);
 		if (!Frames[i].ScanBuffer.IsValid())
 		{
 			LOG_ENG_ERROR_F("[Renderer] ScanBuffer alloc failed (slot %d)", i);
@@ -1065,8 +1064,8 @@ bool RendererCore<Derived>::CreateFrameSync()
 		}
 
 		Frames[i].CompactCounterBuffer = VkMem->AllocateBuffer(sizeof(uint32_t),
-															   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-															   GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/true);
 		if (!Frames[i].CompactCounterBuffer.IsValid())
 		{
 			LOG_ENG_ERROR_F("[Renderer] CompactCounterBuffer alloc failed (slot %d)", i);
@@ -1076,8 +1075,8 @@ bool RendererCore<Derived>::CreateFrameSync()
 		// DrawArgs: one VkDrawIndexedIndirectCommand per mesh slot (256 max × 20 bytes = 5120 bytes)
 		constexpr VkDeviceSize DrawArgsSize = MaxMeshSlots * sizeof(VkDrawIndexedIndirectCommand);
 		Frames[i].DrawArgsBuffer            = VkMem->AllocateBuffer(DrawArgsSize,
-																	VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
-																	GpuMemoryDomain::PersistentMapped, /*requestDeviceAddress=*/ true);
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+			GpuMemoryDomain::PersistentMapped, /*requestDeviceAddress=*/true);
 		if (!Frames[i].DrawArgsBuffer.IsValid())
 		{
 			LOG_ENG_ERROR_F("[Renderer] DrawArgsBuffer alloc failed (slot %d)", i);
@@ -1090,7 +1089,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 		const VkDeviceSize InstancesSize =
 			InstanceFieldCount * static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
 		Frames[i].InstancesBuffer = VkMem->AllocateBuffer(InstancesSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-														  GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+			GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/true);
 		if (!Frames[i].InstancesBuffer.IsValid())
 		{
 			LOG_ENG_ERROR_F("[Renderer] InstancesBuffer alloc failed (slot %d)", i);
@@ -1099,7 +1098,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 
 		// Unsorted instances buffer (scatter output, pre-sort) — same size as sorted
 		Frames[i].UnsortedInstancesBuffer = VkMem->AllocateBuffer(InstancesSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-																  GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+			GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/true);
 		if (!Frames[i].UnsortedInstancesBuffer.IsValid())
 		{
 			LOG_ENG_ERROR_F("[Renderer] UnsortedInstancesBuffer alloc failed (slot %d)", i);
@@ -1109,8 +1108,8 @@ bool RendererCore<Derived>::CreateFrameSync()
 		// Mesh histogram + write index buffers (256 uint32 each = 1 KB)
 		constexpr VkDeviceSize HistSize = MaxMeshSlots * sizeof(uint32_t);
 		Frames[i].MeshHistogramBuffer   = VkMem->AllocateBuffer(HistSize,
-																VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-																GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/true);
 		if (!Frames[i].MeshHistogramBuffer.IsValid())
 		{
 			LOG_ENG_ERROR_F("[Renderer] MeshHistogramBuffer alloc failed (slot %d)", i);
@@ -1118,8 +1117,8 @@ bool RendererCore<Derived>::CreateFrameSync()
 		}
 
 		Frames[i].MeshWriteIdxBuffer = VkMem->AllocateBuffer(HistSize,
-															 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-															 GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/ true);
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+			GpuMemoryDomain::DeviceLocal, /*requestDeviceAddress=*/true);
 		if (!Frames[i].MeshWriteIdxBuffer.IsValid())
 		{
 			LOG_ENG_ERROR_F("[Renderer] MeshWriteIdxBuffer alloc failed (slot %d)", i);
@@ -1135,7 +1134,7 @@ bool RendererCore<Derived>::CreateFrameSync()
 			FieldSlabSize,
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 			GpuMemoryDomain::PersistentMapped,
-			/*requestDeviceAddress=*/ true);
+			/*requestDeviceAddress=*/true);
 
 		if (!FieldSlabs[i].IsValid())
 		{
@@ -1326,7 +1325,7 @@ bool RendererCore<Derived>::CreateMeshBuffers()
 	}
 
 	LOG_ENG_INFO_F("[Renderer] MeshManager ready — cube at slot %u, capsule at slot %u (slot 0 reserved as invalid)",
-				   cubeSlot, capsuleSlot);
+		cubeSlot, capsuleSlot);
 
 	if (!SkeletonManager::Get().Initialize(VkMem))
 	{
@@ -1387,7 +1386,7 @@ void RendererCore<Derived>::FillGpuFrameData(FrameSync& frame)
 	FrameData->OldRotation[3] = oldRot.w;
 
 	const vk::Extent2D ext = VkCtx->GetSwapchain().Extent;
-	FrameData->AspectRatio  = ext.height > 0 ? static_cast<float>(ext.width) / static_cast<float>(ext.height) : 1.0f;
+	FrameData->AspectRatio = ext.height > 0 ? static_cast<float>(ext.width) / static_cast<float>(ext.height) : 1.0f;
 
 	FrameData->VerticesAddr          = MeshManager::Get().GetVertexBufferAddr();
 	FrameData->InstancesAddr         = frame.InstancesBuffer.DeviceAddr;
@@ -1407,9 +1406,9 @@ void RendererCore<Derived>::FillGpuFrameData(FrameSync& frame)
 	FrameData->SkeletalListAddr         = Skinning.GetSkeletalListAddr();
 	FrameData->SkeletalIdxByEntityAddr  = Skinning.GetSkeletalIdxByEntityAddr();
 	FrameData->GpuBoneDataAddr          = SkeletonManager::Get().GetBoneDataAddr();
-	FrameData->GpuBoneParentAddr       = SkeletonManager::Get().GetBoneParentAddr();
-	FrameData->AnimTrackAddr           = AnimationManager::Get().GetTrackBufferAddr();
-	FrameData->AnimKeyframeAddr        = AnimationManager::Get().GetKeyframeBufferAddr();
+	FrameData->GpuBoneParentAddr        = SkeletonManager::Get().GetBoneParentAddr();
+	FrameData->AnimTrackAddr            = AnimationManager::Get().GetTrackBufferAddr();
+	FrameData->AnimKeyframeAddr         = AnimationManager::Get().GetKeyframeBufferAddr();
 	FrameData->SkinWeightAddr           = MeshManager::Get().GetSkinWeightAddr();
 	FrameData->SkinSlotTableAddr        = MeshManager::Get().GetSkinSlotTableAddr();
 	FrameData->SkeletalDispatchArgsAddr = Skinning.GetSkeletalDispatchArgsAddr();
@@ -1417,7 +1416,7 @@ void RendererCore<Derived>::FillGpuFrameData(FrameSync& frame)
 	FrameData->GpuAnimSlotAddr          = AnimationManager::Get().GetAnimSlotAddr();
 	// FieldCount includes GpuTotalFieldCount slab fields + 1 always-on EntityCacheIdx.
 	constexpr uint32_t kFieldCount = GpuTotalFieldCount + 1;
-	FrameData->FieldCount           = kFieldCount;
+	FrameData->FieldCount          = kFieldCount;
 
 	const VkDeviceSize fieldStride = static_cast<VkDeviceSize>(ConfigPtr->MAX_CACHED_ENTITIES) * sizeof(float);
 	const uint64_t slabBase        = FieldSlabs[CurrentFieldSlab].DeviceAddr;
@@ -1425,7 +1424,7 @@ void RendererCore<Derived>::FillGpuFrameData(FrameSync& frame)
 
 	for (uint32_t f = 0; f < kFieldCount; ++f)
 	{
-		const GpuSlabFieldDesc& desc  = SlabFieldDescs[f];
+		const GpuSlabFieldDesc& desc   = SlabFieldDescs[f];
 		FrameData->FieldSemantics[f]   = desc.sem;
 		FrameData->FieldElementSize[f] = sizeof(float);
 		if (desc.kind == GpuSlabKind::EntityIndex)
@@ -1453,8 +1452,10 @@ void UploadSimFloatBuffer(const void* cpuData, void* gpuBuffer, size_t count)
 {
 	if constexpr (std::is_same_v<SimFloat, SimFloatImpl<float>>)
 	{
-		if (cpuData) memcpy(gpuBuffer, cpuData, count);
-		else memset(gpuBuffer, 0, count);
+		if (cpuData)
+			memcpy(gpuBuffer, cpuData, count);
+		else
+			memset(gpuBuffer, 0, count);
 	}
 	else // Fixed32
 	{
@@ -1463,7 +1464,8 @@ void UploadSimFloatBuffer(const void* cpuData, void* gpuBuffer, size_t count)
 			const Fixed32* src       = static_cast<const Fixed32*>(cpuData);
 			float* dst               = static_cast<float*>(gpuBuffer);
 			const size_t numElements = count / sizeof(Fixed32);
-			for (size_t i = 0; i < numElements; ++i) dst[i] = src[i].ToFloat();
+			for (size_t i = 0; i < numElements; ++i)
+				dst[i] = src[i].ToFloat();
 		}
 		else
 		{
@@ -1539,8 +1541,8 @@ void RendererCore<Derived>::WriteToFrameSlab()
 		-> std::pair<ComponentCacheBase*, TemporalFrameHeader*>
 	{
 		if (desc.tier == GpuSlabTier::Temporal)
-			return {temporalCache, temporalHdr};
-		return {volatileCache, volatileHdr};
+			return { temporalCache, temporalHdr };
+		return { volatileCache, volatileHdr };
 	};
 
 	// ── Step 1: Scan slab Flags for dirty bit (bit 30) → build current dirty set ──
@@ -1598,17 +1600,20 @@ void RendererCore<Derived>::WriteToFrameSlab()
 		{
 			const GpuSlabFieldDesc& desc = SlabFieldDescs[f];
 			if (desc.kind == GpuSlabKind::EntityIndex) continue;
-			auto [cache, hdr]            = resolveField(desc);
-			const void* src              = cache->GetFieldData(hdr, static_cast<uint8_t>(desc.slot), desc.fi);
-			uint8_t* dst                 = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
-			const bool isSF              = (desc.kind == GpuSlabKind::SimFloat);
+			auto [cache, hdr] = resolveField(desc);
+			const void* src   = cache->GetFieldData(hdr, static_cast<uint8_t>(desc.slot), desc.fi);
+			uint8_t* dst      = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
+			const bool isSF   = (desc.kind == GpuSlabKind::SimFloat);
 			TrinyxJobs::DispatchNamed("Slab_FullCopy", [src, dst, fieldStride, isSF](uint32_t)
 			{
-				if (isSF) UploadSimFloatBuffer(src, dst, fieldStride);
+				if (isSF)
+					UploadSimFloatBuffer(src, dst, fieldStride);
 				else
 				{
-					if (src) std::memcpy(dst, src, static_cast<size_t>(fieldStride));
-					else std::memset(dst, 0, static_cast<size_t>(fieldStride));
+					if (src)
+						std::memcpy(dst, src, static_cast<size_t>(fieldStride));
+					else
+						std::memset(dst, 0, static_cast<size_t>(fieldStride));
 				}
 			}, &counter, TrinyxJobs::Queue::Render);
 		}
@@ -1628,8 +1633,8 @@ void RendererCore<Derived>::WriteToFrameSlab()
 		{
 			const GpuSlabFieldDesc& desc = SlabFieldDescs[f];
 			if (desc.kind == GpuSlabKind::EntityIndex) continue;
-			auto [cache, hdr]            = resolveField(desc);
-			const auto* src              = static_cast<const uint8_t*>(
+			auto [cache, hdr] = resolveField(desc);
+			const auto* src   = static_cast<const uint8_t*>(
 				cache->GetFieldData(hdr, static_cast<uint8_t>(desc.slot), desc.fi));
 			uint8_t* dst = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
 			if (!src) continue;
@@ -1645,7 +1650,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 					{
 						const uint32_t idx = w * 64 + TNX_CTZ64(bits);
 						fdst[idx]          = ssrc[idx].ToFloat();
-						bits              &= bits - 1;
+						bits &= bits - 1;
 					}
 				}
 			}
@@ -1660,7 +1665,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 					{
 						const uint32_t idx = w * 64 + TNX_CTZ64(bits);
 						udst[idx]          = usrc[idx];
-						bits              &= bits - 1;
+						bits &= bits - 1;
 					}
 				}
 			}
@@ -1675,16 +1680,20 @@ void RendererCore<Derived>::WriteToFrameSlab()
 	for (uint32_t f = 0; f < GpuTotalFieldCount; ++f)
 	{
 		const GpuSlabFieldDesc& desc = SlabFieldDescs[f];
-		if (desc.kind == GpuSlabKind::EntityIndex) { SlabUploadFields[f].src = nullptr; continue; }
+		if (desc.kind == GpuSlabKind::EntityIndex)
+		{
+			SlabUploadFields[f].src = nullptr;
+			continue;
+		}
 		auto [cache, hdr]       = resolveField(desc);
-		SlabUploadFields[f].src  = static_cast<const uint8_t*>(
+		SlabUploadFields[f].src = static_cast<const uint8_t*>(
 			cache->GetFieldData(hdr, static_cast<uint8_t>(desc.slot), desc.fi));
 		SlabUploadFields[f].dst  = slabPtr + static_cast<size_t>(f) * static_cast<size_t>(fieldStride);
 		SlabUploadFields[f].kind = desc.kind;
 	}
 
 	const uint64_t* capturedPlane = plane;
-	const uint32_t  capturedWords = DirtyWordCount;
+	const uint32_t capturedWords  = DirtyWordCount;
 
 	if (dirtyEntityCount < singleJobThreshold)
 	{
@@ -1706,7 +1715,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 						{
 							const uint32_t idx = w * 64 + TNX_CTZ64(bits);
 							fdst[idx]          = ssrc[idx].ToFloat();
-							bits              &= bits - 1;
+							bits &= bits - 1;
 						}
 					}
 				}
@@ -1721,7 +1730,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 						{
 							const uint32_t idx = w * 64 + TNX_CTZ64(bits);
 							udst[idx]          = usrc[idx];
-							bits              &= bits - 1;
+							bits &= bits - 1;
 						}
 					}
 				}
@@ -1748,7 +1757,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 						{
 							const uint32_t idx = w * 64 + TNX_CTZ64(bits);
 							fdst[idx]          = ssrc[idx].ToFloat();
-							bits              &= bits - 1;
+							bits &= bits - 1;
 						}
 					}
 				}
@@ -1763,7 +1772,7 @@ void RendererCore<Derived>::WriteToFrameSlab()
 						{
 							const uint32_t idx = w * 64 + TNX_CTZ64(bits);
 							udst[idx]          = usrc[idx];
-							bits              &= bits - 1;
+							bits &= bits - 1;
 						}
 					}
 				}
@@ -1773,11 +1782,11 @@ void RendererCore<Derived>::WriteToFrameSlab()
 
 	// Defer cleanup — FlushPendingSlabUpload() waits for jobs before vkQueueSubmit,
 	// overlapping upload with command buffer recording on the render thread.
-	bSlabUploadPending        = true;
-	PendingSlabIdx            = nextSlab;
-	PendingRenderAckFrame     = temporalHdr->FrameNumber;
-	PendingVolatileFrameLock  = LastVolatileFrame;
-	PendingTemporalFrameLock  = LastTemporalFrame;
+	bSlabUploadPending       = true;
+	PendingSlabIdx           = nextSlab;
+	PendingRenderAckFrame    = temporalHdr->FrameNumber;
+	PendingVolatileFrameLock = LastVolatileFrame;
+	PendingTemporalFrameLock = LastTemporalFrame;
 }
 
 // -----------------------------------------------------------------------
@@ -1847,15 +1856,14 @@ bool RendererCore<Derived>::CreatePipeline()
 	depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS;
 
 	VkPipelineColorBlendAttachmentState blendAttach{};
-	blendAttach.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-		VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	blendAttach.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
 	VkPipelineColorBlendStateCreateInfo colorBlend{};
 	colorBlend.sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
 	colorBlend.attachmentCount = 1;
 	colorBlend.pAttachments    = &blendAttach;
 
-	const VkDynamicState dynStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+	const VkDynamicState dynStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 
 	VkPipelineDynamicStateCreateInfo dynState{};
 	dynState.sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
@@ -1922,7 +1930,7 @@ bool RendererCore<Derived>::CreateDepthImage()
 	for (int i = 0; i < MaxFramesInFlight; ++i)
 	{
 		Frames[i].DepthAttachment = VkMem->AllocateImage(
-			{ext.width, ext.height},
+			{ ext.width, ext.height },
 			depthFormat,
 			VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
 			VK_IMAGE_ASPECT_DEPTH_BIT);
@@ -1941,7 +1949,7 @@ void RendererCore<Derived>::OnSwapchainResize()
 
 	const vk::SemaphoreCreateInfo semCI{};
 	const vk::raii::Device& raiiDev = VkCtx->GetRaiiDevice();
-	const auto& swapImages = VkCtx->GetSwapchain().Images;
+	const auto& swapImages          = VkCtx->GetSwapchain().Images;
 	RenderedSemaphores.clear();
 	RenderedSemaphores.reserve(swapImages.size());
 	for (size_t i = 0; i < swapImages.size(); ++i)
@@ -2073,9 +2081,8 @@ template <typename Derived>
 void RendererCore<Derived>::TrackFPS()
 {
 	RenderFrameCount++;
-	const double now = SDL_GetPerformanceCounter() /
-		static_cast<double>(SDL_GetPerformanceFrequency());
-	RenderFpsTimer     += now - RenderLastFPSCheck;
+	const double now = SDL_GetPerformanceCounter() / static_cast<double>(SDL_GetPerformanceFrequency());
+	RenderFpsTimer += now - RenderLastFPSCheck;
 	RenderLastFPSCheck = now;
 
 	if (RenderFpsTimer >= 1.0) [[unlikely]]
@@ -2083,15 +2090,15 @@ void RendererCore<Derived>::TrackFPS()
 #if TNX_DEV_METRICS
 		double avgLatencyMs = (LatencySamples > 0) ? (LatencyAccumMs / LatencySamples) : 0.0;
 		LOG_ENG_DEBUG_F("Render FPS: %d | Frame: %.2fms | Input→Photon: %.2fms",
-						static_cast<int>(RenderFrameCount / RenderFpsTimer),
-						(RenderFpsTimer / RenderFrameCount) * 1000.0,
-						avgLatencyMs);
+			static_cast<int>(RenderFrameCount / RenderFpsTimer),
+			(RenderFpsTimer / RenderFrameCount) * 1000.0,
+			avgLatencyMs);
 		LatencyAccumMs = 0.0;
 		LatencySamples = 0;
 #else
 		LOG_ENG_DEBUG_F("Render FPS: %d | Frame: %.2fms",
-						static_cast<int>(RenderFrameCount / RenderFpsTimer),
-						(RenderFpsTimer / RenderFrameCount) * 1000.0);
+			static_cast<int>(RenderFrameCount / RenderFpsTimer),
+			(RenderFpsTimer / RenderFrameCount) * 1000.0);
 #endif
 		RenderFrameCount = 0;
 		RenderFpsTimer   = 0.0;
@@ -2133,7 +2140,7 @@ bool RendererCore<Derived>::CreatePickImages()
 	for (int i = 0; i < MaxFramesInFlight; ++i)
 	{
 		Frames[i].PickAttachment = VkMem->AllocateImage(
-			{ext.width, ext.height},
+			{ ext.width, ext.height },
 			VK_FORMAT_R32_UINT,
 			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
 			VK_IMAGE_ASPECT_COLOR_BIT);
@@ -2288,8 +2295,7 @@ bool RendererCore<Derived>::CreatePickPipeline()
 
 	// Two color blend attachments: color (normal) + pick (no blend, uint)
 	VkPipelineColorBlendAttachmentState blendAttachments[2]{};
-	blendAttachments[0].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-		VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	blendAttachments[0].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 	blendAttachments[1].colorWriteMask = VK_COLOR_COMPONENT_R_BIT; // R32_UINT — only R channel
 
 	VkPipelineColorBlendStateCreateInfo colorBlend{};
@@ -2297,13 +2303,13 @@ bool RendererCore<Derived>::CreatePickPipeline()
 	colorBlend.attachmentCount = 2;
 	colorBlend.pAttachments    = blendAttachments;
 
-	VkDynamicState dynStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+	VkDynamicState dynStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 	VkPipelineDynamicStateCreateInfo dynState{};
 	dynState.sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
 	dynState.dynamicStateCount = 2;
 	dynState.pDynamicStates    = dynStates;
 
-	VkFormat colorFormats[2] = {colorFmt, pickFmt};
+	VkFormat colorFormats[2] = { colorFmt, pickFmt };
 	VkPipelineRenderingCreateInfo renderingCI{};
 	renderingCI.sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
 	renderingCI.colorAttachmentCount    = 2;

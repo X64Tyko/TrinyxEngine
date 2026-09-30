@@ -44,7 +44,7 @@ struct FixedBitset
 		uint32_t c = 0;
 		for (uint32_t i = 0; i < WordCount; ++i)
 #ifdef _MSC_VER
-		c += static_cast<uint32_t>(__popcnt64(Words[i]));
+			c += static_cast<uint32_t>(__popcnt64(Words[i]));
 #else
 			c += __builtin_popcountll(Words[i]);
 #endif
@@ -55,14 +55,16 @@ struct FixedBitset
 	FixedBitset operator&(const FixedBitset& other) const
 	{
 		FixedBitset result;
-		for (uint32_t i = 0; i < WordCount; ++i) result.Words[i] = Words[i] & other.Words[i];
+		for (uint32_t i = 0; i < WordCount; ++i)
+			result.Words[i] = Words[i] & other.Words[i];
 		return result;
 	}
 
 	// Bitwise OR assignment
 	FixedBitset& operator|=(const FixedBitset& other)
 	{
-		for (uint32_t i = 0; i < WordCount; ++i) Words[i] |= other.Words[i];
+		for (uint32_t i = 0; i < WordCount; ++i)
+			Words[i] |= other.Words[i];
 		return *this;
 	}
 

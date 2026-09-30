@@ -17,7 +17,7 @@ class UndoCommand
 public:
 	virtual ~UndoCommand() = default;
 	virtual void Execute() = 0; // redo
-	virtual void Undo() = 0;
+	virtual void Undo()    = 0;
 	virtual bool MergeWith(const UndoCommand&) { return false; }
 };
 
@@ -34,10 +34,10 @@ class EntityTransformCommand : public UndoCommand
 {
 public:
 	EntityTransformCommand(Archetype* arch, Chunk* chunk, uint16_t localIndex, Registry* reg)
-		: m_Arch(arch)
-		, m_Chunk(chunk)
-		, m_LocalIndex(localIndex)
-		, m_Reg(reg)
+		: m_Arch(arch),
+		  m_Chunk(chunk),
+		  m_LocalIndex(localIndex),
+		  m_Reg(reg)
 	{
 		m_Before = SerializeEntityFields(reg, arch, chunk, localIndex);
 	}
@@ -61,15 +61,15 @@ class ComponentFieldChangeCommand : public UndoCommand
 {
 public:
 	ComponentFieldChangeCommand(Archetype* arch, Chunk* chunk, uint16_t localIndex,
-								const char* fieldName, Registry* reg,
-								const void* oldValue, FieldValueType type, size_t fieldSize)
-		: m_Arch(arch)
-		, m_Chunk(chunk)
-		, m_LocalIndex(localIndex)
-		, m_FieldName(fieldName)
-		, m_Reg(reg)
-		, m_Type(type)
-		, m_FieldSize(fieldSize)
+		const char* fieldName, Registry* reg,
+		const void* oldValue, FieldValueType type, size_t fieldSize)
+		: m_Arch(arch),
+		  m_Chunk(chunk),
+		  m_LocalIndex(localIndex),
+		  m_FieldName(fieldName),
+		  m_Reg(reg),
+		  m_Type(type),
+		  m_FieldSize(fieldSize)
 	{
 		m_OldValue.resize(fieldSize);
 		std::memcpy(m_OldValue.data(), oldValue, fieldSize);

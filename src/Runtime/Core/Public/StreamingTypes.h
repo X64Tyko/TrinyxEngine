@@ -7,7 +7,7 @@
 
 #ifdef _MSC_VER
 #pragma warning(push)
-#pragma warning(disable: 4201) // nameless struct in union
+#pragma warning(disable : 4201) // nameless struct in union
 #elif defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
@@ -26,20 +26,20 @@
  */
 union StreamingRequestID
 {
-    uint32_t Value;
+	uint32_t Value;
 
-    struct
-    {
-        uint32_t OwnerID : NetOwnerID_Bits;
-        uint32_t Seq     : 32 - NetOwnerID_Bits;
-    };
+	struct
+	{
+		uint32_t OwnerID : NetOwnerID_Bits;
+		uint32_t Seq : 32 - NetOwnerID_Bits;
+	};
 
-    uint8_t  GetOwnerID() const { return static_cast<uint8_t>(OwnerID); }
-    uint32_t GetSeq()     const { return Seq; }
-    bool     IsValid()    const { return Value != 0; }
+	uint8_t GetOwnerID() const { return static_cast<uint8_t>(OwnerID); }
+	uint32_t GetSeq() const { return Seq; }
+	bool IsValid() const { return Value != 0; }
 
-    bool operator==(StreamingRequestID o) const { return Value == o.Value; }
-    bool operator!=(StreamingRequestID o) const { return Value != o.Value; }
+	bool operator==(StreamingRequestID o) const { return Value == o.Value; }
+	bool operator!=(StreamingRequestID o) const { return Value != o.Value; }
 };
 
 static_assert(sizeof(StreamingRequestID) == 4, "StreamingRequestID must be 4 bytes");

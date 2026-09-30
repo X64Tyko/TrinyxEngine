@@ -44,7 +44,7 @@ inline std::atomic<uint16_t> g_RPCCounter{ 0 };
 
 // Free function template — ID assigned once on first call per type T.
 // T does not need to know about this; it stays a plain POD struct.
-template<typename T>
+template <typename T>
 uint16_t RPCMethodID()
 {
 	static const uint16_t id = g_RPCCounter.fetch_add(1, std::memory_order_relaxed);
@@ -53,7 +53,7 @@ uint16_t RPCMethodID()
 
 // Handler function pointer type stored per MethodID in ReflectionRegistry.
 class Soul;
-using SoulRPCHandler = void(*)(Soul*, const RPCContext&, const uint8_t*);
+using SoulRPCHandler = void (*)(Soul*, const RPCContext&, const uint8_t*);
 
 // ---------------------------------------------------------------------------
 // Class-body declaration macros
@@ -68,12 +68,12 @@ using SoulRPCHandler = void(*)(Soul*, const RPCContext&, const uint8_t*);
 //   First overload: SERVER THUNK (sends back to the originating client).
 //   Second overload: CLIENT HANDLER.
 // ---------------------------------------------------------------------------
-#define TNX_SERVER(Name, TParams)                          \
-	bool Name(const TParams& params);                      \
+#define TNX_SERVER(Name, TParams)     \
+	bool Name(const TParams& params); \
 	void Name(const RPCContext& ctx, const TParams& params)
 
-#define TNX_CLIENT(Name, TParams)                          \
-	bool Name(const TParams& params);                      \
+#define TNX_CLIENT(Name, TParams)     \
+	bool Name(const TParams& params); \
 	void Name(const RPCContext& ctx, const TParams& params)
 
 // ---------------------------------------------------------------------------
@@ -88,48 +88,48 @@ using SoulRPCHandler = void(*)(Soul*, const RPCContext&, const uint8_t*);
 // The static bool trick (= []() -> bool { ... }()) is the same pattern used
 // by TNX_REGISTER_SCHEMA and TNX_REGISTER_ENTITY. It runs before main().
 // ---------------------------------------------------------------------------
-#define TNX_IMPL_SERVER(Class, Name, TParams)                                          \
-	bool Class::Name(const TParams& params)                                            \
-	{                                                                                  \
-		static_assert(std::is_trivially_copyable_v<TParams>,                           \
-			#TParams " must be trivially copyable — it is a wire format");             \
-		RPCHeader hdr{ RPCMethodID<TParams>(),                                         \
-		               static_cast<uint16_t>(sizeof(TParams)) };                       \
-		return GetNetChannel().SendRPC(hdr, params);                                   \
-	}                                                                                  \
-	static bool _##Class##_##Name##_srpc_registered = []() -> bool {                  \
-		static_assert(std::is_trivially_copyable_v<TParams>,                           \
-			#TParams " must be trivially copyable — it is a wire format");             \
-		ReflectionRegistry::Get().RegisterServerRPC(                                   \
-			RPCMethodID<TParams>(),                                                    \
-			static_cast<uint16_t>(sizeof(TParams)),                                    \
-			[](Soul* self, const RPCContext& ctx, const uint8_t* data) {              \
-				static_cast<Class*>(self)->Name(                                       \
-					ctx, *reinterpret_cast<const TParams*>(data));                     \
-			});                                                                        \
-		return true;                                                                   \
-	}();                                                                               \
+#define TNX_IMPL_SERVER(Class, Name, TParams)                              \
+	bool Class::Name(const TParams& params)                                \
+	{                                                                      \
+		static_assert(std::is_trivially_copyable_v<TParams>,               \
+			#TParams " must be trivially copyable — it is a wire format"); \
+		RPCHeader hdr{ RPCMethodID<TParams>(),                             \
+			static_cast<uint16_t>(sizeof(TParams)) };                      \
+		return GetNetChannel().SendRPC(hdr, params);                       \
+	}                                                                      \
+	static bool _##Class##_##Name##_srpc_registered = []() -> bool {       \
+		static_assert(std::is_trivially_copyable_v<TParams>,               \
+			#TParams " must be trivially copyable — it is a wire format"); \
+		ReflectionRegistry::Get().RegisterServerRPC(                       \
+			RPCMethodID<TParams>(),                                        \
+			static_cast<uint16_t>(sizeof(TParams)),                        \
+			[](Soul* self, const RPCContext& ctx, const uint8_t* data) {   \
+			static_cast<Class*>(self)->Name(                               \
+				ctx, *reinterpret_cast<const TParams*>(data));             \
+		});                                                                \
+		return true;                                                       \
+	}();                                                                   \
 	void Class::Name(const RPCContext& ctx, const TParams& params)
 
-#define TNX_IMPL_CLIENT(Class, Name, TParams)                                          \
-	bool Class::Name(const TParams& params)                                            \
-	{                                                                                  \
-		static_assert(std::is_trivially_copyable_v<TParams>,                           \
-			#TParams " must be trivially copyable — it is a wire format");             \
-		RPCHeader hdr{ RPCMethodID<TParams>(),                                         \
-		               static_cast<uint16_t>(sizeof(TParams)) };                       \
-		return GetNetChannel().SendRPC(hdr, params);                                   \
-	}                                                                                  \
-	static bool _##Class##_##Name##_crpc_registered = []() -> bool {                  \
-		static_assert(std::is_trivially_copyable_v<TParams>,                           \
-			#TParams " must be trivially copyable — it is a wire format");             \
-		ReflectionRegistry::Get().RegisterClientRPC(                                   \
-			RPCMethodID<TParams>(),                                                    \
-			static_cast<uint16_t>(sizeof(TParams)),                                    \
-			[](Soul* self, const RPCContext& ctx, const uint8_t* data) {              \
-				static_cast<Class*>(self)->Name(                                       \
-					ctx, *reinterpret_cast<const TParams*>(data));                     \
-			});                                                                        \
-		return true;                                                                   \
-	}();                                                                               \
+#define TNX_IMPL_CLIENT(Class, Name, TParams)                              \
+	bool Class::Name(const TParams& params)                                \
+	{                                                                      \
+		static_assert(std::is_trivially_copyable_v<TParams>,               \
+			#TParams " must be trivially copyable — it is a wire format"); \
+		RPCHeader hdr{ RPCMethodID<TParams>(),                             \
+			static_cast<uint16_t>(sizeof(TParams)) };                      \
+		return GetNetChannel().SendRPC(hdr, params);                       \
+	}                                                                      \
+	static bool _##Class##_##Name##_crpc_registered = []() -> bool {       \
+		static_assert(std::is_trivially_copyable_v<TParams>,               \
+			#TParams " must be trivially copyable — it is a wire format"); \
+		ReflectionRegistry::Get().RegisterClientRPC(                       \
+			RPCMethodID<TParams>(),                                        \
+			static_cast<uint16_t>(sizeof(TParams)),                        \
+			[](Soul* self, const RPCContext& ctx, const uint8_t* data) {   \
+			static_cast<Class*>(self)->Name(                               \
+				ctx, *reinterpret_cast<const TParams*>(data));             \
+		});                                                                \
+		return true;                                                       \
+	}();                                                                   \
 	void Class::Name(const RPCContext& ctx, const TParams& params)

@@ -73,7 +73,7 @@ inline uint32_t OctEncode(float nx, float ny, float nz)
 	auto sx = static_cast<int16_t>(ox * 32767.0f);
 	auto sy = static_cast<int16_t>(oy * 32767.0f);
 	return static_cast<uint32_t>(static_cast<uint16_t>(sx))
-		| (static_cast<uint32_t>(static_cast<uint16_t>(sy)) << 16);
+		   | (static_cast<uint32_t>(static_cast<uint16_t>(sy)) << 16);
 }
 
 inline void OctDecode(uint32_t packed, float& nx, float& ny, float& nz)

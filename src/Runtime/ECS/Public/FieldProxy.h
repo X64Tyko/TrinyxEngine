@@ -46,14 +46,26 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	static constexpr int32_t DirtyMask       = DirtyBit | DirtiedFrameBit;
 
 	// Scalar: implicit conversion to FieldType — allows proxy to be used as a plain value in arithmetic
-	operator FieldType() const requires (WIDTH == FieldWidth::Scalar) { return WriteArray[index]; }
+	operator FieldType() const
+		requires(WIDTH == FieldWidth::Scalar)
+	{
+		return WriteArray[index];
+	}
 
 	// Wide/WideMask: explicit SIMD vector extraction — prevents accidental scalar decay
-	explicit operator VecType() const requires (WIDTH != FieldWidth::Scalar) { return Traits::load(&WriteArray[index]); }
+	explicit operator VecType() const
+		requires(WIDTH != FieldWidth::Scalar)
+	{
+		return Traits::load(&WriteArray[index]);
+	}
 
 	// Scalar read accessor — returns a copy of the underlying value.
 	// Only available in Scalar width (compile error otherwise).
-	FieldType Value() const requires (WIDTH == FieldWidth::Scalar) { return WriteArray[index]; }
+	FieldType Value() const
+		requires(WIDTH == FieldWidth::Scalar)
+	{
+		return WriteArray[index];
+	}
 
 	// Bind: point at the write frame (pre-frame memcpy already seeded old state into it).
 	// flagsArray is the CacheSlotMeta::Flags int32_t* from fieldArrayTable[0].
@@ -75,10 +87,14 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	FORCE_INLINE VecMask operator>(T threshold) const
 	{
 		VecType cmp;
-		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value) cmp = Traits::load(&threshold.WriteArray[threshold.index]);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>) cmp = Traits::set1(threshold);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>) cmp = threshold;
-		else cmp                                                                = Traits::set1(threshold);
+		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value)
+			cmp = Traits::load(&threshold.WriteArray[threshold.index]);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>)
+			cmp = Traits::set1(threshold);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>)
+			cmp = threshold;
+		else
+			cmp = Traits::set1(threshold);
 		return Traits::GT(Traits::load(&WriteArray[index]), cmp);
 	}
 
@@ -86,10 +102,14 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	FORCE_INLINE VecMask operator<(T threshold) const
 	{
 		VecType cmp;
-		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value) cmp = Traits::load(&threshold.WriteArray[threshold.index]);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>) cmp = Traits::set1(threshold);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>) cmp = threshold;
-		else cmp                                                                = Traits::set1(threshold);
+		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value)
+			cmp = Traits::load(&threshold.WriteArray[threshold.index]);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>)
+			cmp = Traits::set1(threshold);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>)
+			cmp = threshold;
+		else
+			cmp = Traits::set1(threshold);
 		return Traits::LT(Traits::load(&WriteArray[index]), cmp);
 	}
 
@@ -97,10 +117,14 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	FORCE_INLINE VecMask operator>=(T threshold) const
 	{
 		VecType cmp;
-		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value) cmp = Traits::load(&threshold.WriteArray[threshold.index]);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>) cmp = Traits::set1(threshold);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>) cmp = threshold;
-		else cmp                                                                = Traits::set1(threshold);
+		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value)
+			cmp = Traits::load(&threshold.WriteArray[threshold.index]);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>)
+			cmp = Traits::set1(threshold);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>)
+			cmp = threshold;
+		else
+			cmp = Traits::set1(threshold);
 		return Traits::GE(Traits::load(&WriteArray[index]), cmp);
 	}
 
@@ -108,10 +132,14 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	FORCE_INLINE VecMask operator<=(T threshold) const
 	{
 		VecType cmp;
-		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value) cmp = Traits::load(&threshold.WriteArray[threshold.index]);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>) cmp = Traits::set1(threshold);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>) cmp = threshold;
-		else cmp                                                                = Traits::set1(threshold);
+		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value)
+			cmp = Traits::load(&threshold.WriteArray[threshold.index]);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>)
+			cmp = Traits::set1(threshold);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>)
+			cmp = threshold;
+		else
+			cmp = Traits::set1(threshold);
 		return Traits::LE(Traits::load(&WriteArray[index]), cmp);
 	}
 
@@ -119,10 +147,14 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	FORCE_INLINE VecMask operator==(T threshold) const
 	{
 		VecType cmp;
-		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value) cmp = Traits::load(&threshold.WriteArray[threshold.index]);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>) cmp = Traits::set1(threshold);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>) cmp = threshold;
-		else cmp                                                                = Traits::set1(threshold);
+		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value)
+			cmp = Traits::load(&threshold.WriteArray[threshold.index]);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>)
+			cmp = Traits::set1(threshold);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>)
+			cmp = threshold;
+		else
+			cmp = Traits::set1(threshold);
 		return Traits::EQ(Traits::load(&WriteArray[index]), cmp);
 	}
 
@@ -130,15 +162,20 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	FORCE_INLINE VecMask operator!=(T threshold) const
 	{
 		VecType cmp;
-		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value) cmp = Traits::load(&threshold.WriteArray[threshold.index]);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>) cmp = Traits::set1(threshold);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>) cmp = threshold;
-		else cmp                                                                = Traits::set1(threshold);
+		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value)
+			cmp = Traits::load(&threshold.WriteArray[threshold.index]);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>)
+			cmp = Traits::set1(threshold);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>)
+			cmp = threshold;
+		else
+			cmp = Traits::set1(threshold);
 		return Traits::NEQ(Traits::load(&WriteArray[index]), cmp);
 	}
 
 	template <ProxyType<FieldType, VecType> T>
-	FORCE_INLINE FieldProxy& operator=(T&& value) requires (WIDTH == FieldWidth::Scalar)
+	FORCE_INLINE FieldProxy& operator=(T&& value)
+		requires(WIDTH == FieldWidth::Scalar)
 	{
 		if constexpr (std::is_convertible_v<T, FieldType>)
 			WriteArray[index] = static_cast<FieldType>(value);
@@ -147,20 +184,26 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	}
 
 	template <ProxyType<FieldType, VecType> T>
-	FORCE_INLINE FieldProxy& operator=(T&& value) requires (WIDTH != FieldWidth::Scalar)
+	FORCE_INLINE FieldProxy& operator=(T&& value)
+		requires(WIDTH != FieldWidth::Scalar)
 	{
 		VecType VecVal;
-		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value) VecVal = Traits::load(&value.WriteArray[value.index]);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>) VecVal = Traits::set1(value);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>) VecVal = value;
-		else VecVal                                                                = Traits::set1(value);
+		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value)
+			VecVal = Traits::load(&value.WriteArray[value.index]);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>)
+			VecVal = Traits::set1(value);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>)
+			VecVal = value;
+		else
+			VecVal = Traits::set1(value);
 		Traits::store(&WriteArray[index], this->mask, VecVal);
 		MarkDirty();
 		return *this;
 	}
 
 	template <ProxyType<FieldType, VecType> T>
-	FORCE_INLINE FieldProxy& operator+=(T&& value) requires (WIDTH == FieldWidth::Scalar)
+	FORCE_INLINE FieldProxy& operator+=(T&& value)
+		requires(WIDTH == FieldWidth::Scalar)
 	{
 		if constexpr (std::is_convertible_v<T, FieldType>)
 			WriteArray[index] += static_cast<FieldType>(value);
@@ -169,20 +212,26 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	}
 
 	template <ProxyType<FieldType, VecType> T>
-	FORCE_INLINE FieldProxy& operator+=(T&& value) requires (WIDTH != FieldWidth::Scalar)
+	FORCE_INLINE FieldProxy& operator+=(T&& value)
+		requires(WIDTH != FieldWidth::Scalar)
 	{
 		VecType VecVal;
-		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value) VecVal = Traits::load(&value.WriteArray[value.index]);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>) VecVal = Traits::set1(value);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>) VecVal = value;
-		else VecVal                                                                = Traits::set1(value);
+		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value)
+			VecVal = Traits::load(&value.WriteArray[value.index]);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>)
+			VecVal = Traits::set1(value);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>)
+			VecVal = value;
+		else
+			VecVal = Traits::set1(value);
 		Traits::store(&WriteArray[index], this->mask, Traits::add(Traits::load(&WriteArray[index]), VecVal));
 		MarkDirty();
 		return *this;
 	}
 
 	template <ProxyType<FieldType, VecType> T>
-	FORCE_INLINE FieldProxy& operator-=(T&& value) requires (WIDTH == FieldWidth::Scalar)
+	FORCE_INLINE FieldProxy& operator-=(T&& value)
+		requires(WIDTH == FieldWidth::Scalar)
 	{
 		if constexpr (std::is_convertible_v<T, FieldType>)
 			WriteArray[index] -= static_cast<FieldType>(value);
@@ -191,20 +240,26 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	}
 
 	template <ProxyType<FieldType, VecType> T>
-	FORCE_INLINE FieldProxy& operator-=(T&& value) requires (WIDTH != FieldWidth::Scalar)
+	FORCE_INLINE FieldProxy& operator-=(T&& value)
+		requires(WIDTH != FieldWidth::Scalar)
 	{
 		VecType VecVal;
-		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value) VecVal = Traits::load(&value.WriteArray[value.index]);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>) VecVal = Traits::set1(value);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>) VecVal = value;
-		else VecVal                                                                = Traits::set1(value);
+		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value)
+			VecVal = Traits::load(&value.WriteArray[value.index]);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>)
+			VecVal = Traits::set1(value);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>)
+			VecVal = value;
+		else
+			VecVal = Traits::set1(value);
 		Traits::store(&WriteArray[index], this->mask, Traits::sub(Traits::load(&WriteArray[index]), VecVal));
 		MarkDirty();
 		return *this;
 	}
 
 	template <ProxyType<FieldType, VecType> T>
-	FORCE_INLINE FieldProxy& operator*=(T&& value) requires (WIDTH == FieldWidth::Scalar)
+	FORCE_INLINE FieldProxy& operator*=(T&& value)
+		requires(WIDTH == FieldWidth::Scalar)
 	{
 		if constexpr (std::is_convertible_v<T, FieldType>)
 			WriteArray[index] *= static_cast<FieldType>(value);
@@ -213,20 +268,26 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	}
 
 	template <ProxyType<FieldType, VecType> T>
-	FORCE_INLINE FieldProxy& operator*=(T&& value) requires (WIDTH != FieldWidth::Scalar)
+	FORCE_INLINE FieldProxy& operator*=(T&& value)
+		requires(WIDTH != FieldWidth::Scalar)
 	{
 		VecType VecVal;
-		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value) VecVal = Traits::load(&value.WriteArray[value.index]);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>) VecVal = Traits::set1(value);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>) VecVal = value;
-		else VecVal                                                                = Traits::set1(value);
+		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value)
+			VecVal = Traits::load(&value.WriteArray[value.index]);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>)
+			VecVal = Traits::set1(value);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>)
+			VecVal = value;
+		else
+			VecVal = Traits::set1(value);
 		Traits::store(&WriteArray[index], this->mask, Traits::mul(Traits::load(&WriteArray[index]), VecVal));
 		MarkDirty();
 		return *this;
 	}
 
 	template <ProxyType<FieldType, VecType> T>
-	FORCE_INLINE FieldProxy& operator/=(T&& value) requires (WIDTH == FieldWidth::Scalar)
+	FORCE_INLINE FieldProxy& operator/=(T&& value)
+		requires(WIDTH == FieldWidth::Scalar)
 	{
 		if constexpr (std::is_convertible_v<T, FieldType>)
 			WriteArray[index] /= static_cast<FieldType>(value);
@@ -235,13 +296,18 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 	}
 
 	template <ProxyType<FieldType, VecType> T>
-	FORCE_INLINE FieldProxy& operator/=(T&& value) requires (WIDTH != FieldWidth::Scalar)
+	FORCE_INLINE FieldProxy& operator/=(T&& value)
+		requires(WIDTH != FieldWidth::Scalar)
 	{
 		VecType VecVal;
-		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value) VecVal = Traits::load(&value.WriteArray[value.index]);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>) VecVal = Traits::set1(value);
-		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>) VecVal = value;
-		else VecVal                                                                = Traits::set1(value);
+		if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<T>>::value)
+			VecVal = Traits::load(&value.WriteArray[value.index]);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::remove_cvref_t<FieldType>>)
+			VecVal = Traits::set1(value);
+		else if constexpr (std::is_same_v<std::remove_cvref_t<T>, VecType>)
+			VecVal = value;
+		else
+			VecVal = Traits::set1(value);
 		Traits::store(&WriteArray[index], this->mask, Traits::div(Traits::load(&WriteArray[index]), VecVal));
 		MarkDirty();
 		return *this;
@@ -293,28 +359,40 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		if constexpr (WIDTH == FieldWidth::Scalar)
 		{
 			FieldType LVal;
-			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value) LVal = LHS.WriteArray[LHS.index];
-			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>) LVal = LHS;
+			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value)
+				LVal = LHS.WriteArray[LHS.index];
+			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>)
+				LVal = LHS;
 
 			FieldType RVal;
-			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value) RVal = RHS.WriteArray[RHS.index];
-			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>) RVal = RHS;
+			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value)
+				RVal = RHS.WriteArray[RHS.index];
+			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>)
+				RVal = RHS;
 
 			return LVal * RVal;
 		}
 		else
 		{
 			VecType LVal;
-			if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<VecType>>) LVal = LHS;
-			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value) LVal = Traits::load(&LHS.WriteArray[LHS.index]);
-			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>) LVal = Traits::set1(LHS);
-			else LVal                                                                                       = Traits::set1(LHS);
+			if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<VecType>>)
+				LVal = LHS;
+			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value)
+				LVal = Traits::load(&LHS.WriteArray[LHS.index]);
+			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>)
+				LVal = Traits::set1(LHS);
+			else
+				LVal = Traits::set1(LHS);
 
 			VecType RVal;
-			if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<VecType>>) RVal = RHS;
-			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value) RVal = Traits::load(&RHS.WriteArray[RHS.index]);
-			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>) RVal = Traits::set1(RHS);
-			else RVal                                                                                       = Traits::set1(RHS);
+			if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<VecType>>)
+				RVal = RHS;
+			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value)
+				RVal = Traits::load(&RHS.WriteArray[RHS.index]);
+			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>)
+				RVal = Traits::set1(RHS);
+			else
+				RVal = Traits::set1(RHS);
 
 			return Traits::mul(LVal, RVal);
 		}
@@ -326,28 +404,40 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		if constexpr (WIDTH == FieldWidth::Scalar)
 		{
 			FieldType LVal;
-			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value) LVal = LHS.WriteArray[LHS.index];
-			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>) LVal = LHS;
+			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value)
+				LVal = LHS.WriteArray[LHS.index];
+			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>)
+				LVal = LHS;
 
 			FieldType RVal;
-			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value) RVal = RHS.WriteArray[RHS.index];
-			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>) RVal = RHS;
+			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value)
+				RVal = RHS.WriteArray[RHS.index];
+			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>)
+				RVal = RHS;
 
 			return LVal + RVal;
 		}
 		else
 		{
 			VecType LVal;
-			if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<VecType>>) LVal = LHS;
-			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value) LVal = Traits::load(&LHS.WriteArray[LHS.index]);
-			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>) LVal = Traits::set1(LHS);
-			else LVal                                                                                       = Traits::set1(LHS);
+			if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<VecType>>)
+				LVal = LHS;
+			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value)
+				LVal = Traits::load(&LHS.WriteArray[LHS.index]);
+			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>)
+				LVal = Traits::set1(LHS);
+			else
+				LVal = Traits::set1(LHS);
 
 			VecType RVal;
-			if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<VecType>>) RVal = RHS;
-			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value) RVal = Traits::load(&RHS.WriteArray[RHS.index]);
-			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>) RVal = Traits::set1(RHS);
-			else RVal                                                                                       = Traits::set1(RHS);
+			if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<VecType>>)
+				RVal = RHS;
+			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value)
+				RVal = Traits::load(&RHS.WriteArray[RHS.index]);
+			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>)
+				RVal = Traits::set1(RHS);
+			else
+				RVal = Traits::set1(RHS);
 
 			return Traits::add(LVal, RVal);
 		}
@@ -359,28 +449,40 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		if constexpr (WIDTH == FieldWidth::Scalar)
 		{
 			FieldType LVal;
-			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value) LVal = LHS.WriteArray[LHS.index];
-			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>) LVal = LHS;
+			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value)
+				LVal = LHS.WriteArray[LHS.index];
+			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>)
+				LVal = LHS;
 
 			FieldType RVal;
-			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value) RVal = RHS.WriteArray[RHS.index];
-			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>) RVal = RHS;
+			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value)
+				RVal = RHS.WriteArray[RHS.index];
+			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>)
+				RVal = RHS;
 
 			return LVal - RVal;
 		}
 		else
 		{
 			VecType LVal;
-			if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<VecType>>) LVal = LHS;
-			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value) LVal = Traits::load(&LHS.WriteArray[LHS.index]);
-			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>) LVal = Traits::set1(LHS);
-			else LVal                                                                                       = Traits::set1(LHS);
+			if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<VecType>>)
+				LVal = LHS;
+			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value)
+				LVal = Traits::load(&LHS.WriteArray[LHS.index]);
+			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>)
+				LVal = Traits::set1(LHS);
+			else
+				LVal = Traits::set1(LHS);
 
 			VecType RVal;
-			if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<VecType>>) RVal = RHS;
-			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value) RVal = Traits::load(&RHS.WriteArray[RHS.index]);
-			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>) RVal = Traits::set1(RHS);
-			else RVal                                                                                       = Traits::set1(RHS);
+			if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<VecType>>)
+				RVal = RHS;
+			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value)
+				RVal = Traits::load(&RHS.WriteArray[RHS.index]);
+			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>)
+				RVal = Traits::set1(RHS);
+			else
+				RVal = Traits::set1(RHS);
 
 			return Traits::sub(LVal, RVal);
 		}
@@ -392,28 +494,40 @@ struct FieldProxy : private FieldProxyMask<WIDTH>
 		if constexpr (WIDTH == FieldWidth::Scalar)
 		{
 			FieldType LVal;
-			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value) LVal = LHS.WriteArray[LHS.index];
-			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>) LVal = LHS;
+			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value)
+				LVal = LHS.WriteArray[LHS.index];
+			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>)
+				LVal = LHS;
 
 			FieldType RVal;
-			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value) RVal = RHS.WriteArray[RHS.index];
-			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>) RVal = RHS;
+			if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value)
+				RVal = RHS.WriteArray[RHS.index];
+			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>)
+				RVal = RHS;
 
 			return LVal / RVal;
 		}
 		else
 		{
 			VecType LVal;
-			if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<VecType>>) LVal = LHS;
-			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value) LVal = Traits::load(&LHS.WriteArray[LHS.index]);
-			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>) LVal = Traits::set1(LHS);
-			else LVal                                                                                       = Traits::set1(LHS);
+			if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<VecType>>)
+				LVal = LHS;
+			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<L>>::value)
+				LVal = Traits::load(&LHS.WriteArray[LHS.index]);
+			else if constexpr (std::is_same_v<std::remove_cvref_t<L>, std::remove_cvref_t<FieldType>>)
+				LVal = Traits::set1(LHS);
+			else
+				LVal = Traits::set1(LHS);
 
 			VecType RVal;
-			if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<VecType>>) RVal = RHS;
-			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value) RVal = Traits::load(&RHS.WriteArray[RHS.index]);
-			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>) RVal = Traits::set1(RHS);
-			else RVal                                                                                       = Traits::set1(RHS);
+			if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<VecType>>)
+				RVal = RHS;
+			else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<R>>::value)
+				RVal = Traits::load(&RHS.WriteArray[RHS.index]);
+			else if constexpr (std::is_same_v<std::remove_cvref_t<R>, std::remove_cvref_t<FieldType>>)
+				RVal = Traits::set1(RHS);
+			else
+				RVal = Traits::set1(RHS);
 
 			return Traits::div(LVal, RVal);
 		}

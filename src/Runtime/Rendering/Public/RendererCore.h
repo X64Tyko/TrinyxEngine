@@ -29,8 +29,8 @@ static constexpr int InstanceBufferCount = 5;
 struct FrameSync
 {
 	VkCommandBuffer Cmd = VK_NULL_HANDLE;
-	vk::raii::Semaphore Acquired{nullptr};
-	vk::raii::Fence Fence{nullptr};
+	vk::raii::Semaphore Acquired{ nullptr };
+	vk::raii::Fence Fence{ nullptr };
 	VulkanBuffer GpuData;
 
 	VulkanImage DepthAttachment;
@@ -53,8 +53,13 @@ struct FrameSync
 // GPU slab field descriptors — shared between RendererCore and WorldViewport.
 // -----------------------------------------------------------------------
 
-enum class GpuSlabTier : uint8_t { Temporal, Volatile };
-enum class GpuSlabKind : uint8_t {
+enum class GpuSlabTier : uint8_t
+{
+	Temporal,
+	Volatile
+};
+enum class GpuSlabKind : uint8_t
+{
 	SimFloat,    // SoA float field, converted from SimFloat if Fixed32
 	RawU32,      // SoA uint32 field, copied verbatim
 	EntityIndex, // No slab backing — scatter writes entity loop index i (always-on)
@@ -64,16 +69,16 @@ struct GpuSlabFieldDesc
 {
 	GpuSlabTier tier;
 	GpuSlabKind kind;
-	uint32_t    slot; // CacheSlotID value (uint8_t range); 0 for EntityIndex
-	uint32_t    fi;   // field index within the component's SoA; 0 for EntityIndex
-	uint32_t    sem;  // GpuFieldSemantic constant
+	uint32_t slot; // CacheSlotID value (uint8_t range); 0 for EntityIndex
+	uint32_t fi;   // field index within the component's SoA; 0 for EntityIndex
+	uint32_t sem;  // GpuFieldSemantic constant
 };
 
 struct SlabFieldUploadInfo
 {
 	const uint8_t* src = nullptr;
-	uint8_t*       dst = nullptr;
-	GpuSlabKind    kind = GpuSlabKind::SimFloat;
+	uint8_t* dst       = nullptr;
+	GpuSlabKind kind   = GpuSlabKind::SimFloat;
 };
 
 // -----------------------------------------------------------------------
@@ -102,11 +107,11 @@ public:
 	RendererCore& operator=(const RendererCore&) = delete;
 
 	void Initialize(Registry* registry,
-					LogicThreadBase* logic,
-					const EngineConfig* config,
-					VulkanContext* vkCtx,
-					VulkanMemory* vkMem,
-					SDL_Window* window, InputBuffer* vizInput);
+		LogicThreadBase* logic,
+		const EngineConfig* config,
+		VulkanContext* vkCtx,
+		VulkanMemory* vkMem,
+		SDL_Window* window, InputBuffer* vizInput);
 	void Start();
 	void Stop();
 	void Join();
@@ -115,14 +120,17 @@ public:
 	void NotifyResize() { bResizeRequested.store(true, std::memory_order_release); }
 
 	/// Block until all submitted GPU work completes. Call before freeing in-flight resources.
-	void WaitForGPU() { if (Device) vkDeviceWaitIdle(Device); }
+	void WaitForGPU()
+	{
+		if (Device) vkDeviceWaitIdle(Device);
+	}
 
 protected:
 	Derived& Self() { return *static_cast<Derived*>(this); }
 
 	// ---- References (non-owning) ----
 	Registry* RegistryPtr         = nullptr;
-	LogicThreadBase* LogicPtr         = nullptr;
+	LogicThreadBase* LogicPtr     = nullptr;
 	const EngineConfig* ConfigPtr = nullptr;
 	VulkanContext* VkCtx          = nullptr;
 	VulkanMemory* VkMem           = nullptr;
@@ -133,8 +141,8 @@ protected:
 
 	// ---- Thread lifecycle ----
 	std::thread Thread;
-	std::atomic<bool> bIsRunning{false};
-	std::atomic<bool> bResizeRequested{false};
+	std::atomic<bool> bIsRunning{ false };
+	std::atomic<bool> bResizeRequested{ false };
 
 	// ---- Thread-owned Vulkan resources ----
 	VkFormat DepthFormat = VK_FORMAT_UNDEFINED;
@@ -167,7 +175,7 @@ protected:
 	uint64_t* DirtyPlanes[InstanceBufferCount]{};
 	uint64_t* DirtySnapshot = nullptr;
 	uint32_t DirtyWordCount = 0;
-	bool FirstSlabWrite[InstanceBufferCount]{true, true, true, true, true};
+	bool FirstSlabWrite[InstanceBufferCount]{ true, true, true, true, true };
 
 	// ── Deferred slab upload ────────────────────────────────────────────
 	// Upload jobs (single or per-field) are dispatched in WriteToFrameSlab,
@@ -176,7 +184,7 @@ protected:
 	SlabFieldUploadInfo SlabUploadFields[GpuTotalFieldCount]{};
 
 	TrinyxJobs::JobCounter SlabUploadCounter{};
-	bool     bSlabUploadPending       = false;
+	bool bSlabUploadPending           = false;
 	uint32_t PendingSlabIdx           = 0;
 	uint64_t PendingRenderAckFrame    = 0;
 	uint64_t PendingVolatileFrameLock = 0;
@@ -190,8 +198,8 @@ protected:
 
 	SkinningPass Skinning;
 
-	vk::raii::PipelineLayout PipelineLayout{nullptr};
-	vk::raii::Pipeline Pipeline{nullptr};
+	vk::raii::PipelineLayout PipelineLayout{ nullptr };
+	vk::raii::Pipeline Pipeline{ nullptr };
 
 	VkPipeline PredicatePipeline     = VK_NULL_HANDLE;
 	VkPipeline PrefixSumPipeline     = VK_NULL_HANDLE;
@@ -206,17 +214,17 @@ protected:
 	VkShaderModule PickFragShader  = VK_NULL_HANDLE;
 	VkPipeline ScatterPickPipeline = VK_NULL_HANDLE;
 	VkPipeline SortPickPipeline    = VK_NULL_HANDLE;
-	vk::raii::Pipeline PickPipeline{nullptr};
+	vk::raii::Pipeline PickPipeline{ nullptr };
 
 	// On-demand pick request (TNX_GPU_PICKING without FAST).
 	// FAST mode always renders to pick attachment and copies the mouse pixel.
-	std::atomic<bool> bPickRequested{false};
-	std::atomic<int32_t> PickX{0};
-	std::atomic<int32_t> PickY{0};
+	std::atomic<bool> bPickRequested{ false };
+	std::atomic<int32_t> PickX{ 0 };
+	std::atomic<int32_t> PickY{ 0 };
 
 	// Pick result: written by render thread after readback, read by external code.
-	std::atomic<uint32_t> PickResult{UINT32_MAX}; // UINT32_MAX = no pick / invalid
-	std::atomic<bool> bPickResultReady{false};
+	std::atomic<uint32_t> PickResult{ UINT32_MAX }; // UINT32_MAX = no pick / invalid
+	std::atomic<bool> bPickResultReady{ false };
 
 	// Tracks which frame slot's readback is pending (FAST mode reads previous frame's result).
 	uint32_t PickReadbackFrame = 0;

@@ -40,16 +40,16 @@
 // Define global component/class counters (declared in Types.h / SchemaReflector.h)
 namespace Internal
 {
-	uint32_t g_GlobalComponentCounter(1);
-	uint8_t g_GlobalMixinCounter(128); // user mixin IDs start after engine band (0-127)
-	std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> g_TemporalComponentCounter = []()
-	{
-		std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> a;
-		a.fill(2); // 0 and 1 reserved for pinned types (TemporalFlags, Transform)
-		return a;
-	}();
-	ClassID g_GlobalClassCounter = 1;
-}
+uint32_t g_GlobalComponentCounter(1);
+uint8_t g_GlobalMixinCounter(128); // user mixin IDs start after engine band (0-127)
+std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> g_TemporalComponentCounter = []()
+{
+	std::array<uint8_t, static_cast<size_t>(CacheTier::MAX)> a;
+	a.fill(2); // 0 and 1 reserved for pinned types (TemporalFlags, Transform)
+	return a;
+}();
+ClassID g_GlobalClassCounter = 1;
+} // namespace Internal
 
 TrinyxEngine::TrinyxEngine()  = default;
 TrinyxEngine::~TrinyxEngine() = default;
@@ -85,7 +85,10 @@ void TrinyxEngine::ParseCommandLine(int argc, char* argv[])
 			Config.NetPort = static_cast<uint16_t>(atoi(argv[++i]));
 		}
 #else
-		else { (void)argv[i]; } // suppress unused warning when networking is disabled
+		else
+		{
+			(void)argv[i];
+		} // suppress unused warning when networking is disabled
 #endif
 	}
 }
@@ -96,7 +99,9 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 
 #ifdef TNX_HEADLESS
 	Config.Headless = true;
-	(void)title; (void)width; (void)height; // unused in headless builds
+	(void)title;
+	(void)width;
+	(void)height; // unused in headless builds
 #endif
 
 	Logger::Get().Init("TrinyxEngine.log", LogLevel::Debug);
@@ -150,7 +155,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 		SDL_SetWindowHitTest(EngineWindow, EditorHitTest, nullptr);
 #else
 		EngineWindow = SDL_CreateWindow(title, width, height,
-										SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+			SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
 #endif // TNX_ENABLE_EDITOR
 		if (!EngineWindow)
 		{
@@ -191,7 +196,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 
 	GameConfig = EngineConfig::LoadProjectConfig(projectDir);
 	snprintf(GameConfig.ProjectDir, sizeof(GameConfig.ProjectDir), "%s",
-			 (projectDir && projectDir[0] != '\0') ? projectDir : "");
+		(projectDir && projectDir[0] != '\0') ? projectDir : "");
 
 #if TNX_ENABLE_EDITOR
 	// Editor config: EditorDefaults.ini overrides (e.g. lower TemporalFrameCount for edit-mode).
@@ -214,9 +219,9 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 		const LogLevel engineLevel = (Config.EngineLogLevel >= 0)
 										 ? static_cast<LogLevel>(Config.EngineLogLevel)
 										 : LogLevel::Info;
-		const LogLevel gameLevel = (Config.GameLogLevel >= 0)
-									   ? static_cast<LogLevel>(Config.GameLogLevel)
-									   : LogLevel::Debug;
+		const LogLevel gameLevel   = (Config.GameLogLevel >= 0)
+										 ? static_cast<LogLevel>(Config.GameLogLevel)
+										 : LogLevel::Debug;
 		Logger::Get().SetMinLevel(LogChannel::Engine, engineLevel);
 		Logger::Get().SetMinLevel(LogChannel::Game, gameLevel);
 	}
@@ -280,7 +285,7 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 	Render = std::make_unique<RendererType>();
 
 	Render->Initialize(DefaultWorld->GetRegistry(), DefaultWorld->GetLogicThread(),
-					   &Config, &VkCtx, &VkMem, EngineWindow, DefaultWorld->GetVizInput());
+		&Config, &VkCtx, &VkMem, EngineWindow, DefaultWorld->GetVizInput());
 #if TNX_ENABLE_EDITOR
 	DefaultWorld->GetLogicThread()->SetSimPaused(true); // Editor starts paused
 	Render->SetEngine(this);
@@ -288,7 +293,12 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 
 	// ---- Audio -----------------------------------------------------------
 	Audio = std::make_unique<AudioManager>();
-	Audio->Initialize(Config.MaxAudioVoices);
+	// --headless skips SDL audio init (like a TNX_HEADLESS build), so leave the manager
+	// uninitialized instead of failing to open a device. Every AudioManager call is a no-op then.
+	if (!Config.Headless)
+		Audio->Initialize(Config.MaxAudioVoices);
+	else
+		LOG_ENG_INFO("[Audio] Headless run — audio disabled");
 	Audio::SetManager(Audio.get());
 #endif // !TNX_HEADLESS
 
@@ -346,7 +356,7 @@ void TrinyxEngine::StartThreadsAndJobs()
 
 	while (!DefaultWorld->GetLogicThread()->IsRunning()
 #ifndef TNX_HEADLESS
-		|| (Render && !Render->IsRunning())
+		   || (Render && !Render->IsRunning())
 #endif
 	)
 	{
@@ -399,7 +409,7 @@ void TrinyxEngine::RunMainLoop()
 		// Sentinel-driven audio update at AudioUpdateHz (accumulator, no busy-wait).
 		if (Audio)
 		{
-			audioAccum             += dt;
+			audioAccum += dt;
 			const double audioStep = 1.0 / std::max(1, Config.AudioUpdateHz);
 			while (audioAccum >= audioStep)
 			{
@@ -409,7 +419,8 @@ void TrinyxEngine::RunMainLoop()
 					if (auto* consumer = DefaultWorld->GetAudioCmdConsumer())
 					{
 						AudioCommand cmd;
-						while (consumer->TryPop(cmd)) Audio->Trigger(cmd.Name, {cmd.Volume, cmd.Pitch, cmd.Loop});
+						while (consumer->TryPop(cmd))
+							Audio->Trigger(cmd.Name, { cmd.Volume, cmd.Pitch, cmd.Loop });
 					}
 				}
 				Audio->Update(static_cast<float>(audioStep));
@@ -432,7 +443,7 @@ void TrinyxEngine::RunMainLoop()
 			Net->TickDispatch();
 
 			netInputAccum += static_cast<double>(dt);
-			netTickAccum  += static_cast<double>(dt);
+			netTickAccum += static_cast<double>(dt);
 
 			// Input send gated at InputNetHz (128Hz).
 			if (netInputAccum >= netInputStep)
@@ -542,7 +553,7 @@ void TrinyxEngine::PumpEvents()
 	TNX_ZONE_N("Input_Poll");
 
 	WorldBase* targetWorld = InputTargetWorld ? InputTargetWorld : DefaultWorld;
-	auto inputTargets  = targetWorld->GetInputTargets();
+	auto inputTargets      = targetWorld->GetInputTargets();
 #ifdef TNX_ENABLE_ROLLBACK
 	LogicThreadBase* Logic = targetWorld->GetLogicThread();
 #endif
@@ -552,11 +563,15 @@ void TrinyxEngine::PumpEvents()
 	// Sentinel just reacts to the atomic flag each pump cycle.
 	bool engineOwnsInput = Render && !Render->EditorOwnsKeyboard();
 
-	if (SDL_GetWindowRelativeMouseMode(EngineWindow) != engineOwnsInput) SDL_SetWindowRelativeMouseMode(EngineWindow, engineOwnsInput);
+	// Relative mode follows either owner: the engine (Play) or an editor tool (viewport fly).
+	// Only engineOwnsInput routes events into the world's input buffers.
+	const bool relativeMouse = engineOwnsInput || (Render && Render->EditorCapturesMouse());
+	if (SDL_GetWindowRelativeMouseMode(EngineWindow) != relativeMouse) SDL_SetWindowRelativeMouseMode(EngineWindow, relativeMouse);
 
 	// Consume any window op queued by the render thread (SDL calls must be on the main thread).
 	uint8_t wop = PendingWindowOp.exchange(0, std::memory_order_relaxed);
-	if      (wop == 1) SDL_MinimizeWindow(EngineWindow);
+	if (wop == 1)
+		SDL_MinimizeWindow(EngineWindow);
 	else if (wop == 2)
 	{
 		if (SDL_GetWindowFlags(EngineWindow) & SDL_WINDOW_MAXIMIZED)
@@ -584,7 +599,8 @@ void TrinyxEngine::PumpEvents()
 
 		switch (e.type)
 		{
-			case SDL_EVENT_QUIT: bIsRunning.store(false, std::memory_order_release);
+			case SDL_EVENT_QUIT:
+				bIsRunning.store(false, std::memory_order_release);
 				break;
 
 			case SDL_EVENT_KEY_DOWN:
@@ -607,7 +623,8 @@ void TrinyxEngine::PumpEvents()
 #endif
 				if (!e.key.repeat)
 				{
-					for (auto* buf : inputTargets) buf->PushKey(e.key.scancode, true);
+					for (auto* buf : inputTargets)
+						buf->PushKey(e.key.scancode, true);
 				}
 				break;
 
@@ -615,14 +632,16 @@ void TrinyxEngine::PumpEvents()
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				for (auto* buf : inputTargets) buf->PushKey(e.key.scancode, false);
+				for (auto* buf : inputTargets)
+					buf->PushKey(e.key.scancode, false);
 				break;
 
 			case SDL_EVENT_MOUSE_MOTION:
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				for (auto* buf : inputTargets) buf->AddMouseDelta(e.motion.xrel, e.motion.yrel);
+				for (auto* buf : inputTargets)
+					buf->AddMouseDelta(e.motion.xrel, e.motion.yrel);
 				break;
 
 			case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -631,14 +650,16 @@ void TrinyxEngine::PumpEvents()
 #else
 				if (!engineOwnsInput) break;
 #endif
-				for (auto* buf : inputTargets) buf->PushMouseButton(e.button.button, true);
+				for (auto* buf : inputTargets)
+					buf->PushMouseButton(e.button.button, true);
 				break;
 
 			case SDL_EVENT_MOUSE_BUTTON_UP:
 #if TNX_ENABLE_EDITOR
 				if (!engineOwnsInput) break;
 #endif
-				for (auto* buf : inputTargets) buf->PushMouseButton(e.button.button, false);
+				for (auto* buf : inputTargets)
+					buf->PushMouseButton(e.button.button, false);
 				break;
 
 			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
@@ -662,17 +683,16 @@ void TrinyxEngine::SubmitRenderCommands() { ... }
 void TrinyxEngine::CalculateFPS()
 {
 	FrameCount++;
-	const double now = SDL_GetPerformanceCounter() /
-		static_cast<double>(SDL_GetPerformanceFrequency());
-	FpsTimer     += now - LastFPSCheck;
+	const double now = SDL_GetPerformanceCounter() / static_cast<double>(SDL_GetPerformanceFrequency());
+	FpsTimer += now - LastFPSCheck;
 	LastFPSCheck = now;
 
 	if (FpsTimer >= 1.0) [[unlikely]]
 	{
 #if defined(TNX_DETAILED_METRICS)
 		LOG_ENG_INFO_F("Main FPS: %d | Frame: %.2fms",
-					   static_cast<int>(FrameCount / FpsTimer),
-					   (FpsTimer / FrameCount) * 1000.0);
+			static_cast<int>(FrameCount / FpsTimer),
+			(FpsTimer / FrameCount) * 1000.0);
 #endif
 		FrameCount = 0;
 		FpsTimer   = 0.0;
@@ -684,8 +704,7 @@ void TrinyxEngine::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)
 	TNX_ZONE_N("Main_WaitTiming");
 
 	const uint64_t targetTicks =
-		static_cast<uint64_t>(1.0 / Config.InputPollHz *
-			static_cast<double>(perfFrequency));
+		static_cast<uint64_t>(1.0 / Config.InputPollHz * static_cast<double>(perfFrequency));
 	const uint64_t frameEnd = frameStart + targetTicks;
 
 	uint64_t now = SDL_GetPerformanceCounter();

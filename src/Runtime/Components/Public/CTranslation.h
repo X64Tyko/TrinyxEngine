@@ -17,7 +17,7 @@ struct CTranslation : ComponentView<CTranslation, WIDTH>
 	FloatProxy<WIDTH> PosY;
 	FloatProxy<WIDTH> PosZ;
 
-	Vec3Accessor<WIDTH> Position{PosX, PosY, PosZ};
+	Vec3Accessor<WIDTH> Position{ PosX, PosY, PosZ };
 };
 
 TNX_REGISTER_COMPONENT(CTranslation)

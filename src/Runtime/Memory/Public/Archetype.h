@@ -129,15 +129,15 @@ public:
 
 	struct FieldDescriptor
 	{
-		uint8_t fieldSlotIndex;         // Index into Chunk::Header::FieldPtrs[]
-		uint8_t componentSlotIndex;     // Field index within its component (0, 1, 2...)
+		uint8_t fieldSlotIndex;             // Index into Chunk::Header::FieldPtrs[]
+		uint8_t componentSlotIndex;         // Field index within its component (0, 1, 2...)
 		CacheSlotID temporalComponentIndex; // Cache slot index in the temporal/volatile slab
-		ComponentTypeID componentID;    // Component type this field belongs to
-		CacheTier tier;                 // Which cache tier (Temporal, Volatile, None)
+		ComponentTypeID componentID;        // Component type this field belongs to
+		CacheTier tier;                     // Which cache tier (Temporal, Volatile, None)
 		FieldValueType valueType = FieldValueType::Unknown;
 		AssetType refAssetType   = AssetType::Invalid; // Non-Invalid = asset reference field
-		size_t fieldSize;        // Size of one element (e.g. 4 for float)
-		bool bIsTemporal;        // True if stored in temporal/volatile slab
+		size_t fieldSize;                              // Size of one element (e.g. 4 for float)
+		bool bIsTemporal;                              // True if stored in temporal/volatile slab
 	};
 
 	// Single source of truth for every field in this archetype — maps (component, cacheSlot, fieldIdx)
@@ -150,7 +150,7 @@ public:
 	// Get base pointer to a field array within a chunk (frame 0 for temporal/volatile fields).
 	void* GetFieldArray(Chunk* chunk, ComponentTypeID typeID, uint32_t fieldIndex)
 	{
-		FieldKey key{typeID, ReflectionRegistry::Get().GetCacheSlotIndex(typeID), fieldIndex};
+		FieldKey key{ typeID, ReflectionRegistry::Get().GetCacheSlotIndex(typeID), fieldIndex };
 		auto* desc = ArchetypeFieldLayout.find(key);
 		return desc ? chunk->GetFieldPtr(desc->fieldSlotIndex) : nullptr;
 	}
@@ -176,7 +176,7 @@ public:
 	uint32_t GetComponentFieldSlotIndices(ComponentTypeID typeID, uint8_t* outSlots, uint32_t maxSlots) const
 	{
 		uint8_t cacheSlot = ReflectionRegistry::Get().GetCacheSlotIndex(typeID);
-		uint32_t count = 0;
+		uint32_t count    = 0;
 		for (uint32_t fi = 0; fi < maxSlots; ++fi)
 		{
 			FieldKey key{ typeID, cacheSlot, fi };
@@ -204,8 +204,8 @@ private:
 	// fields across all frames in the slab ring buffer.
 	// Does NOT update Registry records or slot lists — Registry::ExecuteDefragMove handles that.
 	void MoveEntitySlot(const EntitySlot& src, const EntitySlot& dst,
-	                    ComponentCacheBase* temporalCache,
-	                    ComponentCacheBase* volatileCache);
+		ComponentCacheBase* temporalCache,
+		ComponentCacheBase* volatileCache);
 
 	// Layout construction — called once by Registry after component metadata is known.
 	void BuildLayout(class Registry* reg, const std::vector<ComponentMetaEx>& components, SystemID inArchSystemID = SystemID::None);
@@ -232,8 +232,8 @@ struct ArchetypeKeyHash
 		constexpr size_t FNV_OFFSET = 0xcbf29ce484222325;
 
 		size_t hash = FNV_OFFSET;
-		hash        ^= static_cast<uint64_t>(key.ID) << 48;
-		hash        *= FNV_PRIME;
+		hash ^= static_cast<uint64_t>(key.ID) << 48;
+		hash *= FNV_PRIME;
 
 		// Process signature in 64-bit chunks
 		const uint64_t* data = reinterpret_cast<const uint64_t*>(&key.Sig);

@@ -50,24 +50,24 @@ public:
 			TargetCube = reg->Create<CubeEntity<>>([](CubeEntity<>& v)
 			{
 				v.SetFlags(TemporalFlagBits::Active | TemporalFlagBits::Alive | TemporalFlagBits::Replicated);
-				Vector3 spawnPos{ SimFloat(5.0f), SimFloat(2.0f), SimFloat(-6.0f)};
+				Vector3 spawnPos{ SimFloat(5.0f), SimFloat(2.0f), SimFloat(-6.0f) };
 				v.SetPosition(spawnPos);
 				v.Transform.Rotation.SetIdentity();
 				v.VisTransform.VisBlend = SimFloat(1.0f);
-				v.scale.ScaleX         = SimFloat(1.0f);
-				v.scale.ScaleY         = SimFloat(1.0f);
-				v.scale.ScaleZ         = SimFloat(1.0f);
-				v.color.R              = SimFloat(1.0f);
-				v.color.G              = SimFloat(0.3f);
-				v.color.B              = SimFloat(0.1f);
-				v.color.A              = SimFloat(1.0f);
-				v.mesh.MeshID          = 1u;
-				v.physBody.Shape       = JoltShapeType::Box;
-				v.physBody.HalfExtentX = SimFloat(0.5f);
-				v.physBody.HalfExtentY = SimFloat(0.5f);
-				v.physBody.HalfExtentZ = SimFloat(0.5f);
-				v.physBody.Motion      = JoltMotion::Dynamic;
-				v.physBody.Mass        = SimFloat(10.0f);
+				v.scale.ScaleX          = SimFloat(1.0f);
+				v.scale.ScaleY          = SimFloat(1.0f);
+				v.scale.ScaleZ          = SimFloat(1.0f);
+				v.color.R               = SimFloat(1.0f);
+				v.color.G               = SimFloat(0.3f);
+				v.color.B               = SimFloat(0.1f);
+				v.color.A               = SimFloat(1.0f);
+				v.mesh.MeshID           = 1u;
+				v.physBody.Shape        = JoltShapeType::Box;
+				v.physBody.HalfExtentX  = SimFloat(0.5f);
+				v.physBody.HalfExtentY  = SimFloat(0.5f);
+				v.physBody.HalfExtentZ  = SimFloat(0.5f);
+				v.physBody.Motion       = JoltMotion::Dynamic;
+				v.physBody.Mass         = SimFloat(10.0f);
 			});
 
 			// Spawn the trigger volume across from the cube and off the ground
@@ -160,15 +160,18 @@ private:
 
 	void SpawnPlayerBody(Soul& soul)
 	{
-		WorldBase* world            = GetWorld();
+		WorldBase* world        = GetWorld();
 		ConstructRegistry* reg  = world->GetConstructRegistry();
 		ReplicationSystem* repl = world->GetReplicationSystem();
 
 		const int64_t prefabIDRaw = GetCharacterPrefab(soul);
 		const uint16_t typeHash   = ReflectionRegistry::ConstructTypeHashFromName("PlayerConstruct");
 
-		// Stagger spawn positions so players don't overlap.
-		const SimFloat spawnX = SimFloat((SpawnCounter % 2 == 0) ? -2.0f : 2.0f);
+		// Give every player its own slot, alternating sides at growing distance: -2, +2, -4, +4, ...
+		// Alternating between only two slots put the third player inside the first.
+		const float side      = (SpawnCounter % 2 == 0) ? -1.0f : 1.0f;
+		const float distance  = 2.0f * static_cast<float>(1 + SpawnCounter / 2);
+		const SimFloat spawnX = SimFloat(side * distance);
 		++SpawnCounter;
 
 		// Use PreInit callable so spawn position is set BEFORE Initialize() seeds JoltCharacter.
@@ -188,17 +191,16 @@ private:
 		else
 		{
 			ConstructNetManifest manifest{};
-			manifest.PrefabIndex = typeHash;
-			manifest.NetFlags    = 0;
+			manifest.PrefabIndex      = typeHash;
+			manifest.NetFlags         = 0;
 			const uint32_t spawnFrame = world->GetLogicThread()
 											? world->GetLogicThread()->GetLastCompletedFrame()
 											: 0;
-			ref = reg->AllocateNetRef(player, soul.GetOwnerID(), manifest, typeHash, prefabIDRaw, spawnFrame);
+			ref                       = reg->AllocateNetRef(player, soul.GetOwnerID(), manifest, typeHash, prefabIDRaw, spawnFrame);
 		}
 
 		soul.ClaimBody(ref);
 		LOG_INFO_F("[ArenaMode] Spawned body for ownerID=%u at (%.1f,5,0) (networked=%s)",
-				   soul.GetOwnerID(), spawnX.ToFloat(), repl ? "yes" : "no");
+			soul.GetOwnerID(), spawnX.ToFloat(), repl ? "yes" : "no");
 	}
 };
-

@@ -15,7 +15,7 @@ struct CVelocity : ComponentView<CVelocity, WIDTH>
 	FloatProxy<WIDTH> vY;
 	FloatProxy<WIDTH> vZ;
 
-	Vec3Accessor<WIDTH> Vel{vX, vY, vZ};
+	Vec3Accessor<WIDTH> Vel{ vX, vY, vZ };
 };
 
 TNX_REGISTER_COMPONENT(CVelocity)

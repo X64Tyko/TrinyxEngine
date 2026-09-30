@@ -133,18 +133,28 @@ public:
 	// Server-driven discrete events (spawns, sweeps) that must be replayed during rollback
 	// resim so the corrected timeline stays deterministically consistent with the server.
 	//
-	// Push once on the logic thread when the event first executes (inside SpawnAndWait /
-	// PostAndWait lambdas). During resim, ReplayServerEventsAt replays all events whose
-	// frame matches the current resim frame. PruneServerEvents drops events that have aged
-	// out of the temporal ring — they can never be targeted by a rollback.
+	// Rule: an event is keyed at the frame its effect is written into. Push on the logic thread
+	// (inside SpawnAndWait / PostAndWait lambdas).
+	//   - Deferred effects (replicated spawns) are pushed unapplied at their spawn frame and
+	//     request a rollback there; the resim writes them into the ring.
+	//   - Effects already written this frame (sweeps, activations) use PushAppliedServerEvent,
+	//     which keys them at the current sim frame.
+	// A rollback that cannot reach an unapplied event's frame (level floor, oldest snapshot,
+	// ring depth) applies it at the rewind point instead, so no effect is ever silently lost.
 	struct ServerEventEntry
 	{
 		uint32_t Frame;
 		std::function<void()> Replay;
+		bool bApplied = false; ///< True once the effect is in the ring at Frame.
 	};
 
 	void PushServerEvent(ServerEventEntry entry);
+	/// Record an effect already written into the current write frame; keyed at that frame.
+	void PushAppliedServerEvent(std::function<void()> replay);
 	void ReplayServerEventsAt(uint32_t frame);
+	/// At a rollback's rewind point: apply events keyed before @p frame that never reached the ring.
+	void ApplyPendingServerEventsBefore(uint32_t frame);
+	/// Drops applied events older than @p oldestFrame; unapplied events wait for their rewind.
 	void PruneServerEvents(uint32_t oldestFrame);
 
 	// Snapshot all SoA field values for a newly spawned entity and register a server
@@ -157,9 +167,9 @@ public:
 	// and ORs Dirty | DirtiedFrame into fieldArrayTable[0]. Used by all raw-write correction paths
 	// to ensure consistent dirty tracking without duplicating the field-layout loop.
 	static void WriteEntityTransformFields(void* const* fieldArrayTable, const Archetype* arch,
-	                                       uint32_t localIdx,
-	                                       SimFloat posX, SimFloat posY, SimFloat posZ,
-	                                       SimFloat rotQx, SimFloat rotQy, SimFloat rotQz, SimFloat rotQw);
+		uint32_t localIdx,
+		SimFloat posX, SimFloat posY, SimFloat posZ,
+		SimFloat rotQx, SimFloat rotQy, SimFloat rotQz, SimFloat rotQw);
 
 	// --- Diagnostics ---
 
@@ -174,7 +184,7 @@ public:
 	EntityRecord GetRecord(EntityHandle handle) const;
 
 	// Bind/unbind a callback on an entity's OnCacheSlotChange (defrag listener).
-	template <typename T, void(T::*MemFn)(uint32_t, uint32_t)>
+	template <typename T, void (T::*MemFn)(uint32_t, uint32_t)>
 	void BindOnCacheSlotChange(EntityHandle handle, T* obj)
 	{
 		GlobalEntityHandle gHandle = GlobalEntityRegistry.LookupGlobalHandle(handle);
@@ -182,7 +192,7 @@ public:
 		if (record) record->OnCacheSlotChange.template Bind<T, MemFn>(obj);
 	}
 
-	template <typename T, void(T::*MemFn)(uint32_t, uint32_t)>
+	template <typename T, void (T::*MemFn)(uint32_t, uint32_t)>
 	void UnbindOnCacheSlotChange(EntityHandle handle, T* obj)
 	{
 		GlobalEntityHandle gHandle = GlobalEntityRegistry.LookupGlobalHandle(handle);
@@ -195,7 +205,7 @@ public:
 
 	// Render → Logic handshake: render publishes the logic frame number it just consumed.
 	// Logic reads this to decide whether to clear accumulated dirty bits (bit 30).
-	std::atomic<uint32_t> RenderAck{0};
+	std::atomic<uint32_t> RenderAck{ 0 };
 	uint32_t LastPublishedFrame = 0;
 	bool RenderHasAcked         = false; // false until render publishes its first ack
 
@@ -209,7 +219,8 @@ public:
 private:
 	friend class Archetype;
 	friend class DefragSystem;
-	template <typename, typename, typename> friend class LogicThread;
+	template <typename, typename, typename>
+	friend class LogicThread;
 	friend struct RollbackSim;
 	friend class ReplicationSystem;
 	friend class OwnerNet;
@@ -254,8 +265,8 @@ private:
 	// CacheToRecord, ChunkLiveCounts, and firing OnCacheSlotChange.
 	// DefragSystem::ProcessMoves is responsible for updating InactiveEntitySlots.
 	void ExecuteDefragMove(Archetype* arch,
-	                       const Archetype::EntitySlot& src,
-	                       const Archetype::EntitySlot& dst);
+		const Archetype::EntitySlot& src,
+		const Archetype::EntitySlot& dst);
 
 	// Free trailing chunks in arch whose ChunkLiveCounts entry is 0, decrementing
 	// AllocatedEntityCount so future iteration scans shrink accordingly.
@@ -376,7 +387,7 @@ EntityHandle Registry::Create()
 {
 	ClassID classID = T::StaticClassID();
 	GlobalEntityHandle GHandle;
-	CreateInternal(classID, {&GHandle, 1});
+	CreateInternal(classID, { &GHandle, 1 });
 	EntityHandle lHandle = MakeEntityHandle(GHandle, classID);
 
 	EntityRecord record = GetRecord(lHandle);
@@ -413,7 +424,7 @@ EntityHandle Registry::Create(Fn&& fn)
 {
 	ClassID classID = T::StaticClassID();
 	GlobalEntityHandle GHandle;
-	CreateInternal(classID, {&GHandle, 1});
+	CreateInternal(classID, { &GHandle, 1 });
 	EntityHandle lHandle = MakeEntityHandle(GHandle, classID);
 
 	EntityRecord record = GetRecord(lHandle);
@@ -435,8 +446,7 @@ EntityHandle Registry::Create(Fn&& fn)
 		// Material refs are excluded: MaterialID=0 means "no material", which is valid.
 		for (const auto& [fkey, fdesc] : record.Arch->ArchetypeFieldLayout)
 		{
-			if (fdesc.refAssetType != AssetType::Mesh &&
-				fdesc.refAssetType != AssetType::Skeleton)
+			if (fdesc.refAssetType != AssetType::Mesh && fdesc.refAssetType != AssetType::Skeleton)
 				continue;
 			auto* arr    = static_cast<uint32_t*>(fieldArrayTable[fdesc.fieldSlotIndex]);
 			uint32_t val = arr[record.LocalIndex];
@@ -460,7 +470,7 @@ template <std::invocable<EntityRecord&, void**> Fn>
 EntityHandle Registry::CreateByClassID(ClassID classID, Fn&& fn)
 {
 	GlobalEntityHandle GHandle;
-	CreateInternal(classID, {&GHandle, 1});
+	CreateInternal(classID, { &GHandle, 1 });
 	EntityHandle lHandle = MakeEntityHandle(GHandle, classID);
 
 	EntityRecord record = GetRecord(lHandle);
@@ -468,8 +478,8 @@ EntityHandle Registry::CreateByClassID(ClassID classID, Fn&& fn)
 	{
 		void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 		record.Arch->BuildFieldArrayTable(record.TargetChunk, fieldArrayTable,
-										  GetTemporalCache()->GetActiveWriteFrame(),
-										  GetVolatileCache()->GetActiveWriteFrame());
+			GetTemporalCache()->GetActiveWriteFrame(),
+			GetVolatileCache()->GetActiveWriteFrame());
 
 		fn(record, fieldArrayTable);
 
@@ -498,8 +508,8 @@ template <typename T>
 bool Registry::HasComponent(EntityHandle lHandle)
 {
 	const ComponentTypeID typeID = T::StaticTypeID(); // StaticTypeID() is runtime-const, not constexpr
-	const ClassID classType          = lHandle.GetTypeID();
-	auto& mr                         = ReflectionRegistry::Get();
+	const ClassID classType      = lHandle.GetTypeID();
+	auto& mr                     = ReflectionRegistry::Get();
 	// typeID is 1-based; BuildSignature stores components at bit (typeID-1).
 	return mr.ClassToArchetype[classType].test(typeID - 1);
 }
@@ -523,7 +533,7 @@ std::vector<Archetype*> Registry::ComponentQuery()
 	{
 		Valid            = Arch.first.Sig.Contains(Sig);
 		Results[ArchIdx] = Arch.second;
-		ArchIdx          += !!Valid;
+		ArchIdx += !!Valid;
 	}
 
 	Results.erase(Results.begin() + ArchIdx, Results.end());
@@ -534,207 +544,16 @@ template <typename... Classes>
 std::vector<Archetype*> Registry::ClassQuery()
 {
 	std::vector<Archetype*> Results(Archetypes.size());
-	std::unordered_set<ClassID> ClassIDs{Classes::StaticClassID()...};
+	std::unordered_set<ClassID> ClassIDs{ Classes::StaticClassID()... };
 	uint32_t ArchIdx = 0;
 	bool Valid       = false;
 	for (auto Arch : Archetypes)
 	{
 		Valid            = ClassIDs.contains(Arch.first.ID);
 		Results[ArchIdx] = Arch.second;
-		ArchIdx          += !!Valid;
+		ArchIdx += !!Valid;
 	}
 
 	Results.erase(Results.begin() + ArchIdx, Results.end());
 	return Results;
-}
-
-inline void Registry::InvokeScalarUpdate(SimFloat dt)
-{
-	TNX_ZONE_C(TNX_COLOR_LOGIC);
-
-	uint32_t hisWrite = 0;
-#ifdef TNX_ENABLE_ROLLBACK
-	if (!HistorySlab.TryLockFrameForWrite(hisWrite))
-	{
-		LOG_ENG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
-		return;
-	}
-#endif
-	uint32_t volWrite = 0;
-	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
-	{
-		LOG_ENG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
-#ifdef TNX_ENABLE_ROLLBACK
-		HistorySlab.UnlockFrameWrite();
-#endif
-		return;
-	}
-#ifndef TNX_ENABLE_ROLLBACK
-	hisWrite = volWrite; // Without rollback, Temporal fields share the VolatileSlab — match frame indices.
-#endif
-
-	TrinyxJobs::JobCounter ScalarUpdateCounter;
-
-	for (auto& [sig, arch] : Archetypes)
-	{
-		UpdateFunc ScalarUpdate = ReflectionRegistry::Get().EntityGetters[sig.ID].ScalarUpdate;
-		if (!ScalarUpdate) continue;
-
-		size_t size = arch->Chunks.size();
-
-		for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
-		{
-			TrinyxJobs::Dispatch(
-				[ScalarUpdate, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
-				{
-					Chunk* chunk         = arch->Chunks[chunkIdx];
-					uint32_t entityCount = arch->GetAllocatedChunkCount(chunkIdx);
-					if (entityCount == 0) return;
-
-					void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
-					arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
-
-					ScalarUpdate(dt, fieldArrayTable, fieldArrayTable[0], entityCount);
-				},
-				&ScalarUpdateCounter, TrinyxJobs::Queue::Logic);
-		}
-	}
-
-	TrinyxJobs::WaitForCounter(&ScalarUpdateCounter, TrinyxJobs::Queue::Logic);
-
-#ifdef TNX_ENABLE_ROLLBACK
-	HistorySlab.UnlockFrameWrite();
-#endif
-	VolatileSlab.UnlockFrameWrite();
-}
-
-inline void Registry::InvokePrePhys(SimFloat dt)
-{
-	TNX_ZONE_C(TNX_COLOR_LOGIC);
-
-	uint32_t hisWrite = 0;
-#ifdef TNX_ENABLE_ROLLBACK
-	if (!HistorySlab.TryLockFrameForWrite(hisWrite))
-	{
-		LOG_ENG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
-		return;
-	}
-#endif
-	uint32_t volWrite = 0;
-	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
-	{
-		LOG_ENG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
-#ifdef TNX_ENABLE_ROLLBACK
-		HistorySlab.UnlockFrameWrite();
-#endif
-		return;
-	}
-#ifndef TNX_ENABLE_ROLLBACK
-	hisWrite = volWrite;
-#endif
-
-	TrinyxJobs::JobCounter prePhysCounter;
-
-	for (auto& [sig, arch] : Archetypes)
-	{
-#ifdef TNX_ENABLE_ROLLBACK
-		const EntityMeta& meta = ReflectionRegistry::Get().EntityGetters[sig.ID];
-		UpdateFunc prePhys = (bResimMode && meta.PrePhysResim) ? meta.PrePhysResim : meta.PrePhys;
-#else
-		UpdateFunc prePhys = ReflectionRegistry::Get().EntityGetters[sig.ID].PrePhys;
-#endif
-		if (!prePhys) continue;
-
-		// Capture only what fits in 48 bytes: 5 pointers/values = 40 bytes
-		size_t chunkCount = arch->Chunks.size();
-
-		for (size_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx)
-		{
-			TrinyxJobs::Dispatch(
-				[prePhys, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
-				{
-					Chunk* chunk         = arch->Chunks[chunkIdx];
-					uint32_t entityCount = arch->GetAllocatedChunkCount(chunkIdx);
-					if (entityCount == 0) return;
-
-					void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
-					arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
-
-					prePhys(dt, fieldArrayTable, fieldArrayTable[0], entityCount);
-				},
-				&prePhysCounter, TrinyxJobs::Queue::Logic);
-		}
-	}
-
-	TrinyxJobs::WaitForCounter(&prePhysCounter, TrinyxJobs::Queue::Logic);
-
-#ifdef TNX_ENABLE_ROLLBACK
-	HistorySlab.UnlockFrameWrite();
-#endif
-	VolatileSlab.UnlockFrameWrite();
-}
-
-inline void Registry::InvokePostPhys(SimFloat dt)
-{
-	TNX_ZONE_C(TNX_COLOR_LOGIC);
-
-	uint32_t hisWrite = 0;
-#ifdef TNX_ENABLE_ROLLBACK
-	if (!HistorySlab.TryLockFrameForWrite(hisWrite))
-	{
-		LOG_ENG_WARN_F("Failed to acquire Temporal write lock on frame %u", HistorySlab.GetActiveWriteFrame());
-		return;
-	}
-#endif
-	uint32_t volWrite = 0;
-	if (!VolatileSlab.TryLockFrameForWrite(volWrite))
-	{
-		LOG_ENG_WARN_F("Failed to acquire Volatile write lock on frame %u", VolatileSlab.GetActiveWriteFrame());
-#ifdef TNX_ENABLE_ROLLBACK
-		HistorySlab.UnlockFrameWrite();
-#endif
-		return;
-	}
-#ifndef TNX_ENABLE_ROLLBACK
-	hisWrite = volWrite;
-#endif
-
-	TrinyxJobs::JobCounter postPhysCounter;
-
-	for (auto& [sig, arch] : Archetypes)
-	{
-#ifdef TNX_ENABLE_ROLLBACK
-		const EntityMeta& meta = ReflectionRegistry::Get().EntityGetters[sig.ID];
-		UpdateFunc PostPhys = (bResimMode && meta.PostPhysResim) ? meta.PostPhysResim : meta.PostPhys;
-#else
-		UpdateFunc PostPhys = ReflectionRegistry::Get().EntityGetters[sig.ID].PostPhys;
-#endif
-		if (!PostPhys) continue;
-
-		size_t size = arch->Chunks.size();
-
-		for (size_t chunkIdx = 0; chunkIdx < size; ++chunkIdx)
-		{
-			TrinyxJobs::Dispatch(
-				[PostPhys, arch, chunkIdx, dt, hisWrite, volWrite](uint32_t)
-				{
-					Chunk* chunk         = arch->Chunks[chunkIdx];
-					uint32_t entityCount = arch->GetAllocatedChunkCount(chunkIdx);
-					if (entityCount == 0) return;
-
-					void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
-					arch->BuildFieldArrayTable(chunk, fieldArrayTable, hisWrite, volWrite);
-
-					PostPhys(dt, fieldArrayTable, fieldArrayTable[0], entityCount);
-				},
-				&postPhysCounter, TrinyxJobs::Queue::Logic);
-		}
-	}
-
-	TrinyxJobs::WaitForCounter(&postPhysCounter, TrinyxJobs::Queue::Logic);
-
-#ifdef TNX_ENABLE_ROLLBACK
-	HistorySlab.UnlockFrameWrite();
-#endif
-	VolatileSlab.UnlockFrameWrite();
 }

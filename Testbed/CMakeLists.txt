@@ -50,8 +50,7 @@ target_compile_definitions(Trinyx PRIVATE TNX_TESTING)
 target_include_directories(${PROJECT_NAME} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
-        
+
 target_include_directories(${PROJECT_NAME} PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Public"
 )
-

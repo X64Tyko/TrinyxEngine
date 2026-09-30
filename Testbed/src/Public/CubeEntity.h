@@ -24,7 +24,7 @@ public:
 	FORCE_INLINE void PrePhysics([[maybe_unused]] SimFloat dt)
 	{
 		transform.Position += velocity.Vel * dt;
-		transform.PosX     = (transform.PosX > SimFloat(50.f)).Choose(SimFloat(-50.f), transform.PosX);
+		transform.PosX = (transform.PosX > SimFloat(50.f)).Choose(SimFloat(-50.f), transform.PosX);
 
 		velocity.vX *= SimFloat(0.98f);
 		velocity.vY *= SimFloat(0.99f);
@@ -33,10 +33,6 @@ public:
 		transform.Rotation.RotateZ(dt * SimFloat(0.4f));
 	}
 };
-
-
-
-
 
 
 template <FieldWidth WIDTH = FieldWidth::Scalar>
@@ -54,21 +50,15 @@ public:
 };
 
 
-
-
-
-
-
-
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 class SuperCube : public BaseCube<SuperCube, WIDTH>
 {
 	TNX_REGISTER_SCHEMA(SuperCube, BaseCube)
 public:
+	using Base::color;
+	using Base::scale;
 	using Base::transform;
 	using Base::velocity;
-	using Base::scale;
-	using Base::color;
 
 	// Logic
 	FORCE_INLINE void ScalarUpdate([[maybe_unused]] SimFloat dt)

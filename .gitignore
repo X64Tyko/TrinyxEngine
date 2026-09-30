@@ -35,7 +35,8 @@ riderModule.iml
 
 # CMake Build Folders
 build/
-cmake-build-*/
+# Build trees (directories, or links to them — e.g. cmake-build-windows -> C:\TrinyxBuild)
+cmake-build-*
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
@@ -62,3 +63,6 @@ temp_*.txt
 # Claude Code per-project config (settings, allowlists, hooks)
 .claude/
 /libs/tracy/profiler/
+
+# Python
+__pycache__/

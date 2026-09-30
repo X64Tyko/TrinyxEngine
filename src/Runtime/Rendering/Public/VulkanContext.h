@@ -25,13 +25,13 @@ struct VulkanQueues
 
 struct VulkanSwapchain
 {
-	vk::raii::SwapchainKHR Handle{nullptr};
+	vk::raii::SwapchainKHR Handle{ nullptr };
 	vk::Format Format = vk::Format::eUndefined;
 	vk::Extent2D Extent{};
 	std::vector<vk::Image> Images;               // non-owning (owned by swapchain)
 	std::vector<vk::raii::ImageView> ImageViews; // owning
-	// WSI only — no depth/render-target resources here.
-	// Depth image lives in VulkRender, allocated via VMA.
+												 // WSI only — no depth/render-target resources here.
+												 // Depth image lives in VulkRender, allocated via VMA.
 };
 
 // -----------------------------------------------------------------------
@@ -102,8 +102,8 @@ public:
 	/// Find a supported image format from the candidates list.
 	/// Used by VulkRender when selecting depth/render-target formats.
 	VkFormat FindSupportedFormat(const std::vector<VkFormat>& candidates,
-								 VkImageTiling tiling,
-								 VkFormatFeatureFlags features) const;
+		VkImageTiling tiling,
+		VkFormatFeatureFlags features) const;
 
 private:
 	bool CreateInstance(SDL_Window* window, bool enableValidation);
@@ -122,18 +122,18 @@ private:
 
 	// Core Vulkan handles (raii — destroy in reverse declaration order)
 	vk::raii::Context VkContext;
-	vk::raii::Instance Instance{nullptr};
-	vk::raii::DebugUtilsMessengerEXT DebugMessenger{nullptr};
-	vk::raii::SurfaceKHR Surface{nullptr};
-	vk::raii::PhysicalDevice PhysicalDevice{nullptr};
-	vk::raii::Device Device{nullptr};
+	vk::raii::Instance Instance{ nullptr };
+	vk::raii::DebugUtilsMessengerEXT DebugMessenger{ nullptr };
+	vk::raii::SurfaceKHR Surface{ nullptr };
+	vk::raii::PhysicalDevice PhysicalDevice{ nullptr };
+	vk::raii::Device Device{ nullptr };
 
 	VulkanQueues Queues;
 	VulkanSwapchain Swapchain;
 
-	vk::raii::CommandPool GraphicsCommandPool{nullptr};
-	vk::raii::CommandPool ComputeCommandPool{nullptr};
-	vk::raii::CommandPool TransferCommandPool{nullptr};
+	vk::raii::CommandPool GraphicsCommandPool{ nullptr };
+	vk::raii::CommandPool ComputeCommandPool{ nullptr };
+	vk::raii::CommandPool TransferCommandPool{ nullptr };
 
 	// Feature flags
 	bool bHasReBAR                    = false;

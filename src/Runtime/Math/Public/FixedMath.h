@@ -2,13 +2,13 @@
 #include "SimFloat.h"
 
 #ifdef _MSC_VER
-#  include <intrin.h>
+#include <intrin.h>
 #endif
 
 // Quaternion dot product.
 template <typename TRot>
 FORCE_INLINE TRot QDot(TRot ax, TRot ay, TRot az, TRot aw,
-                       TRot bx, TRot by, TRot bz, TRot bw)
+	TRot bx, TRot by, TRot bz, TRot bw)
 {
 	return ax * bx + ay * by + az * bz + aw * bw;
 }
@@ -17,21 +17,30 @@ FORCE_INLINE TRot QDot(TRot ax, TRot ay, TRot az, TRot aw,
 // TRot is typically SimUnit; t is the blend weight as SimFloat.
 template <typename TRot>
 FORCE_INLINE void QNLerp(TRot ax, TRot ay, TRot az, TRot aw,
-                         TRot bx, TRot by, TRot bz, TRot bw,
-                         SimFloat t,
-                         TRot& ox, TRot& oy, TRot& oz, TRot& ow)
+	TRot bx, TRot by, TRot bz, TRot bw,
+	SimFloat t,
+	TRot& ox, TRot& oy, TRot& oz, TRot& ow)
 {
 	if (QDot(ax, ay, az, aw, bx, by, bz, bw) < TRot(0))
 	{
-		bx = -bx; by = -by; bz = -bz; bw = -bw;
+		bx = -bx;
+		by = -by;
+		bz = -bz;
+		bw = -bw;
 	}
 	SimFloat it = SimFloat(1) - t;
-	ox = it * ax + t * bx;
-	oy = it * ay + t * by;
-	oz = it * az + t * bz;
-	ow = it * aw + t * bw;
-	TRot len = Sqrt(ox * ox + oy * oy + oz * oz + ow * ow);
-	if (len > TRot(0)) { ox /= len; oy /= len; oz /= len; ow /= len; }
+	ox          = it * ax + t * bx;
+	oy          = it * ay + t * by;
+	oz          = it * az + t * bz;
+	ow          = it * aw + t * bw;
+	TRot len    = Sqrt(ox * ox + oy * oy + oz * oz + ow * ow);
+	if (len > TRot(0))
+	{
+		ox /= len;
+		oy /= len;
+		oz /= len;
+		ow /= len;
+	}
 }
 
 #ifdef TNX_DETERMINISM
@@ -63,11 +72,11 @@ inline void RotateVectorFixed(
 	int32_t& ox, int32_t& oy, int32_t& oz)
 {
 	constexpr int kShift = 2 * FixedUnit::ScaleLog2; // 56
-	const int64_t cx = 2LL * ((int64_t)qy * vz - (int64_t)qz * vy);
-	const int64_t cy = 2LL * ((int64_t)qz * vx - (int64_t)qx * vz);
-	const int64_t cz = 2LL * ((int64_t)qx * vy - (int64_t)qy * vx);
-	ox = vx + static_cast<int32_t>(Mul128Shift(qw, cx, kShift) + Mul128Shift(qy, cz, kShift) - Mul128Shift(qz, cy, kShift));
-	oy = vy + static_cast<int32_t>(Mul128Shift(qw, cy, kShift) + Mul128Shift(qz, cx, kShift) - Mul128Shift(qx, cz, kShift));
-	oz = vz + static_cast<int32_t>(Mul128Shift(qw, cz, kShift) + Mul128Shift(qx, cy, kShift) - Mul128Shift(qy, cx, kShift));
+	const int64_t cx     = 2LL * ((int64_t)qy * vz - (int64_t)qz * vy);
+	const int64_t cy     = 2LL * ((int64_t)qz * vx - (int64_t)qx * vz);
+	const int64_t cz     = 2LL * ((int64_t)qx * vy - (int64_t)qy * vx);
+	ox                   = vx + static_cast<int32_t>(Mul128Shift(qw, cx, kShift) + Mul128Shift(qy, cz, kShift) - Mul128Shift(qz, cy, kShift));
+	oy                   = vy + static_cast<int32_t>(Mul128Shift(qw, cy, kShift) + Mul128Shift(qz, cx, kShift) - Mul128Shift(qx, cz, kShift));
+	oz                   = vz + static_cast<int32_t>(Mul128Shift(qw, cz, kShift) + Mul128Shift(qx, cy, kShift) - Mul128Shift(qy, cx, kShift));
 }
 #endif

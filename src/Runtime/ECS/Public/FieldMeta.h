@@ -48,12 +48,12 @@ struct ComponentMetaEx
 // Hash specialization for std::unordered_set
 namespace std
 {
-	template <>
-	struct hash<ComponentMetaEx>
+template <>
+struct hash<ComponentMetaEx>
+{
+	size_t operator()(const ComponentMetaEx& Meta) const noexcept
 	{
-		size_t operator()(const ComponentMetaEx& Meta) const noexcept
-		{
-			return hash<uint64_t>()(Meta.TypeID);
-		}
-	};
-}
+		return hash<uint64_t>()(Meta.TypeID);
+	}
+};
+} // namespace std

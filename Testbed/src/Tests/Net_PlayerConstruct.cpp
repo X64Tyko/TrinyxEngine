@@ -20,9 +20,9 @@ RUNTIME_TEST(Net_PlayerConstruct)
 	WorldBase* world = Engine.GetDefaultWorld();
 	ASSERT(world != nullptr);
 
-	ReplicationSystem* repl     = world->GetReplicationSystem();
-	ConstructRegistry* reg      = world->GetConstructRegistry();
-	const uint16_t     typeHash = ReflectionRegistry::ConstructTypeHashFromName("PlayerConstruct");
+	ReplicationSystem* repl = world->GetReplicationSystem();
+	ConstructRegistry* reg  = world->GetConstructRegistry();
+	const uint16_t typeHash = ReflectionRegistry::ConstructTypeHashFromName("PlayerConstruct");
 
 	/*
 	 * TODO: Net_PlayerConstruct — full loopback PIE test.
@@ -44,7 +44,9 @@ RUNTIME_TEST(Net_PlayerConstruct)
 	 * Blocked by: PIE session bootstrap API stabilization.
 	 */
 
-	(void)repl; (void)reg; (void)typeHash;
+	(void)repl;
+	(void)reg;
+	(void)typeHash;
 	throw tnx::Testing::TestSkipped("Pending PIE session bootstrap API stabilization");
 }
 

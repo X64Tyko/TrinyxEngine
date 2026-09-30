@@ -19,266 +19,294 @@
 
 namespace VecMath
 {
-	// ─── Intermediate Storage ───────────────────────────────────────────────
-	// float in Scalar, __m256 in Wide/WideMask. Returned by binary ops on
-	// accessors so that compound expressions work without touching SoA mid-chain.
+// ─── Intermediate Storage ───────────────────────────────────────────────
+// float in Scalar, __m256 in Wide/WideMask. Returned by binary ops on
+// accessors so that compound expressions work without touching SoA mid-chain.
 
-	template <int N, FieldWidth WIDTH>
-	struct VecLocal
+template <int N, FieldWidth WIDTH>
+struct VecLocal
+{
+	using Val = std::conditional_t<WIDTH == FieldWidth::Scalar, SimFloat, typename SIMDTraits<SimFloat, WIDTH>::VecType>;
+	Val v[N];
+
+	FORCE_INLINE Val& operator[](int i) { return v[i]; }
+	FORCE_INLINE const Val& operator[](int i) const { return v[i]; }
+
+	// ── VecLocal + VecLocal ──
+	FORCE_INLINE VecLocal operator+(const VecLocal& o) const
 	{
-		using Val = std::conditional_t<WIDTH == FieldWidth::Scalar, SimFloat, typename SIMDTraits<SimFloat, WIDTH>::VecType>;
-		Val v[N];
-
-		FORCE_INLINE Val& operator[](int i) { return v[i]; }
-		FORCE_INLINE const Val& operator[](int i) const { return v[i]; }
-
-		// ── VecLocal + VecLocal ──
-		FORCE_INLINE VecLocal operator+(const VecLocal& o) const
-		{
-			VecLocal r;
-			if constexpr (WIDTH == FieldWidth::Scalar) for (int i = 0; i < N; ++i) r.v[i] = v[i] + o.v[i];
-			else
-			{
-				using T = SIMDTraits<SimFloat, WIDTH>;
-				for (int i = 0; i < N; ++i) r.v[i] = T::add(v[i], o.v[i]);
-			}
-			return r;
-		}
-
-		FORCE_INLINE VecLocal operator-(const VecLocal& o) const
-		{
-			VecLocal r;
-			if constexpr (WIDTH == FieldWidth::Scalar) for (int i = 0; i < N; ++i) r.v[i] = v[i] - o.v[i];
-			else
-			{
-				using T = SIMDTraits<SimFloat, WIDTH>;
-				for (int i = 0; i < N; ++i) r.v[i] = T::sub(v[i], o.v[i]);
-			}
-			return r;
-		}
-
-		// Component-wise multiply (VecLocal * VecLocal)
-		FORCE_INLINE VecLocal operator*(const VecLocal& o) const
-		{
-			VecLocal r;
-			if constexpr (WIDTH == FieldWidth::Scalar) for (int i = 0; i < N; ++i) r.v[i] = v[i] * o.v[i];
-			else
-			{
-				using T = SIMDTraits<SimFloat, WIDTH>;
-				for (int i = 0; i < N; ++i) r.v[i] = T::mul(v[i], o.v[i]);
-			}
-			return r;
-		}
-
-		// ── VecLocal * scalar ──
-		FORCE_INLINE VecLocal operator*(SimFloat s) const
-		{
-			VecLocal r;
-			if constexpr (WIDTH == FieldWidth::Scalar) for (int i = 0; i < N; ++i) r.v[i] = v[i] * s;
-			else
-			{
-				using T       = SIMDTraits<SimFloat, WIDTH>;
-				const auto sv = T::set1(s);
-				for (int i = 0; i < N; ++i) r.v[i] = T::mul(v[i], sv);
-			}
-			return r;
-		}
-
-		FORCE_INLINE friend VecLocal operator*(SimFloat s, const VecLocal& vec) { return vec * s; }
-
-		FORCE_INLINE VecLocal operator/(SimFloat s) const
-		{
-			VecLocal r;
-			if constexpr (WIDTH == FieldWidth::Scalar) for (int i = 0; i < N; ++i) r.v[i] = v[i] / s;
-			else
-			{
-				using T       = SIMDTraits<SimFloat, WIDTH>;
-				const auto sv = T::set1(s);
-				for (int i = 0; i < N; ++i) r.v[i] = T::div(v[i], sv);
-			}
-			return r;
-		}
-
-		FORCE_INLINE VecLocal operator-() const
-		{
-			VecLocal r;
-			if constexpr (WIDTH == FieldWidth::Scalar) for (int i = 0; i < N; ++i) r.v[i] = -v[i];
-			else
-			{
-				using T         = SIMDTraits<SimFloat, WIDTH>;
-				const auto zero = T::set1(SimFloat(0.0f));
-				for (int i = 0; i < N; ++i) r.v[i] = T::sub(zero, v[i]);
-			}
-			return r;
-		}
-	};
-
-	// ─── Load helpers ───────────────────────────────────────────────────────
-
-	template <FieldWidth WIDTH>
-	FORCE_INLINE VecLocal<2, WIDTH> Load2(
-		const FloatProxy<WIDTH>& x, const FloatProxy<WIDTH>& y)
-	{
-		VecLocal<2, WIDTH> r;
+		VecLocal r;
 		if constexpr (WIDTH == FieldWidth::Scalar)
-		{
-			r.v[0] = x.WriteArray[x.index];
-			r.v[1] = y.WriteArray[y.index];
-		}
+			for (int i = 0; i < N; ++i)
+				r.v[i] = v[i] + o.v[i];
 		else
 		{
 			using T = SIMDTraits<SimFloat, WIDTH>;
-			r.v[0]  = T::load(&x.WriteArray[x.index]);
-			r.v[1]  = T::load(&y.WriteArray[y.index]);
+			for (int i = 0; i < N; ++i)
+				r.v[i] = T::add(v[i], o.v[i]);
 		}
 		return r;
 	}
 
-	template <FieldWidth WIDTH>
-	FORCE_INLINE VecLocal<3, WIDTH> Load3(
-		const FloatProxy<WIDTH>& x, const FloatProxy<WIDTH>& y, const FloatProxy<WIDTH>& z)
+	FORCE_INLINE VecLocal operator-(const VecLocal& o) const
 	{
-		VecLocal<3, WIDTH> r;
+		VecLocal r;
 		if constexpr (WIDTH == FieldWidth::Scalar)
-		{
-			r.v[0] = x.WriteArray[x.index];
-			r.v[1] = y.WriteArray[y.index];
-			r.v[2] = z.WriteArray[z.index];
-		}
+			for (int i = 0; i < N; ++i)
+				r.v[i] = v[i] - o.v[i];
 		else
 		{
 			using T = SIMDTraits<SimFloat, WIDTH>;
-			r.v[0]  = T::load(&x.WriteArray[x.index]);
-			r.v[1]  = T::load(&y.WriteArray[y.index]);
-			r.v[2]  = T::load(&z.WriteArray[z.index]);
+			for (int i = 0; i < N; ++i)
+				r.v[i] = T::sub(v[i], o.v[i]);
 		}
 		return r;
 	}
 
-	template <FieldWidth WIDTH>
-	FORCE_INLINE VecLocal<4, WIDTH> Load4(
-		const FloatProxy<WIDTH>& x, const FloatProxy<WIDTH>& y,
-		const FloatProxy<WIDTH>& z, const FloatProxy<WIDTH>& w)
+	// Component-wise multiply (VecLocal * VecLocal)
+	FORCE_INLINE VecLocal operator*(const VecLocal& o) const
 	{
-		VecLocal<4, WIDTH> r;
+		VecLocal r;
 		if constexpr (WIDTH == FieldWidth::Scalar)
-		{
-			r.v[0] = x.WriteArray[x.index];
-			r.v[1] = y.WriteArray[y.index];
-			r.v[2] = z.WriteArray[z.index];
-			r.v[3] = w.WriteArray[w.index];
-		}
+			for (int i = 0; i < N; ++i)
+				r.v[i] = v[i] * o.v[i];
 		else
 		{
 			using T = SIMDTraits<SimFloat, WIDTH>;
-			r.v[0]  = T::load(&x.WriteArray[x.index]);
-			r.v[1]  = T::load(&y.WriteArray[y.index]);
-			r.v[2]  = T::load(&z.WriteArray[z.index]);
-			r.v[3]  = T::load(&w.WriteArray[w.index]);
+			for (int i = 0; i < N; ++i)
+				r.v[i] = T::mul(v[i], o.v[i]);
 		}
 		return r;
 	}
 
-	// ─── Dot products ───────────────────────────────────────────────────────
-
-	template <FieldWidth WIDTH>
-	FORCE_INLINE typename VecLocal<2, WIDTH>::Val Dot2(
-		const VecLocal<2, WIDTH>& a, const VecLocal<2, WIDTH>& b)
+	// ── VecLocal * scalar ──
+	FORCE_INLINE VecLocal operator*(SimFloat s) const
 	{
-		if constexpr (WIDTH == FieldWidth::Scalar) return a.v[0] * b.v[0] + a.v[1] * b.v[1];
-		else
-		{
-			using T = SIMDTraits<SimFloat, WIDTH>;
-			return T::add(T::mul(a.v[0], b.v[0]), T::mul(a.v[1], b.v[1]));
-		}
-	}
-
-	template <FieldWidth WIDTH>
-	FORCE_INLINE typename VecLocal<3, WIDTH>::Val Dot3(
-		const VecLocal<3, WIDTH>& a, const VecLocal<3, WIDTH>& b)
-	{
-		if constexpr (WIDTH == FieldWidth::Scalar) return a.v[0] * b.v[0] + a.v[1] * b.v[1] + a.v[2] * b.v[2];
-		else
-		{
-			using T = SIMDTraits<SimFloat, WIDTH>;
-			return T::add(T::add(T::mul(a.v[0], b.v[0]), T::mul(a.v[1], b.v[1])),
-						  T::mul(a.v[2], b.v[2]));
-		}
-	}
-
-	template <FieldWidth WIDTH>
-	FORCE_INLINE typename VecLocal<4, WIDTH>::Val Dot4(
-		const VecLocal<4, WIDTH>& a, const VecLocal<4, WIDTH>& b)
-	{
-		if constexpr (WIDTH == FieldWidth::Scalar) return a.v[0] * b.v[0] + a.v[1] * b.v[1] + a.v[2] * b.v[2] + a.v[3] * b.v[3];
-		else
-		{
-			using T = SIMDTraits<SimFloat, WIDTH>;
-			return T::add(T::add(T::mul(a.v[0], b.v[0]), T::mul(a.v[1], b.v[1])),
-						  T::add(T::mul(a.v[2], b.v[2]), T::mul(a.v[3], b.v[3])));
-		}
-	}
-
-	// ─── Cross product (Vec3 only) ──────────────────────────────────────────
-
-	template <FieldWidth WIDTH>
-	FORCE_INLINE VecLocal<3, WIDTH> Cross3(
-		const VecLocal<3, WIDTH>& a, const VecLocal<3, WIDTH>& b)
-	{
-		VecLocal<3, WIDTH> r;
+		VecLocal r;
 		if constexpr (WIDTH == FieldWidth::Scalar)
-		{
-			r.v[0] = a.v[1] * b.v[2] - a.v[2] * b.v[1];
-			r.v[1] = a.v[2] * b.v[0] - a.v[0] * b.v[2];
-			r.v[2] = a.v[0] * b.v[1] - a.v[1] * b.v[0];
-		}
+			for (int i = 0; i < N; ++i)
+				r.v[i] = v[i] * s;
 		else
 		{
-			using T = SIMDTraits<SimFloat, WIDTH>;
-			r.v[0]  = T::sub(T::mul(a.v[1], b.v[2]), T::mul(a.v[2], b.v[1]));
-			r.v[1]  = T::sub(T::mul(a.v[2], b.v[0]), T::mul(a.v[0], b.v[2]));
-			r.v[2]  = T::sub(T::mul(a.v[0], b.v[1]), T::mul(a.v[1], b.v[0]));
+			using T       = SIMDTraits<SimFloat, WIDTH>;
+			const auto sv = T::set1(s);
+			for (int i = 0; i < N; ++i)
+				r.v[i] = T::mul(v[i], sv);
 		}
 		return r;
 	}
 
-	// ─── Length / Normalize ─────────────────────────────────────────────────
+	FORCE_INLINE friend VecLocal operator*(SimFloat s, const VecLocal& vec) { return vec * s; }
 
-	template <int N, FieldWidth WIDTH>
-	FORCE_INLINE typename VecLocal<N, WIDTH>::Val LengthSq(const VecLocal<N, WIDTH>& v)
+	FORCE_INLINE VecLocal operator/(SimFloat s) const
 	{
-		if constexpr (N == 2) return Dot2<WIDTH>(v, v);
-		else if constexpr (N == 3) return Dot3<WIDTH>(v, v);
-		else return Dot4<WIDTH>(v, v);
-	}
-
-	template <int N, FieldWidth WIDTH>
-	FORCE_INLINE typename VecLocal<N, WIDTH>::Val Length(const VecLocal<N, WIDTH>& v)
-	{
-		auto sq = LengthSq<N, WIDTH>(v);
-		if constexpr (WIDTH == FieldWidth::Scalar) return Sqrt(sq);
-		else return SIMDTraits<SimFloat, WIDTH>::sqrt(sq);
-	}
-
-	template <int N, FieldWidth WIDTH>
-	FORCE_INLINE VecLocal<N, WIDTH> Normalized(const VecLocal<N, WIDTH>& v)
-	{
-		VecLocal<N, WIDTH> r;
+		VecLocal r;
 		if constexpr (WIDTH == FieldWidth::Scalar)
-		{
-			SimFloat lensq = LengthSq<N, WIDTH>(v);
-			SimFloat inv   = (lensq > SimFloat(0.0f)) ? Rsqrt(lensq) : SimFloat(0.0f);
-			for (int i = 0; i < N; ++i) r.v[i] = v.v[i] * inv;
-		}
+			for (int i = 0; i < N; ++i)
+				r.v[i] = v[i] / s;
 		else
 		{
-			using T  = SIMDTraits<SimFloat, WIDTH>;
-			auto sq  = LengthSq<N, WIDTH>(v);
-			auto inv = T::rsqrt(sq);
-			for (int i = 0; i < N; ++i) r.v[i] = T::mul(v.v[i], inv);
+			using T       = SIMDTraits<SimFloat, WIDTH>;
+			const auto sv = T::set1(s);
+			for (int i = 0; i < N; ++i)
+				r.v[i] = T::div(v[i], sv);
 		}
 		return r;
 	}
+
+	FORCE_INLINE VecLocal operator-() const
+	{
+		VecLocal r;
+		if constexpr (WIDTH == FieldWidth::Scalar)
+			for (int i = 0; i < N; ++i)
+				r.v[i] = -v[i];
+		else
+		{
+			using T         = SIMDTraits<SimFloat, WIDTH>;
+			const auto zero = T::set1(SimFloat(0.0f));
+			for (int i = 0; i < N; ++i)
+				r.v[i] = T::sub(zero, v[i]);
+		}
+		return r;
+	}
+};
+
+// ─── Load helpers ───────────────────────────────────────────────────────
+
+template <FieldWidth WIDTH>
+FORCE_INLINE VecLocal<2, WIDTH> Load2(
+	const FloatProxy<WIDTH>& x, const FloatProxy<WIDTH>& y)
+{
+	VecLocal<2, WIDTH> r;
+	if constexpr (WIDTH == FieldWidth::Scalar)
+	{
+		r.v[0] = x.WriteArray[x.index];
+		r.v[1] = y.WriteArray[y.index];
+	}
+	else
+	{
+		using T = SIMDTraits<SimFloat, WIDTH>;
+		r.v[0]  = T::load(&x.WriteArray[x.index]);
+		r.v[1]  = T::load(&y.WriteArray[y.index]);
+	}
+	return r;
+}
+
+template <FieldWidth WIDTH>
+FORCE_INLINE VecLocal<3, WIDTH> Load3(
+	const FloatProxy<WIDTH>& x, const FloatProxy<WIDTH>& y, const FloatProxy<WIDTH>& z)
+{
+	VecLocal<3, WIDTH> r;
+	if constexpr (WIDTH == FieldWidth::Scalar)
+	{
+		r.v[0] = x.WriteArray[x.index];
+		r.v[1] = y.WriteArray[y.index];
+		r.v[2] = z.WriteArray[z.index];
+	}
+	else
+	{
+		using T = SIMDTraits<SimFloat, WIDTH>;
+		r.v[0]  = T::load(&x.WriteArray[x.index]);
+		r.v[1]  = T::load(&y.WriteArray[y.index]);
+		r.v[2]  = T::load(&z.WriteArray[z.index]);
+	}
+	return r;
+}
+
+template <FieldWidth WIDTH>
+FORCE_INLINE VecLocal<4, WIDTH> Load4(
+	const FloatProxy<WIDTH>& x, const FloatProxy<WIDTH>& y,
+	const FloatProxy<WIDTH>& z, const FloatProxy<WIDTH>& w)
+{
+	VecLocal<4, WIDTH> r;
+	if constexpr (WIDTH == FieldWidth::Scalar)
+	{
+		r.v[0] = x.WriteArray[x.index];
+		r.v[1] = y.WriteArray[y.index];
+		r.v[2] = z.WriteArray[z.index];
+		r.v[3] = w.WriteArray[w.index];
+	}
+	else
+	{
+		using T = SIMDTraits<SimFloat, WIDTH>;
+		r.v[0]  = T::load(&x.WriteArray[x.index]);
+		r.v[1]  = T::load(&y.WriteArray[y.index]);
+		r.v[2]  = T::load(&z.WriteArray[z.index]);
+		r.v[3]  = T::load(&w.WriteArray[w.index]);
+	}
+	return r;
+}
+
+// ─── Dot products ───────────────────────────────────────────────────────
+
+template <FieldWidth WIDTH>
+FORCE_INLINE typename VecLocal<2, WIDTH>::Val Dot2(
+	const VecLocal<2, WIDTH>& a, const VecLocal<2, WIDTH>& b)
+{
+	if constexpr (WIDTH == FieldWidth::Scalar)
+		return a.v[0] * b.v[0] + a.v[1] * b.v[1];
+	else
+	{
+		using T = SIMDTraits<SimFloat, WIDTH>;
+		return T::add(T::mul(a.v[0], b.v[0]), T::mul(a.v[1], b.v[1]));
+	}
+}
+
+template <FieldWidth WIDTH>
+FORCE_INLINE typename VecLocal<3, WIDTH>::Val Dot3(
+	const VecLocal<3, WIDTH>& a, const VecLocal<3, WIDTH>& b)
+{
+	if constexpr (WIDTH == FieldWidth::Scalar)
+		return a.v[0] * b.v[0] + a.v[1] * b.v[1] + a.v[2] * b.v[2];
+	else
+	{
+		using T = SIMDTraits<SimFloat, WIDTH>;
+		return T::add(T::add(T::mul(a.v[0], b.v[0]), T::mul(a.v[1], b.v[1])),
+			T::mul(a.v[2], b.v[2]));
+	}
+}
+
+template <FieldWidth WIDTH>
+FORCE_INLINE typename VecLocal<4, WIDTH>::Val Dot4(
+	const VecLocal<4, WIDTH>& a, const VecLocal<4, WIDTH>& b)
+{
+	if constexpr (WIDTH == FieldWidth::Scalar)
+		return a.v[0] * b.v[0] + a.v[1] * b.v[1] + a.v[2] * b.v[2] + a.v[3] * b.v[3];
+	else
+	{
+		using T = SIMDTraits<SimFloat, WIDTH>;
+		return T::add(T::add(T::mul(a.v[0], b.v[0]), T::mul(a.v[1], b.v[1])),
+			T::add(T::mul(a.v[2], b.v[2]), T::mul(a.v[3], b.v[3])));
+	}
+}
+
+// ─── Cross product (Vec3 only) ──────────────────────────────────────────
+
+template <FieldWidth WIDTH>
+FORCE_INLINE VecLocal<3, WIDTH> Cross3(
+	const VecLocal<3, WIDTH>& a, const VecLocal<3, WIDTH>& b)
+{
+	VecLocal<3, WIDTH> r;
+	if constexpr (WIDTH == FieldWidth::Scalar)
+	{
+		r.v[0] = a.v[1] * b.v[2] - a.v[2] * b.v[1];
+		r.v[1] = a.v[2] * b.v[0] - a.v[0] * b.v[2];
+		r.v[2] = a.v[0] * b.v[1] - a.v[1] * b.v[0];
+	}
+	else
+	{
+		using T = SIMDTraits<SimFloat, WIDTH>;
+		r.v[0]  = T::sub(T::mul(a.v[1], b.v[2]), T::mul(a.v[2], b.v[1]));
+		r.v[1]  = T::sub(T::mul(a.v[2], b.v[0]), T::mul(a.v[0], b.v[2]));
+		r.v[2]  = T::sub(T::mul(a.v[0], b.v[1]), T::mul(a.v[1], b.v[0]));
+	}
+	return r;
+}
+
+// ─── Length / Normalize ─────────────────────────────────────────────────
+
+template <int N, FieldWidth WIDTH>
+FORCE_INLINE typename VecLocal<N, WIDTH>::Val LengthSq(const VecLocal<N, WIDTH>& v)
+{
+	if constexpr (N == 2)
+		return Dot2<WIDTH>(v, v);
+	else if constexpr (N == 3)
+		return Dot3<WIDTH>(v, v);
+	else
+		return Dot4<WIDTH>(v, v);
+}
+
+template <int N, FieldWidth WIDTH>
+FORCE_INLINE typename VecLocal<N, WIDTH>::Val Length(const VecLocal<N, WIDTH>& v)
+{
+	auto sq = LengthSq<N, WIDTH>(v);
+	if constexpr (WIDTH == FieldWidth::Scalar)
+		return Sqrt(sq);
+	else
+		return SIMDTraits<SimFloat, WIDTH>::sqrt(sq);
+}
+
+template <int N, FieldWidth WIDTH>
+FORCE_INLINE VecLocal<N, WIDTH> Normalized(const VecLocal<N, WIDTH>& v)
+{
+	VecLocal<N, WIDTH> r;
+	if constexpr (WIDTH == FieldWidth::Scalar)
+	{
+		SimFloat lensq = LengthSq<N, WIDTH>(v);
+		SimFloat inv   = (lensq > SimFloat(0.0f)) ? Rsqrt(lensq) : SimFloat(0.0f);
+		for (int i = 0; i < N; ++i)
+			r.v[i] = v.v[i] * inv;
+	}
+	else
+	{
+		using T  = SIMDTraits<SimFloat, WIDTH>;
+		auto sq  = LengthSq<N, WIDTH>(v);
+		auto inv = T::rsqrt(sq);
+		for (int i = 0; i < N; ++i)
+			r.v[i] = T::mul(v.v[i], inv);
+	}
+	return r;
+}
 } // namespace VecMath
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -330,16 +358,16 @@ struct Vec2Accessor
 	FORCE_INLINE Vec2Accessor& operator+=(const Vec2Accessor& o)
 	{
 		auto v = o.Load();
-		x      += v[0];
-		y      += v[1];
+		x += v[0];
+		y += v[1];
 		return *this;
 	}
 
 	FORCE_INLINE Vec2Accessor& operator-=(const Vec2Accessor& o)
 	{
 		auto v = o.Load();
-		x      -= v[0];
-		y      -= v[1];
+		x -= v[0];
+		y -= v[1];
 		return *this;
 	}
 
@@ -425,18 +453,18 @@ struct Vec3Accessor
 	FORCE_INLINE Vec3Accessor& operator+=(const Vec3Accessor& o)
 	{
 		auto v = o.Load();
-		x      += v[0];
-		y      += v[1];
-		z      += v[2];
+		x += v[0];
+		y += v[1];
+		z += v[2];
 		return *this;
 	}
 
 	FORCE_INLINE Vec3Accessor& operator-=(const Vec3Accessor& o)
 	{
 		auto v = o.Load();
-		x      -= v[0];
-		y      -= v[1];
-		z      -= v[2];
+		x -= v[0];
+		y -= v[1];
+		z -= v[2];
 		return *this;
 	}
 
@@ -531,20 +559,20 @@ struct Vec4Accessor
 	FORCE_INLINE Vec4Accessor& operator+=(const Vec4Accessor& o)
 	{
 		auto v = o.Load();
-		x      += v[0];
-		y      += v[1];
-		z      += v[2];
-		w      += v[3];
+		x += v[0];
+		y += v[1];
+		z += v[2];
+		w += v[3];
 		return *this;
 	}
 
 	FORCE_INLINE Vec4Accessor& operator-=(const Vec4Accessor& o)
 	{
 		auto v = o.Load();
-		x      -= v[0];
-		y      -= v[1];
-		z      -= v[2];
-		w      -= v[3];
+		x -= v[0];
+		y -= v[1];
+		z -= v[2];
+		w -= v[3];
 		return *this;
 	}
 

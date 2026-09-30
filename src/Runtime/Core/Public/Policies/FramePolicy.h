@@ -18,7 +18,7 @@
  */
 struct GameFrame
 {
-static constexpr bool IsEditor = false; ///< Disables all editor-only LogicThread branches.
+	static constexpr bool IsEditor = false; ///< Disables all editor-only LogicThread branches.
 };
 
 /**
@@ -26,7 +26,7 @@ static constexpr bool IsEditor = false; ///< Disables all editor-only LogicThrea
  */
 struct EditorFrame
 {
-static constexpr bool IsEditor = true; ///< Enables editor-only LogicThread branches.
+	static constexpr bool IsEditor = true; ///< Enables editor-only LogicThread branches.
 };
 
 /** @} */

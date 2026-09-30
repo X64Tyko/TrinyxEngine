@@ -184,7 +184,7 @@ private:
 
 #ifdef TNX_ENABLE_NETWORK
 	// Set by FlowManager at creation and refreshed on every RPC dispatch.
-	NetChannel Channel   = {};
+	NetChannel Channel = {};
 #endif
 	FlowManagerBase* FlowMgr = nullptr;
 };
@@ -225,64 +225,84 @@ inline const char* SoulRoleTag(const Soul* soul)
 // ---------------------------------------------------------------------------
 
 // Non-formatted variants
-#define LOG_NET_TRACE(soul, msg) do { \
-    char _TnxNetBuf[512]; \
-    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] %s", SoulRoleTag(soul), (msg)); \
-    LOG_ENG_TRACE(_TnxNetBuf); \
-} while(0)
+#define LOG_NET_TRACE(soul, msg)                                                       \
+	do                                                                                 \
+	{                                                                                  \
+		char _TnxNetBuf[512];                                                          \
+		snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] %s", SoulRoleTag(soul), (msg)); \
+		LOG_ENG_TRACE(_TnxNetBuf);                                                     \
+	} while (0)
 
-#define LOG_NET_DEBUG(soul, msg) do { \
-    char _TnxNetBuf[512]; \
-    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] %s", SoulRoleTag(soul), (msg)); \
-    LOG_ENG_DEBUG(_TnxNetBuf); \
-} while(0)
+#define LOG_NET_DEBUG(soul, msg)                                                       \
+	do                                                                                 \
+	{                                                                                  \
+		char _TnxNetBuf[512];                                                          \
+		snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] %s", SoulRoleTag(soul), (msg)); \
+		LOG_ENG_DEBUG(_TnxNetBuf);                                                     \
+	} while (0)
 
-#define LOG_NET_INFO(soul, msg) do { \
-    char _TnxNetBuf[512]; \
-    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] %s", SoulRoleTag(soul), (msg)); \
-    LOG_ENG_INFO(_TnxNetBuf); \
-} while(0)
+#define LOG_NET_INFO(soul, msg)                                                        \
+	do                                                                                 \
+	{                                                                                  \
+		char _TnxNetBuf[512];                                                          \
+		snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] %s", SoulRoleTag(soul), (msg)); \
+		LOG_ENG_INFO(_TnxNetBuf);                                                      \
+	} while (0)
 
-#define LOG_NET_WARN(soul, msg) do { \
-    char _TnxNetBuf[512]; \
-    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] %s", SoulRoleTag(soul), (msg)); \
-    LOG_ENG_WARN(_TnxNetBuf); \
-} while(0)
+#define LOG_NET_WARN(soul, msg)                                                        \
+	do                                                                                 \
+	{                                                                                  \
+		char _TnxNetBuf[512];                                                          \
+		snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] %s", SoulRoleTag(soul), (msg)); \
+		LOG_ENG_WARN(_TnxNetBuf);                                                      \
+	} while (0)
 
-#define LOG_NET_ERROR(soul, msg) do { \
-    char _TnxNetBuf[512]; \
-    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] %s", SoulRoleTag(soul), (msg)); \
-    LOG_ENG_ERROR(_TnxNetBuf); \
-} while(0)
+#define LOG_NET_ERROR(soul, msg)                                                       \
+	do                                                                                 \
+	{                                                                                  \
+		char _TnxNetBuf[512];                                                          \
+		snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] %s", SoulRoleTag(soul), (msg)); \
+		LOG_ENG_ERROR(_TnxNetBuf);                                                     \
+	} while (0)
 
 // Formatted variants — fmt must be a string literal so the role prefix
 // can be concatenated at compile time.
-#define LOG_NET_TRACE_F(soul, fmt, ...) do { \
-    char _TnxNetBuf[512]; \
-    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] " fmt, SoulRoleTag(soul), ##__VA_ARGS__); \
-    LOG_ENG_TRACE(_TnxNetBuf); \
-} while(0)
+#define LOG_NET_TRACE_F(soul, fmt, ...)                                                          \
+	do                                                                                           \
+	{                                                                                            \
+		char _TnxNetBuf[512];                                                                    \
+		snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] " fmt, SoulRoleTag(soul), ##__VA_ARGS__); \
+		LOG_ENG_TRACE(_TnxNetBuf);                                                               \
+	} while (0)
 
-#define LOG_NET_DEBUG_F(soul, fmt, ...) do { \
-    char _TnxNetBuf[512]; \
-    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] " fmt, SoulRoleTag(soul), ##__VA_ARGS__); \
-    LOG_ENG_DEBUG(_TnxNetBuf); \
-} while(0)
+#define LOG_NET_DEBUG_F(soul, fmt, ...)                                                          \
+	do                                                                                           \
+	{                                                                                            \
+		char _TnxNetBuf[512];                                                                    \
+		snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] " fmt, SoulRoleTag(soul), ##__VA_ARGS__); \
+		LOG_ENG_DEBUG(_TnxNetBuf);                                                               \
+	} while (0)
 
-#define LOG_NET_INFO_F(soul, fmt, ...) do { \
-    char _TnxNetBuf[512]; \
-    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] " fmt, SoulRoleTag(soul), ##__VA_ARGS__); \
-    LOG_ENG_INFO(_TnxNetBuf); \
-} while(0)
+#define LOG_NET_INFO_F(soul, fmt, ...)                                                           \
+	do                                                                                           \
+	{                                                                                            \
+		char _TnxNetBuf[512];                                                                    \
+		snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] " fmt, SoulRoleTag(soul), ##__VA_ARGS__); \
+		LOG_ENG_INFO(_TnxNetBuf);                                                                \
+	} while (0)
 
-#define LOG_NET_WARN_F(soul, fmt, ...) do { \
-    char _TnxNetBuf[512]; \
-    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] " fmt, SoulRoleTag(soul), ##__VA_ARGS__); \
-    LOG_ENG_WARN(_TnxNetBuf); \
-} while(0)
+#define LOG_NET_WARN_F(soul, fmt, ...)                                                           \
+	do                                                                                           \
+	{                                                                                            \
+		char _TnxNetBuf[512];                                                                    \
+		snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] " fmt, SoulRoleTag(soul), ##__VA_ARGS__); \
+		LOG_ENG_WARN(_TnxNetBuf);                                                                \
+	} while (0)
 
-#define LOG_NET_ERROR_F(soul, fmt, ...) do { \
-    char _TnxNetBuf[512]; \
-    snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] " fmt, SoulRoleTag(soul), ##__VA_ARGS__); \
-    LOG_ENG_ERROR(_TnxNetBuf); \
-} while(0)
+#define LOG_NET_ERROR_F(soul, fmt, ...)                                                          \
+	do                                                                                           \
+	{                                                                                            \
+		char _TnxNetBuf[512];                                                                    \
+		snprintf(_TnxNetBuf, sizeof(_TnxNetBuf), "[%s] " fmt, SoulRoleTag(soul), ##__VA_ARGS__); \
+		LOG_ENG_ERROR(_TnxNetBuf);                                                               \
+	} while (0)

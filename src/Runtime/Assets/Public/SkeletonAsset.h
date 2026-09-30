@@ -29,7 +29,7 @@ struct TnxSkelHeader
 	uint32_t Version     = TnxSkelVersion;
 	uint32_t BoneCount   = 0;
 	uint32_t SocketCount = 0;
-	uint8_t  Reserved[48]{};
+	uint8_t Reserved[48]{};
 };
 
 static_assert(sizeof(TnxSkelHeader) == 64, "TnxSkelHeader must be exactly 64 bytes");
@@ -40,10 +40,10 @@ static_assert(sizeof(TnxSkelHeader) == 64, "TnxSkelHeader must be exactly 64 byt
 
 struct BoneInfoDisk
 {
-	uint32_t parentIndex;          // 0xFFFFFFFF for root
-	float    inverseBindPose[16];  // column-major mat4  (64B)
-	uint32_t nameHash;             // TnxName::Value — used at runtime
-	char     nameStr[28];          // stripped in TNX_SHIPPING builds (pad to 32B)
+	uint32_t parentIndex;      // 0xFFFFFFFF for root
+	float inverseBindPose[16]; // column-major mat4  (64B)
+	uint32_t nameHash;         // TnxName::Value — used at runtime
+	char nameStr[28];          // stripped in TNX_SHIPPING builds (pad to 32B)
 };
 
 static_assert(sizeof(BoneInfoDisk) == 4 + 64 + 4 + 28, "BoneInfoDisk unexpected size");
@@ -54,14 +54,14 @@ static_assert(sizeof(BoneInfoDisk) == 4 + 64 + 4 + 28, "BoneInfoDisk unexpected 
 
 struct SocketInfoDisk
 {
-	uint32_t id;                   // TnxName hash (== SocketID)
+	uint32_t id; // TnxName hash (== SocketID)
 	uint32_t boneIndex;
 	// BoneTransform stored as raw floats — disk format is always float regardless of SimFloat mode.
-	float    tx, ty, tz;
-	float    rx, ry, rz, rw;
-	float    sx, sy, sz;
-	uint8_t  prewarm;              // bool
-	char     nameStr[27];          // editor-only string (pad to 32B total after prewarm)
+	float tx, ty, tz;
+	float rx, ry, rz, rw;
+	float sx, sy, sz;
+	uint8_t prewarm;  // bool
+	char nameStr[27]; // editor-only string (pad to 32B total after prewarm)
 };
 
 static_assert(sizeof(SocketInfoDisk) == 4 + 4 + 40 + 1 + 27, "SocketInfoDisk unexpected size");
@@ -72,25 +72,25 @@ static_assert(sizeof(SocketInfoDisk) == 4 + 4 + 40 + 1 + 27, "SocketInfoDisk une
 
 struct BoneInfo
 {
-	uint32_t  parentIndex;
-	float     inverseBindPose[16];
-	TnxName   name;
+	uint32_t parentIndex;
+	float inverseBindPose[16];
+	TnxName name;
 };
 
 struct SocketDef
 {
-	SocketID      id;          // TnxName::Value — compare with TNX_SOCKET("LeftFoot")
-	uint32_t      boneIndex;
+	SocketID id; // TnxName::Value — compare with TNX_SOCKET("LeftFoot")
+	uint32_t boneIndex;
 	BoneTransform localOffset;
-	bool          prewarm;
-	TnxName       name;
+	bool prewarm;
+	TnxName name;
 };
 
 struct SkeletonAsset
 {
-	uint32_t             boneCount   = 0;
-	uint32_t             socketCount = 0;
-	std::vector<BoneInfo>  bones;
+	uint32_t boneCount   = 0;
+	uint32_t socketCount = 0;
+	std::vector<BoneInfo> bones;
 	std::vector<SocketDef> sockets;
 
 	// ----------------------------------------------------------------

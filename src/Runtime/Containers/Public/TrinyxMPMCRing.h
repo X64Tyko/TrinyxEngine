@@ -20,7 +20,7 @@ class TrinyxMPMCRing : public TrinyxRingBase<TrinyxMPMCRing<T>, T>
 	using typename Base::Cell;
 
 public:
-	TrinyxMPMCRing()  = default;
+	TrinyxMPMCRing() = default;
 	~TrinyxMPMCRing() { Base::ShutdownStorage(); }
 
 	TrinyxMPMCRing(const TrinyxMPMCRing&)            = delete;
@@ -41,7 +41,7 @@ public:
 	// ------------------------------------------------------------------
 
 	bool TryPush(const T& item) { return Base::MPEnqueue(item); }
-	bool TryPush(T&& item)      { return Base::MPEnqueue(std::move(item)); }
+	bool TryPush(T&& item) { return Base::MPEnqueue(std::move(item)); }
 
 	// ------------------------------------------------------------------
 	// Consumer side — callable from any thread (MPMC).
@@ -50,19 +50,21 @@ public:
 	/// Non-blocking dequeue. Returns false if empty.
 	bool TryPop(T& item)
 	{
-		Cell*  cell;
+		Cell* cell;
 		size_t pos = DequeuePos.load(std::memory_order_relaxed);
 		for (;;)
 		{
 			cell       = &Base::Cells[pos & Base::Mask];
 			size_t seq = cell->Sequence.load(std::memory_order_acquire);
-			auto   diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1);
+			auto diff  = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1);
 			if (diff == 0)
 			{
 				if (DequeuePos.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) break;
 			}
-			else if (diff < 0) return false; // empty
-			else pos = DequeuePos.load(std::memory_order_relaxed);
+			else if (diff < 0)
+				return false; // empty
+			else
+				pos = DequeuePos.load(std::memory_order_relaxed);
 		}
 		item = cell->Data;
 		cell->Sequence.store(pos + Base::Mask + 1, std::memory_order_release);
@@ -71,10 +73,9 @@ public:
 
 	bool IsEmpty() const
 	{
-		return Base::EnqueuePos.load(std::memory_order_relaxed) ==
-		       DequeuePos.load(std::memory_order_relaxed);
+		return Base::EnqueuePos.load(std::memory_order_relaxed) == DequeuePos.load(std::memory_order_relaxed);
 	}
 
 private:
-	alignas(64) std::atomic<size_t> DequeuePos{0};
+	alignas(64) std::atomic<size_t> DequeuePos{ 0 };
 };

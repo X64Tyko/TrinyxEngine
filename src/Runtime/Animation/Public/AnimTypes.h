@@ -23,8 +23,8 @@ constexpr NotifyID InvalidNotifyID = 0;
 struct BoneTransform
 {
 	SimFloat tx{}, ty{}, tz{};
-	SimUnit  rx{}, ry{}, rz{};
-	SimUnit  rw = SimUnit(1);
+	SimUnit rx{}, ry{}, rz{};
+	SimUnit rw  = SimUnit(1);
 	SimFloat sx = SimFloat(1), sy = SimFloat(1), sz = SimFloat(1);
 
 	static BoneTransform Identity() { return {}; }
@@ -47,7 +47,7 @@ struct BoneTransform
 /// Single entry in a per-tick bone cache; stores a resolved world-space transform.
 struct BoneCacheEntry
 {
-	uint32_t    boneIndex = 0xFFFFFFFF;
+	uint32_t boneIndex = 0xFFFFFFFF;
 	BoneTransform worldTransform;
 };
 
@@ -56,8 +56,8 @@ struct BoneCacheEntry
 struct ChainWalkResult
 {
 	BoneTransform ancestorTransform; ///< Nearest cached ancestor (identity for root).
-	uint32_t      chain[64];         ///< Bone indices from ancestor toward target.
-	uint32_t      remainingBones = 0;
+	uint32_t chain[64];              ///< Bone indices from ancestor toward target.
+	uint32_t remainingBones = 0;
 };
 
 struct SkeletonAsset; // forward — resolved via SkeletonManager
@@ -69,7 +69,7 @@ struct BoneCacheLocal
 	static constexpr uint32_t MaxCachedBones = 16;
 
 	BoneCacheEntry entries[MaxCachedBones];
-	uint32_t       count = 0;
+	uint32_t count = 0;
 
 	/// Reset the cache at the start of each PostPhysics tick.
 	void Clear() { count = 0; }
@@ -97,17 +97,17 @@ struct BoneCacheLocal
 	/// Returns the ancestor's world transform and the chain of bone indices
 	/// (exclusive ancestor, inclusive target) that still need FK evaluation.
 	ChainWalkResult FindNearestCachedAncestor(uint32_t targetBoneIndex,
-	                                          const SkeletonAsset& skeleton) const;
+		const SkeletonAsset& skeleton) const;
 };
 
 /// Per-socket evaluation state: resolved world transform plus validity flag.
 struct SocketEntry
 {
-	SocketID      id           = InvalidSocketID;
-	uint32_t      boneIndex    = 0xFFFFFFFF;
-	BoneTransform localOffset;   ///< Offset in bone space from SocketDef.
+	SocketID id        = InvalidSocketID;
+	uint32_t boneIndex = 0xFFFFFFFF;
+	BoneTransform localOffset; ///< Offset in bone space from SocketDef.
 	BoneTransform worldTransform;
-	bool          valid        = false; ///< True once the world transform has been evaluated this tick.
+	bool valid = false; ///< True once the world transform has been evaluated this tick.
 };
 
 /// PostPhysics-scoped socket cache; holds resolved world transforms for all registered sockets.
@@ -117,12 +117,13 @@ struct SocketTransformLocal
 	static constexpr uint32_t MaxSockets = 12;
 
 	SocketEntry sockets[MaxSockets];
-	uint32_t    count = 0;
+	uint32_t count = 0;
 
 	/// Invalidate all entries at the start of a PostPhysics tick without removing registrations.
 	void Clear()
 	{
-		for (uint32_t i = 0; i < count; ++i) sockets[i].valid = false;
+		for (uint32_t i = 0; i < count; ++i)
+			sockets[i].valid = false;
 	}
 
 	/// Register a socket so it can be queried via GetSocketTransform. Call once after skeleton bind.
@@ -148,9 +149,9 @@ struct SocketTransformLocal
 /// Payload delivered to AnimConstruct::OnAnimNotify when a notify crosses its trigger time.
 struct NotifyFireEvent
 {
-	NotifyID  id;
-	SimFloat  blendWeight;  ///< Weight of the blend slot that fired this notify.
-	float     triggerTime;
+	NotifyID id;
+	SimFloat blendWeight; ///< Weight of the blend slot that fired this notify.
+	float triggerTime;
 };
 
 /// Record of a single notify fire; used by AnimNotifyState to prevent double-fire within a loop.
@@ -168,7 +169,7 @@ struct AnimNotifyState
 	static constexpr uint32_t MaxFireRecords = 32;
 
 	NotifyFireRecord fired[MaxFireRecords];
-	uint32_t         firedCount = 0;
+	uint32_t firedCount = 0;
 
 	/// Reset all fire records at the start of a tick.
 	void Clear() { firedCount = 0; }
@@ -186,7 +187,7 @@ struct AnimNotifyState
 	void RecordFire(NotifyID id, uint32_t slot, SimFloat time)
 	{
 		if (firedCount >= MaxFireRecords) return;
-		fired[firedCount++] = {id, slot, time};
+		fired[firedCount++] = { id, slot, time };
 	}
 
 	/// Remove all records for @p slot whose fire time predates @p newLoopStart (loop wrap occurred).

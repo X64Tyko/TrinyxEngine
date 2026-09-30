@@ -9,11 +9,11 @@
 PacketHeader NetChannel::MakeHeader(NetMessageType type, uint16_t payloadSize, uint32_t frameNumber) const
 {
 	PacketHeader hdr{};
-	hdr.Type        = static_cast<uint8_t>(type);
-	hdr.Flags       = PacketFlag::DefaultFlags;
-	hdr.SequenceNum = CI ? CI->NextSeqOut++ : 0;
-	hdr.FrameNumber = frameNumber;
-	hdr.SenderID    = CI ? CI->OwnerID : 0;
+	hdr.Type             = static_cast<uint8_t>(type);
+	hdr.Flags            = PacketFlag::DefaultFlags;
+	hdr.SequenceNum      = CI ? CI->NextSeqOut++ : 0;
+	hdr.FrameNumber      = frameNumber;
+	hdr.SenderID         = CI ? CI->OwnerID : 0;
 	hdr.Timestamp        = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
 	hdr.PayloadSize      = payloadSize;
 	hdr.AckedClientFrame = CI ? CI->LastAckedClientFrame : 0;
@@ -45,6 +45,6 @@ bool NetChannel::SendInternal(const PacketHeader& hdr, const uint8_t* payload, u
 	}
 	else [[unlikely]]
 		LOG_NET_WARN_F(NetSoul, "[NetChannel] Send failed: handle=%u type=%u ownerID=%u reliable=%d",
-					   CI->Handle, hdr.Type, CI->OwnerID, static_cast<int>(reliable));
+			CI->Handle, hdr.Type, CI->OwnerID, static_cast<int>(reliable));
 	return ok;
 }

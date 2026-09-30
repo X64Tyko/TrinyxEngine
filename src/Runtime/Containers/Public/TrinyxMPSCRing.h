@@ -50,10 +50,13 @@ public:
 		friend class TrinyxMPSCRing;
 
 		TrinyxMPSCRing* Queue;
-		mutable size_t  DequeuePos         = 0; // plain — single consumer, no contention
-		mutable size_t  LastKnownOverflows  = 0; // tracks evictions from OverwritePush
+		mutable size_t DequeuePos         = 0; // plain — single consumer, no contention
+		mutable size_t LastKnownOverflows = 0; // tracks evictions from OverwritePush
 
-		explicit Consumer(TrinyxMPSCRing* q) : Queue(q) {}
+		explicit Consumer(TrinyxMPSCRing* q)
+			: Queue(q)
+		{
+		}
 
 		// Advance DequeuePos to account for any overwrite-evictions the producer performed.
 		// Called lazily at the start of every consumer read operation.
@@ -62,7 +65,7 @@ public:
 			const size_t cur = Queue->OverflowCount.load(std::memory_order_acquire);
 			if (cur > LastKnownOverflows)
 			{
-				DequeuePos        += cur - LastKnownOverflows;
+				DequeuePos += cur - LastKnownOverflows;
 				LastKnownOverflows = cur;
 			}
 		}
@@ -71,8 +74,12 @@ public:
 		Consumer(const Consumer&)            = delete;
 		Consumer& operator=(const Consumer&) = delete;
 		Consumer(Consumer&& o) noexcept
-			: Queue(o.Queue), DequeuePos(o.DequeuePos), LastKnownOverflows(o.LastKnownOverflows)
-		{ o.Queue = nullptr; }
+			: Queue(o.Queue),
+			  DequeuePos(o.DequeuePos),
+			  LastKnownOverflows(o.LastKnownOverflows)
+		{
+			o.Queue = nullptr;
+		}
 
 		/// Number of items currently available to read.
 		size_t Size() const
@@ -88,9 +95,9 @@ public:
 		bool TryPeekAt(size_t offset, T& out) const
 		{
 			SyncOverflows();
-			const size_t pos  = DequeuePos + offset;
-			const Cell*  cell = &Queue->Cells[pos & Queue->Mask];
-			const size_t seq  = cell->Sequence.load(std::memory_order_acquire);
+			const size_t pos = DequeuePos + offset;
+			const Cell* cell = &Queue->Cells[pos & Queue->Mask];
+			const size_t seq = cell->Sequence.load(std::memory_order_acquire);
 			if (static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1) != 0) return false;
 			out = cell->Data;
 			return true;
@@ -100,9 +107,9 @@ public:
 		bool TryPop(T& out)
 		{
 			SyncOverflows();
-			const size_t pos  = DequeuePos;
-			Cell*        cell = &Queue->Cells[pos & Queue->Mask];
-			const size_t seq  = cell->Sequence.load(std::memory_order_acquire);
+			const size_t pos = DequeuePos;
+			Cell* cell       = &Queue->Cells[pos & Queue->Mask];
+			const size_t seq = cell->Sequence.load(std::memory_order_acquire);
 			if (static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1) != 0) return false;
 			out = cell->Data;
 			cell->Sequence.store(pos + Queue->Mask + 1, std::memory_order_release);
@@ -121,14 +128,14 @@ public:
 
 	// ---------------------------------------------------------------------------
 
-	TrinyxMPSCRing()  = default;
+	TrinyxMPSCRing() = default;
 	~TrinyxMPSCRing() { Base::ShutdownStorage(); }
 
 	TrinyxMPSCRing(const TrinyxMPSCRing&)            = delete;
 	TrinyxMPSCRing& operator=(const TrinyxMPSCRing&) = delete;
 
 	bool Initialize(size_t requestedCapacity) { return Base::InitStorage(requestedCapacity); }
-	void Shutdown()                            { Base::ShutdownStorage(); }
+	void Shutdown() { Base::ShutdownStorage(); }
 
 	/// Issue the single Consumer handle. May only be called once per instance.
 	Consumer MakeConsumer()
@@ -143,7 +150,7 @@ public:
 	// ---------------------------------------------------------------------------
 
 	bool TryPush(const T& item) { return Base::MPEnqueue(item); }
-	bool TryPush(T&& item)      { return Base::MPEnqueue(std::move(item)); }
+	bool TryPush(T&& item) { return Base::MPEnqueue(std::move(item)); }
 
 	/// Single-producer overwrite push. When the ring is full, the oldest entry is
 	/// silently evicted so the new item always lands. The Consumer syncs via
@@ -159,9 +166,9 @@ public:
 
 		// Ring is full. Evict the oldest slot by marking it as consumed, then retry.
 		// Since this is SP, EnqueuePos is stable for the duration of this call.
-		const size_t cap      = Base::Mask + 1;
-		const size_t pos      = Base::EnqueuePos.load(std::memory_order_relaxed);
-		Cell&        oldest   = Base::Cells[(pos - cap) & Base::Mask];
+		const size_t cap = Base::Mask + 1;
+		const size_t pos = Base::EnqueuePos.load(std::memory_order_relaxed);
+		Cell& oldest     = Base::Cells[(pos - cap) & Base::Mask];
 		// Mark as if TryPop had consumed it: seq = oldestPos + cap = pos
 		oldest.Sequence.store(pos, std::memory_order_release);
 		OverflowCount.fetch_add(1, std::memory_order_release);
@@ -173,5 +180,5 @@ public:
 
 private:
 	bool bConsumerIssued = false;
-	alignas(64) std::atomic<size_t> OverflowCount{0};
+	alignas(64) std::atomic<size_t> OverflowCount{ 0 };
 };

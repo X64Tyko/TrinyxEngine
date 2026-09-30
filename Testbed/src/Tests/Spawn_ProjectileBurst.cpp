@@ -21,7 +21,7 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 	std::uniform_real_distribution<float> speedDist(30.0f, 80.0f);
 	std::uniform_real_distribution<float> colorDist(0.4f, 1.0f);
 
-	constexpr int Count     = 100; // increase to stress-test
+	constexpr int Count        = 100; // increase to stress-test
 	constexpr SimFloat OriginY = SimFloat(20.0f);
 	constexpr SimFloat OriginZ = SimFloat(-50.0f);
 
@@ -32,11 +32,9 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 	for (int i = 0; i < Count; ++i)
 	{
 		SimFloat speed = SimFloat(speedDist(gen));
-		setups.push_back({
-			SimFloat(0.0f), OriginY, OriginZ,
+		setups.push_back({ SimFloat(0.0f), OriginY, OriginZ,
 			SimFloat(spreadDist(gen)), SimFloat(spreadDist(gen)) + SimFloat(10.0f), -speed,
-			SimFloat(colorDist(gen)), SimFloat(colorDist(gen)) * SimFloat(0.5f), SimFloat(0.1f), SimFloat(1.0f)
-		});
+			SimFloat(colorDist(gen)), SimFloat(colorDist(gen)) * SimFloat(0.5f), SimFloat(0.1f), SimFloat(1.0f) });
 	}
 
 	Registry* reg         = Engine.GetRegistry();
@@ -51,7 +49,7 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 	ASSERT_EQ(reg->GetTotalEntityCount() - before, static_cast<uint32_t>(Count));
 
 	LOG_ENG_ALWAYS_F("[Spawn_ProjectileBurst] %d projectiles from origin (0, %.0f, %.0f) (30s lifetime)",
-					 Count, OriginY.ToFloat(), OriginZ.ToFloat());
+		Count, OriginY.ToFloat(), OriginZ.ToFloat());
 
 	std::thread([]()
 	{
@@ -59,7 +57,8 @@ RUNTIME_TEST(Spawn_ProjectileBurst)
 		TrinyxEngine::Get().Spawn([](uint32_t)
 		{
 			Registry* r = TrinyxEngine::Get().GetRegistry();
-			for (EntityHandle id : gProjectileIds) r->Destroy(id);
+			for (EntityHandle id : gProjectileIds)
+				r->Destroy(id);
 			LOG_ENG_ALWAYS_F("[Spawn_ProjectileBurst] Destroyed %zu entities after 30s", gProjectileIds.size());
 			gProjectileIds.clear();
 		});

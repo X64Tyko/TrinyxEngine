@@ -26,6 +26,13 @@ DEFINE_MULTICAST_CALLBACK(OnOverlapEndCB, PhysicsOverlapData)
 class JoltCharacter;
 class JoltContactListener;
 class JoltJobSystemAdapter;
+
+namespace JPH
+{
+class BroadPhaseLayerInterfaceTable;
+class ObjectVsBroadPhaseLayerFilterTable;
+class ObjectLayerPairFilterTable;
+} // namespace JPH
 struct EngineConfig;
 
 // JoltPhysics — engine-level wrapper around JPH::PhysicsSystem.
@@ -101,7 +108,7 @@ public:
 
 	// --- Entity contact callbacks (keyed by EntityCacheHandle) ---
 
-	template <typename T, void(T::*MemFn)(PhysicsOnHitData)>
+	template <typename T, void (T::*MemFn)(PhysicsOnHitData)>
 	void BindOnHit(EntityHandle handle, Registry* reg, T* obj)
 	{
 		EntityCacheHandle idx = reg->GetRecord(handle).CacheEntityIndex;
@@ -109,7 +116,7 @@ public:
 		OnHitCallbacks[idx].Bind<T, MemFn>(obj);
 	}
 
-	template <typename T, void(T::*MemFn)(PhysicsOverlapData)>
+	template <typename T, void (T::*MemFn)(PhysicsOverlapData)>
 	void BindOnOverlapBegin(EntityHandle handle, Registry* reg, T* obj)
 	{
 		EntityCacheHandle idx = reg->GetRecord(handle).CacheEntityIndex;
@@ -117,7 +124,7 @@ public:
 		OnOverlapBeginCallbacks[idx].Bind<T, MemFn>(obj);
 	}
 
-	template <typename T, void(T::*MemFn)(PhysicsOverlapData)>
+	template <typename T, void (T::*MemFn)(PhysicsOverlapData)>
 	void BindOnOverlapEnd(EntityHandle handle, Registry* reg, T* obj)
 	{
 		EntityCacheHandle idx = reg->GetRecord(handle).CacheEntityIndex;
@@ -125,27 +132,16 @@ public:
 		OnOverlapEndCallbacks[idx].Bind<T, MemFn>(obj);
 	}
 
-	void UnbindContacts(EntityHandle handle, Registry* reg, void* ctx)
-	{
-		EntityCacheHandle idx = reg->GetRecord(handle).CacheEntityIndex;
-		if (idx < OnHitCallbacks.size()) OnHitCallbacks[idx].UnbindByContext(ctx);
-		if (idx < OnOverlapBeginCallbacks.size()) OnOverlapBeginCallbacks[idx].UnbindByContext(ctx);
-		if (idx < OnOverlapEndCallbacks.size()) OnOverlapEndCallbacks[idx].UnbindByContext(ctx);
-	}
+	void UnbindContacts(EntityHandle handle, Registry* reg, void* ctx);
 
-	void UnbindContacts(EntityCacheHandle idx, void* ctx)
-	{
-		if (idx < OnHitCallbacks.size()) OnHitCallbacks[idx].UnbindByContext(ctx);
-		if (idx < OnOverlapBeginCallbacks.size()) OnOverlapBeginCallbacks[idx].UnbindByContext(ctx);
-		if (idx < OnOverlapEndCallbacks.size()) OnOverlapEndCallbacks[idx].UnbindByContext(ctx);
-	}
+	void UnbindContacts(EntityCacheHandle idx, void* ctx);
 
 	// --- Construct contact callbacks (keyed by BodyID::GetIndex()) ---
 	// For Construct-owned bodies with no ECS entity (e.g. JoltCharacter inner body).
 	// representingEntity: passed as HitEntity to the other participant's callback.
 	// JoltCharacter::Shutdown calls ClearConstructContacts — no destructor cleanup needed.
 
-	template <typename T, void(T::*MemFn)(PhysicsOnHitData)>
+	template <typename T, void (T::*MemFn)(PhysicsOnHitData)>
 	void BindConstructOnHit(JPH::BodyID id, T* obj, EntityHandle representingEntity = EntityHandle{})
 	{
 		uint32_t idx = id.GetIndex();
@@ -155,7 +151,7 @@ public:
 		ConstructBodyEntityHandles[idx] = representingEntity;
 	}
 
-	template <typename T, void(T::*MemFn)(PhysicsOverlapData)>
+	template <typename T, void (T::*MemFn)(PhysicsOverlapData)>
 	void BindConstructOnOverlapBegin(JPH::BodyID id, T* obj, EntityHandle representingEntity = EntityHandle{})
 	{
 		uint32_t idx = id.GetIndex();
@@ -165,7 +161,7 @@ public:
 		ConstructBodyEntityHandles[idx] = representingEntity;
 	}
 
-	template <typename T, void(T::*MemFn)(PhysicsOverlapData)>
+	template <typename T, void (T::*MemFn)(PhysicsOverlapData)>
 	void BindConstructOnOverlapEnd(JPH::BodyID id, T* obj, EntityHandle representingEntity = EntityHandle{})
 	{
 		uint32_t idx = id.GetIndex();
@@ -175,23 +171,9 @@ public:
 		ConstructBodyEntityHandles[idx] = representingEntity;
 	}
 
-	void UnbindConstructContacts(JPH::BodyID id, void* ctx)
-	{
-		uint32_t idx = id.GetIndex();
-		if (idx < ConstructHitCallbacks.size()) ConstructHitCallbacks[idx].UnbindByContext(ctx);
-		if (idx < ConstructOverlapBeginCallbacks.size()) ConstructOverlapBeginCallbacks[idx].UnbindByContext(ctx);
-		if (idx < ConstructOverlapEndCallbacks.size()) ConstructOverlapEndCallbacks[idx].UnbindByContext(ctx);
-	}
+	void UnbindConstructContacts(JPH::BodyID id, void* ctx);
 
-	void ClearConstructContacts(JPH::BodyID id)
-	{
-		uint32_t idx = id.GetIndex();
-		if (idx < ConstructHitCallbacks.size())          ConstructHitCallbacks[idx].Reset();
-		if (idx < ConstructOverlapBeginCallbacks.size()) ConstructOverlapBeginCallbacks[idx].Reset();
-		if (idx < ConstructOverlapEndCallbacks.size())   ConstructOverlapEndCallbacks[idx].Reset();
-		if (idx < ConstructBodyOwnerPtrs.size())         ConstructBodyOwnerPtrs[idx]     = nullptr;
-		if (idx < ConstructBodyEntityHandles.size())     ConstructBodyEntityHandles[idx] = EntityHandle{};
-	}
+	void ClearConstructContacts(JPH::BodyID id);
 
 	// --- Contact event ring ---
 	// JoltContactListener pushes PhysicsContactEvents from Jolt worker threads
@@ -214,45 +196,36 @@ public:
 
 private:
 	// Jolt subsystems (order matters for destruction)
+	// Layer tables are per instance: every world (PIE runs several) owns the tables its
+	// PhysicsSystem references. Declared before PhysSystem so they are destroyed after it.
+	std::unique_ptr<JPH::BroadPhaseLayerInterfaceTable> BPLayerInterface;
+	std::unique_ptr<JPH::ObjectLayerPairFilterTable> ObjPairFilter;
+	std::unique_ptr<JPH::ObjectVsBroadPhaseLayerFilterTable> ObjVsBPFilter;
 	std::unique_ptr<JoltJobSystemAdapter> JobSystem;
 	std::unique_ptr<JPH::TempAllocatorImpl> TempAllocator;
 	std::unique_ptr<JPH::PhysicsSystem> PhysSystem;
 	std::unique_ptr<JoltContactListener> ContactListener;
 	TrinyxMPSCRing<PhysicsContactEvent> ContactEventRing;
-	std::atomic_bool bActive{false};
+	std::atomic_bool bActive{ false };
 
 	std::vector<JPH::BodyID> EntityToBody; // indexed by EntityCacheHandle
-	std::vector<uint32_t>    BodyToEntity; // indexed by BodyID::GetIndex()
+	std::vector<uint32_t> BodyToEntity;    // indexed by BodyID::GetIndex()
 
 	// Entity contact callbacks — indexed by EntityCacheHandle.
-	std::vector<OnHitCB>          OnHitCallbacks;
+	std::vector<OnHitCB> OnHitCallbacks;
 	std::vector<OnOverlapBeginCB> OnOverlapBeginCallbacks;
-	std::vector<OnOverlapEndCB>   OnOverlapEndCallbacks;
+	std::vector<OnOverlapEndCB> OnOverlapEndCallbacks;
 
-	void EnsureEntityCallbackSize(EntityCacheHandle idx)
-	{
-		size_t needed = static_cast<size_t>(idx) + 1;
-		if (OnHitCallbacks.size() < needed)          OnHitCallbacks.resize(needed);
-		if (OnOverlapBeginCallbacks.size() < needed) OnOverlapBeginCallbacks.resize(needed);
-		if (OnOverlapEndCallbacks.size() < needed)   OnOverlapEndCallbacks.resize(needed);
-	}
+	void EnsureEntityCallbackSize(EntityCacheHandle idx);
 
 	// Construct contact callbacks — indexed by BodyID::GetIndex(), no BodyToEntity entry.
-	std::vector<OnHitCB>          ConstructHitCallbacks;
+	std::vector<OnHitCB> ConstructHitCallbacks;
 	std::vector<OnOverlapBeginCB> ConstructOverlapBeginCallbacks;
-	std::vector<OnOverlapEndCB>   ConstructOverlapEndCallbacks;
-	std::vector<void*>            ConstructBodyOwnerPtrs;
-	std::vector<EntityHandle>     ConstructBodyEntityHandles;
+	std::vector<OnOverlapEndCB> ConstructOverlapEndCallbacks;
+	std::vector<void*> ConstructBodyOwnerPtrs;
+	std::vector<EntityHandle> ConstructBodyEntityHandles;
 
-	void EnsureConstructCallbackSize(uint32_t idx)
-	{
-		size_t needed = static_cast<size_t>(idx) + 1;
-		if (ConstructHitCallbacks.size() < needed)          ConstructHitCallbacks.resize(needed);
-		if (ConstructOverlapBeginCallbacks.size() < needed) ConstructOverlapBeginCallbacks.resize(needed);
-		if (ConstructOverlapEndCallbacks.size() < needed)   ConstructOverlapEndCallbacks.resize(needed);
-		if (ConstructBodyOwnerPtrs.size() < needed)         ConstructBodyOwnerPtrs.resize(needed, nullptr);
-		if (ConstructBodyEntityHandles.size() < needed)     ConstructBodyEntityHandles.resize(needed);
-	}
+	void EnsureConstructCallbackSize(uint32_t idx);
 
 	static constexpr uint32_t InvalidEntityIndex = UINT32_MAX;
 

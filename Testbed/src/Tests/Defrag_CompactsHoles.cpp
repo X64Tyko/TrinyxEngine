@@ -26,14 +26,14 @@ TEST(Defrag_CompactsHoles)
 	Registry* Reg = Engine.GetRegistry();
 
 	// Spawn one entity to initialise the archetype and discover EntitiesPerChunk.
-	EntityHandle probe = Reg->Create<TestEntity<>>();
+	EntityHandle probe             = Reg->Create<TestEntity<>>();
 	std::vector<Archetype*> arches = Reg->ClassQuery<TestEntity<>>();
 	ASSERT_EQ(arches.size(), 1u);
 	Archetype* arch    = arches[0];
 	const uint32_t epc = arch->EntitiesPerChunk;
 
 	// Fill to exactly 4 full chunks.
-	const uint32_t total = 4 * epc;
+	const uint32_t total           = 4 * epc;
 	std::vector<EntityHandle> rest = Reg->Create<TestEntity<>>(total - 1);
 
 	std::vector<EntityHandle> all;
@@ -41,9 +41,9 @@ TEST(Defrag_CompactsHoles)
 	all.push_back(probe);
 	all.insert(all.end(), rest.begin(), rest.end());
 
-	ASSERT_EQ(arch->Chunks.size(),        5u); //Archetype allocates an extra chunk when full
+	ASSERT_EQ(arch->Chunks.size(), 5u); // Archetype allocates an extra chunk when full
 	ASSERT_EQ(arch->AllocatedEntityCount, total);
-	ASSERT_EQ(arch->TotalEntityCount,     total);
+	ASSERT_EQ(arch->TotalEntityCount, total);
 
 	// Destroy all epc entities in chunk 0 (ArchIndex 0..epc-1).
 	// Hole ratio = epc / (4*epc) = 25% > HoleThreshold (20%).
@@ -53,8 +53,8 @@ TEST(Defrag_CompactsHoles)
 	Reg->ProcessDeferredDestructions();
 	Engine.ConfirmLocalRecycles();
 
-	ASSERT_EQ(arch->TotalEntityCount,     3 * epc);
-	ASSERT_EQ(arch->AllocatedEntityCount, total);  // high-water mark unchanged
+	ASSERT_EQ(arch->TotalEntityCount, 3 * epc);
+	ASSERT_EQ(arch->AllocatedEntityCount, total); // high-water mark unchanged
 
 	// ForceDefragSync bypasses the 1024-frame cadence and loops internally until
 	// the archetype drops below HoleThreshold (handles epc > MaxMovesPerTick).
@@ -62,11 +62,11 @@ TEST(Defrag_CompactsHoles)
 	Reg->ForceDefragSync();
 
 	// Chunk 3 freed: 4 → 3 chunks, AllocatedEntityCount = 3*epc.
-	ASSERT_EQ(arch->Chunks.size(),        3u);
+	ASSERT_EQ(arch->Chunks.size(), 3u);
 	ASSERT_EQ(arch->AllocatedEntityCount, 3 * epc);
 
 	// Live count must be exactly preserved.
-	ASSERT_EQ(arch->TotalEntityCount,     3 * epc);
+	ASSERT_EQ(arch->TotalEntityCount, 3 * epc);
 
 	// No holes remain.
 	ASSERT(arch->InactiveEntitySlots.empty());

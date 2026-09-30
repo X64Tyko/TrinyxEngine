@@ -12,7 +12,7 @@
 
 namespace TrinyxJobs
 {
-	struct JobCounter;
+struct JobCounter;
 }
 
 enum class SystemID : uint8_t;
@@ -20,7 +20,7 @@ class Archetype;
 
 // Function pointer types for tier-specific behavior
 using FnGetNextWriteFramePtr = uint32_t (*)(const class ComponentCacheBase*);
-using FnPropagateFramePtr = void (*)(class ComponentCacheBase*, TrinyxJobs::JobCounter&);
+using FnPropagateFramePtr    = void (*)(class ComponentCacheBase*, TrinyxJobs::JobCounter&);
 
 /// @brief Cache-line-aligned per-frame metadata stored at the start of each ring-buffer slot.
 ///
@@ -32,12 +32,12 @@ struct alignas(64) TemporalFrameHeader
 	// Ownership tracking (atomic bitfield)
 	std::atomic<uint8_t> OwnershipFlags;
 	/*
-        0x01 = LOGIC_WRITING
-        0x02 = RENDER_READING
-        0x04 = NETWORK_READING
-        0x08 = DEFRAG_LOCKED
-        Multiple readers can coexist (bitwise OR)
-    */
+		0x01 = LOGIC_WRITING
+		0x02 = RENDER_READING
+		0x04 = NETWORK_READING
+		0x08 = DEFRAG_LOCKED
+		Multiple readers can coexist (bitwise OR)
+	*/
 	uint8_t _pad;
 
 	// Frame identification
@@ -71,20 +71,11 @@ struct alignas(64) TemporalFrameHeader
 	uint8_t InputKeyState[64];
 	SimFloat InputMouseDX;
 	SimFloat InputMouseDY;
+	SimFloat InputViewYaw; // absolute control rotation for this frame
+	SimFloat InputViewPitch;
 #endif
 
-	// Padding to cache line
-#if defined(TNX_ENABLE_ROLLBACK) && TNX_DEV_METRICS
-	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint32_t) * 3
-		+ sizeof(Vector3) * 3 + sizeof(SimFloat) + 64 + sizeof(SimFloat) * 2) % 64];
-#elif defined(TNX_ENABLE_ROLLBACK)
-	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint32_t) * 3
-		+ sizeof(Vector3) * 3 + sizeof(SimFloat) + 64 + sizeof(SimFloat) * 2) % 64];
-#elif TNX_DEV_METRICS
-	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(SimFloat)) % 64];
-#else
-	char _padding[64 - (sizeof(std::atomic<uint8_t>) + sizeof(uint8_t) + sizeof(uint32_t) * 3 + sizeof(Vector3) * 3 + sizeof(SimFloat)) % 64];
-#endif
+	// No manual tail padding: alignas(64) rounds sizeof up to whole cache lines.
 };
 
 /// @brief Non-template concrete base for all SoA ring-buffer caches.
@@ -125,7 +116,7 @@ public:
 	// Allocate field array for a chunk across all frames, returns absolute pointer to frame 0 data.
 	// Archetype calls this for each temporal field when allocating a new chunk.
 	void* AllocateFieldArray(Archetype* owner, struct Chunk* chunk, CacheSlotID cacheSlot,
-							 size_t fieldIndex, const char* fieldName, size_t entityCount, size_t fieldSize, SystemID EntitySystemID);
+		size_t fieldIndex, const char* fieldName, size_t entityCount, size_t fieldSize, SystemID EntitySystemID);
 
 	// Since we're allocating one field at a time and we need them in line we have to advance the allocator manually for now.
 	size_t AdvanceAllocator(SystemID EntitySystemID, size_t entityCount, size_t fieldSize);
@@ -195,7 +186,7 @@ public:
 	size_t GetSystemAllocatorIndex(SystemID sysID, size_t size) const;
 
 	size_t AdvanceSystemAllocatorIndex(SystemID sysID, size_t size);
-	
+
 	uint32_t GetNextWriteFrame() const
 	{
 		return FnGetNextWriteFrame(this);
@@ -236,10 +227,10 @@ public:
 protected:
 	template <typename Derived>
 	friend class ComponentCacheImpl;
-	
+
 	template <CacheTier Tier>
 	friend class ComponentCache;
-	
+
 	// Called by ComponentCacheImpl::Initialize with the correct frame count for the tier.
 	void InitializeInternal(const EngineConfig* Config, uint32_t frameCount);
 
@@ -247,8 +238,8 @@ protected:
 	bool LockFrameForWrite(uint32_t WriteFrame);
 
 	FnGetNextWriteFramePtr FnGetNextWriteFrame = nullptr;
-	FnPropagateFramePtr FnPropagateFrame = nullptr;
-	
+	FnPropagateFramePtr FnPropagateFrame       = nullptr;
+
 	// Set by ComponentCacheImpl before calling InitializeInternal so GetTier() is valid immediately.
 	CacheTier Tier_           = CacheTier::Volatile;
 	uint32_t LastWrittenFrame = 0;
@@ -306,14 +297,14 @@ private:
 	struct FreedChunkSlab
 	{
 		Archetype* Owner;
-		size_t     CacheStart; // chunk->Header.CacheIndexStart at time of free
+		size_t CacheStart; // chunk->Header.CacheIndexStart at time of free
 
 		struct FieldRegion
 		{
-			uint16_t TableIndex;     // FieldAllocations[] index
-			uint8_t  FieldSlotIndex; // Chunk::Header::FieldPtrs[] slot to wire on reuse
-			size_t   OffsetInZone;   // Byte offset within this field's slab zone
-			size_t   Size;           // Bytes (= AlignSize(entitiesPerChunk * fieldSize))
+			uint16_t TableIndex;    // FieldAllocations[] index
+			uint8_t FieldSlotIndex; // Chunk::Header::FieldPtrs[] slot to wire on reuse
+			size_t OffsetInZone;    // Byte offset within this field's slab zone
+			size_t Size;            // Bytes (= AlignSize(entitiesPerChunk * fieldSize))
 		};
 		std::vector<FieldRegion> Fields;
 	};
@@ -343,14 +334,8 @@ template <typename Derived>
 class ComponentCacheImpl : public ComponentCacheBase
 {
 public:
-	void Initialize(const EngineConfig* Config)
-	{
-		Tier_ = static_cast<Derived*>(this)->GetCacheTier();
-		FnGetNextWriteFrame = &Derived::GetNextWriteFrameImpl;
-		FnPropagateFrame = &Derived::PropagateFrameImpl;
-		InitializeInternal(Config, static_cast<Derived*>(this)->GetFrameCount(Config));
-	}
-	
+	void Initialize(const EngineConfig* Config);
+
 protected:
 	friend Derived;
 };
@@ -369,106 +354,23 @@ template <CacheTier Tier>
 class ComponentCache final : public ComponentCacheImpl<ComponentCache<Tier>>
 {
 public:
-	uint32_t GetFrameCount(const EngineConfig* Config) const
-	{
-		if constexpr (Tier == CacheTier::Volatile)
-		{
-			(void)Config;
-			return 3;
-		}
-		else
-		{
-#ifndef TNX_ENABLE_ROLLBACK
-			return 3;
-#endif
-			return static_cast<uint32_t>(Config->TemporalFrameCount);
-		}
-	}
+	uint32_t GetFrameCount(const EngineConfig* Config) const;
 
 	static constexpr CacheTier GetCacheTier() { return Tier; }
 
 	static constexpr const char* GetLabel()
 	{
 		if constexpr (Tier == CacheTier::Volatile) return "Volatile";
-		if constexpr (Tier == CacheTier::Universal) return "Universal";
-		else return "Temporal";
+		if constexpr (Tier == CacheTier::Universal)
+			return "Universal";
+		else
+			return "Temporal";
 	}
 
 	// Static implementations for function pointers
-	static uint32_t GetNextWriteFrameImpl(const ComponentCacheBase* base)
-	{
-		if constexpr (Tier == CacheTier::Volatile)
-		{
-			// Triple-buffer: find the frame that's not locked
-			// We have 3 frames: one being written (T+1), one being read (T), one free (T-1)
-			// Return the buffer slot index (0-2) of the unlocked frame
-			// It's possible another thread is using the buffer for networking or something, loop until we find a valid frame
-			while (true)
-			{
-				for (uint32_t i = 0; i < 3; ++i)
-				{
-					uint32_t candidate = (base->ActiveWriteFrame + 1 + i) % base->GetTotalFrameCount();
-					if (candidate == base->ActiveWriteFrame) continue;
-					TemporalFrameHeader* header = base->GetFrameHeader(candidate);
-					uint8_t flags = header->OwnershipFlags.load(std::memory_order_acquire);
-					// Frame is free if not write-locked and not read-locked
-					if ((flags & 0x03) == 0) // 0x01 = LOGIC_WRITING, 0x02 = RENDER_READING
-					{
-						return candidate;
-					}
-				}
-			}
-		}
-		else
-		{
-			// Temporal/Universal: circular buffer, just increment with modulo
-			return (base->ActiveWriteFrame + 1) % base->GetTotalFrameCount();
-		}
-	}
+	static uint32_t GetNextWriteFrameImpl(const ComponentCacheBase* base);
 
-	static void PropagateFrameImpl(ComponentCacheBase* base, TrinyxJobs::JobCounter& counter)
-	{
-		uint32_t targetSlot = (base->ActiveWriteFrame + 1) % base->GetTotalFrameCount();
-		if constexpr (Tier == CacheTier::Volatile)
-		{
-			// Triple-buffer: find the frame that's not locked
-			// We have 3 frames: one being written (T+1), one being read (T), one free (T-1)
-			// Return the buffer slot index (0-2) of the unlocked frame
-			// It's possible another thread is using the buffer for networking or something, loop until we find a valid frame
-			bool bLocked = false;
-			while (!bLocked)
-			{
-				for (uint32_t i = 0; i < 3; ++i)
-				{
-					targetSlot = (base->ActiveWriteFrame + 1 + i) % base->GetTotalFrameCount();
-					if (targetSlot == base->ActiveWriteFrame) continue;
-
-					// Try to lock the write frame
-					bLocked = base->LockFrameForWrite(targetSlot);
-					if (bLocked) break;
-				}
-			}
-		}
-		else
-		{
-			uint32_t spins = 0;
-			while (!base->LockFrameForWrite(targetSlot))
-			{
-				if (++spins > 10'000'000)
-				{
-					LOG_ENG_ERROR_F("[Temporal] PropagateFrame stuck — frame %u has leaked lock (flags=0x%02x)",
-									targetSlot, base->GetFrameHeader(targetSlot)->OwnershipFlags.load(std::memory_order_relaxed));
-					return;
-				}
-				_mm_pause();
-			}
-		}
-
-		base->LastWrittenFrame = base->ActiveWriteFrame;
-		base->ActiveWriteFrame = targetSlot;
-		base->PropagateFrameData(base->LastWrittenFrame, targetSlot, counter);
-		base->UnlockFrameWrite();
-	}
+	static void PropagateFrameImpl(ComponentCacheBase* base, TrinyxJobs::JobCounter& counter);
 };
 
 
@@ -479,3 +381,11 @@ public:
 using TemporalComponentCache  = ComponentCache<CacheTier::Temporal>;
 using VolatileComponentCache  = ComponentCache<CacheTier::Volatile>;
 using UniversalComponentCache = ComponentCache<CacheTier::Universal>;
+
+// Closed set of instantiations — member bodies and explicit instantiations live in TemporalComponentCache.cpp.
+extern template class ComponentCacheImpl<ComponentCache<CacheTier::Volatile>>;
+extern template class ComponentCacheImpl<ComponentCache<CacheTier::Temporal>>;
+extern template class ComponentCacheImpl<ComponentCache<CacheTier::Universal>>;
+extern template class ComponentCache<CacheTier::Volatile>;
+extern template class ComponentCache<CacheTier::Temporal>;
+extern template class ComponentCache<CacheTier::Universal>;

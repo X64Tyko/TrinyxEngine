@@ -35,11 +35,13 @@ struct TnxName
 	constexpr TnxName(uint32_t hash, const char* str)
 		: Value(hash)
 #ifndef TNX_STRIP_NAMES
-		, Str{}
+		  ,
+		  Str{}
 #endif
 	{
 #ifndef TNX_STRIP_NAMES
-		for (size_t i = 0; i < TNX_NAME_MAX_LEN - 1 && str && str[i]; ++i) Str[i] = str[i];
+		for (size_t i = 0; i < TNX_NAME_MAX_LEN - 1 && str && str[i]; ++i)
+			Str[i] = str[i];
 #endif
 		(void)str;
 	}
@@ -74,13 +76,18 @@ struct TnxName
 	static constexpr uint32_t Fnv1a(const char* str)
 	{
 		uint32_t h = 2166136261u;
-		while (str && *str) h = (h ^ static_cast<uint8_t>(*str++)) * 16777619u;
+		while (str && *str)
+			h = (h ^ static_cast<uint8_t>(*str++)) * 16777619u;
 		return h;
 	}
 };
 
 // Compile-time construction from a string literal.
-#define TNX_NAME(str) TnxName{TnxName::Fnv1a(str), str}
+#define TNX_NAME(str)            \
+	TnxName                      \
+	{                            \
+		TnxName::Fnv1a(str), str \
+	}
 
 // std::hash specialization — allows TnxName as unordered_map/set key.
 template <>

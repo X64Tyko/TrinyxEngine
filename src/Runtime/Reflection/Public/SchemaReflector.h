@@ -58,7 +58,8 @@ template <typename T>
 	requires requires { T::FieldRefTypes; }
 constexpr bool ComponentHasAssetRefsV<T> = []()
 {
-	for (auto t : T::FieldRefTypes) if (t != AssetType::Invalid) return true;
+	for (auto t : T::FieldRefTypes)
+		if (t != AssetType::Invalid) return true;
 	return false;
 }();
 
@@ -76,7 +77,7 @@ constexpr bool TupleHasAssetRefsV<std::tuple<Cs...>> = (ComponentHasAssetRefsV<C
 // with asset references, as determined by EntityComponentsOf.
 template <typename T>
 concept EntityHasAssetRefs = requires { typename EntityComponentsOf<T>::Type; }
-	&& TupleHasAssetRefsV<typename EntityComponentsOf<T>::Type>;
+							 && TupleHasAssetRefsV<typename EntityComponentsOf<T>::Type>;
 
 template <typename Class>
 struct PrefabReflector
@@ -86,7 +87,7 @@ struct PrefabReflector
 	{
 		// Compile-time validation of entity type
 		VALIDATE_ENTITY_HAS_SCHEMA(Class);
-		//VALIDATE_ENTITY_IS_STANDARD_LAYOUT(Class);
+		// VALIDATE_ENTITY_IS_STANDARD_LAYOUT(Class);
 
 		ReflectionRegistry::Get().RegisterPrefab<Class>();
 
@@ -147,15 +148,24 @@ static void RegisterFieldsImpl(std::index_sequence<Is...>)
 template <typename T>
 constexpr FieldValueType DeduceFieldValueType()
 {
-	if constexpr (std::is_same_v<T, float>) return FieldValueType::Float32;
-	else if constexpr (std::is_same_v<T, double>) return FieldValueType::Float64;
-	else if constexpr (std::is_same_v<T, int32_t>) return FieldValueType::Int32;
-	else if constexpr (std::is_same_v<T, uint32_t>) return FieldValueType::Uint32;
-	else if constexpr (std::is_same_v<T, int64_t>) return FieldValueType::Int64;
-	else if constexpr (std::is_same_v<T, uint64_t>) return FieldValueType::Uint64;
-	else if constexpr (std::is_same_v<T, SimFloatImpl<Fixed32>>) return FieldValueType::Fixed32;
-	else if constexpr (std::is_same_v<T, SimFloatImpl<float>>) return FieldValueType::Float32;
-	else return FieldValueType::Unknown;
+	if constexpr (std::is_same_v<T, float>)
+		return FieldValueType::Float32;
+	else if constexpr (std::is_same_v<T, double>)
+		return FieldValueType::Float64;
+	else if constexpr (std::is_same_v<T, int32_t>)
+		return FieldValueType::Int32;
+	else if constexpr (std::is_same_v<T, uint32_t>)
+		return FieldValueType::Uint32;
+	else if constexpr (std::is_same_v<T, int64_t>)
+		return FieldValueType::Int64;
+	else if constexpr (std::is_same_v<T, uint64_t>)
+		return FieldValueType::Uint64;
+	else if constexpr (std::is_same_v<T, SimFloatImpl<Fixed32>>)
+		return FieldValueType::Fixed32;
+	else if constexpr (std::is_same_v<T, SimFloatImpl<float>>)
+		return FieldValueType::Float32;
+	else
+		return FieldValueType::Unknown;
 }
 
 // Extract metadata from a member pointer
@@ -204,10 +214,7 @@ static constexpr size_t GetFieldCount()
 template <typename Derived>
 static bool RegisterFieldsStatic()
 {
-	RegisterFieldsImpl<Derived>(std::make_index_sequence<GetFieldCount<Derived>()>
-		{
-		}
-	);
+	RegisterFieldsImpl<Derived>(std::make_index_sequence<GetFieldCount<Derived>()>{});
 	return true;
 }
 
@@ -248,73 +255,74 @@ FORCE_INLINE void ForEachField(Func&& func)
 // EntityComponentsOf<CLASS<>> so concepts can inspect the component list.
 // The class is guaranteed complete when the .cpp is compiled, so member
 // pointer type extraction via DefineSchema() is safe here.
-#define TNX_DEFINE_ENTITY(CLASS) \
-    template<> \
-    struct EntityComponentsOf<CLASS<>> \
-    { \
-        using Type = typename SchemaComponentTypes< \
-            std::remove_cvref_t<decltype(CLASS<>::DefineSchema())>>::Type; \
-    }; \
-    namespace { \
-        static const bool g_Reflect_##CLASS = []() { \
-            PrefabReflector<CLASS<>>::Register(); \
-            return true; \
-        }(); \
-    }
+#define TNX_DEFINE_ENTITY(CLASS)                                           \
+	template <>                                                            \
+	struct EntityComponentsOf<CLASS<>>                                     \
+	{                                                                      \
+		using Type = typename SchemaComponentTypes<                        \
+			std::remove_cvref_t<decltype(CLASS<>::DefineSchema())>>::Type; \
+	};                                                                     \
+	namespace                                                              \
+	{                                                                      \
+	static const bool g_Reflect_##CLASS = []() {                           \
+		PrefabReflector<CLASS<>>::Register();                              \
+		return true;                                                       \
+	}();                                                                   \
+	}
 
 // Legacy alias — remove once all entity .cpp files are updated.
 #define TNX_REGISTER_ENTITY(CLASS) TNX_DEFINE_ENTITY(CLASS)
-#define TNX_REGISTER_SCHEMA(CLASS, SUPER, ...) \
-    public: \
-    static constexpr const char* EntityTypeName = #CLASS; \
-    static constexpr auto DefineSchema() \
-    { \
-        return SUPER<CLASS, WIDTH>::DefineSchema().Extend(__VA_OPT__(TNX_MAP_LIST(TNX_GET_PTR, CLASS, __VA_ARGS__))); \
-    } \
-    \
-    FORCE_INLINE void Advance(uint32_t step) \
-    { \
-        SUPER<CLASS, WIDTH>::Advance(step); \
-        __VA_OPT__(TNX_MAPF_LIST(TNX_BIND_ADVANCE, CLASS, __VA_ARGS__)) \
-    } \
-    \
-    using Base = SUPER<CLASS, WIDTH>; \
-    using WideType = CLASS<FieldWidth::Wide>; \
-    using MaskedType = CLASS<FieldWidth::WideMask>;
+#define TNX_REGISTER_SCHEMA(CLASS, SUPER, ...)                                                                        \
+public:                                                                                                               \
+	static constexpr const char* EntityTypeName = #CLASS;                                                             \
+	static constexpr auto DefineSchema()                                                                              \
+	{                                                                                                                 \
+		return SUPER<CLASS, WIDTH>::DefineSchema().Extend(__VA_OPT__(TNX_MAP_LIST(TNX_GET_PTR, CLASS, __VA_ARGS__))); \
+	}                                                                                                                 \
+                                                                                                                      \
+	FORCE_INLINE void Advance(uint32_t step)                                                                          \
+	{                                                                                                                 \
+		SUPER<CLASS, WIDTH>::Advance(step);                                                                           \
+		__VA_OPT__(TNX_MAPF_LIST(TNX_BIND_ADVANCE, CLASS, __VA_ARGS__))                                               \
+	}                                                                                                                 \
+                                                                                                                      \
+	using Base       = SUPER<CLASS, WIDTH>;                                                                           \
+	using WideType   = CLASS<FieldWidth::Wide>;                                                                       \
+	using MaskedType = CLASS<FieldWidth::WideMask>;
 
-#define TNX_REGISTER_SUPER_SCHEMA(CLASS, SUPER, ...) \
-    public: \
-    static constexpr auto DefineSchema() \
-    { \
-        return SUPER<Derived, WIDTH>::DefineSchema().Extend(__VA_OPT__(TNX_MAP_LIST(TNX_GET_PTR, CLASS, __VA_ARGS__))); \
-    } \
-    \
-    FORCE_INLINE void Advance(uint32_t step) \
-    { \
-        SUPER<Derived, WIDTH>::Advance(step); \
-        __VA_OPT__(TNX_MAPF_LIST(TNX_BIND_ADVANCE, CLASS, __VA_ARGS__)) \
-    }
+#define TNX_REGISTER_SUPER_SCHEMA(CLASS, SUPER, ...)                                                                    \
+public:                                                                                                                 \
+	static constexpr auto DefineSchema()                                                                                \
+	{                                                                                                                   \
+		return SUPER<Derived, WIDTH>::DefineSchema().Extend(__VA_OPT__(TNX_MAP_LIST(TNX_GET_PTR, CLASS, __VA_ARGS__))); \
+	}                                                                                                                   \
+                                                                                                                        \
+	FORCE_INLINE void Advance(uint32_t step)                                                                            \
+	{                                                                                                                   \
+		SUPER<Derived, WIDTH>::Advance(step);                                                                           \
+		__VA_OPT__(TNX_MAPF_LIST(TNX_BIND_ADVANCE, CLASS, __VA_ARGS__))                                                 \
+	}
 
-#define TNX_EXPAND(x) x
-#define TNX_GET_ARG_COUNT(...) TNX_EXPAND(TNX_INTERNAL_ARG_COUNT(__VA_ARGS__, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1))
-#define TNX_INTERNAL_ARG_COUNT(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,_16, count, ...) count
+#define TNX_EXPAND(x)                                                                                             x
+#define TNX_GET_ARG_COUNT(...)                                                                                    TNX_EXPAND(TNX_INTERNAL_ARG_COUNT(__VA_ARGS__, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1))
+#define TNX_INTERNAL_ARG_COUNT(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, count, ...) count
 
 // Mapping Dispatcher
-#define TNX_MAP_LIST(m, context, ...) TNX_EXPAND(TNX_CONCAT(TNX_MAP_, TNX_GET_ARG_COUNT(__VA_ARGS__))(m, context, __VA_ARGS__))
+#define TNX_MAP_LIST(m, context, ...)  TNX_EXPAND(TNX_CONCAT(TNX_MAP_, TNX_GET_ARG_COUNT(__VA_ARGS__))(m, context, __VA_ARGS__))
 #define TNX_MAPF_LIST(m, context, ...) TNX_EXPAND(TNX_CONCAT(TNX_MAPF_, TNX_GET_ARG_COUNT(__VA_ARGS__))(m, context, __VA_ARGS__))
-#define TNX_CONCAT_INNER(a, b) a##b
-#define TNX_CONCAT(a, b) TNX_CONCAT_INNER(a, b)
+#define TNX_CONCAT_INNER(a, b)         a##b
+#define TNX_CONCAT(a, b)               TNX_CONCAT_INNER(a, b)
 
 // Individual Expansion Steps (Supports up to 16 members per component)
-#define TNX_MAP_1(m, c, x)      m(c, x)
-#define TNX_MAP_2(m, c, x, ...) m(c, x), TNX_MAP_1(m, c, __VA_ARGS__)
-#define TNX_MAP_3(m, c, x, ...) m(c, x), TNX_MAP_2(m, c, __VA_ARGS__)
-#define TNX_MAP_4(m, c, x, ...) m(c, x), TNX_MAP_3(m, c, __VA_ARGS__)
-#define TNX_MAP_5(m, c, x, ...) m(c, x), TNX_MAP_4(m, c, __VA_ARGS__)
-#define TNX_MAP_6(m, c, x, ...) m(c, x), TNX_MAP_5(m, c, __VA_ARGS__)
-#define TNX_MAP_7(m, c, x, ...) m(c, x), TNX_MAP_6(m, c, __VA_ARGS__)
-#define TNX_MAP_8(m, c, x, ...) m(c, x), TNX_MAP_7(m, c, __VA_ARGS__)
-#define TNX_MAP_9(m, c, x, ...) m(c, x), TNX_MAP_8(m, c, __VA_ARGS__)
+#define TNX_MAP_1(m, c, x)       m(c, x)
+#define TNX_MAP_2(m, c, x, ...)  m(c, x), TNX_MAP_1(m, c, __VA_ARGS__)
+#define TNX_MAP_3(m, c, x, ...)  m(c, x), TNX_MAP_2(m, c, __VA_ARGS__)
+#define TNX_MAP_4(m, c, x, ...)  m(c, x), TNX_MAP_3(m, c, __VA_ARGS__)
+#define TNX_MAP_5(m, c, x, ...)  m(c, x), TNX_MAP_4(m, c, __VA_ARGS__)
+#define TNX_MAP_6(m, c, x, ...)  m(c, x), TNX_MAP_5(m, c, __VA_ARGS__)
+#define TNX_MAP_7(m, c, x, ...)  m(c, x), TNX_MAP_6(m, c, __VA_ARGS__)
+#define TNX_MAP_8(m, c, x, ...)  m(c, x), TNX_MAP_7(m, c, __VA_ARGS__)
+#define TNX_MAP_9(m, c, x, ...)  m(c, x), TNX_MAP_8(m, c, __VA_ARGS__)
 #define TNX_MAP_10(m, c, x, ...) m(c, x), TNX_MAP_9(m, c, __VA_ARGS__)
 #define TNX_MAP_11(m, c, x, ...) m(c, x), TNX_MAP_10(m, c, __VA_ARGS__)
 #define TNX_MAP_12(m, c, x, ...) m(c, x), TNX_MAP_11(m, c, __VA_ARGS__)
@@ -323,15 +331,15 @@ FORCE_INLINE void ForEachField(Func&& func)
 #define TNX_MAP_15(m, c, x, ...) m(c, x), TNX_MAP_14(m, c, __VA_ARGS__)
 #define TNX_MAP_16(m, c, x, ...) m(c, x), TNX_MAP_15(m, c, __VA_ARGS__)
 
-#define TNX_MAPF_1(m, c, x)      m(c, x)
-#define TNX_MAPF_2(m, c, x, ...) m(c, x) TNX_MAP_1(m, c, __VA_ARGS__)
-#define TNX_MAPF_3(m, c, x, ...) m(c, x) TNX_MAPF_2(m, c, __VA_ARGS__)
-#define TNX_MAPF_4(m, c, x, ...) m(c, x) TNX_MAPF_3(m, c, __VA_ARGS__)
-#define TNX_MAPF_5(m, c, x, ...) m(c, x) TNX_MAPF_4(m, c, __VA_ARGS__)
-#define TNX_MAPF_6(m, c, x, ...) m(c, x) TNX_MAPF_5(m, c, __VA_ARGS__)
-#define TNX_MAPF_7(m, c, x, ...) m(c, x) TNX_MAPF_6(m, c, __VA_ARGS__)
-#define TNX_MAPF_8(m, c, x, ...) m(c, x) TNX_MAPF_7(m, c, __VA_ARGS__)
-#define TNX_MAPF_9(m, c, x, ...) m(c, x) TNX_MAPF_8(m, c, __VA_ARGS__)
+#define TNX_MAPF_1(m, c, x)       m(c, x)
+#define TNX_MAPF_2(m, c, x, ...)  m(c, x) TNX_MAP_1(m, c, __VA_ARGS__)
+#define TNX_MAPF_3(m, c, x, ...)  m(c, x) TNX_MAPF_2(m, c, __VA_ARGS__)
+#define TNX_MAPF_4(m, c, x, ...)  m(c, x) TNX_MAPF_3(m, c, __VA_ARGS__)
+#define TNX_MAPF_5(m, c, x, ...)  m(c, x) TNX_MAPF_4(m, c, __VA_ARGS__)
+#define TNX_MAPF_6(m, c, x, ...)  m(c, x) TNX_MAPF_5(m, c, __VA_ARGS__)
+#define TNX_MAPF_7(m, c, x, ...)  m(c, x) TNX_MAPF_6(m, c, __VA_ARGS__)
+#define TNX_MAPF_8(m, c, x, ...)  m(c, x) TNX_MAPF_7(m, c, __VA_ARGS__)
+#define TNX_MAPF_9(m, c, x, ...)  m(c, x) TNX_MAPF_8(m, c, __VA_ARGS__)
 #define TNX_MAPF_10(m, c, x, ...) m(c, x) TNX_MAPF_9(m, c, __VA_ARGS__)
 #define TNX_MAPF_11(m, c, x, ...) m(c, x) TNX_MAPF_10(m, c, __VA_ARGS__)
 #define TNX_MAPF_12(m, c, x, ...) m(c, x) TNX_MAPF_11(m, c, __VA_ARGS__)
@@ -341,10 +349,11 @@ FORCE_INLINE void ForEachField(Func&& func)
 #define TNX_MAPF_16(m, c, x, ...) m(c, x) TNX_MAPF_15(m, c, __VA_ARGS__)
 
 // Macro to auto-register fields during static initialization
-#define TNX_REGISTER_COMPONENT_FIELDS(ComponentType) \
-    namespace { \
-        static bool _##ComponentType##_FieldsRegistered = RegisterFieldsStatic<ComponentType>(); \
-    }
+#define TNX_REGISTER_COMPONENT_FIELDS(ComponentType)                                         \
+	namespace                                                                                \
+	{                                                                                        \
+	static bool _##ComponentType##_FieldsRegistered = RegisterFieldsStatic<ComponentType>(); \
+	}
 
 // Helper to prefix the class name to the member pointer
 #define TNX_GET_PTR(Class, Member) &Class::Member
@@ -356,76 +365,90 @@ FORCE_INLINE void ForEachField(Func&& func)
 
 #define TNX_BIND_FINAL(ComponentType, Member, ...) Member.MaskFinal(count);
 
-#define TNX_BIND_BIND(ComponentType, Member, ...) Member.Bind(arrays[arrayIndex], flagsArray, startIndex, count); arrayIndex += 1;
+#define TNX_BIND_BIND(ComponentType, Member, ...)                   \
+	Member.Bind(arrays[arrayIndex], flagsArray, startIndex, count); \
+	arrayIndex += 1;
 
 // Handles creating the field definition, debug field names, Bind function, and Registering the struct component
-#define TNX_REGISTER_FIELDS(ComponentType, ...) \
-    static constexpr const char* ComponentTypeName = #ComponentType; \
-    static constexpr auto DefineFields() \
-    { /* Use the map bindings and __VA_OPT__ to create our Field Definitions for each item passed to the macro */ \
-        return std::make_tuple(__VA_OPT__(TNX_MAP_LIST(TNX_GET_PTR, ComponentType, __VA_ARGS__))); \
-    } \
-    \
-    static constexpr auto FieldNames = std::array{ /* Same thing but for the names of the fields */ \
-        __VA_OPT__(TNX_MAP_LIST(TNX_GET_NAME, ComponentType, __VA_ARGS__)) \
-    }; \
-\
-    FORCE_INLINE void Advance(uint32_t step) \
-    { \
-        __VA_OPT__(TNX_MAPF_LIST(TNX_BIND_ADVANCE, ComponentType, __VA_ARGS__)) \
-    } \
-\
-    FORCE_INLINE void Bind(void** arrays, void* flagsArray, uint32_t startIndex = 0, int32_t count = -1) \
-    { \
-        int32_t arrayIndex = 0; \
-        __VA_OPT__(TNX_MAPF_LIST(TNX_BIND_BIND, ComponentType, __VA_ARGS__)) \
-    }
+#define TNX_REGISTER_FIELDS(ComponentType, ...)                                                                   \
+	static constexpr const char* ComponentTypeName = #ComponentType;                                              \
+	static constexpr auto DefineFields()                                                                          \
+	{ /* Use the map bindings and __VA_OPT__ to create our Field Definitions for each item passed to the macro */ \
+		return std::make_tuple(__VA_OPT__(TNX_MAP_LIST(TNX_GET_PTR, ComponentType, __VA_ARGS__)));                \
+	}                                                                                                             \
+                                                                                                                  \
+	static constexpr auto FieldNames = std::array{ /* Same thing but for the names of the fields */               \
+		__VA_OPT__(TNX_MAP_LIST(TNX_GET_NAME, ComponentType, __VA_ARGS__))                                        \
+	};                                                                                                            \
+                                                                                                                  \
+	FORCE_INLINE void Advance(uint32_t step){                                                                     \
+		__VA_OPT__(TNX_MAPF_LIST(TNX_BIND_ADVANCE, ComponentType, __VA_ARGS__))                                   \
+	}                                                                                                             \
+                                                                                                                  \
+	FORCE_INLINE void Bind(void** arrays, void* flagsArray, uint32_t startIndex = 0, int32_t count = -1)          \
+	{                                                                                                             \
+		int32_t arrayIndex = 0;                                                                                   \
+		__VA_OPT__(TNX_MAPF_LIST(TNX_BIND_BIND, ComponentType, __VA_ARGS__))                                      \
+	}
 
-#define TNX_REGISTER_COMPONENT(ComponentType) \
-    namespace { \
-        struct _##ComponentType##_Registrar { \
-            _##ComponentType##_Registrar() { \
-                RegisterFieldsStatic<ComponentType<>>(); \
-            } \
-        }; \
-        [[maybe_unused]] TNX_USED_ATTR static _##ComponentType##_Registrar _##ComponentType##_FieldsRegistered; \
-    }
+#define TNX_REGISTER_COMPONENT(ComponentType)                                                               \
+	namespace                                                                                               \
+	{                                                                                                       \
+	struct _##ComponentType##_Registrar                                                                     \
+	{                                                                                                       \
+		_##ComponentType##_Registrar()                                                                      \
+		{                                                                                                   \
+			RegisterFieldsStatic<ComponentType<>>();                                                        \
+		}                                                                                                   \
+	};                                                                                                      \
+	[[maybe_unused]] TNX_USED_ATTR static _##ComponentType##_Registrar _##ComponentType##_FieldsRegistered; \
+	}
 
-#define TNX_TEMPORAL_FIELDS(ComponentType, SysID, ...) \
-    static inline CacheTier TemporalTier = CacheTier::Temporal; \
-    static inline SystemID SystemTypeID = SystemID::SysID; \
-    TNX_REGISTER_FIELDS(ComponentType, __VA_ARGS__)
+#define TNX_TEMPORAL_FIELDS(ComponentType, SysID, ...)          \
+	static inline CacheTier TemporalTier = CacheTier::Temporal; \
+	static inline SystemID SystemTypeID  = SystemID::SysID;     \
+	TNX_REGISTER_FIELDS(ComponentType, __VA_ARGS__)
 
-#define TNX_VOLATILE_FIELDS(ComponentType, SysID, ...) \
-    static inline CacheTier TemporalTier = CacheTier::Volatile; \
-    static inline SystemID SystemTypeID = SystemID::SysID; \
-    TNX_REGISTER_FIELDS(ComponentType, __VA_ARGS__)
+#define TNX_VOLATILE_FIELDS(ComponentType, SysID, ...)          \
+	static inline CacheTier TemporalTier = CacheTier::Volatile; \
+	static inline SystemID SystemTypeID  = SystemID::SysID;     \
+	TNX_REGISTER_FIELDS(ComponentType, __VA_ARGS__)
 
 // ---------------------------------------------------------------------------
 // FlowState / GameMode self-registration macros
 // ---------------------------------------------------------------------------
 
-#define TNX_REGISTER_STATE(StateClass) \
-    namespace { \
-        struct _##StateClass##_StateReg { \
-            _##StateClass##_StateReg() { \
-                ReflectionRegistry::Get().RegisterState(#StateClass, \
-                    []() -> std::unique_ptr<FlowState> { return std::make_unique<StateClass>(); }); \
-            } \
-        }; \
-        [[maybe_unused]] TNX_USED_ATTR static _##StateClass##_StateReg _##StateClass##_state_reg; \
-    }
+#define TNX_REGISTER_STATE(StateClass)                                                        \
+	namespace                                                                                 \
+	{                                                                                         \
+	struct _##StateClass##_StateReg                                                           \
+	{                                                                                         \
+		_##StateClass##_StateReg()                                                            \
+		{                                                                                     \
+			ReflectionRegistry::Get().RegisterState(#StateClass,                              \
+				[]() -> std::unique_ptr<FlowState> {                                          \
+				return std::make_unique<StateClass>();                                        \
+			});                                                                               \
+		}                                                                                     \
+	};                                                                                        \
+	[[maybe_unused]] TNX_USED_ATTR static _##StateClass##_StateReg _##StateClass##_state_reg; \
+	}
 
-#define TNX_REGISTER_MODE(ModeClass) \
-    namespace { \
-        struct _##ModeClass##_ModeReg { \
-            _##ModeClass##_ModeReg() { \
-                ReflectionRegistry::Get().RegisterMode(#ModeClass, \
-                    []() -> std::unique_ptr<GameMode> { return std::make_unique<ModeClass>(); }); \
-            } \
-        }; \
-        [[maybe_unused]] TNX_USED_ATTR static _##ModeClass##_ModeReg _##ModeClass##_mode_reg; \
-    }
+#define TNX_REGISTER_MODE(ModeClass)                                                      \
+	namespace                                                                             \
+	{                                                                                     \
+	struct _##ModeClass##_ModeReg                                                         \
+	{                                                                                     \
+		_##ModeClass##_ModeReg()                                                          \
+		{                                                                                 \
+			ReflectionRegistry::Get().RegisterMode(#ModeClass,                            \
+				[]() -> std::unique_ptr<GameMode> {                                       \
+				return std::make_unique<ModeClass>();                                     \
+			});                                                                           \
+		}                                                                                 \
+	};                                                                                    \
+	[[maybe_unused]] TNX_USED_ATTR static _##ModeClass##_ModeReg _##ModeClass##_mode_reg; \
+	}
 
 // ---------------------------------------------------------------------------
 // TNX_REGISTER_MODEMIX — registers a user-defined GameMode mixin with the
@@ -440,18 +463,20 @@ FORCE_INLINE void ForEachField(Func&& func)
 // the engine band (0–127) and self-register by calling RegisterMixin directly.
 // ---------------------------------------------------------------------------
 
-#define TNX_REGISTER_MODEMIX(MixinClass) \
-    namespace { \
-        struct _##MixinClass##_MixinReg { \
-            _##MixinClass##_MixinReg() { \
-                uint8_t id = Internal::g_GlobalMixinCounter++; \
-                assert(id <= ReflectionRegistry::MixinUserBandEnd && \
-                    "TNX_REGISTER_MODEMIX: user mixin band exhausted (128-255)."); \
-                ReflectionRegistry::Get().RegisterMixin(#MixinClass, id, /*isUserDefined=*/true); \
-            } \
-        }; \
-        [[maybe_unused]] TNX_USED_ATTR static _##MixinClass##_MixinReg _##MixinClass##_mixin_reg; \
-    }
+#define TNX_REGISTER_MODEMIX(MixinClass)                                                                                        \
+	namespace                                                                                                                   \
+	{                                                                                                                           \
+	struct _##MixinClass##_MixinReg                                                                                             \
+	{                                                                                                                           \
+		_##MixinClass##_MixinReg()                                                                                              \
+		{                                                                                                                       \
+			uint8_t id = Internal::g_GlobalMixinCounter++;                                                                      \
+			assert(id <= ReflectionRegistry::MixinUserBandEnd && "TNX_REGISTER_MODEMIX: user mixin band exhausted (128-255)."); \
+			ReflectionRegistry::Get().RegisterMixin(#MixinClass, id, /*isUserDefined=*/true);                                   \
+		}                                                                                                                       \
+	};                                                                                                                          \
+	[[maybe_unused]] TNX_USED_ATTR static _##MixinClass##_MixinReg _##MixinClass##_mixin_reg;                                   \
+	}
 
 // ---------------------------------------------------------------------------
 // Required by TNX_REGISTER_CONSTRUCT — pulled in here so the macro is self-contained.
@@ -474,19 +499,21 @@ FORCE_INLINE void ForEachField(Func&& func)
 // Requires the class to implement:
 //   void InitializeForReplication(WorldBase*, EntityHandle*, uint8_t viewCount)
 // ---------------------------------------------------------------------------
-#define TNX_REGISTER_CONSTRUCT(ConstructClass) \
-private: \
-    struct _ConstructReg { \
-        _ConstructReg() { \
-            ReflectionRegistry::Get().RegisterConstruct( \
-                #ConstructClass, \
-                ReflectionRegistry::ConstructTypeHashFromName(#ConstructClass), \
-                [](ConstructRegistry* reg, WorldBase* w, EntityHandle* handles, uint8_t count, Soul* soul) -> void* { \
-                    static_assert(requires(ConstructClass& obj, WorldBase* w2, EntityHandle* h, uint8_t n) { \
-                        obj.InitializeForReplication(w2, h, n); \
-                    }, #ConstructClass " must implement InitializeForReplication(WorldBase*, EntityHandle*, uint8_t)"); \
-                    return reg->CreateForReplication<ConstructClass>(w, handles, count, soul); \
-                }); \
-        } \
-    }; \
-    [[maybe_unused]] TNX_USED_ATTR static inline _ConstructReg _construct_reg;
+#define TNX_REGISTER_CONSTRUCT(ConstructClass)                                                                        \
+private:                                                                                                              \
+	struct _ConstructReg                                                                                              \
+	{                                                                                                                 \
+		_ConstructReg()                                                                                               \
+		{                                                                                                             \
+			ReflectionRegistry::Get().RegisterConstruct(                                                              \
+				#ConstructClass,                                                                                      \
+				ReflectionRegistry::ConstructTypeHashFromName(#ConstructClass),                                       \
+				[](ConstructRegistry* reg, WorldBase* w, EntityHandle* handles, uint8_t count, Soul* soul) -> void* { \
+				static_assert(requires(ConstructClass& obj, WorldBase* w2, EntityHandle* h, uint8_t n) {              \
+					obj.InitializeForReplication(w2, h, n);                                                           \
+				}, #ConstructClass " must implement InitializeForReplication(WorldBase*, EntityHandle*, uint8_t)");   \
+				return reg->CreateForReplication<ConstructClass>(w, handles, count, soul);                            \
+			});                                                                                                       \
+		}                                                                                                             \
+	};                                                                                                                \
+	[[maybe_unused]] TNX_USED_ATTR static inline _ConstructReg _construct_reg;

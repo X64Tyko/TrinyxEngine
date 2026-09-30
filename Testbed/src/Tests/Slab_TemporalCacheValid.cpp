@@ -11,7 +11,7 @@
 // always get a valid, usable cache regardless of rollback build flag.
 RUNTIME_TEST(Slab_TemporalCacheValid)
 {
-	Registry* Reg               = Engine.GetRegistry();
+	Registry* Reg                = Engine.GetRegistry();
 	ComponentCacheBase* Temporal = Reg->GetTemporalCache();
 
 	ASSERT(Temporal != nullptr);

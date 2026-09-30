@@ -99,7 +99,7 @@ void FlowManager<TNet, TRollback, TFrame>::LoadLevel(const char* levelPath, bool
 	if constexpr (std::is_same_v<TNet, OwnerSim>)
 	{
 		using NetT = typename TNet::NetThreadType;
-		auto* net = static_cast<NetT*>(GetRawNetThread());
+		auto* net  = static_cast<NetT*>(GetRawNetThread());
 		if (net) onComplete.Bind<NetT, &NetT::AcknowledgeLevelReady>(net);
 	}
 #endif
@@ -108,10 +108,10 @@ void FlowManager<TNet, TRollback, TFrame>::LoadLevel(const char* levelPath, bool
 	const StreamingRequestID id = sm->BeginRequest(onComplete, ActiveWorld->GetLocalOwnerID());
 	if (id == InvalidStreamingRequest) return;
 
-	const char* pathPtr   = sm->CopyPath(id, levelPath);
-	Registry*   reg       = ActiveWorld->GetRegistry();
-	WorldBase*  world     = ActiveWorld.get();
-	Soul*       soul      = GetSoul(ActiveWorld->GetLocalOwnerID());
+	const char* pathPtr = sm->CopyPath(id, levelPath);
+	Registry* reg       = ActiveWorld->GetRegistry();
+	WorldBase* world    = ActiveWorld.get();
+	Soul* soul          = GetSoul(ActiveWorld->GetLocalOwnerID());
 
 	if constexpr (TRollback::Enabled)
 	{
@@ -132,9 +132,10 @@ void FlowManager<TNet, TRollback, TFrame>::LoadLevel(const char* levelPath, bool
 				std::vector<GlobalEntityHandle> handles;
 				const size_t count = EntityBuilder::SpawnFromFileTracked(reg, pathPtr, bBackground, handles);
 				LOG_NET_INFO_F(soul, "[FlowManager] LoadLevel: spawned %zu entities from %s%s at frame %u",
-							   count, pathPtr, bBackground ? " (Alive-only)" : "", spawnFrame);
+					count, pathPtr, bBackground ? " (Alive-only)" : "", spawnFrame);
 #ifdef TNX_ENABLE_ROLLBACK
-				for (GlobalEntityHandle gh : handles) reg->PushEntityReinitEvent(gh, spawnFrame);
+				for (GlobalEntityHandle gh : handles)
+					reg->PushEntityReinitEvent(gh, spawnFrame);
 #endif
 			});
 		});
@@ -150,7 +151,7 @@ void FlowManager<TNet, TRollback, TFrame>::LoadLevel(const char* levelPath, bool
 			{
 				const size_t count = EntityBuilder::SpawnFromFile(reg, pathPtr, bBackground);
 				LOG_NET_INFO_F(soul, "[FlowManager] LoadLevel: spawned %zu entities from %s%s",
-							   count, pathPtr, bBackground ? " (Alive-only)" : "");
+					count, pathPtr, bBackground ? " (Alive-only)" : "");
 			});
 		});
 	}

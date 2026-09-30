@@ -77,19 +77,26 @@ static void ReadJoints(const cgltf_accessor* acc, cgltf_size index, uint8_t out[
 
 static void TransformPos(const float m[16], const float in[3], float out[3])
 {
-	out[0] = in[0] * m[0] + in[1] * m[4] + in[2] * m[8]  + m[12];
-	out[1] = in[0] * m[1] + in[1] * m[5] + in[2] * m[9]  + m[13];
+	out[0] = in[0] * m[0] + in[1] * m[4] + in[2] * m[8] + m[12];
+	out[1] = in[0] * m[1] + in[1] * m[5] + in[2] * m[9] + m[13];
 	out[2] = in[0] * m[2] + in[1] * m[6] + in[2] * m[10] + m[14];
 }
 
 static void TransformDir(const float m[16], const float in[3], float out[3])
 {
-	float x = in[0] * m[0] + in[1] * m[4] + in[2] * m[8];
-	float y = in[0] * m[1] + in[1] * m[5] + in[2] * m[9];
-	float z = in[0] * m[2] + in[1] * m[6] + in[2] * m[10];
+	float x   = in[0] * m[0] + in[1] * m[4] + in[2] * m[8];
+	float y   = in[0] * m[1] + in[1] * m[5] + in[2] * m[9];
+	float z   = in[0] * m[2] + in[1] * m[6] + in[2] * m[10];
 	float len = sqrtf(x * x + y * y + z * z);
-	if (len > 1e-6f) { x /= len; y /= len; z /= len; }
-	out[0] = x; out[1] = y; out[2] = z;
+	if (len > 1e-6f)
+	{
+		x /= len;
+		y /= len;
+		z /= len;
+	}
+	out[0] = x;
+	out[1] = y;
+	out[2] = z;
 }
 
 // Column-major 4x4 multiply: C = A * B.
@@ -101,8 +108,8 @@ static void MatMul16CM(const float A[16], const float B[16], float C[16])
 		{
 			float s = 0.f;
 			for (int k = 0; k < 4; ++k)
-				s += A[k*4+row] * B[col*4+k];
-			C[col*4+row] = s;
+				s += A[k * 4 + row] * B[col * 4 + k];
+			C[col * 4 + row] = s;
 		}
 }
 
@@ -113,29 +120,32 @@ static bool MatInv16CM(const float m[16], float inv[16])
 	for (int r = 0; r < 4; ++r)
 		for (int c = 0; c < 4; ++c)
 		{
-			A[r][c]   = m[c*4+r];
-			A[r][c+4] = (r == c) ? 1.f : 0.f;
+			A[r][c]     = m[c * 4 + r];
+			A[r][c + 4] = (r == c) ? 1.f : 0.f;
 		}
 	for (int col = 0; col < 4; ++col)
 	{
 		int pivot = col;
-		for (int r = col+1; r < 4; ++r)
+		for (int r = col + 1; r < 4; ++r)
 			if (fabsf(A[r][col]) > fabsf(A[pivot][col])) pivot = r;
 		if (pivot != col)
-			for (int c = 0; c < 8; ++c) std::swap(A[col][c], A[pivot][c]);
+			for (int c = 0; c < 8; ++c)
+				std::swap(A[col][c], A[pivot][c]);
 		float dv = A[col][col];
 		if (fabsf(dv) < 1e-12f) return false;
-		for (int c = 0; c < 8; ++c) A[col][c] /= dv;
+		for (int c = 0; c < 8; ++c)
+			A[col][c] /= dv;
 		for (int r = 0; r < 4; ++r)
 		{
 			if (r == col) continue;
 			float f = A[r][col];
-			for (int c = 0; c < 8; ++c) A[r][c] -= f * A[col][c];
+			for (int c = 0; c < 8; ++c)
+				A[r][c] -= f * A[col][c];
 		}
 	}
 	for (int r = 0; r < 4; ++r)
 		for (int c = 0; c < 4; ++c)
-			inv[c*4+r] = A[r][c+4];
+			inv[c * 4 + r] = A[r][c + 4];
 	return true;
 }
 
@@ -145,40 +155,48 @@ static bool MatInv16CM(const float m[16], float inv[16])
 
 static bool ImportSkeletalPrimitive(
 	const cgltf_primitive& prim,
-	[[maybe_unused]] const cgltf_skin*      skin,
-	const float            worldMatrix[16],
-	std::vector<Vertex>&       rawVerts,
-	std::vector<SkinWeights>&  rawWeights,
-	std::vector<uint32_t>&     rawIndices,
+	[[maybe_unused]] const cgltf_skin* skin,
+	const float worldMatrix[16],
+	std::vector<Vertex>& rawVerts,
+	std::vector<SkinWeights>& rawWeights,
+	std::vector<uint32_t>& rawIndices,
 	float aabbMin[3], float aabbMax[3])
 {
 	if (prim.type != cgltf_primitive_type_triangles) return false;
 
-	const cgltf_accessor* posAcc    = nullptr;
-	const cgltf_accessor* normAcc   = nullptr;
-	const cgltf_accessor* uvAcc     = nullptr;
-	const cgltf_accessor* tanAcc    = nullptr;
-	const cgltf_accessor* jointsAcc = nullptr;
-	const cgltf_accessor* weightsAcc= nullptr;
+	const cgltf_accessor* posAcc     = nullptr;
+	const cgltf_accessor* normAcc    = nullptr;
+	const cgltf_accessor* uvAcc      = nullptr;
+	const cgltf_accessor* tanAcc     = nullptr;
+	const cgltf_accessor* jointsAcc  = nullptr;
+	const cgltf_accessor* weightsAcc = nullptr;
 
 	for (cgltf_size i = 0; i < prim.attributes_count; ++i)
 	{
 		const auto& attr = prim.attributes[i];
 		switch (attr.type)
 		{
-			case cgltf_attribute_type_position: posAcc     = attr.data; break;
-			case cgltf_attribute_type_normal:   normAcc    = attr.data; break;
-			case cgltf_attribute_type_texcoord: if (attr.index == 0) uvAcc = attr.data; break;
-			case cgltf_attribute_type_tangent:  if (attr.index == 0) tanAcc = attr.data; break;
-			case cgltf_attribute_type_joints:   if (attr.index == 0) jointsAcc = attr.data; break;
-			case cgltf_attribute_type_weights:  if (attr.index == 0) weightsAcc = attr.data; break;
+			case cgltf_attribute_type_position: posAcc = attr.data; break;
+			case cgltf_attribute_type_normal: normAcc = attr.data; break;
+			case cgltf_attribute_type_texcoord:
+				if (attr.index == 0) uvAcc = attr.data;
+				break;
+			case cgltf_attribute_type_tangent:
+				if (attr.index == 0) tanAcc = attr.data;
+				break;
+			case cgltf_attribute_type_joints:
+				if (attr.index == 0) jointsAcc = attr.data;
+				break;
+			case cgltf_attribute_type_weights:
+				if (attr.index == 0) weightsAcc = attr.data;
+				break;
 			default: break;
 		}
 	}
 
 	if (!posAcc) return false;
 
-	const uint32_t baseVertex = static_cast<uint32_t>(rawVerts.size());
+	const uint32_t baseVertex  = static_cast<uint32_t>(rawVerts.size());
 	const cgltf_size vertCount = posAcc->count;
 
 	rawVerts.resize(rawVerts.size() + vertCount);
@@ -186,7 +204,7 @@ static bool ImportSkeletalPrimitive(
 
 	for (cgltf_size i = 0; i < vertCount; ++i)
 	{
-		Vertex&      vert   = rawVerts[baseVertex + i];
+		Vertex& vert        = rawVerts[baseVertex + i];
 		SkinWeights& weight = rawWeights[baseVertex + i];
 		std::memset(&vert, 0, sizeof(Vertex));
 
@@ -194,7 +212,9 @@ static bool ImportSkeletalPrimitive(
 		ReadFloat3(posAcc, i, pos);
 		float wPos[3];
 		TransformPos(worldMatrix, pos, wPos);
-		vert.px = wPos[0]; vert.py = wPos[1]; vert.pz = wPos[2];
+		vert.px = wPos[0];
+		vert.py = wPos[1];
+		vert.pz = wPos[2];
 
 		for (int a = 0; a < 3; ++a)
 		{
@@ -202,7 +222,7 @@ static bool ImportSkeletalPrimitive(
 			aabbMax[a] = std::max(aabbMax[a], wPos[a]);
 		}
 
-		float norm[3] = {0.f, 1.f, 0.f};
+		float norm[3] = { 0.f, 1.f, 0.f };
 		if (normAcc) ReadFloat3(normAcc, i, norm);
 		float wNorm[3];
 		TransformDir(worldMatrix, norm, wNorm);
@@ -210,11 +230,12 @@ static bool ImportSkeletalPrimitive(
 
 		float uv[2] = {};
 		if (uvAcc) ReadFloat2(uvAcc, i, uv);
-		vert.u = uv[0]; vert.v = uv[1];
+		vert.u = uv[0];
+		vert.v = uv[1];
 
 		if (tanAcc)
 		{
-			float tan4[4] = {1.f, 0.f, 0.f, 1.f};
+			float tan4[4] = { 1.f, 0.f, 0.f, 1.f };
 			ReadFloat4(tanAcc, i, tan4);
 			float wTan[3];
 			TransformDir(worldMatrix, tan4, wTan);
@@ -223,7 +244,7 @@ static bool ImportSkeletalPrimitive(
 		}
 
 		// Skin weights
-		float rawW[4] = {1.f, 0.f, 0.f, 0.f};
+		float rawW[4] = { 1.f, 0.f, 0.f, 0.f };
 		if (weightsAcc) ReadFloat4(weightsAcc, i, rawW);
 
 		uint8_t joints[4] = {};
@@ -243,7 +264,7 @@ static bool ImportSkeletalPrimitive(
 		if (sumW != 255)
 		{
 			uint8_t* maxW = std::max_element(weight.boneWeights, weight.boneWeights + 4);
-			*maxW = static_cast<uint8_t>(*maxW + (255 - sumW));
+			*maxW         = static_cast<uint8_t>(*maxW + (255 - sumW));
 		}
 	}
 
@@ -271,10 +292,10 @@ static bool ImportSkeletalPrimitive(
 // -----------------------------------------------------------------------
 
 static bool ImportSkeleton(const cgltf_skin& skin, [[maybe_unused]] const cgltf_data& data,
-                           const float meshWorldMatrix[16], SkeletonAsset& outSkeleton)
+	const float meshWorldMatrix[16], SkeletonAsset& outSkeleton)
 {
 	const cgltf_size boneCount = skin.joints_count;
-	outSkeleton.boneCount = static_cast<uint32_t>(boneCount);
+	outSkeleton.boneCount      = static_cast<uint32_t>(boneCount);
 	outSkeleton.bones.resize(boneCount);
 
 	// Build joint-node to index map
@@ -299,7 +320,7 @@ static bool ImportSkeleton(const cgltf_skin& skin, [[maybe_unused]] const cgltf_
 
 	for (cgltf_size i = 0; i < boneCount; ++i)
 	{
-		BoneInfo& bone = outSkeleton.bones[i];
+		BoneInfo& bone          = outSkeleton.bones[i];
 		const cgltf_node* joint = skin.joints[i];
 
 		// Parent index
@@ -325,14 +346,14 @@ static bool ImportSkeleton(const cgltf_skin& skin, [[maybe_unused]] const cgltf_
 
 		// Name
 		const char* nameStr = joint->name ? joint->name : "";
-		bone.name = TnxName(nameStr);
+		bone.name           = TnxName(nameStr);
 	}
 
 	// Sockets are authored in the editor (M3). Leave socketCount = 0 for M1.
 	outSkeleton.socketCount = 0;
 
 	LOG_ENG_INFO_F("[SkeletonImporter] Skeleton '%s': %zu bones",
-	               skin.name ? skin.name : "(unnamed)", boneCount);
+		skin.name ? skin.name : "(unnamed)", boneCount);
 	return true;
 }
 
@@ -340,15 +361,15 @@ static bool ImportSkeleton(const cgltf_skin& skin, [[maybe_unused]] const cgltf_
 // Pass 3 — Animations
 // -----------------------------------------------------------------------
 
-static void ImportAnimation(const cgltf_animation&   anim,
-                            const cgltf_skin&         skin,
-                            uint32_t                  boneCount,
-                            AnimationAsset&           outAnim,
-                            TnxName&                  outName)
+static void ImportAnimation(const cgltf_animation& anim,
+	const cgltf_skin& skin,
+	uint32_t boneCount,
+	AnimationAsset& outAnim,
+	TnxName& outName)
 {
-	outName = TnxName(anim.name ? anim.name : "anim");
+	outName           = TnxName(anim.name ? anim.name : "anim");
 	outAnim.boneCount = boneCount;
-	outAnim.boneTracks.resize(boneCount, {0, 0});
+	outAnim.boneTracks.resize(boneCount, { 0, 0 });
 	outAnim.duration = 0.f;
 
 	// Build joint → bone index map from skin
@@ -358,7 +379,11 @@ static void ImportAnimation(const cgltf_animation&   anim,
 		jointIndex[skin.joints[i]] = static_cast<uint32_t>(i);
 
 	// Temporary per-bone keyframe accumulation
-	struct BoneKeys { std::vector<AnimKeyframe> keys; bool hasTranslation = false; };
+	struct BoneKeys
+	{
+		std::vector<AnimKeyframe> keys;
+		bool hasTranslation = false;
+	};
 	std::vector<BoneKeys> perBone(boneCount);
 
 	for (cgltf_size c = 0; c < anim.channels_count; ++c)
@@ -370,14 +395,13 @@ static void ImportAnimation(const cgltf_animation&   anim,
 		if (it == jointIndex.end()) continue;
 
 		uint32_t boneIdx = it->second;
-		if (chan.target_path != cgltf_animation_path_type_translation &&
-		    chan.target_path != cgltf_animation_path_type_rotation)
+		if (chan.target_path != cgltf_animation_path_type_translation && chan.target_path != cgltf_animation_path_type_rotation)
 			continue; // scale ignored in M1
 
 		const cgltf_animation_sampler& sampler = *chan.sampler;
 		if (!sampler.input || !sampler.output) continue;
 
-		const cgltf_size keyCount = sampler.input->count;
+		const cgltf_size keyCount         = sampler.input->count;
 		std::vector<AnimKeyframe>& boneKf = perBone[boneIdx].keys;
 		if (boneKf.size() < keyCount) boneKf.resize(keyCount);
 
@@ -385,21 +409,26 @@ static void ImportAnimation(const cgltf_animation&   anim,
 		{
 			float t = 0.f;
 			cgltf_accessor_read_float(sampler.input, k, &t, 1);
-			boneKf[k].time = t;
+			boneKf[k].time   = t;
 			outAnim.duration = std::max(outAnim.duration, t);
 
 			if (chan.target_path == cgltf_animation_path_type_translation)
 			{
 				float v[3] = {};
 				cgltf_accessor_read_float(sampler.output, k, v, 3);
-				boneKf[k].tx = v[0]; boneKf[k].ty = v[1]; boneKf[k].tz = v[2];
+				boneKf[k].tx                    = v[0];
+				boneKf[k].ty                    = v[1];
+				boneKf[k].tz                    = v[2];
 				perBone[boneIdx].hasTranslation = true;
 			}
 			else // rotation
 			{
-				float v[4] = {0.f, 0.f, 0.f, 1.f};
+				float v[4] = { 0.f, 0.f, 0.f, 1.f };
 				cgltf_accessor_read_float(sampler.output, k, v, 4);
-				boneKf[k].rx = v[0]; boneKf[k].ry = v[1]; boneKf[k].rz = v[2]; boneKf[k].rw = v[3];
+				boneKf[k].rx = v[0];
+				boneKf[k].ry = v[1];
+				boneKf[k].rz = v[2];
+				boneKf[k].rw = v[3];
 			}
 		}
 	}
@@ -414,7 +443,7 @@ static void ImportAnimation(const cgltf_animation&   anim,
 		std::vector<AnimKeyframe>& keys = perBone[b].keys;
 
 		const cgltf_node* joint = skin.joints[b];
-		float bindT[3] = {0.f, 0.f, 0.f};
+		float bindT[3]          = { 0.f, 0.f, 0.f };
 		if (joint->has_translation)
 		{
 			bindT[0] = joint->translation[0];
@@ -427,8 +456,10 @@ static void ImportAnimation(const cgltf_animation&   anim,
 			// No animation channels — emit one static keyframe at the bind-pose local TRS.
 			AnimKeyframe kf{};
 			kf.time = 0.f;
-			kf.tx = bindT[0]; kf.ty = bindT[1]; kf.tz = bindT[2];
-			kf.rw = 1.f; // identity quaternion
+			kf.tx   = bindT[0];
+			kf.ty   = bindT[1];
+			kf.tz   = bindT[2];
+			kf.rw   = 1.f; // identity quaternion
 			keys.push_back(kf);
 		}
 		else
@@ -438,18 +469,21 @@ static void ImportAnimation(const cgltf_animation&   anim,
 				if (k.rw == 0.f) k.rw = 1.f; // no rotation channel → identity quat
 				if (!perBone[b].hasTranslation)
 				{
-					k.tx = bindT[0]; k.ty = bindT[1]; k.tz = bindT[2];
+					k.tx = bindT[0];
+					k.ty = bindT[1];
+					k.tz = bindT[2];
 				}
 			}
 		}
 
-		outAnim.boneTracks[b] = {nextOffset, static_cast<uint32_t>(keys.size())};
-		for (const AnimKeyframe& k : keys) outAnim.keyframes.push_back(k);
+		outAnim.boneTracks[b] = { nextOffset, static_cast<uint32_t>(keys.size()) };
+		for (const AnimKeyframe& k : keys)
+			outAnim.keyframes.push_back(k);
 		nextOffset += static_cast<uint32_t>(keys.size());
 	}
 
 	LOG_ENG_INFO_F("[SkeletonImporter] Animation '%s': %.2fs, %u bones, %zu keyframes",
-	               outName.GetStr(), outAnim.duration, boneCount, outAnim.keyframes.size());
+		outName.GetStr(), outAnim.duration, boneCount, outAnim.keyframes.size());
 }
 
 // -----------------------------------------------------------------------
@@ -459,7 +493,7 @@ static void ImportAnimation(const cgltf_animation&   anim,
 bool ImportSkeletalGLTF(const std::string& srcPath, SkeletalImportResult& outResult)
 {
 	cgltf_options options{};
-	cgltf_data*   data = nullptr;
+	cgltf_data* data = nullptr;
 
 	cgltf_result result = cgltf_parse_file(&options, srcPath.c_str(), &data);
 	if (result != cgltf_result_success)
@@ -490,16 +524,16 @@ bool ImportSkeletalGLTF(const std::string& srcPath, SkeletalImportResult& outRes
 	// Pass 1 — Mesh geometry + skin weights
 	// -----------------------------------------------------------------------
 
-	std::vector<Vertex>      rawVerts;
+	std::vector<Vertex> rawVerts;
 	std::vector<SkinWeights> rawWeights;
-	std::vector<uint32_t>    rawIndices;
-	float aabbMin[3] = { 1e30f,  1e30f,  1e30f};
-	float aabbMax[3] = {-1e30f, -1e30f, -1e30f};
+	std::vector<uint32_t> rawIndices;
+	float aabbMin[3] = { 1e30f, 1e30f, 1e30f };
+	float aabbMax[3] = { -1e30f, -1e30f, -1e30f };
 
 	// Capture the mesh node's world matrix — used in Pass 2 to correct IBPs.
 	// All skin mesh nodes should share the same skin, so any one of them gives the right matrix.
-	float meshWorldMatrix[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
-	bool  meshWorldMatrixSet  = false;
+	float meshWorldMatrix[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+	bool meshWorldMatrixSet   = false;
 
 	for (cgltf_size ni = 0; ni < data->nodes_count; ++ni)
 	{
@@ -518,11 +552,11 @@ bool ImportSkeletalGLTF(const std::string& srcPath, SkeletalImportResult& outRes
 		for (cgltf_size pi = 0; pi < node->mesh->primitives_count; ++pi)
 		{
 			if (!ImportSkeletalPrimitive(node->mesh->primitives[pi], &skin, worldMatrix,
-			                             rawVerts, rawWeights, rawIndices,
-			                             aabbMin, aabbMax))
+					rawVerts, rawWeights, rawIndices,
+					aabbMin, aabbMax))
 			{
 				LOG_ENG_WARN_F("[SkeletonImporter] Skipped non-triangle primitive %zu in node '%s'",
-				               pi, node->name ? node->name : "(unnamed)");
+					pi, node->name ? node->name : "(unnamed)");
 			}
 		}
 	}
@@ -537,16 +571,16 @@ bool ImportSkeletalGLTF(const std::string& srcPath, SkeletalImportResult& outRes
 	// Deduplicate — geometry only; skin weights tracked in parallel
 	std::unordered_map<Vertex, uint32_t, VertexHash, VertexEqual> vertMap;
 	vertMap.reserve(rawVerts.size());
-	std::vector<Vertex>      dedupVerts;
+	std::vector<Vertex> dedupVerts;
 	std::vector<SkinWeights> dedupWeights;
-	std::vector<uint32_t>    dedupIndices;
+	std::vector<uint32_t> dedupIndices;
 	dedupVerts.reserve(rawVerts.size());
 	dedupWeights.reserve(rawVerts.size());
 	dedupIndices.reserve(rawIndices.size());
 
 	for (uint32_t idx : rawIndices)
 	{
-		const Vertex& v = rawVerts[idx];
+		const Vertex& v     = rawVerts[idx];
 		auto [it, inserted] = vertMap.emplace(v, static_cast<uint32_t>(dedupVerts.size()));
 		if (inserted)
 		{
@@ -563,7 +597,7 @@ bool ImportSkeletalGLTF(const std::string& srcPath, SkeletalImportResult& outRes
 	std::memcpy(outResult.mesh.AABBMax, aabbMax, sizeof(float) * 3);
 
 	LOG_ENG_INFO_F("[SkeletonImporter] Mesh: %zu verts, %zu indices (deduped from %zu)",
-	               outResult.mesh.Vertices.size(), outResult.mesh.Indices.size(), rawVerts.size());
+		outResult.mesh.Vertices.size(), outResult.mesh.Indices.size(), rawVerts.size());
 
 	// -----------------------------------------------------------------------
 	// Pass 2 — Skeleton
@@ -586,11 +620,11 @@ bool ImportSkeletalGLTF(const std::string& srcPath, SkeletalImportResult& outRes
 	for (cgltf_size a = 0; a < data->animations_count; ++a)
 	{
 		ImportAnimation(data->animations[a], skin, outResult.skeleton.boneCount,
-		                outResult.animations[a], outResult.animNames[a]);
+			outResult.animations[a], outResult.animNames[a]);
 	}
 
 	LOG_ENG_INFO_F("[SkeletonImporter] '%s': %zu animations imported",
-	               srcPath.c_str(), data->animations_count);
+		srcPath.c_str(), data->animations_count);
 
 	cgltf_free(data);
 	return true;

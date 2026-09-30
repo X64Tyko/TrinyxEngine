@@ -21,10 +21,10 @@ static TnxWidgets::Tier TierFromCache(CacheTier ct)
 {
 	switch (ct)
 	{
-		case CacheTier::Temporal:  return TnxWidgets::Tier::Temporal;
-		case CacheTier::Volatile:  return TnxWidgets::Tier::Volatile;
+		case CacheTier::Temporal: return TnxWidgets::Tier::Temporal;
+		case CacheTier::Volatile: return TnxWidgets::Tier::Volatile;
 		case CacheTier::Universal: return TnxWidgets::Tier::Temporal;
-		default:                   return TnxWidgets::Tier::Cold;
+		default: return TnxWidgets::Tier::Cold;
 	}
 }
 
@@ -32,7 +32,7 @@ static TnxWidgets::Tier TierFromCache(CacheTier ct)
 static const char* StripTypePrefix(const char* name)
 {
 	if (!name) return "(unknown)";
-	if (std::strncmp(name, "class ", 6)  == 0) return name + 6;
+	if (std::strncmp(name, "class ", 6) == 0) return name + 6;
 	if (std::strncmp(name, "struct ", 7) == 0) return name + 7;
 	return name;
 }
@@ -43,9 +43,9 @@ static const char* StripTypePrefix(const char* name)
 // -----------------------------------------------------------------------
 static bool DrawComponentHeader(const char* compName, uint32_t compID, CacheTier tier)
 {
-	ImGui::PushStyleColor(ImGuiCol_Header,        TnxStyle::Color::BgElev);
+	ImGui::PushStyleColor(ImGuiCol_Header, TnxStyle::Color::BgElev);
 	ImGui::PushStyleColor(ImGuiCol_HeaderHovered, TnxStyle::Color::PurpleFaint);
-	ImGui::PushStyleColor(ImGuiCol_HeaderActive,  TnxStyle::Color::PurpleSoft);
+	ImGui::PushStyleColor(ImGuiCol_HeaderActive, TnxStyle::Color::PurpleSoft);
 
 	char label[128];
 	snprintf(label, sizeof(label), "%s###comp_%u", compName ? compName : "Unknown", compID);
@@ -68,7 +68,7 @@ static void DrawEmptyState()
 	ImGui::PushStyleColor(ImGuiCol_Text, TnxStyle::Color::FgDim);
 	ImGui::Spacing();
 	ImGui::Spacing();
-	float w = ImGui::GetContentRegionAvail().x;
+	float w           = ImGui::GetContentRegionAvail().x;
 	const char* line1 = "Nothing selected.";
 	const char* line2 = "Click an entity or archetype in the World Outliner.";
 	ImGui::SetCursorPosX((w - ImGui::CalcTextSize(line1).x) * 0.5f);
@@ -107,9 +107,9 @@ static void DrawConstructMode(EditorState& state)
 // Iterates arch->ArchetypeFieldLayout, one CollapsingHeader per component.
 // -----------------------------------------------------------------------
 static void DrawComponentList(const ReflectionRegistry& cfr, Archetype* arch,
-							  bool showFields, void** fieldArrayTable,
-							  uint16_t entityLocalIndex, bool simPaused,
-							  EditorState& state)
+	bool showFields, void** fieldArrayTable,
+	uint16_t entityLocalIndex, bool simPaused,
+	EditorState& state)
 {
 	ComponentTypeID currentCompID = 0;
 	bool sectionOpen              = false;
@@ -129,13 +129,13 @@ static void DrawComponentList(const ReflectionRegistry& cfr, Archetype* arch,
 		{
 			closePrevSection();
 
-			currentCompID         = fdesc.componentID;
-			const char* compName  = cfr.GetAllComponents().count(currentCompID)
-									  ? cfr.GetComponentMeta(currentCompID).Name
-									  : "Unknown";
-			CacheTier tier        = cfr.GetAllComponents().count(currentCompID)
-									  ? cfr.GetComponentMeta(currentCompID).TemporalTier
-									  : CacheTier::None;
+			currentCompID        = fdesc.componentID;
+			const char* compName = cfr.GetAllComponents().count(currentCompID)
+									   ? cfr.GetComponentMeta(currentCompID).Name
+									   : "Unknown";
+			CacheTier tier       = cfr.GetAllComponents().count(currentCompID)
+									   ? cfr.GetComponentMeta(currentCompID).TemporalTier
+									   : CacheTier::None;
 
 			sectionOpen = DrawComponentHeader(compName, currentCompID, tier);
 			if (sectionOpen && showFields) ImGui::Indent(8.0f);
@@ -146,7 +146,8 @@ static void DrawComponentList(const ReflectionRegistry& cfr, Archetype* arch,
 		// --- Field row ---
 		const auto* fields    = cfr.GetFields(fdesc.componentID);
 		const char* fieldName = (fields && fdesc.componentSlotIndex < fields->size())
-								  ? (*fields)[fdesc.componentSlotIndex].Name : "???";
+									? (*fields)[fdesc.componentSlotIndex].Name
+									: "???";
 
 		size_t idx = fdesc.fieldSlotIndex;
 
@@ -163,9 +164,9 @@ static void DrawComponentList(const ReflectionRegistry& cfr, Archetype* arch,
 		// Asset-ref fields: combo or read-only name
 		if (fdesc.refAssetType != AssetType::Invalid)
 		{
-			uint8_t* base     = static_cast<uint8_t*>(fieldArrayTable[idx]);
-			uint32_t* slotPtr = reinterpret_cast<uint32_t*>(base + entityLocalIndex * fdesc.fieldSize);
-			uint32_t slotIdx  = *slotPtr;
+			uint8_t* base         = static_cast<uint8_t*>(fieldArrayTable[idx]);
+			uint32_t* slotPtr     = reinterpret_cast<uint32_t*>(base + entityLocalIndex * fdesc.fieldSize);
+			uint32_t slotIdx      = *slotPtr;
 			const char* assetName = MeshManager::Get().GetSlotName(slotIdx);
 
 			ImGui::PushID(fieldName);
@@ -184,9 +185,9 @@ static void DrawComponentList(const ReflectionRegistry& cfr, Archetype* arch,
 					uint32_t meshCount = MeshManager::Get().GetMeshCount();
 					for (uint32_t i = 0; i < meshCount; ++i)
 					{
-						const char* name  = MeshManager::Get().GetSlotName(i);
-						const char* lbl   = (!name || !*name) ? "(unnamed)" : name;
-						bool sel          = (i == slotIdx);
+						const char* name = MeshManager::Get().GetSlotName(i);
+						const char* lbl  = (!name || !*name) ? "(unnamed)" : name;
+						bool sel         = (i == slotIdx);
 						if (ImGui::Selectable(lbl, sel))
 						{
 							uint32_t oldSlot  = slotIdx;
@@ -233,7 +234,8 @@ static void DrawComponentList(const ReflectionRegistry& cfr, Archetype* arch,
 			else
 			{
 				ImGui::PushFont(TnxStyle::Font::MonoRegular);
-				if (assetName && *assetName) ImGui::TextUnformatted(assetName);
+				if (assetName && *assetName)
+					ImGui::TextUnformatted(assetName);
 				else
 				{
 					char slotStr[32];
@@ -436,7 +438,11 @@ static void DrawComponentList(const ReflectionRegistry& cfr, Archetype* arch,
 
 void DetailsPanel::Draw(EditorState& state)
 {
-	if (!BeginPadded()) { ImGui::End(); return; }
+	if (!BeginPadded())
+	{
+		ImGui::End();
+		return;
+	}
 	TnxWidgets::PanelHeader(nullptr, "Details");
 
 	// --- None ---
@@ -476,7 +482,7 @@ void DetailsPanel::Draw(EditorState& state)
 	ImGui::PushStyleColor(ImGuiCol_Text, TnxStyle::Color::FgMuted);
 	char hdrBuf[128];
 	snprintf(hdrBuf, sizeof(hdrBuf), "ClassID %u  ·  %u entities  ·  %zu chunks",
-			 arch->ArchClassID, arch->TotalEntityCount, arch->Chunks.size());
+		arch->ArchClassID, arch->TotalEntityCount, arch->Chunks.size());
 	ImGui::TextUnformatted(hdrBuf);
 	ImGui::PopStyleColor();
 
@@ -485,7 +491,7 @@ void DetailsPanel::Draw(EditorState& state)
 		ImGui::PushStyleColor(ImGuiCol_Text, TnxStyle::Color::FgDim);
 		char entBuf[64];
 		snprintf(entBuf, sizeof(entBuf), "Entity  idx 0x%06X  ·  local %u",
-				 state.SelectedCacheIndex, state.SelectedLocalIndex);
+			state.SelectedCacheIndex, state.SelectedLocalIndex);
 		ImGui::TextUnformatted(entBuf);
 		ImGui::PopStyleColor();
 	}
@@ -504,8 +510,8 @@ void DetailsPanel::Draw(EditorState& state)
 	if (state.Selection == EditorState::SelectionType::Archetype)
 	{
 		DrawComponentList(cfr, arch,
-						  /* showFields */ false, nullptr,
-						  0, false, state);
+			/* showFields */ false, nullptr,
+			0, false, state);
 		ImGui::End();
 		return;
 	}
@@ -536,8 +542,8 @@ void DetailsPanel::Draw(EditorState& state)
 	arch->BuildFieldArrayTable(state.SelectedChunk, fieldArrayTable, temporalFrame, volatileFrame);
 
 	DrawComponentList(cfr, arch,
-					  /* showFields */ true, fieldArrayTable,
-					  state.SelectedLocalIndex, simPaused, state);
+		/* showFields */ true, fieldArrayTable,
+		state.SelectedLocalIndex, simPaused, state);
 
 	ImGui::End();
 }

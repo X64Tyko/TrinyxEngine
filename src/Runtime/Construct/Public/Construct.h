@@ -61,8 +61,57 @@ struct ConstructViewRef
 //   void PostPhysics(SimFloat dt)— runs after wide entity PostPhysics sweep
 //   void ScalarUpdate(SimFloat dt)— runs after entity ScalarUpdate
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// ConstructBase — non-template core of Construct<T>.
+//
+// Holds everything that doesn't depend on the derived type: world/soul/ID state
+// and the registered View list. Bodies live in Construct.cpp, so changes here
+// don't recompile every Construct. Construct<Derived> adds only the concept-
+// detected, type-specific wiring.
+// ---------------------------------------------------------------------------
+class ConstructBase
+{
+public:
+	void RegisterView(ConstructViewRef ref);
+	void DeregisterView(void* viewPtr);
+
+	/// Collect the ECS EntityHandle for each registered View.
+	/// Used by ReplicationSystem to build the ConstructSpawnPayload.
+	void CollectViewHandles(std::vector<EntityHandle>& out) const;
+
+	WorldBase* GetWorld() const { return OwnerWorld; }
+	Registry* GetRegistry() const;
+	bool IsInitialized() const { return bInitialized; }
+	uint32_t GetConstructID() const { return ConstructID; }
+	void SetConstructID(uint32_t id) { ConstructID = id; }
+
+	Soul* GetOwnerSoul() const { return OwnerSoul; }
+	void SetOwnerSoul(Soul* soul) { OwnerSoul = soul; }
+
+protected:
+	ConstructBase()  = default;
+	~ConstructBase() = default;
+
+	void HydrateAllViews();
+
+	/// Binds or unbinds contact callbacks for every registered View's entity.
+	/// @p self is the Derived* the callbacks were registered with (may differ from `this`
+	/// under multiple inheritance).
+	void UnbindAllViewContacts(void* self);
+
+	/// Deregisters every scalar tick batch entry for @p self (the Derived* used at registration).
+	void DeregisterTicks(void* self);
+
+	WorldBase* OwnerWorld = nullptr;
+	Soul* OwnerSoul       = nullptr;
+	uint32_t ConstructID  = 0;
+	bool bInitialized     = false;
+
+	std::vector<ConstructViewRef> Views;
+};
+
 template <typename Derived>
-class Construct
+class Construct : public ConstructBase
 {
 public:
 	// Default lifetime tier. Derived classes override via TNX_CONSTRUCT_SESSION, etc.
@@ -80,7 +129,7 @@ public:
 			static_cast<Derived*>(this)->PreInit();
 		}
 	}
-	
+
 	void Initialize(WorldBase* InWorld)
 	{
 		OwnerWorld = InWorld;
@@ -155,62 +204,13 @@ public:
 
 		// Unbind contact callbacks before deregistering ticks
 		if constexpr (HasOnHit<Derived> || HasOnOverlapBegin<Derived> || HasOnOverlapEnd<Derived>)
-		{
-			JoltPhysics* Phys = OwnerWorld->GetPhysics();
-			Registry* Reg     = OwnerWorld->GetRegistry();
-			for (const auto& v : Views)
-			{
-				if (!v.GetHandleFn) continue;
-				EntityHandle handle = v.GetHandleFn(v.View);
-				Phys->UnbindContacts(handle, Reg, static_cast<Derived*>(this));
-			}
-		}
+			UnbindAllViewContacts(static_cast<Derived*>(this));
 
-		LogicThreadBase* Logic = OwnerWorld->GetLogicThread();
-		Logic->ScalarPrePhysicsBatch.Deregister(static_cast<Derived*>(this));
-		Logic->ScalarPostPhysicsBatch.Deregister(static_cast<Derived*>(this));
-		Logic->ScalarPhysicsStepBatch.Deregister(static_cast<Derived*>(this));
-		Logic->ScalarUpdateBatch.Deregister(static_cast<Derived*>(this));
+		DeregisterTicks(static_cast<Derived*>(this));
 
 		bInitialized = false;
 		OwnerWorld   = nullptr;
 	}
-
-	void RegisterView(ConstructViewRef ref)
-	{
-		Views.push_back(ref);
-	}
-
-	/// Collect the ECS EntityHandle for each registered View.
-	/// Used by ReplicationSystem to build the ConstructSpawnPayload.
-	void CollectViewHandles(std::vector<EntityHandle>& out) const
-	{
-		out.clear();
-		for (const auto& v : Views)
-			if (v.GetHandleFn) out.push_back(v.GetHandleFn(v.View));
-	}
-
-	void DeregisterView(void* viewPtr)
-	{
-		for (size_t i = 0; i < Views.size(); ++i)
-		{
-			if (Views[i].View == viewPtr)
-			{
-				Views[i] = std::move(Views.back());
-				Views.pop_back();
-				return;
-			}
-		}
-	}
-
-	WorldBase* GetWorld() const { return OwnerWorld; }
-	Registry* GetRegistry() const { return OwnerWorld ? OwnerWorld->GetRegistry() : nullptr; }
-	bool IsInitialized() const { return bInitialized; }
-	uint32_t GetConstructID() const { return ConstructID; }
-	void SetConstructID(uint32_t id) { ConstructID = id; }
-
-	Soul* GetOwnerSoul() const { return OwnerSoul; }
-	void SetOwnerSoul(Soul* soul) { OwnerSoul = soul; }
 
 protected:
 	Construct() = default;
@@ -221,18 +221,6 @@ protected:
 	}
 
 private:
-	WorldBase* OwnerWorld    = nullptr;
-	Soul* OwnerSoul      = nullptr;
-	uint32_t ConstructID = 0;
-	bool bInitialized    = false;
-
-	std::vector<ConstructViewRef> Views;
-
-	void HydrateAllViews()
-	{
-		for (auto& v : Views) v.EnsureHydrated();
-	}
-
 	void PrePhysBase(SimFloat dt)
 	{
 		HydrateAllViews();

@@ -54,7 +54,11 @@ TEST(Net_LoopbackPingPong)
 	HSteamNetConnection serverConn = 0;
 	for (const auto& ci : mgr.GetConnections())
 	{
-		if (ci.Handle != clientConn) { serverConn = ci.Handle; break; }
+		if (ci.Handle != clientConn)
+		{
+			serverConn = ci.Handle;
+			break;
+		}
 	}
 	ASSERT(serverConn != 0);
 

@@ -25,7 +25,7 @@ class ConstructBatch
 public:
 	// Register a Construct's tick method into this batch.
 	// MemFn must be a member function pointer with signature void(SimFloat).
-	template <typename T, void(T::*MemFn)(SimFloat)>
+	template <typename T, void (T::*MemFn)(SimFloat)>
 	void Register(T* Object, TickGroup Group = TickGroup::Default, int16_t Order = 0)
 	{
 		ConstructTickEntry Entry;
@@ -41,7 +41,10 @@ public:
 	void Deregister(void* Object)
 	{
 		auto It = std::remove_if(Entries.begin(), Entries.end(),
-			[Object](const ConstructTickEntry& E) { return E.Tick.bindObj == Object; });
+			[Object](const ConstructTickEntry& E)
+		{
+			return E.Tick.bindObj == Object;
+		});
 
 		if (It != Entries.end())
 		{
@@ -61,11 +64,11 @@ public:
 		{
 			std::stable_sort(Entries.begin(), Entries.end(),
 				[](const ConstructTickEntry& A, const ConstructTickEntry& B)
-				{
-					if (A.Group != B.Group)
-						return static_cast<uint8_t>(A.Group) < static_cast<uint8_t>(B.Group);
-					return A.OrderWithinGroup < B.OrderWithinGroup;
-				});
+			{
+				if (A.Group != B.Group)
+					return static_cast<uint8_t>(A.Group) < static_cast<uint8_t>(B.Group);
+				return A.OrderWithinGroup < B.OrderWithinGroup;
+			});
 			bDirty = false;
 		}
 

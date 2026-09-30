@@ -117,15 +117,15 @@ public:
 	// --- World and flow access ---
 
 	/// @brief Returns the active default world, or @c nullptr before the FlowManager creates one.
-	WorldBase*       GetDefaultWorld() const { return DefaultWorld; }
+	WorldBase* GetDefaultWorld() const { return DefaultWorld; }
 	/// @brief Returns the FlowManager that owns all worlds and game states.
-	FlowManagerBase* GetFlowManager()  const { return Flow.get(); }
+	FlowManagerBase* GetFlowManager() const { return Flow.get(); }
 
 	/// @brief Convenience accessor: returns the default world's entity registry.
 	Registry* GetRegistry() const;
 
 	/// @brief Returns the active config (editor overlay when @c TNX_ENABLE_EDITOR, else game config).
-	const EngineConfig* GetConfig()     const { return &Config; }
+	const EngineConfig* GetConfig() const { return &Config; }
 	/// @brief Returns the pure game config without editor overrides, used when creating PIE worlds.
 	const EngineConfig* GetGameConfig() const { return &GameConfig; }
 
@@ -159,16 +159,19 @@ public:
 	 * @note @p lambda must satisfy @c ValidJobLambda: trivially copyable, ≤48 bytes, signature @c (uint32_t).
 	 */
 	template <TrinyxJobs::ValidJobLambda LAMBDA>
-	void Spawn(LAMBDA lambda) { if (DefaultWorld) DefaultWorld->SpawnAndWait(lambda); }
+	void Spawn(LAMBDA lambda)
+	{
+		if (DefaultWorld) DefaultWorld->SpawnAndWait(lambda);
+	}
 
 // --- Renderer, window, and audio (compiled out in headless builds) ---
 #ifndef TNX_HEADLESS
 	/// @brief Returns the active renderer — @c EditorRenderer or @c GameplayRenderer depending on build flags.
 	RendererType* GetRenderer() const { return Render.get(); }
 	/// @brief Returns the SDL window handle.
-	SDL_Window*   GetWindow()   const { return EngineWindow; }
+	SDL_Window* GetWindow() const { return EngineWindow; }
 	/// @brief Returns the audio manager.
-	AudioManager* GetAudio()    const { return Audio.get(); }
+	AudioManager* GetAudio() const { return Audio.get(); }
 #endif
 	/// @brief Returns the streaming manager (level loads, chunk activations, future GPU transfers).
 	StreamingManager* GetStreamingManager() const { return Streaming.get(); }
@@ -188,11 +191,11 @@ public:
 	bool EnsureNetworking();
 
 	Callback<void, WorldBase*, NetConnectionManager*> OnPIEStarted; ///< Fired by EditorContext at StartPIE; game code binds in PostInitialize.
-	Callback<void, NetConnectionManager*>             OnPIEStopped; ///< Fired by EditorContext at StopPIE.
+	Callback<void, NetConnectionManager*> OnPIEStopped;             ///< Fired by EditorContext at StopPIE.
 #endif
 
 	Callback<void, WorldBase*> OnPlayStarted; ///< Fired when Play (Local) is clicked in the editor.
-	Callback<void>             OnPlayStopped; ///< Fired when Stop (Local) is clicked in the editor.
+	Callback<void> OnPlayStopped;             ///< Fired when Stop (Local) is clicked in the editor.
 
 	/// @brief When set, @c PumpEvents writes input to this world instead of @c DefaultWorld.
 	/// @note EditorContext sets this during PIE/Play to route input to the active world.
@@ -207,23 +210,23 @@ private:
 	void StartThreadsAndJobs(); ///< @brief Pin Logic/Render threads and initialize the job worker pool.
 	void RunMainLoop();         ///< @brief Main loop: pump events, pace frames, coordinate the render thread.
 #ifndef TNX_HEADLESS
-	void PumpEvents();          ///< @brief Drain the SDL event queue and route input to the active world.
+	void PumpEvents(); ///< @brief Drain the SDL event queue and route input to the active world.
 #endif
 	void WaitForTiming(uint64_t frameStart, uint64_t perfFrequency); ///< @brief Spin-wait to hit the configured frame rate cap.
-	void CalculateFPS(); ///< @brief Update the Sentinel-side FPS counter approximately once per second.
+	void CalculateFPS();                                             ///< @brief Update the Sentinel-side FPS counter approximately once per second.
 
 #ifndef TNX_HEADLESS
 	// --- Window ---
-	SDL_Window*    EngineWindow = nullptr; ///< SDL window handle; null in headless builds.
-	SDL_GPUDevice* GpuDevice    = nullptr; ///< SDL GPU device handle.
-	FramePacer     Pacer;                  ///< Frame-rate pacing state (timing only — render is GPU-autonomous).
+	SDL_Window* EngineWindow = nullptr; ///< SDL window handle; null in headless builds.
+	SDL_GPUDevice* GpuDevice = nullptr; ///< SDL GPU device handle.
+	FramePacer Pacer;                   ///< Frame-rate pacing state (timing only — render is GPU-autonomous).
 #endif
 
 	std::unique_ptr<StreamingManager> Streaming; ///< Async batch manager — level loads, chunk activations, future GPU transfers.
 
 #ifdef TNX_ENABLE_NETWORK
 	// --- Networking ---
-	GNSContext                 GNS; ///< GNS library context; owns the GNS global singleton state.
+	GNSContext GNS;                     ///< GNS library context; owns the GNS global singleton state.
 	std::unique_ptr<NetThreadType> Net; ///< Active net thread (PIENetThread / AuthorityNet / OwnerNet).
 #if !TNX_ENABLE_EDITOR
 	std::unique_ptr<ReplicationSystem> Replicator; ///< Owned for non-editor builds; editor creates per-PIE-session instances in EditorContext.
@@ -233,7 +236,7 @@ private:
 #ifndef TNX_HEADLESS
 	// --- Vulkan (owned here, shared across all worlds) ---
 	VulkanContext VkCtx; ///< Vulkan instance, physical device, and logical device.
-	VulkanMemory  VkMem; ///< VMA allocator and GPU buffer management.
+	VulkanMemory VkMem;  ///< VMA allocator and GPU buffer management.
 
 	// --- Renderer and audio ---
 	std::unique_ptr<RendererType> Render; ///< Compile-time selected: EditorRenderer or GameplayRenderer.
@@ -248,20 +251,20 @@ private:
 	WorldBase* DefaultWorld = nullptr; ///< Non-owning alias; FlowManager holds the authoritative world lifetime.
 
 	// --- Lifecycle ---
-	std::atomic<bool>            bIsRunning{false};       ///< True while the main loop is executing.
-	std::atomic<bool>            bJobsInitialized{false}; ///< Set to true once the job worker pool is ready; Logic thread polls this gate.
+	std::atomic<bool> bIsRunning{ false };       ///< True while the main loop is executing.
+	std::atomic<bool> bJobsInitialized{ false }; ///< Set to true once the job worker pool is ready; Logic thread polls this gate.
 #if TNX_ENABLE_EDITOR
-	std::atomic<uint8_t>         PendingWindowOp{0};      ///< Deferred window op from render thread: 1=minimize, 2=maximize/restore.
-	std::atomic<int>             PendingWinDx{0};         ///< Accumulated render-thread window x-move delta (pixels).
-	std::atomic<int>             PendingWinDy{0};         ///< Accumulated render-thread window y-move delta (pixels).
+	std::atomic<uint8_t> PendingWindowOp{ 0 }; ///< Deferred window op from render thread: 1=minimize, 2=maximize/restore.
+	std::atomic<int> PendingWinDx{ 0 };        ///< Accumulated render-thread window x-move delta (pixels).
+	std::atomic<int> PendingWinDy{ 0 };        ///< Accumulated render-thread window y-move delta (pixels).
 #endif
-	std::unique_ptr<FlowManagerBase> Flow;                ///< FlowManager — owns all worlds, game states, and level lifetimes.
+	std::unique_ptr<FlowManagerBase> Flow; ///< FlowManager — owns all worlds, game states, and level lifetimes.
 
 	// --- Frame timing ---
 	uint64_t LastFrameCounter = 0;   ///< SDL performance counter snapshot from the previous frame.
-	double   FpsTimer         = 0.0; ///< Accumulated time since the last FPS calculation.
-	double   LastFPSCheck     = 0.0; ///< Timestamp of the most recent FPS update.
-	int      FrameCount       = 0;   ///< Frames counted since the last FPS calculation.
+	double FpsTimer           = 0.0; ///< Accumulated time since the last FPS calculation.
+	double LastFPSCheck       = 0.0; ///< Timestamp of the most recent FPS update.
+	int FrameCount            = 0;   ///< Frames counted since the last FPS calculation.
 };
 
 template <typename GameClass>

@@ -15,67 +15,97 @@
 
 namespace BuiltinCube
 {
-	static Vertex MakeVert(float px, float py, float pz, float nx, float ny, float nz)
-	{
-		Vertex v{};
-		v.px        = px;
-		v.py        = py;
-		v.pz        = pz;
-		v.n_oct16x2 = OctEncode(nx, ny, nz);
-		v.u         = 0.0f;
-		v.v         = 0.0f;
-		v.t_oct16x2 = OctEncode(0.0f, 0.0f, 1.0f); // default tangent +Z
-		v.mask      = 0;
-		v.flags     = 0;
-		v.pad       = 0;
-		return v;
-	}
-
-	static const Vertex Vertices[] = {
-		// +Z front face (normal 0,0,1)
-		MakeVert(-0.5f, -0.5f, 0.5f, 0, 0, 1),
-		MakeVert(0.5f, -0.5f, 0.5f, 0, 0, 1),
-		MakeVert(0.5f, 0.5f, 0.5f, 0, 0, 1),
-		MakeVert(-0.5f, 0.5f, 0.5f, 0, 0, 1),
-		// -Z back face (normal 0,0,-1)
-		MakeVert(0.5f, -0.5f, -0.5f, 0, 0, -1),
-		MakeVert(-0.5f, -0.5f, -0.5f, 0, 0, -1),
-		MakeVert(-0.5f, 0.5f, -0.5f, 0, 0, -1),
-		MakeVert(0.5f, 0.5f, -0.5f, 0, 0, -1),
-		// +X right face (normal 1,0,0)
-		MakeVert(0.5f, -0.5f, 0.5f, 1, 0, 0),
-		MakeVert(0.5f, -0.5f, -0.5f, 1, 0, 0),
-		MakeVert(0.5f, 0.5f, -0.5f, 1, 0, 0),
-		MakeVert(0.5f, 0.5f, 0.5f, 1, 0, 0),
-		// -X left face (normal -1,0,0)
-		MakeVert(-0.5f, -0.5f, -0.5f, -1, 0, 0),
-		MakeVert(-0.5f, -0.5f, 0.5f, -1, 0, 0),
-		MakeVert(-0.5f, 0.5f, 0.5f, -1, 0, 0),
-		MakeVert(-0.5f, 0.5f, -0.5f, -1, 0, 0),
-		// +Y top face (normal 0,1,0)
-		MakeVert(-0.5f, 0.5f, 0.5f, 0, 1, 0),
-		MakeVert(0.5f, 0.5f, 0.5f, 0, 1, 0),
-		MakeVert(0.5f, 0.5f, -0.5f, 0, 1, 0),
-		MakeVert(-0.5f, 0.5f, -0.5f, 0, 1, 0),
-		// -Y bottom face (normal 0,-1,0)
-		MakeVert(-0.5f, -0.5f, -0.5f, 0, -1, 0),
-		MakeVert(0.5f, -0.5f, -0.5f, 0, -1, 0),
-		MakeVert(0.5f, -0.5f, 0.5f, 0, -1, 0),
-		MakeVert(-0.5f, -0.5f, 0.5f, 0, -1, 0),
-	};
-
-	static constexpr uint32_t Indices[] = {
-		0, 1, 2, 2, 3, 0,       // +Z front
-		4, 5, 6, 6, 7, 4,       // -Z back
-		8, 9, 10, 10, 11, 8,    // +X right
-		12, 13, 14, 14, 15, 12, // -X left
-		16, 17, 18, 18, 19, 16, // +Y top
-		20, 21, 22, 22, 23, 20, // -Y bottom
-	};
-
-	static constexpr uint32_t VertexCount = 24;
-	static constexpr uint32_t IndexCount  = 36;
+static Vertex MakeVert(float px, float py, float pz, float nx, float ny, float nz)
+{
+	Vertex v{};
+	v.px        = px;
+	v.py        = py;
+	v.pz        = pz;
+	v.n_oct16x2 = OctEncode(nx, ny, nz);
+	v.u         = 0.0f;
+	v.v         = 0.0f;
+	v.t_oct16x2 = OctEncode(0.0f, 0.0f, 1.0f); // default tangent +Z
+	v.mask      = 0;
+	v.flags     = 0;
+	v.pad       = 0;
+	return v;
 }
+
+static const Vertex Vertices[] = {
+	// +Z front face (normal 0,0,1)
+	MakeVert(-0.5f, -0.5f, 0.5f, 0, 0, 1),
+	MakeVert(0.5f, -0.5f, 0.5f, 0, 0, 1),
+	MakeVert(0.5f, 0.5f, 0.5f, 0, 0, 1),
+	MakeVert(-0.5f, 0.5f, 0.5f, 0, 0, 1),
+	// -Z back face (normal 0,0,-1)
+	MakeVert(0.5f, -0.5f, -0.5f, 0, 0, -1),
+	MakeVert(-0.5f, -0.5f, -0.5f, 0, 0, -1),
+	MakeVert(-0.5f, 0.5f, -0.5f, 0, 0, -1),
+	MakeVert(0.5f, 0.5f, -0.5f, 0, 0, -1),
+	// +X right face (normal 1,0,0)
+	MakeVert(0.5f, -0.5f, 0.5f, 1, 0, 0),
+	MakeVert(0.5f, -0.5f, -0.5f, 1, 0, 0),
+	MakeVert(0.5f, 0.5f, -0.5f, 1, 0, 0),
+	MakeVert(0.5f, 0.5f, 0.5f, 1, 0, 0),
+	// -X left face (normal -1,0,0)
+	MakeVert(-0.5f, -0.5f, -0.5f, -1, 0, 0),
+	MakeVert(-0.5f, -0.5f, 0.5f, -1, 0, 0),
+	MakeVert(-0.5f, 0.5f, 0.5f, -1, 0, 0),
+	MakeVert(-0.5f, 0.5f, -0.5f, -1, 0, 0),
+	// +Y top face (normal 0,1,0)
+	MakeVert(-0.5f, 0.5f, 0.5f, 0, 1, 0),
+	MakeVert(0.5f, 0.5f, 0.5f, 0, 1, 0),
+	MakeVert(0.5f, 0.5f, -0.5f, 0, 1, 0),
+	MakeVert(-0.5f, 0.5f, -0.5f, 0, 1, 0),
+	// -Y bottom face (normal 0,-1,0)
+	MakeVert(-0.5f, -0.5f, -0.5f, 0, -1, 0),
+	MakeVert(0.5f, -0.5f, -0.5f, 0, -1, 0),
+	MakeVert(0.5f, -0.5f, 0.5f, 0, -1, 0),
+	MakeVert(-0.5f, -0.5f, 0.5f, 0, -1, 0),
+};
+
+static constexpr uint32_t Indices[] = {
+	0,
+	1,
+	2,
+	2,
+	3,
+	0, // +Z front
+	4,
+	5,
+	6,
+	6,
+	7,
+	4, // -Z back
+	8,
+	9,
+	10,
+	10,
+	11,
+	8, // +X right
+	12,
+	13,
+	14,
+	14,
+	15,
+	12, // -X left
+	16,
+	17,
+	18,
+	18,
+	19,
+	16, // +Y top
+	20,
+	21,
+	22,
+	22,
+	23,
+	20, // -Y bottom
+};
+
+static constexpr uint32_t VertexCount = 24;
+static constexpr uint32_t IndexCount  = 36;
+} // namespace BuiltinCube
 
 // -----------------------------------------------------------------------
 // Shutdown
@@ -100,7 +130,7 @@ bool MeshManager::Initialize(VulkanMemory* vkMem)
 		VERTEX_MEGA_BUFFER_SIZE,
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		GpuMemoryDomain::PersistentMapped,
-		/*requestDeviceAddress=*/ true);
+		/*requestDeviceAddress=*/true);
 
 	if (!VertexMegaBuffer.IsValid())
 	{
@@ -112,7 +142,7 @@ bool MeshManager::Initialize(VulkanMemory* vkMem)
 		INDEX_MEGA_BUFFER_SIZE,
 		VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
 		GpuMemoryDomain::PersistentMapped,
-		/*requestDeviceAddress=*/ false);
+		/*requestDeviceAddress=*/false);
 
 	if (!IndexMegaBuffer.IsValid())
 	{
@@ -124,7 +154,7 @@ bool MeshManager::Initialize(VulkanMemory* vkMem)
 		MAX_MESH_SLOTS * sizeof(GpuMeshInfo),
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		GpuMemoryDomain::PersistentMapped,
-		/*requestDeviceAddress=*/ true);
+		/*requestDeviceAddress=*/true);
 
 	if (!MeshTableBuffer.IsValid())
 	{
@@ -137,7 +167,7 @@ bool MeshManager::Initialize(VulkanMemory* vkMem)
 		MAX_TOTAL_SKIN_WEIGHTS * sizeof(SkinWeights),
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		GpuMemoryDomain::PersistentMapped,
-		/*requestDeviceAddress=*/ true);
+		/*requestDeviceAddress=*/true);
 
 	if (!SkinWeightMegaBuffer.IsValid())
 	{
@@ -150,7 +180,7 @@ bool MeshManager::Initialize(VulkanMemory* vkMem)
 		MAX_MESH_SLOTS * sizeof(GpuSkinSlotInfo),
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		GpuMemoryDomain::PersistentMapped,
-		/*requestDeviceAddress=*/ true);
+		/*requestDeviceAddress=*/true);
 
 	if (!SkinSlotTableBuffer.IsValid())
 	{
@@ -160,12 +190,15 @@ bool MeshManager::Initialize(VulkanMemory* vkMem)
 	std::memset(SkinSlotTableBuffer.MappedPtr, 0, MAX_MESH_SLOTS * sizeof(GpuSkinSlotInfo));
 
 	LOG_ENG_INFO_F("[MeshManager] Initialized (vertex: %u MB, index: %u MB, skin: %u MB)",
-				   VERTEX_MEGA_BUFFER_SIZE / (1024 * 1024),
-				   INDEX_MEGA_BUFFER_SIZE / (1024 * 1024),
-				   static_cast<uint32_t>(MAX_TOTAL_SKIN_WEIGHTS * sizeof(SkinWeights) / (1024 * 1024)));
+		VERTEX_MEGA_BUFFER_SIZE / (1024 * 1024),
+		INDEX_MEGA_BUFFER_SIZE / (1024 * 1024),
+		static_cast<uint32_t>(MAX_TOTAL_SKIN_WEIGHTS * sizeof(SkinWeights) / (1024 * 1024)));
 
 	AssetRegistry::Get().RegisterUploadChecker(
-		[](void*) { return MeshManager::Get().IsUploadComplete(); }, nullptr);
+		[](void*)
+	{
+		return MeshManager::Get().IsUploadComplete();
+	}, nullptr);
 	return true;
 }
 
@@ -208,7 +241,7 @@ uint32_t MeshManager::LoadSkinWeights(uint32_t meshSlot, const std::vector<SkinW
 	skinSlotTable[meshSlot].vertexCount  = SkinSlots[meshSlot].vertexCount;
 
 	LOG_ENG_INFO_F("[MeshManager] Loaded skin weights for mesh slot %u (%u vertices)",
-				   meshSlot, count);
+		meshSlot, count);
 	return meshSlot;
 }
 
@@ -239,8 +272,8 @@ uint32_t MeshManager::CommitToSlot(const MeshAsset& asset, AssetID id)
 		return UINT32_MAX;
 	}
 
-	uint32_t slotID   = MeshCount++;
-	SlotIDs[slotID]   = id;
+	uint32_t slotID = MeshCount++;
+	SlotIDs[slotID] = id;
 
 	// Register slot → UUID mapping immediately so CheckinBySlot can resolve a
 	// despawn that arrives before the upload job fires OnLoaded.
@@ -254,15 +287,15 @@ uint32_t MeshManager::CommitToSlot(const MeshAsset& asset, AssetID id)
 	std::memcpy(slot.AABBMax, asset.AABBMax, sizeof(float) * 3);
 
 	auto* vertDst  = static_cast<uint8_t*>(VertexMegaBuffer.MappedPtr) + NextVertexOffset * sizeof(Vertex);
-	auto* idxDst   = static_cast<uint8_t*>(IndexMegaBuffer.MappedPtr)  + NextIndexOffset  * sizeof(uint32_t);
+	auto* idxDst   = static_cast<uint8_t*>(IndexMegaBuffer.MappedPtr) + NextIndexOffset * sizeof(uint32_t);
 	auto* gpuTable = static_cast<GpuMeshInfo*>(MeshTableBuffer.MappedPtr);
 
 	// TODO: these copies block the calling thread — true async loading needs a staging
 	// arena so the job owns the source data without a shared_ptr.
 	std::memcpy(vertDst, asset.Vertices.data(), vertBytes);
-	std::memcpy(idxDst,  asset.Indices.data(),  indexBytes);
+	std::memcpy(idxDst, asset.Indices.data(), indexBytes);
 	NextVertexOffset += static_cast<uint32_t>(asset.Vertices.size());
-	NextIndexOffset  += static_cast<uint32_t>(asset.Indices.size());
+	NextIndexOffset += static_cast<uint32_t>(asset.Indices.size());
 
 	// GPU table is PersistentMapped — write directly on the calling thread.
 	gpuTable[slotID].FirstIndex   = slot.FirstIndex;
@@ -301,8 +334,8 @@ uint32_t MeshManager::LoadMesh(const MeshAsset& asset, TnxName name, AssetID id)
 
 	if (slotID != UINT32_MAX)
 		LOG_ENG_INFO_F("[MeshManager] Loaded mesh slot %u '%s' (%zu verts, %zu indices)",
-					   slotID, name.IsValid() ? name.GetStr() : "(unnamed)",
-					   asset.Vertices.size(), asset.Indices.size());
+			slotID, name.IsValid() ? name.GetStr() : "(unnamed)",
+			asset.Vertices.size(), asset.Indices.size());
 	return slotID;
 }
 
@@ -355,9 +388,9 @@ uint32_t MeshManager::LoadBuiltinCube()
 {
 	MeshAsset cube;
 	cube.Vertices.assign(BuiltinCube::Vertices,
-						 BuiltinCube::Vertices + BuiltinCube::VertexCount);
+		BuiltinCube::Vertices + BuiltinCube::VertexCount);
 	cube.Indices.assign(BuiltinCube::Indices,
-						BuiltinCube::Indices + BuiltinCube::IndexCount);
+		BuiltinCube::Indices + BuiltinCube::IndexCount);
 	cube.AABBMin[0] = -0.5f;
 	cube.AABBMin[1] = -0.5f;
 	cube.AABBMin[2] = -0.5f;

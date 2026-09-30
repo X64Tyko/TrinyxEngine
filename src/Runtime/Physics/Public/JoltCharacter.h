@@ -13,12 +13,12 @@ public:
 	~JoltCharacter();
 
 	void Initialize(JoltPhysics* physics, JPH::RVec3 position,
-					float capsuleRadius, float capsuleHalfHeight);
+		float capsuleRadius, float capsuleHalfHeight);
 
 	void Shutdown();
 
 	void Update(JPH::Vec3 desiredVelocity, JPH::Vec3 gravity, float dt,
-				JPH::TempAllocator& allocator);
+		JPH::TempAllocator& allocator);
 
 	JPH::RVec3 GetPosition() const;
 	JPH::Quat GetRotation() const;
@@ -28,8 +28,8 @@ public:
 	void SetPosition(JPH::RVec3 position);
 
 	void SyncToSlab(SimFloat* posX, SimFloat* posY, SimFloat* posZ,
-					SimFloat* rotX, SimFloat* rotY, SimFloat* rotZ, SimFloat* rotW,
-					uint32_t index);
+		SimFloat* rotX, SimFloat* rotY, SimFloat* rotZ, SimFloat* rotW,
+		uint32_t index);
 
 	// Pass to JoltPhysics::BindConstructOnHit to wire up contact callbacks.
 	JPH::BodyID GetInnerBodyID() const { return InnerBodyID; }
@@ -37,5 +37,5 @@ public:
 private:
 	JPH::Ref<JPH::CharacterVirtual> Character;
 	JoltPhysics* Physics = nullptr;
-	JPH::BodyID  InnerBodyID;
+	JPH::BodyID InnerBodyID;
 };

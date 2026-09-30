@@ -13,7 +13,7 @@ bool AnimationManager::Initialize(VulkanMemory* vkMem)
 		MAX_TOTAL_BONE_TRACKS * sizeof(GpuAnimBoneTrack),
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		GpuMemoryDomain::PersistentMapped,
-		/*requestDeviceAddress=*/ true);
+		/*requestDeviceAddress=*/true);
 
 	if (!TrackBuffer.IsValid())
 	{
@@ -25,7 +25,7 @@ bool AnimationManager::Initialize(VulkanMemory* vkMem)
 		MAX_TOTAL_KEYFRAMES * sizeof(GpuAnimKeyframe),
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		GpuMemoryDomain::PersistentMapped,
-		/*requestDeviceAddress=*/ true);
+		/*requestDeviceAddress=*/true);
 
 	if (!KeyframeBuffer.IsValid())
 	{
@@ -33,14 +33,14 @@ bool AnimationManager::Initialize(VulkanMemory* vkMem)
 		return false;
 	}
 
-	std::memset(TrackBuffer.MappedPtr,    0, MAX_TOTAL_BONE_TRACKS * sizeof(GpuAnimBoneTrack));
-	std::memset(KeyframeBuffer.MappedPtr, 0, MAX_TOTAL_KEYFRAMES   * sizeof(GpuAnimKeyframe));
+	std::memset(TrackBuffer.MappedPtr, 0, MAX_TOTAL_BONE_TRACKS * sizeof(GpuAnimBoneTrack));
+	std::memset(KeyframeBuffer.MappedPtr, 0, MAX_TOTAL_KEYFRAMES * sizeof(GpuAnimKeyframe));
 
 	AnimSlotBuffer = vkMem->AllocateBuffer(
 		MAX_ANIM_SLOTS * sizeof(GpuAnimSlotInfo),
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		GpuMemoryDomain::PersistentMapped,
-		/*requestDeviceAddress=*/ true);
+		/*requestDeviceAddress=*/true);
 
 	if (!AnimSlotBuffer.IsValid())
 	{
@@ -51,13 +51,16 @@ bool AnimationManager::Initialize(VulkanMemory* vkMem)
 	std::memset(AnimSlotBuffer.MappedPtr, 0, MAX_ANIM_SLOTS * sizeof(GpuAnimSlotInfo));
 
 	LOG_ENG_INFO_F("[AnimationManager] Initialized (tracks: %u @ %u KB, keyframes: %u @ %u MB)",
-				   MAX_TOTAL_BONE_TRACKS,
-				   static_cast<uint32_t>(MAX_TOTAL_BONE_TRACKS * sizeof(GpuAnimBoneTrack) / 1024),
-				   MAX_TOTAL_KEYFRAMES,
-				   static_cast<uint32_t>(MAX_TOTAL_KEYFRAMES * sizeof(GpuAnimKeyframe) / (1024 * 1024)));
+		MAX_TOTAL_BONE_TRACKS,
+		static_cast<uint32_t>(MAX_TOTAL_BONE_TRACKS * sizeof(GpuAnimBoneTrack) / 1024),
+		MAX_TOTAL_KEYFRAMES,
+		static_cast<uint32_t>(MAX_TOTAL_KEYFRAMES * sizeof(GpuAnimKeyframe) / (1024 * 1024)));
 
 	AssetRegistry::Get().RegisterUploadChecker(
-		[](void*) { return AnimationManager::Get().IsUploadComplete(); }, nullptr);
+		[](void*)
+	{
+		return AnimationManager::Get().IsUploadComplete();
+	}, nullptr);
 	return true;
 }
 
@@ -90,8 +93,8 @@ uint32_t AnimationManager::CommitToSlot(const AnimationAsset& asset, AssetID id)
 		return UINT32_MAX;
 	}
 
-	uint32_t slotID  = AnimCount++;
-	SlotIDs[slotID]  = id;
+	uint32_t slotID = AnimCount++;
+	SlotIDs[slotID] = id;
 
 	if (id.IsValid()) AssetRegistry::Get().RegisterSlot(AssetType::Animation, slotID, id);
 
@@ -100,7 +103,7 @@ uint32_t AnimationManager::CommitToSlot(const AnimationAsset& asset, AssetID id)
 	Slots[slotID].keyframeOffset = NextKeyframe;
 	Slots[slotID].duration       = asset.duration;
 
-	auto* gpuSlots = static_cast<GpuAnimSlotInfo*>(AnimSlotBuffer.MappedPtr);
+	auto* gpuSlots               = static_cast<GpuAnimSlotInfo*>(AnimSlotBuffer.MappedPtr);
 	gpuSlots[slotID].trackOffset = NextTrack;
 	gpuSlots[slotID].boneCount   = asset.boneCount;
 
@@ -114,10 +117,10 @@ uint32_t AnimationManager::CommitToSlot(const AnimationAsset& asset, AssetID id)
 
 	// PersistentMapped — GPU sees writes before OnLoaded fires on the calling thread.
 	GpuAnimBoneTrack* gpuTracks = static_cast<GpuAnimBoneTrack*>(TrackBuffer.MappedPtr) + NextTrack;
-	GpuAnimKeyframe*  gpuKfs    = static_cast<GpuAnimKeyframe*>(KeyframeBuffer.MappedPtr) + NextKeyframe;
+	GpuAnimKeyframe* gpuKfs     = static_cast<GpuAnimKeyframe*>(KeyframeBuffer.MappedPtr) + NextKeyframe;
 	const uint32_t kfBase       = NextKeyframe;
 	static_assert(sizeof(GpuAnimKeyframe) == sizeof(AnimKeyframe),
-	              "GpuAnimKeyframe and AnimKeyframe layout must match for bulk memcpy");
+		"GpuAnimKeyframe and AnimKeyframe layout must match for bulk memcpy");
 
 	for (uint32_t i = 0; i < asset.boneCount; ++i)
 	{
@@ -125,7 +128,7 @@ uint32_t AnimationManager::CommitToSlot(const AnimationAsset& asset, AssetID id)
 		gpuTracks[i].keyframeCount  = asset.boneTracks[i].keyframeCount;
 	}
 	std::memcpy(gpuKfs, asset.keyframes.data(),
-	            asset.keyframes.size() * sizeof(GpuAnimKeyframe));
+		asset.keyframes.size() * sizeof(GpuAnimKeyframe));
 
 	if (id.IsValid())
 	{
@@ -138,11 +141,11 @@ uint32_t AnimationManager::CommitToSlot(const AnimationAsset& asset, AssetID id)
 		}
 	}
 
-	NextTrack    += asset.boneCount;
+	NextTrack += asset.boneCount;
 	NextKeyframe += keyframeCount;
 
 	LOG_ENG_INFO_F("[AnimationManager] Loaded anim slot %u (%.2fs, %u bones, %u keyframes)",
-				   slotID, asset.duration, asset.boneCount, keyframeCount);
+		slotID, asset.duration, asset.boneCount, keyframeCount);
 	return slotID;
 }
 
@@ -187,7 +190,7 @@ uint32_t AnimationManager::LoadAnimation(TnxName name)
 	if (!entry)
 	{
 		LOG_ENG_ERROR_F("[AnimationManager] LoadAnimation: TnxName '%s' not in registry",
-						name.GetStr());
+			name.GetStr());
 		return UINT32_MAX;
 	}
 	return LoadAnimation(entry->ID);

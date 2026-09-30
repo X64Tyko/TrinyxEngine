@@ -35,7 +35,7 @@ public:
 	static constexpr ConstructLifetime Lifetime = ConstructLifetime::World;
 
 	uint32_t OwnerNetHandle = 0; // Confirmed by server at PlayerBeginConfirm (0 = predicted/unconfirmed)
-	uint8_t  OwnerID        = 0; // NetOwnerID of the controlling Soul
+	uint8_t OwnerID         = 0; // NetOwnerID of the controlling Soul
 
 	ConstructView<TEntity> View;
 

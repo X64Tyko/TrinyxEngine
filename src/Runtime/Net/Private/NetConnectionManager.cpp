@@ -15,26 +15,26 @@
 // GNS constant aliases — clearer names without the k_/k prefixes
 namespace GNS
 {
-	// Connection states
-	constexpr auto Connecting             = k_ESteamNetworkingConnectionState_Connecting;
-	constexpr auto Connected              = k_ESteamNetworkingConnectionState_Connected;
-	constexpr auto ClosedByPeer           = k_ESteamNetworkingConnectionState_ClosedByPeer;
-	constexpr auto ProblemDetectedLocally = k_ESteamNetworkingConnectionState_ProblemDetectedLocally;
+// Connection states
+constexpr auto Connecting             = k_ESteamNetworkingConnectionState_Connecting;
+constexpr auto Connected              = k_ESteamNetworkingConnectionState_Connected;
+constexpr auto ClosedByPeer           = k_ESteamNetworkingConnectionState_ClosedByPeer;
+constexpr auto ProblemDetectedLocally = k_ESteamNetworkingConnectionState_ProblemDetectedLocally;
 
-	// Config keys
-	constexpr auto ConfigStatusCallback = k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged;
+// Config keys
+constexpr auto ConfigStatusCallback = k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged;
 
-	// Results
-	constexpr auto ResultOK = k_EResultOK;
+// Results
+constexpr auto ResultOK = k_EResultOK;
 
-	// Send flags
-	constexpr auto SendReliable          = k_nSteamNetworkingSend_Reliable;
-	constexpr auto SendUnreliable        = k_nSteamNetworkingSend_Unreliable;
-	constexpr auto SendUnreliableNoNagle = k_nSteamNetworkingSend_Unreliable | k_nSteamNetworkingSend_NoNagle;
+// Send flags
+constexpr auto SendReliable          = k_nSteamNetworkingSend_Reliable;
+constexpr auto SendUnreliable        = k_nSteamNetworkingSend_Unreliable;
+constexpr auto SendUnreliableNoNagle = k_nSteamNetworkingSend_Unreliable | k_nSteamNetworkingSend_NoNagle;
 
-	// Polling
-	constexpr int MaxMessagesPerPoll = 64;
-}
+// Polling
+constexpr int MaxMessagesPerPoll = 64;
+} // namespace GNS
 
 // Static instance for GNS callback routing
 NetConnectionManager* NetConnectionManager::s_Instance = nullptr;
@@ -98,17 +98,18 @@ static void ApplySendRate(HSteamNetConnection conn, int minRate, int maxRate)
 	if (maxRate > 0) utils->SetConnectionConfigValueInt32(conn, k_ESteamNetworkingConfig_SendRateMax, maxRate);
 }
 
-bool NetConnectionManager::Listen(uint16_t port)
+bool NetConnectionManager::Listen(uint16_t port, bool loopbackOnly)
 {
 	if (!Sockets) return false;
 
 	SteamNetworkingIPAddr addr;
 	addr.Clear();
 	addr.m_port = port;
+	if (loopbackOnly) addr.SetIPv4(0x7F000001u, port);
 
 	SteamNetworkingConfigValue_t opt;
 	opt.SetPtr(GNS::ConfigStatusCallback,
-			   reinterpret_cast<void*>(&NetConnectionManager::OnConnectionStatusChanged));
+		reinterpret_cast<void*>(&NetConnectionManager::OnConnectionStatusChanged));
 
 	ListenSocket = Sockets->CreateListenSocketIP(addr, 1, &opt);
 	if (ListenSocket == 0)
@@ -174,7 +175,7 @@ HSteamNetConnection NetConnectionManager::Connect(const char* address, uint16_t 
 
 	SteamNetworkingConfigValue_t opt;
 	opt.SetPtr(GNS::ConfigStatusCallback,
-			   reinterpret_cast<void*>(&NetConnectionManager::OnConnectionStatusChanged));
+		reinterpret_cast<void*>(&NetConnectionManager::OnConnectionStatusChanged));
 
 	HSteamNetConnection conn = Sockets->ConnectByIPAddress(addr, 1, &opt);
 	if (conn == 0)
@@ -227,7 +228,16 @@ int NetConnectionManager::PollIncoming(std::vector<ReceivedMessage>& outMessages
 		ReceivedMessage received;
 		const uint8_t* payloadPtr = PacketHeader::Deserialize(buf, bufSize, received.Header);
 
-		if (payloadPtr && received.Header.PayloadSize > 0)
+		// Runt or truncated packet: the header is uninitialized or claims more payload than
+		// arrived. Drop it before it reaches ack tracking or dispatch.
+		if (!payloadPtr)
+		{
+			LOG_ENG_WARN_F("[NetConnectionManager] Dropping malformed packet (%u bytes)", bufSize);
+			msg->Release();
+			continue;
+		}
+
+		if (received.Header.PayloadSize > 0)
 		{
 			received.Payload.assign(payloadPtr, payloadPtr + received.Header.PayloadSize);
 		}
@@ -243,8 +253,10 @@ int NetConnectionManager::PollIncoming(std::vector<ReceivedMessage>& outMessages
 			{
 				// Shift bitfield to account for the gap
 				uint32_t delta = seq - ci->LastSeqIn;
-				if (delta < 32) ci->AckBitfield = (ci->AckBitfield << delta) | (1u << (delta - 1));
-				else ci->AckBitfield            = 0; // Gap too large, reset
+				if (delta < 32)
+					ci->AckBitfield = (ci->AckBitfield << delta) | (1u << (delta - 1));
+				else
+					ci->AckBitfield = 0; // Gap too large, reset
 				ci->LastSeqIn = seq;
 			}
 			else if (seq < ci->LastSeqIn)
@@ -263,12 +275,11 @@ int NetConnectionManager::PollIncoming(std::vector<ReceivedMessage>& outMessages
 }
 
 bool NetConnectionManager::Send(HSteamNetConnection conn, const PacketHeader& header,
-								const uint8_t* payload, bool reliable, bool noNagle)
+	const uint8_t* payload, bool reliable, bool noNagle)
 {
 	// Payload pointer must be present when PayloadSize > 0 — a mismatch means
 	// the caller stamped the wrong size or forgot to pass the buffer.
-	assert((header.PayloadSize == 0 || payload != nullptr || header.PayloadSize >= 65535) &&
-		   "Send: non-zero PayloadSize but null payload pointer");
+	assert((header.PayloadSize == 0 || payload != nullptr || header.PayloadSize >= 65535) && "Send: non-zero PayloadSize but null payload pointer");
 
 	uint8_t buf[sizeof(PacketHeader) + 65535]; // Stack buffer — PayloadSize is uint16
 	uint32_t totalSize = PacketHeader::Serialize(buf, header, payload);
@@ -276,18 +287,20 @@ bool NetConnectionManager::Send(HSteamNetConnection conn, const PacketHeader& he
 }
 
 bool NetConnectionManager::SendRaw(HSteamNetConnection conn, const uint8_t* data,
-								   uint32_t size, bool reliable, bool noNagle)
+	uint32_t size, bool reliable, bool noNagle)
 {
 	if (!Sockets) return false;
 
 	// GNS hard limit — exceeding this silently drops the message.
-	assert(size <= static_cast<uint32_t>(k_cbMaxSteamNetworkingSocketsMessageSizeSend) &&
-		   "SendRaw: message exceeds GNS maximum send size (512 KB)");
+	assert(size <= static_cast<uint32_t>(k_cbMaxSteamNetworkingSocketsMessageSizeSend) && "SendRaw: message exceeds GNS maximum send size (512 KB)");
 
 	int flags;
-	if (reliable) flags = GNS::SendReliable;
-	else if (noNagle || bGlobalNoNagle) flags = GNS::SendUnreliableNoNagle;
-	else flags                                = GNS::SendUnreliable;
+	if (reliable)
+		flags = GNS::SendReliable;
+	else if (noNagle || bGlobalNoNagle)
+		flags = GNS::SendUnreliableNoNagle;
+	else
+		flags = GNS::SendUnreliable;
 
 	EResult result = Sockets->SendMessageToConnection(conn, data, size, flags, nullptr);
 	return result == GNS::ResultOK;
@@ -376,56 +389,56 @@ void NetConnectionManager::OnConnectionStatusChanged(SteamNetConnectionStatusCha
 	switch (info->m_info.m_eState)
 	{
 		case GNS::Connecting:
+		{
+			// Only accept truly incoming connections (m_hListenSocket != 0).
+			// Outgoing connections (from ConnectByIPAddress) also start in
+			// Connecting state but have m_hListenSocket == 0.
+			if (info->m_info.m_hListenSocket != 0)
 			{
-				// Only accept truly incoming connections (m_hListenSocket != 0).
-				// Outgoing connections (from ConnectByIPAddress) also start in
-				// Connecting state but have m_hListenSocket == 0.
-				if (info->m_info.m_hListenSocket != 0)
-				{
-					LOG_ENG_INFO_F("[NetConnectionManager] Incoming connection %u", info->m_hConn);
-					mgr->AcceptConnection(info->m_hConn);
-				}
-				break;
+				LOG_ENG_INFO_F("[NetConnectionManager] Incoming connection %u", info->m_hConn);
+				mgr->AcceptConnection(info->m_hConn);
 			}
+			break;
+		}
 
 		case GNS::Connected:
+		{
+			ConnectionInfo* ci = mgr->FindConnection(info->m_hConn);
+			if (ci)
 			{
-				ConnectionInfo* ci = mgr->FindConnection(info->m_hConn);
-				if (ci)
-				{
-					ci->bConnected = true;
-					LOG_ENG_INFO_F("[NetConnectionManager] Connection %u established", info->m_hConn);
+				ci->bConnected = true;
+				LOG_ENG_INFO_F("[NetConnectionManager] Connection %u established", info->m_hConn);
 
-					if (ci->bAuthoritySide)
-					{
-						mgr->OnClientConnected(*ci);
-					}
-					else
-					{
-						// Begin handshake
-						PacketHeader handshakeHeader{};
-						handshakeHeader.Type        = static_cast<uint8_t>(NetMessageType::ConnectionHandshake);
-						handshakeHeader.Flags       = PacketFlag::HasAck;
-						handshakeHeader.SequenceNum = 1;
-						handshakeHeader.FrameNumber = 0;
-						handshakeHeader.SenderID    = 0;
-						handshakeHeader.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
-						handshakeHeader.PayloadSize = 0;
-						mgr->Send(info->m_hConn, handshakeHeader, nullptr, true);
-					}
+				if (ci->bAuthoritySide)
+				{
+					mgr->OnClientConnected(*ci);
 				}
-				break;
+				else
+				{
+					// Begin handshake
+					PacketHeader handshakeHeader{};
+					handshakeHeader.Type        = static_cast<uint8_t>(NetMessageType::ConnectionHandshake);
+					handshakeHeader.Flags       = PacketFlag::HasAck;
+					handshakeHeader.SequenceNum = 1;
+					handshakeHeader.FrameNumber = 0;
+					handshakeHeader.SenderID    = 0;
+					handshakeHeader.Timestamp   = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
+					handshakeHeader.PayloadSize = 0;
+					mgr->Send(info->m_hConn, handshakeHeader, nullptr, true);
+				}
 			}
+			break;
+		}
 
 		case GNS::ClosedByPeer:
 		case GNS::ProblemDetectedLocally:
-			{
-				LOG_ENG_INFO_F("[NetConnectionManager] Connection %u closed: %s",
-							   info->m_hConn, info->m_info.m_szEndDebug);
-				mgr->Sockets->CloseConnection(info->m_hConn, 0, nullptr, false);
-				mgr->RemoveConnection(info->m_hConn);
-				break;
-			}
+		{
+			LOG_ENG_INFO_F("[NetConnectionManager] Connection %u closed: %s",
+				info->m_hConn, info->m_info.m_szEndDebug);
+			mgr->Sockets->CloseConnection(info->m_hConn, 0, nullptr, false);
+			mgr->RemoveConnection(info->m_hConn);
+			break;
+		}
 
 		default: break;
 	}

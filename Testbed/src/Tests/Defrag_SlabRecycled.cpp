@@ -24,14 +24,14 @@ TEST(Defrag_SlabRecycled)
 	Engine.ResetRegistry();
 	Registry* Reg = Engine.GetRegistry();
 
-	EntityHandle probe = Reg->Create<TestEntity<>>();
+	EntityHandle probe             = Reg->Create<TestEntity<>>();
 	std::vector<Archetype*> arches = Reg->ClassQuery<TestEntity<>>();
 	ASSERT_EQ(arches.size(), 1u);
 	Archetype* arch    = arches[0];
 	const uint32_t epc = arch->EntitiesPerChunk;
 
 	// Fill to exactly 4 full chunks.
-	const uint32_t total = 4 * epc;
+	const uint32_t total           = 4 * epc;
 	std::vector<EntityHandle> rest = Reg->Create<TestEntity<>>(total - 1);
 
 	std::vector<EntityHandle> all;
@@ -55,7 +55,7 @@ TEST(Defrag_SlabRecycled)
 	Reg->ProcessDeferredDestructions();
 	Engine.ConfirmLocalRecycles();
 
-	ASSERT_EQ(arch->TotalEntityCount,     3 * epc);
+	ASSERT_EQ(arch->TotalEntityCount, 3 * epc);
 	ASSERT_EQ(arch->AllocatedEntityCount, total);
 
 	// Defrag: moves chunk 3 entities into chunk 0's holes; TrimTailChunks frees
@@ -63,9 +63,9 @@ TEST(Defrag_SlabRecycled)
 	// in FreedChunkSlabs. AllocatedEntityCount shrinks to 3*epc.
 	Reg->ForceDefragSync();
 
-	ASSERT_EQ(arch->Chunks.size(),        3u);
+	ASSERT_EQ(arch->Chunks.size(), 3u);
 	ASSERT_EQ(arch->AllocatedEntityCount, 3 * epc);
-	ASSERT_EQ(arch->TotalEntityCount,     3 * epc);
+	ASSERT_EQ(arch->TotalEntityCount, 3 * epc);
 
 	// Spawn epc new entities — PushEntities triggers one AllocateChunk call.
 	// TryReuseFreedSlab must pick up the spare chunk's freed slab (first in list)
@@ -79,7 +79,7 @@ TEST(Defrag_SlabRecycled)
 	ASSERT_EQ(arch->Chunks[3]->Header.CacheIndexStart, spareChunkCacheStart);
 
 	// Entity counts are consistent.
-	ASSERT_EQ(arch->TotalEntityCount,     4 * epc);
+	ASSERT_EQ(arch->TotalEntityCount, 4 * epc);
 	ASSERT_EQ(arch->AllocatedEntityCount, 4 * epc);
 
 	// All new entities are valid.

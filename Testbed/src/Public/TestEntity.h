@@ -12,6 +12,7 @@ class TestEntity : public EntityView<TestEntity, WIDTH>
 	TNX_REGISTER_SCHEMA(TestEntity, EntityView, transform, velocity)
 
 	static constexpr uint32_t EntitiesPerChunk = 16;
+
 public:
 	CTransform<WIDTH> transform;
 	CVelocity<WIDTH> velocity;

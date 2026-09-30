@@ -390,9 +390,9 @@ struct SimFloatImpl<FixedUnit>
 	}
 
 	// Accessors
-	float    ToFloat() const { return value.ToFloat(); }
+	float ToFloat() const { return value.ToFloat(); }
 	FixedUnit ToFixed() const { return value; }
-	double   ToDouble() const { return value.ToDouble(); }
+	double ToDouble() const { return value.ToDouble(); }
 
 	// Unary operators
 	SimFloatImpl operator+() const { return *this; }
@@ -586,16 +586,28 @@ FORCE_INLINE SimFloatImpl<T> operator/(SimFloatImpl<T> a, int32_t b)
 
 // Binary operators for int32_t op SimFloatImpl<T>
 template <typename T>
-FORCE_INLINE SimFloatImpl<T> operator+(int32_t a, SimFloatImpl<T> b) { return SimFloatImpl<T>(a) + b; }
+FORCE_INLINE SimFloatImpl<T> operator+(int32_t a, SimFloatImpl<T> b)
+{
+	return SimFloatImpl<T>(a) + b;
+}
 
 template <typename T>
-FORCE_INLINE SimFloatImpl<T> operator-(int32_t a, SimFloatImpl<T> b) { return SimFloatImpl<T>(a) - b; }
+FORCE_INLINE SimFloatImpl<T> operator-(int32_t a, SimFloatImpl<T> b)
+{
+	return SimFloatImpl<T>(a) - b;
+}
 
 template <typename T>
-FORCE_INLINE SimFloatImpl<T> operator*(int32_t a, SimFloatImpl<T> b) { return SimFloatImpl<T>(a) * b; }
+FORCE_INLINE SimFloatImpl<T> operator*(int32_t a, SimFloatImpl<T> b)
+{
+	return SimFloatImpl<T>(a) * b;
+}
 
 template <typename T>
-FORCE_INLINE SimFloatImpl<T> operator/(int32_t a, SimFloatImpl<T> b) { return SimFloatImpl<T>(a) / b; }
+FORCE_INLINE SimFloatImpl<T> operator/(int32_t a, SimFloatImpl<T> b)
+{
+	return SimFloatImpl<T>(a) / b;
+}
 
 // Cross-type operators — SimFloatImpl<FixedUnit> (SimUnit) × SimFloatImpl<Fixed32> (SimFloat)
 //
@@ -630,10 +642,10 @@ FORCE_INLINE SimFloatImpl<FixedUnit> operator*(SimFloatImpl<Fixed32> a, SimFloat
 // bit-identical determinism via TNX_DETERMINISTIC build flag.
 #ifdef TNX_DETERMINISM
 using SimFloat = SimFloatImpl<Fixed32>;
-using SimUnit = SimFloatImpl<FixedUnit>;
+using SimUnit  = SimFloatImpl<FixedUnit>;
 #else
 using SimFloat = SimFloatImpl<float>;
-using SimUnit = SimFloatImpl<float>;
+using SimUnit  = SimFloatImpl<float>;
 #endif
 
 // Fast math functions for SimFloat
@@ -650,7 +662,8 @@ FORCE_INLINE SimFloatImpl<T> Sqrt(SimFloatImpl<T> x)
 		if (x.value.value <= 0) return SimFloatImpl<T>(FixedUnit::FromRaw(0));
 		int64_t n = static_cast<int64_t>(x.value.value) * FixedUnit::Scale64;
 		int64_t r = n;
-		while (r > (n / r)) r = (r + n / r) >> 1;
+		while (r > (n / r))
+			r = (r + n / r) >> 1;
 		return SimFloatImpl<T>(FixedUnit::FromRaw(static_cast<int32_t>(r)));
 	}
 	else
@@ -698,7 +711,8 @@ FORCE_INLINE SimFloatImpl<T> FastSin(SimFloatImpl<T> x)
 		return SimFloatImpl<T>(Fixed32::FromRaw(
 			static_cast<int32_t>((static_cast<int64_t>(r.value) * Fixed32::Scale64) >> FixedUnit::ScaleLog2)));
 	}
-	else return SimFloatImpl<T>(std::sin(x.value));
+	else
+		return SimFloatImpl<T>(std::sin(x.value));
 }
 
 template <typename T>
@@ -710,7 +724,8 @@ FORCE_INLINE SimFloatImpl<T> FastCos(SimFloatImpl<T> x)
 		return SimFloatImpl<T>(Fixed32::FromRaw(
 			static_cast<int32_t>((static_cast<int64_t>(r.value) * Fixed32::Scale64) >> FixedUnit::ScaleLog2)));
 	}
-	else return SimFloatImpl<T>(std::cos(x.value));
+	else
+		return SimFloatImpl<T>(std::cos(x.value));
 }
 
 template <typename T>
@@ -723,7 +738,8 @@ FORCE_INLINE SimFloatImpl<T> FastTan(SimFloatImpl<T> x)
 		if (c.ToFixed().value == 0) return SimFloatImpl<T>(Fixed32::FromInt(99999));
 		return s / c;
 	}
-	else return SimFloatImpl<T>(std::tan(x.value));
+	else
+		return SimFloatImpl<T>(std::tan(x.value));
 }
 
 template <typename T>

@@ -6,7 +6,7 @@
 // Used by engine sweep passes that update all entities in a cache lane.
 // Lane count is kSIMDWide32Lanes (8 on AVX2, 16 on AVX-512).
 // Guarded by __AVX2__ — skipped on builds without AVX2 support.
-TEST (FieldProxy_WideStore)
+TEST(FieldProxy_WideStore)
 {
 	(void)Engine;
 
@@ -23,7 +23,8 @@ TEST (FieldProxy_WideStore)
 
 		proxy = SimFloat(7.0f);
 
-		for (int i = 0; i < kSIMDWide32Lanes; ++i) ASSERT_EQ(data[i], SimFloat(7.0f));
+		for (int i = 0; i < kSIMDWide32Lanes; ++i)
+			ASSERT_EQ(data[i], SimFloat(7.0f));
 	}
 
 	// --- Wide store: partial entity count in mask doesn't restrict Wide (unconditional) ---
@@ -36,13 +37,16 @@ TEST (FieldProxy_WideStore)
 		proxy = SimFloat(3.0f);
 
 		// Wide writes ALL lanes — this is intentional (WideMask handles masking)
-		for (int i = 0; i < kSIMDWide32Lanes; ++i) ASSERT_EQ(partial[i], SimFloat(3.0f));
+		for (int i = 0; i < kSIMDWide32Lanes; ++i)
+			ASSERT_EQ(partial[i], SimFloat(3.0f));
 	}
 
 	// --- Wide +=, with dirty bits set on all lanes ---
 	{
-		for (int i = 0; i < kSIMDWide32Lanes; ++i) data[i] = static_cast<SimFloat>(i);
-		for (int i = 0; i < kSIMDWide32Lanes; ++i) flags[i] = 0;
+		for (int i = 0; i < kSIMDWide32Lanes; ++i)
+			data[i] = static_cast<SimFloat>(i);
+		for (int i = 0; i < kSIMDWide32Lanes; ++i)
+			flags[i] = 0;
 
 		FieldProxy<SimFloat, FieldWidth::Wide> proxy;
 		proxy.Bind(data, flags, 0, kSIMDWide32Lanes);
@@ -52,7 +56,8 @@ TEST (FieldProxy_WideStore)
 			ASSERT_EQ(data[i], static_cast<SimFloat>(i) + SimFloat(10.0f));
 
 		constexpr int32_t DirtyBit = static_cast<int32_t>(1u << 30);
-		for (int i = 0; i < kSIMDWide32Lanes; ++i) ASSERT((flags[i] & DirtyBit) != 0);
+		for (int i = 0; i < kSIMDWide32Lanes; ++i)
+			ASSERT((flags[i] & DirtyBit) != 0);
 	}
 #endif
 }

@@ -68,7 +68,7 @@ TEST(Net_Loopback_Server)
 
 	const ConnectionInfo* ci = serverThread.GetConnectionManager()->FindConnection(clientHandle);
 	ASSERT(ci != nullptr);
-	ASSERT(ci->OwnerID != 0);     // Server never assigned OwnerID — ConnectionHandshake not received
+	ASSERT(ci->OwnerID != 0);          // Server never assigned OwnerID — ConnectionHandshake not received
 	ASSERT(ci->OwnerID < MaxOwnerIDs); // OwnerID out of valid range
 	LOG_ENG_ALWAYS_F("[Net_Loopback_Server] Handshake complete — assigned OwnerID=%u", ci->OwnerID);
 

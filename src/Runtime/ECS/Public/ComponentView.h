@@ -73,27 +73,21 @@ using UInt64Proxy = FieldProxy<uint64_t, WIDTH>;
 inline SystemID operator&(SystemID lhs, SystemID rhs)
 {
 	return static_cast<SystemID>(
-		static_cast<std::underlying_type_t<SystemID>>(lhs) &
-		static_cast<std::underlying_type_t<SystemID>>(rhs)
-	);
+		static_cast<std::underlying_type_t<SystemID>>(lhs) & static_cast<std::underlying_type_t<SystemID>>(rhs));
 }
 
 // Overload the bitwise OR operator
 inline SystemID operator|(SystemID lhs, SystemID rhs)
 {
 	return static_cast<SystemID>(
-		static_cast<std::underlying_type_t<SystemID>>(lhs) |
-		static_cast<std::underlying_type_t<SystemID>>(rhs)
-	);
+		static_cast<std::underlying_type_t<SystemID>>(lhs) | static_cast<std::underlying_type_t<SystemID>>(rhs));
 }
 
 // Overload the bitwise OR operator
 inline SystemID operator|=(SystemID lhs, SystemID rhs)
 {
 	return static_cast<SystemID>(
-		static_cast<std::underlying_type_t<SystemID>>(lhs) |
-		static_cast<std::underlying_type_t<SystemID>>(rhs)
-	);
+		static_cast<std::underlying_type_t<SystemID>>(lhs) | static_cast<std::underlying_type_t<SystemID>>(rhs));
 }
 
 inline bool Equal(SystemID lhs, SystemID rhs)

@@ -33,37 +33,37 @@ class Registry;
 class DefragSystem
 {
 public:
-    static constexpr float    HoleThreshold   = 0.20f; // 20% holes triggers work
-    static constexpr uint32_t MinLiveEntities = 32;    // skip tiny archetypes
-    static constexpr uint32_t AnalysisCadence = 1024;  // re-analyze every N Logic frames (~2 s at 512 Hz)
-    static constexpr uint32_t MaxMovesPerTick = 64;    // entity moves per WorldQueue drain
+	static constexpr float HoleThreshold      = 0.20f; // 20% holes triggers work
+	static constexpr uint32_t MinLiveEntities = 32;    // skip tiny archetypes
+	static constexpr uint32_t AnalysisCadence = 1024;  // re-analyze every N Logic frames (~2 s at 512 Hz)
+	static constexpr uint32_t MaxMovesPerTick = 64;    // entity moves per WorldQueue drain
 
-    // Called from the Logic thread each frame (after ProcessDeferredDestructions).
-    // Increments the internal frame counter; when the cadence fires, scans all
-    // archetypes and posts WorldQueue move jobs for those that need compaction.
-    void Tick(const FlatMap<Archetype::ArchetypeKey, Archetype*>& archetypes,
-              Registry& registry,
-              TrinyxJobs::WorldQueueHandle wq);
+	// Called from the Logic thread each frame (after ProcessDeferredDestructions).
+	// Increments the internal frame counter; when the cadence fires, scans all
+	// archetypes and posts WorldQueue move jobs for those that need compaction.
+	void Tick(const FlatMap<Archetype::ArchetypeKey, Archetype*>& archetypes,
+		Registry& registry,
+		TrinyxJobs::WorldQueueHandle wq);
 
-    // Executes up to MaxMovesPerTick entity moves for arch, then re-posts itself
-    // to wq if moves remain and the archetype is still fragmented.
-    // Called only on the Logic thread (via WorldQueue drain).
-    void ProcessMoves(Registry& registry,
-                      Archetype* arch,
-                      uint32_t   movesRemaining,
-                      TrinyxJobs::WorldQueueHandle wq);
+	// Executes up to MaxMovesPerTick entity moves for arch, then re-posts itself
+	// to wq if moves remain and the archetype is still fragmented.
+	// Called only on the Logic thread (via WorldQueue drain).
+	void ProcessMoves(Registry& registry,
+		Archetype* arch,
+		uint32_t movesRemaining,
+		TrinyxJobs::WorldQueueHandle wq);
 
 private:
-    struct MovePair
-    {
-        Archetype::EntitySlot Src;
-        Archetype::EntitySlot Dst;
-    };
+	struct MovePair
+	{
+		Archetype::EntitySlot Src;
+		Archetype::EntitySlot Dst;
+	};
 
-    uint32_t FrameCounter = 0;
+	uint32_t FrameCounter = 0;
 
-    void PostMoveJob(Registry& registry,
-                     Archetype* arch,
-                     uint32_t   movesRemaining,
-                     TrinyxJobs::WorldQueueHandle wq);
+	void PostMoveJob(Registry& registry,
+		Archetype* arch,
+		uint32_t movesRemaining,
+		TrinyxJobs::WorldQueueHandle wq);
 };

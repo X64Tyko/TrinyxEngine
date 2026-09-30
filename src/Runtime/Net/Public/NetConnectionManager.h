@@ -44,8 +44,7 @@ struct ConnectionInfo
 	int32_t GetFrameOffset() const
 	{
 		return static_cast<int32_t>(
-			static_cast<int64_t>(ServerFrameAtHandshake) -
-			static_cast<int64_t>(ClientLocalFrameAtHandshake));
+			static_cast<int64_t>(ServerFrameAtHandshake) - static_cast<int64_t>(ClientLocalFrameAtHandshake));
 	}
 
 	// Convert a server-space frame number to client-local frame space.
@@ -60,16 +59,16 @@ struct ConnectionInfo
 		return static_cast<uint32_t>(static_cast<int64_t>(clientFrame) + GetFrameOffset());
 	}
 
-	uint32_t InputLead              = 0;    // Frames to lead the server — set after ClockSync
-	uint8_t ClockSyncProbesSent     = 0;    // Ping probes sent during Synchronizing phase
-	uint8_t ClockSyncProbesRecvd    = 0;    // Pong responses received during Synchronizing phase
-	double LastHeartbeatTime        = 0.0;  // SDL_GetPerformanceCounter() / freq at last Ping send
-	ClientRepState RepState         = ClientRepState::PendingHandshake;
-	bool bConnected                 = false;
-	bool bAuthoritySide                = false; // True for server-accepted handles, false for client-initiated
-	bool bOwnerInitiated           = false; // True only for connections we opened via Connect() — reliable even in GNS loopback
-	bool bInitialSpawnFlushed       = false; // Server-side: true after first full entity batch sent to this client
-	bool bInitialConstructFlushed   = false; // Server-side: true after first full construct batch sent to this client
+	uint32_t InputLead            = 0;   // Frames to lead the server — set after ClockSync
+	uint8_t ClockSyncProbesSent   = 0;   // Ping probes sent during Synchronizing phase
+	uint8_t ClockSyncProbesRecvd  = 0;   // Pong responses received during Synchronizing phase
+	double LastHeartbeatTime      = 0.0; // SDL_GetPerformanceCounter() / freq at last Ping send
+	ClientRepState RepState       = ClientRepState::PendingHandshake;
+	bool bConnected               = false;
+	bool bAuthoritySide           = false; // True for server-accepted handles, false for client-initiated
+	bool bOwnerInitiated          = false; // True only for connections we opened via Connect() — reliable even in GNS loopback
+	bool bInitialSpawnFlushed     = false; // Server-side: true after first full entity batch sent to this client
+	bool bInitialConstructFlushed = false; // Server-side: true after first full construct batch sent to this client
 
 	// Client-side: last frame the server confirmed it consumed — in client-local frame space
 	// (the server converts from server-frame via FrameOffset before stamping the header).
@@ -126,7 +125,8 @@ public:
 	// --- Server API ---
 
 	/// Start listening on the given port. Returns true on success.
-	bool Listen(uint16_t port);
+	/// @param loopbackOnly Bind 127.0.0.1 instead of all interfaces (PIE: no firewall prompt, no LAN exposure).
+	bool Listen(uint16_t port, bool loopbackOnly = false);
 
 	/// Stop listening and close all connections.
 	void StopListening();
@@ -150,12 +150,12 @@ public:
 
 	/// Send a header + payload to a specific connection. Returns true on success.
 	bool Send(HSteamNetConnection conn, const PacketHeader& header,
-			  const uint8_t* payload, bool reliable = false, bool noNagle = false);
+		const uint8_t* payload, bool reliable = false, bool noNagle = false);
 
 	/// Send a pre-built header (sequence already stamped by Sentinel) + payload.
 	/// Use from job workers — does NOT touch NextSeqOut on ConnectionInfo.
 	bool SendPrebuilt(HSteamNetConnection conn, const PacketHeader& header,
-					  const uint8_t* payload, bool noNagle = false)
+		const uint8_t* payload, bool noNagle = false)
 	{
 		return Send(conn, header, payload, /*reliable=*/false, noNagle);
 	}
@@ -240,11 +240,11 @@ private:
 	void RemoveConnection(HSteamNetConnection conn);
 
 	ISteamNetworkingSockets* Sockets = nullptr;
-	HSteamListenSocket ListenSocket = 0;
-	HSteamNetPollGroup PollGroup    = 0;
+	HSteamListenSocket ListenSocket  = 0;
+	HSteamNetPollGroup PollGroup     = 0;
 
 	bool bGlobalNoNagle = false;
-	int  SendRateMin    = -1; // -1 = use GNS default
+	int SendRateMin     = -1; // -1 = use GNS default
 	int SendRateMax     = -1;
 
 	std::list<ConnectionInfo> Connections;
@@ -252,7 +252,7 @@ private:
 	/// Atomically updated when AssignOwnerID is called on a client-initiated connection.
 	/// Readable from any thread — used by tests and the editor to observe handshake completion.
 #if defined(TNX_TESTING) || defined(TNX_ENABLE_EDITOR)
-	std::atomic<uint8_t> LocalOwnerID{0};
+	std::atomic<uint8_t> LocalOwnerID{ 0 };
 #endif
 
 	/// Singleton pointer for static callback routing.

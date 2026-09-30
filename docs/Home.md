@@ -44,7 +44,7 @@ TrinyxEngine is a C++20, data-oriented game engine built for competitive multipl
 | Page | Description |
 |---|---|
 | [Overview](rendering/Overview.md) | VizBuffer architecture, current state vs roadmap |
-| [GPU Compute Pipeline](rendering/GPU-Pipeline.md) | 3-pass predicate/prefix_sum/scatter, Buffer Device Address |
+| [GPU Compute Pipeline](rendering/GPU-Pipeline.md) | Predicate → prefix_sum → scatter → build_draws → sort_instances, GPU skinning, Buffer Device Address |
 | [Dirty-Bit Upload](rendering/Dirty-Bit-Upload.md) | Selective GPU upload, 5 InstanceBuffers, SIMD OR path |
 
 ### Editor
@@ -65,6 +65,7 @@ TrinyxEngine is a C++20, data-oriented game engine built for competitive multipl
 | [Performance Targets](reference/Performance-Targets.md) | Benchmarks, budgets, scalability targets |
 | [Status & Roadmap](reference/Status-And-Roadmap.md) | Current milestone status and upcoming work |
 | [Design Decisions](reference/Design-Decisions.md) | Why key architectural decisions were made |
+| [Code Structure](reference/Code-Structure.md) | Headers declare, sources define — where implementations live and why |
 | [Known Issues](reference/Known-Issues.md) | Current technical debt and known bugs |
 | [Schema Error Reference](reference/Schema-Error-Reference.md) | Component validation error messages |
 
@@ -130,7 +131,7 @@ See [Installation](getting-started/Installation.md) for full setup, IDE integrat
 
 ## Status
 
-**Current phase (2026-05):** Foundation Stage — Replication reliability fix + Animation
+**Current phase (2026-09):** Foundation Stage — Animation and networking in progress
 
 | Stage | Milestone | Status |
 |---|---|---|
@@ -140,7 +141,7 @@ See [Installation](getting-started/Installation.md) for full setup, IDE integrat
 | Foundation | Audio | Complete |
 | Foundation | Camera System | Complete |
 | Foundation | Game Flow | In Progress |
-| Foundation | Animation | Planned |
+| Foundation | Animation | In Progress |
 | Hardening | Hot-path audit, constraint system, static tier | Planned |
 
 Full details: [Status & Roadmap](reference/Status-And-Roadmap.md)

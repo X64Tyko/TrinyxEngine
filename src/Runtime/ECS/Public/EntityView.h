@@ -3,15 +3,15 @@
 #include "Registry.h"
 #include "CacheSlotMeta.h"
 
-//#define SFlags this->Flags.Flags
+// #define SFlags this->Flags.Flags
 
 // Global counter (hidden in cpp)
 namespace Internal
 {
-	extern uint32_t g_GlobalComponentCounter;
-	extern ClassID g_GlobalClassCounter;
-	// TODO: if the user changes the "Generation" bits for the Entity ID and has more than... 2B classes... nvm
-}
+extern uint32_t g_GlobalComponentCounter;
+extern ClassID g_GlobalClassCounter;
+// TODO: if the user changes the "Generation" bits for the Entity ID and has more than... 2B classes... nvm
+} // namespace Internal
 
 template <template <FieldWidth> class Derived, FieldWidth WIDTH = FieldWidth::Scalar>
 class EntityView
@@ -55,7 +55,7 @@ public:
 	{
 		Flags |= flagBits;
 	}
-	
+
 	void Initialize()
 	{
 	}
@@ -91,7 +91,7 @@ public:
 
 						// Advance by number of fields for this component
 						constexpr size_t fieldCount = MemberType::FieldNames.size();
-						fieldArrayBaseIndex         += fieldCount;
+						fieldArrayBaseIndex += fieldCount;
 					}
 					else
 					{

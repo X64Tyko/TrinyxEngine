@@ -9,10 +9,13 @@ TEST(Bitset_SignatureContains)
 	Signature Full, Partial, Disjoint;
 
 	// Full = bits 0, 1, 2
-	Full.Set(0); Full.Set(1); Full.Set(2);
+	Full.Set(0);
+	Full.Set(1);
+	Full.Set(2);
 
 	// Partial = bits 0, 1 only
-	Partial.Set(0); Partial.Set(1);
+	Partial.Set(0);
+	Partial.Set(1);
 
 	// Disjoint = bit 5 only
 	Disjoint.Set(5);

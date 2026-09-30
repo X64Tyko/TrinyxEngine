@@ -20,7 +20,7 @@ struct CVisualTransform : ComponentView<CVisualTransform, WIDTH>
 	FloatProxy<WIDTH> VisPosY;
 	FloatProxy<WIDTH> VisPosZ;
 	FloatProxy<WIDTH> VisBlend;
-	
-	Vec3Accessor<WIDTH> Position{VisPosX, VisPosY, VisPosZ};
+
+	Vec3Accessor<WIDTH> Position{ VisPosX, VisPosY, VisPosZ };
 };
 TNX_REGISTER_COMPONENT(CVisualTransform)

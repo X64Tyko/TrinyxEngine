@@ -25,20 +25,25 @@
  */
 struct SoloSim
 {
-/**
- * @brief No-op; solo play has no remote input to inject.
- * @tparam TLogic Concrete LogicThread specialization.
- * @return Always `false` — no corrections pending.
- */
-template <typename TLogic>
-bool OnSimInput(uint32_t /*frame*/, TLogic& /*logic*/) { return false; }
+	/**
+	 * @brief No-op; solo play has no remote input to inject.
+	 * @tparam TLogic Concrete LogicThread specialization.
+	 * @return Always `false` — no corrections pending.
+	 */
+	template <typename TLogic>
+	bool OnSimInput(uint32_t /*frame*/, TLogic& /*logic*/)
+	{
+		return false;
+	}
 
-/**
- * @brief No-op; solo play has no peers to replicate to.
- * @tparam TLogic Concrete LogicThread specialization.
- */
-template <typename TLogic>
-void OnFramePublished(uint32_t /*frame*/, TLogic& /*logic*/) {}
+	/**
+	 * @brief No-op; solo play has no peers to replicate to.
+	 * @tparam TLogic Concrete LogicThread specialization.
+	 */
+	template <typename TLogic>
+	void OnFramePublished(uint32_t /*frame*/, TLogic& /*logic*/)
+	{
+	}
 };
 
 /** @} */

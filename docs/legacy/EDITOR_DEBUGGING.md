@@ -20,7 +20,7 @@ A GPU-generated texture visualizing the entire Volatile and Temporal SoA slab wi
 * **Chunk Overlay:** The GPU draws borders and fullness gradients for AoS chunk allocations over the SoA heatmap using a `ChunkMeta` SSBO.
 
 ### 1.2 DoD-to-OOP Side-Table
-To keep SIMD sweeps pure, Entities do not store `Owner*` pointers in the slab. 
+To keep SIMD sweeps pure, Entities do not store `Owner*` pointers in the slab.
 * **Architecture:** `ConstructRegistry` maintains a lock-free `FlatMap<EntityCacheIndex, ConstructMetadata>`.
 * **Usage:** When hovering over an anonymous pixel in the heatmap, the Editor queries the Side-Table to display the owning Construct's RTTI name and View name (e.g., *"BarrelAssembly owned by Turret_3"*).
 
@@ -41,12 +41,12 @@ Allows developers to edit history and watch the timeline heal.
 
 ### 2.1 The Command-Based Debug Draw API
 A thread-safe, triple-buffered command ring buffer for drawing transient 3D shapes.
-* **Workflow:** Logic code (512Hz) pushes commands with a `Duration` parameter. 
+* **Workflow:** Logic code (512Hz) pushes commands with a `Duration` parameter.
 * **Rendering:** The Encoder thread consumes the buffer, converting `Fixed32` cell-relative coordinates to `Float32` camera-relative coordinates, issuing a batched graphics draw call.
 
 ### 2.2 Post-Process Non-Visibility Overlays
 For debugging spatial systems that aren't strictly visual (Physically Based Audio, AI perception, Trigger Volumes) without fighting the depth buffer.
-* **Architecture:** The compute culling pass flags the instance payload (e.g., `DebugPBAActive`). 
+* **Architecture:** The compute culling pass flags the instance payload (e.g., `DebugPBAActive`).
 * **Execution:** A post-process pass reads the `InstanceBuffer` and the Scene Depth, projecting the bounds of flagged entities and drawing translucent debug shaders directly on top of the rendered scene (x-ray behavior).
 
 ### 2.3 Spatial Manipulation (ImGuizmo)

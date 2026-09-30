@@ -1,0 +1,88 @@
+# TrinyxEngine formatting rules.
+# Derived from the existing code; Unreal Engine coding standard where the code is ambiguous.
+# Pinned to clang-format 23.1.1 (see .pre-commit-config.yaml) — other versions can format differently.
+---
+Language: Cpp
+Standard: c++20
+BasedOnStyle: LLVM
+
+# Indentation — tabs, 4 wide (UE standard)
+UseTab: ForContinuationAndIndentation
+TabWidth: 4
+IndentWidth: 4
+ContinuationIndentWidth: 4
+ConstructorInitializerIndentWidth: 4
+AccessModifierOffset: -4
+IndentCaseLabels: true
+NamespaceIndentation: None
+IndentPPDirectives: None
+
+# Braces — Allman (UE standard), including lambda bodies
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: true
+  AfterClass: true
+  AfterControlStatement: Always
+  AfterEnum: true
+  AfterExternBlock: true
+  AfterFunction: true
+  AfterNamespace: true
+  AfterStruct: true
+  AfterUnion: true
+  BeforeCatch: true
+  BeforeElse: true
+  BeforeLambdaBody: true
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: true
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortLambdasOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Empty
+AllowShortEnumsOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+
+# Line breaking — no hard column limit; existing manual breaks are kept.
+ColumnLimit: 0
+BreakConstructorInitializers: BeforeColon
+PackConstructorInitializers: Never
+BreakInheritanceList: BeforeColon
+AlwaysBreakTemplateDeclarations: Yes
+BreakTemplateDeclarations: Yes
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+LambdaBodyIndentation: OuterScope
+MaxEmptyLinesToKeep: 2
+KeepEmptyLinesAtTheStartOfBlocks: false
+InsertNewlineAtEOF: true
+
+# Alignment — the codebase aligns consecutive assignments/declarations
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+AlignConsecutiveDeclarations: false
+AlignConsecutiveMacros: true
+AlignTrailingComments:
+  Kind: Always
+AlignEscapedNewlines: Left
+AlignOperands: Align
+BreakBeforeBinaryOperators: NonAssignment
+AlignAfterOpenBracket: DontAlign
+
+# Spacing / pointers
+PointerAlignment: Left
+ReferenceAlignment: Pointer
+SpaceAfterTemplateKeyword: true
+SpaceAfterCStyleCast: false
+SpaceBeforeParens: ControlStatements
+Cpp11BracedListStyle: false
+FixNamespaceComments: true
+
+# Includes — order can matter (platform headers, generated code); leave as written.
+SortIncludes: Never
+IncludeBlocks: Preserve
+...

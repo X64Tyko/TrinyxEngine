@@ -55,7 +55,7 @@ cmake --build cmake-build-relwithdebinfo-visual-studio --config RelWithDebInfo
 | Option                         | Default | Purpose                                                                                                    |
 |--------------------------------|---------|------------------------------------------------------------------------------------------------------------|
 | `TNX_ENABLE_EDITOR=ON/OFF`     | OFF     | Enable editor UI (ImGui + GPU picking)                                                                     |
-| `TNX_ENABLE_ROLLBACK=ON/OFF`   | OFF     | Enable N-frame rollback history for netcode (forces `TNX_DETERMINISM=ON`)                                  |
+| `TNX_ENABLE_ROLLBACK=ON/OFF`   | OFF     | Enable N-frame rollback history (independent of `TNX_DETERMINISM`; forced on in editor builds)          |
 | `TNX_DETERMINISM=ON/OFF`       | OFF     | Cross-platform determinism: disables FMA/fast-math in engine and Jolt (`JPH_CROSS_PLATFORM_DETERMINISTIC`) |
 | `ENABLE_TRACY=ON/OFF`          | ON      | Tracy profiler integration                                                                                 |
 | `TRACY_PROFILE_LEVEL=1/2/3`    | 3       | 1=coarse (~1%), 2=medium (~5%), 3=per-entity (~50%+ overhead)                                              |
@@ -479,7 +479,8 @@ for the authoritative status tracker.
 1. **Editor (bare-bones)** — Complete. 8 panels (World Outliner, Details, Content Browser, Engine Stats, Log,
    Node Script, Component Generator, Debugger), ImGuizmo gizmo (W/E/R, snap, undo), PIE (local + networked
    1–4 clients, scene snapshot/restore), asset database (.tnxid sidecars, .tnxdb), JSON .tnxscene format,
-   50-command undo/redo stack, GPU picking. See `docs/EDITOR.md`. Scope is explicitly limited to this definition.
+   50-command undo/redo stack, GPU picking, Construct / Entity / Prefab editor windows. See `docs/editor/Overview.md`.
+   Scope is explicitly limited to this definition.
 2. **Construct/View OOP** — Complete. `Construct<T>`, `Owned<T>`, `ConstructView<TEntity>`, `ConstructBatch`,
    JoltCharacter. PlayerConstruct proven.
 3. **Networking** — In progress. GNS wrapper, Authority/Owner/Host model, PIE loopback, entity spawn/destroy
@@ -487,7 +488,9 @@ for the authoritative status tracker.
    gated push replication, networked despawn. `LogicThread<TNet,TRollback,TFrame>`, `AuthoritySim`/`OwnerSim`,
    `ServerClientChannel` all done. Pending: Phase 0 tentative despawn, `ListenNet` compile-time mode,
    `AuthorityClass` tags + runtime authority override table, host migration, disconnect policy,
-   snapshot serialization path, and Deterministic/Non-Deterministic mode split rewrite.
+   snapshot serialization path, and Deterministic/Non-Deterministic mode split rewrite (non-rollback reconciliation,
+   server-only rollback, continuous clock sync, lag compensation; remote-entity representation is an open design —
+   see `docs/networking/Overview.md`).
 4. **Audio** — Complete. SDL3 `AudioManager`: voice pool, handle-based (`SoundHandle`) playback/stop/fade,
    `AudioEventEntry` registry, priority voice stealing, lazy-load/auto-unload. Compatible with Anti-Event design.
 5. **Camera System** — Complete. `CameraManager` (per-Soul layer stack), `CameraSlot[5]`, `CameraLayer` with
@@ -495,6 +498,9 @@ for the authoritative status tracker.
    `ECamera` (hot SoA), `CurveHandle`.
 6. **Game Flow** — In progress. FlowManager, FlowState, GameMode, Soul, NetChannel implemented. `WithSpawnManagement`,
    `WithLobby`, `WithTeamAssignment` ModeMixins done. Travel toolbox model implemented. Bootstrap contract done.
+7. **Animation** — In progress. Temporal `CAnimBase` / `CAnimLayer` (rollback + replication), GPU blendspaces,
+   cross-fades, masked replace/additive layers, `AnimConstruct` state machine with root motion, notifies, sockets,
+   GPU compute skinning. Pending: IK, retargeting, graph tooling.
 
 ### Stage 2: Hardening
 
@@ -575,6 +581,14 @@ Targets include: hot-path audit, constraint system, static entity tier, reflecti
 ---
 
 ## What Claude Should Know
+
+- **Headers declare, sources define.** Follow `docs/reference/Code-Structure.md`: non-template bodies go in
+  `Private/*.cpp`; closed-set templates use explicit instantiation (the `LogicThread` pattern); open templates stay thin
+  over a non-template core; only listed hot-path/compile-time headers are implementation-heavy. Logic changes should
+  not force header rebuilds.
+- **Formatting and linting are tool-enforced.** Follow `.clang-format` / `.clang-tidy` (existing code style, Unreal
+  Engine coding standard when in doubt). Before handing back C++ changes, run `python scripts/presubmit.py` (or
+  `--skip-tests` for a quick lint pass) and fix what it reports.
 
 - **Do not suggest replacing fixed-update with variable timestep.** The 512Hz fixed rate is a load-bearing architectural constraint, not an oversight.
 - **Do not suggest using `std::map` or `std::unordered_map` in hot paths.** This codebase is latency-sensitive and data-oriented by design.

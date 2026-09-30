@@ -26,13 +26,19 @@ struct EditorState
 	LogicThreadBase* LogicPtr     = nullptr;
 
 	// --- Selection ---
-	enum class SelectionType : uint8_t { None, Construct, Archetype, Entity };
+	enum class SelectionType : uint8_t
+	{
+		None,
+		Construct,
+		Archetype,
+		Entity
+	};
 
 	SelectionType Selection = SelectionType::None;
 
 	// Construct selection (valid when SelectionType::Construct)
-	uint32_t SelectedConstructID = 0;
-	void*    SelectedConstructPtr = nullptr;
+	uint32_t SelectedConstructID          = 0;
+	void* SelectedConstructPtr            = nullptr;
 	const char* SelectedConstructTypeName = nullptr;
 
 	// Archetype selection (valid for both Archetype and Entity modes)
@@ -58,7 +64,12 @@ struct EditorState
 	}
 
 	// --- Gizmo ---
-	enum class GizmoOp : uint8_t { Translate, Rotate, Scale };
+	enum class GizmoOp : uint8_t
+	{
+		Translate,
+		Rotate,
+		Scale
+	};
 
 	GizmoOp CurrentGizmoOp   = GizmoOp::Translate;
 	bool bGizmoWorldMode     = true; // true = WORLD, false = LOCAL

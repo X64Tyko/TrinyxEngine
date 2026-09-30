@@ -14,7 +14,7 @@ struct SteamNetConnectionStatusChangedCallback_t;
 
 /// Function pointer type for connection status change notifications.
 /// Passed into Initialize so GNS can route callbacks to the engine.
-using GNSStatusChangedFn = void(*)(SteamNetConnectionStatusChangedCallback_t*);
+using GNSStatusChangedFn = void (*)(SteamNetConnectionStatusChangedCallback_t*);
 
 struct SocketHandle
 {
@@ -25,7 +25,7 @@ struct SocketHandle
 	bool operator==(const SocketHandle& rhs) const { return bIsInitialized == rhs.bIsInitialized; }
 
 	explicit operator bool() const { return bIsInitialized && Sockets != nullptr; }
-	
+
 	static SocketHandle& Invalid()
 	{
 		static SocketHandle handle;
@@ -60,6 +60,6 @@ public:
 private:
 	SocketHandle SocketsHandle;
 	ISteamNetworkingSockets* SocketsInterface = nullptr;
-	bool bInitialized = false;
-	bool bOwnsGNS     = false; // true only if this instance called GameNetworkingSockets_Init
+	bool bInitialized                         = false;
+	bool bOwnsGNS                             = false; // true only if this instance called GameNetworkingSockets_Init
 };

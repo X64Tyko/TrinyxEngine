@@ -65,6 +65,6 @@ public:
 	virtual const char* GetName() const { return "FlowState"; }
 
 protected:
-	FlowState() = default;
+	FlowState()           = default;
 	FlowManagerBase* Flow = nullptr; // Set on OnEnter — always the owning FlowManager.
 };

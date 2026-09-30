@@ -5,7 +5,7 @@
 // Validates FieldProxy<float, Scalar> — the single-entity scalar update path.
 // This is the most commonly exercised path (Construct-side entity writes).
 // Tests: store via operator=, load via Value(), dirty bit marking, Advance() cursor.
-TEST (FieldProxy_ScalarStoreLoad)
+TEST(FieldProxy_ScalarStoreLoad)
 {
 	(void)Engine;
 

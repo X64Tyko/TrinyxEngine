@@ -8,9 +8,10 @@
 
 // These two functions are defined in the GNS static library but not declared in
 // any public GNS header. Declare them here to avoid modifying vendored files.
-extern "C" {
-void SteamNetworkingSockets_SetManualPollMode(bool bFlag);
-void SteamNetworkingSockets_Poll(int msMaxWaitTime);
+extern "C"
+{
+	void SteamNetworkingSockets_SetManualPollMode(bool bFlag);
+	void SteamNetworkingSockets_Poll(int msMaxWaitTime);
 }
 
 GNSContext::~GNSContext()

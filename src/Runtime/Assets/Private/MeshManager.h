@@ -20,15 +20,15 @@ struct MeshAsset;
 // -----------------------------------------------------------------------
 namespace BuiltinMesh
 {
-	inline AssetID CubeID()
-	{
-		return AssetID::Create(0x0000010000000000LL, AssetType::Mesh);
-	}
-	inline AssetID CapsuleID()
-	{
-		return AssetID::Create(0x0000020000000000LL, AssetType::Mesh);
-	}
+inline AssetID CubeID()
+{
+	return AssetID::Create(0x0000010000000000LL, AssetType::Mesh);
 }
+inline AssetID CapsuleID()
+{
+	return AssetID::Create(0x0000020000000000LL, AssetType::Mesh);
+}
+} // namespace BuiltinMesh
 
 // -----------------------------------------------------------------------
 // MeshManager — GPU mega-buffer management for all mesh geometry.
@@ -54,7 +54,7 @@ public:
 	static constexpr uint32_t MAX_MESH_SLOTS          = 256;
 	static constexpr uint32_t VERTEX_MEGA_BUFFER_SIZE = 16 * 1024 * 1024; // 16 MB
 	static constexpr uint32_t INDEX_MEGA_BUFFER_SIZE  = 4 * 1024 * 1024;  //  4 MB
-	static constexpr uint32_t MAX_TOTAL_SKIN_WEIGHTS  = 4000000;           //  4M vertices of skin data (~32 MB)
+	static constexpr uint32_t MAX_TOTAL_SKIN_WEIGHTS  = 4000000;          //  4M vertices of skin data (~32 MB)
 
 	struct MeshSlot
 	{
@@ -109,17 +109,17 @@ public:
 	uint32_t LoadBuiltinCapsule(float radius, float halfHeight, uint32_t segments);
 
 
-	uint64_t GetVertexBufferAddr()     const { return VertexMegaBuffer.DeviceAddr; }
-	VkBuffer GetIndexBufferHandle()    const { return static_cast<VkBuffer>(IndexMegaBuffer.Buffer); }
-	uint64_t GetMeshTableAddr()        const { return MeshTableBuffer.DeviceAddr; }
-	uint64_t GetSkinWeightAddr()       const { return SkinWeightMegaBuffer.DeviceAddr; }
-	uint64_t GetSkinSlotTableAddr()    const { return SkinSlotTableBuffer.DeviceAddr; }
-	const MeshSlot&        GetSlot(uint32_t id)       const { return Slots[id]; }
-	const SkinWeightSlot&  GetSkinSlot(uint32_t id)   const { return SkinSlots[id]; }
+	uint64_t GetVertexBufferAddr() const { return VertexMegaBuffer.DeviceAddr; }
+	VkBuffer GetIndexBufferHandle() const { return static_cast<VkBuffer>(IndexMegaBuffer.Buffer); }
+	uint64_t GetMeshTableAddr() const { return MeshTableBuffer.DeviceAddr; }
+	uint64_t GetSkinWeightAddr() const { return SkinWeightMegaBuffer.DeviceAddr; }
+	uint64_t GetSkinSlotTableAddr() const { return SkinSlotTableBuffer.DeviceAddr; }
+	const MeshSlot& GetSlot(uint32_t id) const { return Slots[id]; }
+	const SkinWeightSlot& GetSkinSlot(uint32_t id) const { return SkinSlots[id]; }
 	uint32_t GetMeshCount() const { return MeshCount; }
 
 	void FlushPendingUploads() { TrinyxJobs::WaitForCounter(&GpuUploadCounter, TrinyxJobs::Queue::Render); }
-	bool IsUploadComplete()    const { return GpuUploadCounter.Value.load(std::memory_order_acquire) == 0; }
+	bool IsUploadComplete() const { return GpuUploadCounter.Value.load(std::memory_order_acquire) == 0; }
 
 	/// Find a mesh slot by TnxName (primary API). Returns UINT32_MAX if not registered.
 	uint32_t FindSlotByTName(TnxName name) const
@@ -154,8 +154,8 @@ public:
 	AssetID GetSlotID(uint32_t slot) const { return SlotIDs[slot]; }
 
 private:
-	MeshManager()  = default;
-	~MeshManager() = default;
+	MeshManager()                              = default;
+	~MeshManager()                             = default;
 	MeshManager(const MeshManager&)            = delete;
 	MeshManager& operator=(const MeshManager&) = delete;
 
@@ -169,11 +169,11 @@ private:
 	VulkanBuffer SkinSlotTableBuffer;  // GpuSkinSlotInfo[MAX_MESH_SLOTS], PersistentMapped + BDA
 
 	TrinyxJobs::JobCounter GpuUploadCounter;
-	uint32_t NextVertexOffset  = 0; // in vertices (not bytes)
-	uint32_t NextIndexOffset   = 0; // in indices  (not bytes)
-	uint32_t NextSkinOffset    = 0; // in SkinWeights entries (not bytes)
-	uint32_t MeshCount         = 1; // slot 0 reserved as invalid sentinel
-	MeshSlot       Slots[MAX_MESH_SLOTS]{};
+	uint32_t NextVertexOffset = 0; // in vertices (not bytes)
+	uint32_t NextIndexOffset  = 0; // in indices  (not bytes)
+	uint32_t NextSkinOffset   = 0; // in SkinWeights entries (not bytes)
+	uint32_t MeshCount        = 1; // slot 0 reserved as invalid sentinel
+	MeshSlot Slots[MAX_MESH_SLOTS]{};
 	SkinWeightSlot SkinSlots[MAX_MESH_SLOTS]{};
-	AssetID        SlotIDs[MAX_MESH_SLOTS]{}; // slot → AssetID reverse map for GetSlotName/GetSlotID
+	AssetID SlotIDs[MAX_MESH_SLOTS]{}; // slot → AssetID reverse map for GetSlotName/GetSlotID
 };

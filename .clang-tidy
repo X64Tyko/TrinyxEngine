@@ -1,0 +1,73 @@
+# TrinyxEngine lint rules. CLion runs these live; scripts/presubmit.py runs them on changed files.
+# Naming follows the existing code; Unreal Engine coding standard where the code is ambiguous.
+---
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-reserved-identifier,
+  -bugprone-macro-parentheses,
+  -bugprone-derived-method-shadowing-base-method,
+  -bugprone-exception-escape,
+  -bugprone-throwing-static-initialization,
+  clang-analyzer-*,
+  -clang-analyzer-optin.*,
+  performance-*,
+  -performance-enum-size,
+  -performance-no-int-to-ptr,
+  modernize-use-override,
+  modernize-use-nullptr,
+  modernize-redundant-void-arg,
+  misc-redundant-expression,
+  misc-unused-using-decls,
+  misc-definitions-in-headers,
+  readability-misleading-indentation,
+  readability-redundant-control-flow,
+  readability-redundant-smartptr-get,
+  readability-identifier-naming
+
+# Only real bugs block a push; everything else is advisory.
+WarningsAsErrors: >
+  bugprone-use-after-move,
+  bugprone-dangling-handle,
+  bugprone-infinite-loop,
+  bugprone-undefined-memory-manipulation,
+  bugprone-sizeof-expression,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.NewDelete*
+
+HeaderFilterRegex: '.*/(src|Testbed|Playground|TrinyxParser|DeterminismTest)/.*'
+ExcludeHeaderFilterRegex: '.*/(libs|vendor|cmake-build-[^/]*)/.*'
+FormatStyle: file
+
+# SDL maps SDL_strcasecmp etc. to POSIX functions under the clang analyzer, which don't exist with MSVC headers.
+ExtraArgs: [ '-DSDL_DISABLE_ANALYZE_MACROS' ]
+
+CheckOptions:
+  # Types — PascalCase (C/E/T/F prefixes are conventions, not enforced)
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.StructCase: CamelCase
+  readability-identifier-naming.UnionCase: CamelCase
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.TypeAliasCase: CamelCase
+  readability-identifier-naming.TypedefCase: CamelCase
+  readability-identifier-naming.TypeAliasIgnoredRegexp: '^[a-z_0-9]+_t(ype)?$|^(value_type|iterator|const_iterator|type)$'
+  readability-identifier-naming.EnumConstantCase: CamelCase
+  readability-identifier-naming.ScopedEnumConstantCase: CamelCase
+  # Functions — PascalCase; std-compatible names (begin/end/size…) allowed
+  readability-identifier-naming.FunctionCase: CamelCase
+  readability-identifier-naming.MethodCase: CamelCase
+  readability-identifier-naming.MethodIgnoredRegexp: '^(begin|end|cbegin|cend|rbegin|rend|size|empty|data|clear|push_back|emplace_back|reserve|resize|swap|hash|get|operator.*)$'
+  # Members — PascalCase (UE: bools take a 'b' prefix, e.g. bOwnsEntity)
+  readability-identifier-naming.MemberCase: CamelCase
+  readability-identifier-naming.MemberIgnoredRegexp: '^b[A-Z][A-Za-z0-9]*$'
+  # Locals and parameters — camelCase
+  readability-identifier-naming.LocalVariableCase: camelBack
+  readability-identifier-naming.LocalVariableIgnoredRegexp: '^s_[A-Z][A-Za-z0-9]*$|^[A-Z]$'
+  readability-identifier-naming.ParameterCase: camelBack
+  readability-identifier-naming.ParameterIgnoredRegexp: '^[A-Z]$'
+  # Macros — UPPER_CASE
+  readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
+...

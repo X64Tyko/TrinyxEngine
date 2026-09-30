@@ -80,6 +80,6 @@ public:
 	WorldBase* GetWorld() const { return OwnerWorld; }
 
 protected:
-	GameMode() = default;
+	GameMode()            = default;
 	WorldBase* OwnerWorld = nullptr;
 };

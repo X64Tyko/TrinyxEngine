@@ -6,6 +6,7 @@
 #include <cstdint>
 #include "VulkanMemory.h"
 #include "RendererCore.h" // MaxFramesInFlight
+#include "EditorCamera.h"
 
 class WorldBase;
 
@@ -31,12 +32,18 @@ struct WorldViewport
 {
 	WorldBase* TargetWorld = nullptr;
 
+	// ── Camera ──────────────────────────────────────────────────────────
+	// Edit viewports look through their own EditorCamera; PIE viewports leave it off and show
+	// the world's published camera. Resolve through ResolveViewCamera, never the header directly.
+	EditorCamera Camera;
+	bool bUseEditorCamera = false;
+
 	// ── Offscreen render targets ────────────────────────────────────────
 	VulkanImage ColorTarget;                       // RGBA8, rendered scene
 	VulkanImage DepthTarget;                       // D32_SFLOAT
 	VkDescriptorSet ImGuiTexture = VK_NULL_HANDLE; // For ImGui::Image()
 #ifdef TNX_GPU_PICKING
-	VulkanImage PickTarget;                        // R32_UINT, entity cache index per pixel
+	VulkanImage PickTarget; // R32_UINT, entity cache index per pixel
 #endif
 
 	// ── Per-viewport sampler (for ImGui::Image compositing) ─────────────
@@ -54,7 +61,7 @@ struct WorldViewport
 	uint32_t PrevFieldSlab                  = 0;
 	uint32_t GPUActiveFrame                 = 0;
 	uint32_t GPUPrevFrame                   = 0;
-	bool FirstSlabWrite[kViewportSlabCount] = {true, true, true, true, true};
+	bool FirstSlabWrite[kViewportSlabCount] = { true, true, true, true, true };
 
 	// ── Per-world dirty tracking ────────────────────────────────────────
 	uint64_t* DirtyPlanes[kViewportSlabCount] = {};
@@ -70,9 +77,9 @@ struct WorldViewport
 	// ── Deferred slab upload ─────────────────────────────────────────────
 	// Jobs dispatched in WriteToViewportSlab overlap with command recording.
 	// FlushViewportSlabUpload() waits before FillGpuFrameDataForViewport.
-	SlabFieldUploadInfo    VpUploadFields[GpuTotalFieldCount]{};
+	SlabFieldUploadInfo VpUploadFields[GpuTotalFieldCount]{};
 	TrinyxJobs::JobCounter SlabUploadCounter;
-	bool     bSlabUploadPending       = false;
+	bool bSlabUploadPending           = false;
 	uint64_t PendingRenderAckFrame    = 0;
 	uint64_t PendingVolatileFrameLock = 0;
 	uint64_t PendingTemporalFrameLock = 0;
@@ -90,7 +97,8 @@ struct WorldViewport
 	{
 		DirtyWordCount = wordCount;
 		DirtySnapshot  = new uint64_t[wordCount]();
-		for (auto& plane : DirtyPlanes) plane = new uint64_t[wordCount]();
+		for (auto& plane : DirtyPlanes)
+			plane = new uint64_t[wordCount]();
 	}
 
 	/// Free dirty tracking arrays. Called by renderer on viewport destruction.

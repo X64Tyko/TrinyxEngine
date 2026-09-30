@@ -3,14 +3,16 @@
 #include <cstdint>
 
 void ServerClientChannel::Open(uint8_t ownerID, uint32_t logDepth, ConnectionInfo* ci,
-							   NetConnectionManager* mgr, uint32_t entityCapacity)
+	NetConnectionManager* mgr, uint32_t entityCapacity)
 {
 	OwnerID = ownerID;
 	CI      = ci;
 	Channel = NetChannel(ci, mgr, nullptr);
 	InputLog.Initialize(logDepth);
-	if (entityCapacity > 0) Replicated.assign(entityCapacity, false);
-	else Replicated.clear();
+	if (entityCapacity > 0)
+		Replicated.assign(entityCapacity, false);
+	else
+		Replicated.clear();
 }
 
 void ServerClientChannel::Close()

@@ -26,7 +26,8 @@ TEST(Bitplane_TombstonedSkipped)
 
 	// Destroy half of them — they become tombstoned
 	constexpr int DestroyCount = 8;
-	for (int i = 0; i < DestroyCount; ++i) Reg->Destroy(handles[static_cast<size_t>(i)]);
+	for (int i = 0; i < DestroyCount; ++i)
+		Reg->Destroy(handles[static_cast<size_t>(i)]);
 
 	Reg->ProcessDeferredDestructions();
 
@@ -44,7 +45,8 @@ TEST(Bitplane_TombstonedSkipped)
 	uint32_t totalAllocated = 0;
 	for (Archetype* arch : arches)
 	{
-		for (size_t ci = 0; ci < arch->Chunks.size(); ++ci) totalAllocated += arch->GetAllocatedChunkCount(static_cast<uint32_t>(ci));
+		for (size_t ci = 0; ci < arch->Chunks.size(); ++ci)
+			totalAllocated += arch->GetAllocatedChunkCount(static_cast<uint32_t>(ci));
 	}
 
 	// Allocated high-water mark must be >= live count + dead slots still in slab

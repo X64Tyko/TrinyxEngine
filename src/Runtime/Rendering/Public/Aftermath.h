@@ -22,34 +22,34 @@
 
 namespace Aftermath
 {
-	/// Register crash-dump callbacks. Must be called BEFORE vkCreateDevice so
-	/// that the GPU driver hooks into the new device. Returns true if Aftermath
-	/// is fully active, false if the SDK is missing or the call failed (engine
-	/// continues running without crash dumps in that case).
-	bool Initialize();
+/// Register crash-dump callbacks. Must be called BEFORE vkCreateDevice so
+/// that the GPU driver hooks into the new device. Returns true if Aftermath
+/// is fully active, false if the SDK is missing or the call failed (engine
+/// continues running without crash dumps in that case).
+bool Initialize();
 
-	/// Release Aftermath state. Call after vkDeviceWaitIdle and before destroying
-	/// the device.
-	void Shutdown();
+/// Release Aftermath state. Call after vkDeviceWaitIdle and before destroying
+/// the device.
+void Shutdown();
 
-	/// True if Aftermath::Initialize succeeded and the SDK is wired in.
-	bool IsEnabled();
+/// True if Aftermath::Initialize succeeded and the SDK is wired in.
+bool IsEnabled();
 
-	/// Append the VK_NV_device_diagnostics_config extension name to the device
-	/// extension list if the physical device supports it. Caller passes the
-	/// already-collected list of device extensions; this will push_back if
-	/// supported. Returns true if the extension was added.
-	bool TryAddDeviceExtension(VkPhysicalDevice physDev, const char** outExtensionName);
+/// Append the VK_NV_device_diagnostics_config extension name to the device
+/// extension list if the physical device supports it. Caller passes the
+/// already-collected list of device extensions; this will push_back if
+/// supported. Returns true if the extension was added.
+bool TryAddDeviceExtension(VkPhysicalDevice physDev, const char** outExtensionName);
 
-	/// Inserts Aftermath's VkDeviceDiagnosticsConfigCreateInfoNV at the head of
-	/// the pNext chain and returns the new head pointer (assign to
-	/// VkDeviceCreateInfo::pNext). When disabled / unsupported, returns
-	/// `existingChain` unchanged.
-	const void* PrependDeviceCreateChain(const void* existingChain);
+/// Inserts Aftermath's VkDeviceDiagnosticsConfigCreateInfoNV at the head of
+/// the pNext chain and returns the new head pointer (assign to
+/// VkDeviceCreateInfo::pNext). When disabled / unsupported, returns
+/// `existingChain` unchanged.
+const void* PrependDeviceCreateChain(const void* existingChain);
 
-	/// Optional: emit a checkpoint marker on the command buffer so Aftermath's
-	/// dump points at the closest passed checkpoint when a crash occurs.
-	/// `marker` must outlive the GPU frame (use string literals or a long-lived
-	/// pool) — the SDK stores the pointer, not the bytes.
-	void Checkpoint(VkCommandBuffer cmd, const char* marker);
+/// Optional: emit a checkpoint marker on the command buffer so Aftermath's
+/// dump points at the closest passed checkpoint when a crash occurs.
+/// `marker` must outlive the GPU frame (use string literals or a long-lived
+/// pool) — the SDK stores the pointer, not the bytes.
+void Checkpoint(VkCommandBuffer cmd, const char* marker);
 } // namespace Aftermath

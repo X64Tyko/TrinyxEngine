@@ -25,7 +25,8 @@ void SkeletonAsset::GetChainFromRoot(uint32_t boneIndex, uint32_t* outChain, uin
 
 	// Reverse so [0] == root
 	outLen = depth;
-	for (uint32_t i = 0; i < depth; ++i) outChain[i] = tmp[depth - 1 - i];
+	for (uint32_t i = 0; i < depth; ++i)
+		outChain[i] = tmp[depth - 1 - i];
 }
 
 bool SkeletonAsset::IsAncestor(uint32_t ancestor, uint32_t descendant) const
@@ -75,10 +76,16 @@ bool SaveSkeletonAsset(const SkeletonAsset& asset, const std::string& path)
 		SocketInfoDisk disk;
 		disk.id        = s.id;
 		disk.boneIndex = s.boneIndex;
-		disk.tx = s.localOffset.tx.ToFloat(); disk.ty = s.localOffset.ty.ToFloat(); disk.tz = s.localOffset.tz.ToFloat();
-		disk.rx = s.localOffset.rx.ToFloat(); disk.ry = s.localOffset.ry.ToFloat();
-		disk.rz = s.localOffset.rz.ToFloat(); disk.rw = s.localOffset.rw.ToFloat();
-		disk.sx = s.localOffset.sx.ToFloat(); disk.sy = s.localOffset.sy.ToFloat(); disk.sz = s.localOffset.sz.ToFloat();
+		disk.tx        = s.localOffset.tx.ToFloat();
+		disk.ty        = s.localOffset.ty.ToFloat();
+		disk.tz        = s.localOffset.tz.ToFloat();
+		disk.rx        = s.localOffset.rx.ToFloat();
+		disk.ry        = s.localOffset.ry.ToFloat();
+		disk.rz        = s.localOffset.rz.ToFloat();
+		disk.rw        = s.localOffset.rw.ToFloat();
+		disk.sx        = s.localOffset.sx.ToFloat();
+		disk.sy        = s.localOffset.sy.ToFloat();
+		disk.sz        = s.localOffset.sz.ToFloat();
 		disk.prewarm   = s.prewarm ? 1 : 0;
 		std::memset(disk.nameStr, 0, sizeof(disk.nameStr));
 #ifndef TNX_STRIP_NAMES
@@ -94,7 +101,7 @@ bool SaveSkeletonAsset(const SkeletonAsset& asset, const std::string& path)
 	}
 
 	LOG_ENG_INFO_F("[SkeletonAsset] Saved '%s' (%u bones, %u sockets)",
-	               path.c_str(), asset.boneCount, asset.socketCount);
+		path.c_str(), asset.boneCount, asset.socketCount);
 	return true;
 }
 
@@ -139,14 +146,20 @@ bool LoadSkeletonAsset(SkeletonAsset& outAsset, const std::string& path)
 	{
 		SocketInfoDisk disk;
 		file.read(reinterpret_cast<char*>(&disk), sizeof(disk));
-		s.id        = disk.id;
-		s.boneIndex = disk.boneIndex;
-		s.localOffset.tx = disk.tx; s.localOffset.ty = disk.ty; s.localOffset.tz = disk.tz;
-		s.localOffset.rx = disk.rx; s.localOffset.ry = disk.ry;
-		s.localOffset.rz = disk.rz; s.localOffset.rw = disk.rw;
-		s.localOffset.sx = disk.sx; s.localOffset.sy = disk.sy; s.localOffset.sz = disk.sz;
-		s.prewarm   = disk.prewarm != 0;
-		s.name        = TnxName(disk.id, disk.nameStr);
+		s.id             = disk.id;
+		s.boneIndex      = disk.boneIndex;
+		s.localOffset.tx = disk.tx;
+		s.localOffset.ty = disk.ty;
+		s.localOffset.tz = disk.tz;
+		s.localOffset.rx = disk.rx;
+		s.localOffset.ry = disk.ry;
+		s.localOffset.rz = disk.rz;
+		s.localOffset.rw = disk.rw;
+		s.localOffset.sx = disk.sx;
+		s.localOffset.sy = disk.sy;
+		s.localOffset.sz = disk.sz;
+		s.prewarm        = disk.prewarm != 0;
+		s.name           = TnxName(disk.id, disk.nameStr);
 	}
 
 	if (!file.good())
@@ -157,6 +170,6 @@ bool LoadSkeletonAsset(SkeletonAsset& outAsset, const std::string& path)
 	}
 
 	LOG_ENG_INFO_F("[SkeletonAsset] Loaded '%s' (%u bones, %u sockets)",
-	               path.c_str(), header.BoneCount, header.SocketCount);
+		path.c_str(), header.BoneCount, header.SocketCount);
 	return true;
 }

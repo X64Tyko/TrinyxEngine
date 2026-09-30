@@ -24,9 +24,11 @@
 void ReplicationSystem::Initialize(WorldBase* serverWorld)
 {
 	AuthorityWorld = serverWorld;
-	for (auto& ch : Channels) ch.reset();
+	for (auto& ch : Channels)
+		ch.reset();
 	ActiveOwnerIDs.clear();
-	for (auto& f : PendingResimFrames) f.store(UINT32_MAX, std::memory_order_relaxed);
+	for (auto& f : PendingResimFrames)
+		f.store(UINT32_MAX, std::memory_order_relaxed);
 	LOG_ENG_INFO("[Replication] Initialized");
 }
 
@@ -58,7 +60,7 @@ void ReplicationSystem::AddPendingResim(uint8_t ownerID, uint32_t serverFrame)
 	while (serverFrame < current)
 	{
 		if (PendingResimFrames[ownerID].compare_exchange_weak(current, serverFrame,
-															  std::memory_order_release, std::memory_order_relaxed))
+				std::memory_order_release, std::memory_order_relaxed))
 			break;
 	}
 }
@@ -90,14 +92,14 @@ void ReplicationSystem::DispatchFrameJobs()
 }
 
 bool ReplicationSystem::EnqueuePlayerConfirm(uint8_t ownerID, uint32_t serverFrame,
-                                              const RPCHeader& rpcHdr, const void* params, uint16_t paramSize)
+	const RPCHeader& rpcHdr, const void* params, uint16_t paramSize)
 {
 	ServerClientChannel* ch = GetChannelIfActive(ownerID);
 	if (!ch || !ch->CI) return false;
 
-	const uint32_t clientFrame  = ch->CI->ToClientFrame(serverFrame);
-	const uint16_t payloadSize  = static_cast<uint16_t>(sizeof(RPCHeader) + paramSize);
-	PacketHeader hdr = ch->Channel.PrepareHeader(NetMessageType::SoulRPC, payloadSize, clientFrame);
+	const uint32_t clientFrame = ch->CI->ToClientFrame(serverFrame);
+	const uint16_t payloadSize = static_cast<uint16_t>(sizeof(RPCHeader) + paramSize);
+	PacketHeader hdr           = ch->Channel.PrepareHeader(NetMessageType::SoulRPC, payloadSize, clientFrame);
 
 	PendingPacket pkt;
 	pkt.Header = hdr;
@@ -107,10 +109,10 @@ bool ReplicationSystem::EnqueuePlayerConfirm(uint8_t ownerID, uint32_t serverFra
 		std::memcpy(pkt.Payload.data() + sizeof(RPCHeader), params, paramSize);
 	pkt.Reliable = true;
 
-	ch->PendingPlayerConfirm = std::move(pkt);
+	ch->PendingPlayerConfirm           = std::move(pkt);
 	ch->PendingPlayerConfirmSpawnFrame = serverFrame + 1; // SpawnAndWait returns before the spawn tick publishes.
 	LOG_ENG_INFO_F("[Replication] EnqueuePlayerConfirm: ownerID=%u clientFrame=%u minDispatch=%u",
-	               ownerID, clientFrame, ch->PendingPlayerConfirmSpawnFrame);
+		ownerID, clientFrame, ch->PendingPlayerConfirmSpawnFrame);
 	return true;
 }
 
@@ -121,7 +123,11 @@ void ReplicationSystem::Flush(NetConnectionManager* connMgr)
 	bool hasPendingConfirm = false;
 	for (uint8_t oid : ActiveOwnerIDs)
 		if (ServerClientChannel* ch = GetChannelIfActive(oid))
-			if (ch->PendingPlayerConfirm.has_value()) { hasPendingConfirm = true; break; }
+			if (ch->PendingPlayerConfirm.has_value())
+			{
+				hasPendingConfirm = true;
+				break;
+			}
 
 	if (hasPendingConfirm)
 	{
@@ -134,7 +140,10 @@ void ReplicationSystem::Flush(NetConnectionManager* connMgr)
 			ServerClientChannel* ch = GetChannelIfActive(oid);
 			if (ch && ch->PendingPlayerConfirm.has_value()
 				&& LastDispatchedFrame >= ch->PendingPlayerConfirmSpawnFrame)
-			{ anyReady = true; break; }
+			{
+				anyReady = true;
+				break;
+			}
 		}
 
 		if (anyReady)
@@ -162,9 +171,9 @@ void ReplicationSystem::DispatchConstructSpawnJobs(uint32_t frameNumber)
 	struct Capture
 	{
 		ServerClientChannel* Channel;
-		PacketHeader         Header;
+		PacketHeader Header;
 		std::vector<uint8_t> Buf;
-		uint32_t             ServerSpawnFrame;
+		uint32_t ServerSpawnFrame;
 	};
 
 	auto dispatchBuf = [&](ServerClientChannel* ch, uint32_t clientFrame, const std::vector<uint8_t>& buf)
@@ -176,7 +185,7 @@ void ReplicationSystem::DispatchConstructSpawnJobs(uint32_t frameNumber)
 			static_cast<uint16_t>(buf.size()),
 			clientFrame);
 
-		auto* cap             = new Capture{ch, hdr, buf, 0};
+		auto* cap             = new Capture{ ch, hdr, buf, 0 };
 		cap->ServerSpawnFrame = reinterpret_cast<const ConstructSpawnPayload*>(buf.data())->SpawnFrame;
 
 		TrinyxJobs::Dispatch([cap](uint32_t)
@@ -238,14 +247,16 @@ void ReplicationSystem::DispatchConstructSpawnJobs(uint32_t frameNumber)
 						const uint8_t viewCount  = static_cast<uint8_t>(viewHandles.size());
 						const size_t payloadSize = sizeof(ConstructSpawnPayload) + viewCount * sizeof(uint32_t);
 						std::vector<uint8_t> buf(payloadSize, 0);
-						auto* pl        = reinterpret_cast<ConstructSpawnPayload*>(buf.data());
-						pl->Handle      = rec->NetworkID.Value;
-						ConstructNetManifest mf{}; mf.PrefabIndex = rec->TypeHash;
+						auto* pl   = reinterpret_cast<ConstructSpawnPayload*>(buf.data());
+						pl->Handle = rec->NetworkID.Value;
+						ConstructNetManifest mf{};
+						mf.PrefabIndex  = rec->TypeHash;
 						pl->Manifest    = mf.Value;
 						pl->SpawnFrame  = rec->SpawnFrame;
 						pl->ViewCount   = viewCount;
 						uint32_t* trail = reinterpret_cast<uint32_t*>(buf.data() + sizeof(ConstructSpawnPayload));
-						for (uint8_t j = 0; j < viewCount; ++j) trail[j] = netHandleValues[j];
+						for (uint8_t j = 0; j < viewCount; ++j)
+							trail[j] = netHandleValues[j];
 
 						dispatchBuf(ch, clientFrame, buf);
 					}
@@ -387,7 +398,7 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 				EntityRecord* record  = reg->GlobalEntityRegistry.Records[gH.GetIndex()];
 				if (!record) continue;
 
-				allDestroys.push_back({i, record->NetworkID.Value});
+				allDestroys.push_back({ i, record->NetworkID.Value });
 			}
 		}
 		else if (f & Alive)
@@ -402,7 +413,7 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 			EntityNetManifest manifest{};
 			manifest.ClassType = record->Arch ? record->Arch->ArchClassID : 0;
 
-			allCandidates.push_back({i, nh, manifest, static_cast<uint8_t>(record->GetGeneration())});
+			allCandidates.push_back({ i, nh, manifest, static_cast<uint8_t>(record->GetGeneration()) });
 		}
 	}
 
@@ -415,7 +426,7 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 	{
 		if (ServerClientChannel* ch = GetChannelIfActive(oid))
 			if (ch->CI && ch->CI->RepState == ClientRepState::LevelLoaded && !ch->CI->bInitialSpawnFlushed
-			    && (serverFlow ? serverFlow->IsGameModeReady() : true))
+				&& (serverFlow ? serverFlow->IsGameModeReady() : true))
 				anyInitialFlush = true;
 	}
 
@@ -454,7 +465,7 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 		if (!ch || !ch->CI) continue;
 
 		const bool bInitialFlush = ch->CI->RepState == ClientRepState::LevelLoaded && !ch->CI->bInitialSpawnFlushed
-		                        && (serverFlow ? serverFlow->IsGameModeReady() : true);
+								   && (serverFlow ? serverFlow->IsGameModeReady() : true);
 		const bool bIncremental  = ch->CI->RepState >= ClientRepState::Loaded && ch->CI->bInitialSpawnFlushed;
 		if (!bInitialFlush && !bIncremental) continue;
 
@@ -511,10 +522,10 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 				if (!cap->bInitialFlush && cap->Channel->IsReplicated(i)) continue;
 				cap->Channel->MarkReplicated(i);
 
-				const bool bEntityActive   = (cap->flags[i] & static_cast<int32_t>(TemporalFlagBits::Active)) != 0;
-				const uint32_t flagBits = (!cap->bInitialFlush && bEntityActive)
-											  ? static_cast<uint32_t>(TemporalFlagBits::Active | TemporalFlagBits::Alive)
-											  : static_cast<uint32_t>(TemporalFlagBits::Alive);
+				const bool bEntityActive = (cap->flags[i] & static_cast<int32_t>(TemporalFlagBits::Active)) != 0;
+				const uint32_t flagBits  = (!cap->bInitialFlush && bEntityActive)
+											   ? static_cast<uint32_t>(TemporalFlagBits::Active | TemporalFlagBits::Alive)
+											   : static_cast<uint32_t>(TemporalFlagBits::Alive);
 
 				EntitySpawnPayload entry{};
 				entry.NetHandle  = cand.netHandle.Value;
@@ -549,7 +560,7 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 				cap->Channel->SendQueue.Push(std::move(pkt));
 
 				LOG_NET_DEBUG_F(nullptr, "[Replication] %zu %s EntitySpawn(s) queued",
-								batch.size(), cap->bInitialFlush ? "initial" : "incremental");
+					batch.size(), cap->bInitialFlush ? "initial" : "incremental");
 			}
 
 			{
@@ -572,7 +583,7 @@ void ReplicationSystem::DispatchSpawnJobs(uint32_t frameNumber)
 					cap->Channel->SendQueue.Push(std::move(pkt));
 
 					LOG_NET_DEBUG_F(nullptr, "[Replication] %zu EntityDestroy(s) queued",
-									destroyBatch.size());
+						destroyBatch.size());
 				}
 			}
 
@@ -610,7 +621,7 @@ void ReplicationSystem::DispatchActivateJobs(uint32_t frameNumber)
 		if (ch->PendingActivations.empty()) continue;
 
 		const uint32_t clientFrame = ch->CI->ToClientFrame(frameNumber);
-		PacketHeader hdr = ch->Channel.PrepareHeader(NetMessageType::EntityActivate, 0, clientFrame);
+		PacketHeader hdr           = ch->Channel.PrepareHeader(NetMessageType::EntityActivate, 0, clientFrame);
 
 		struct Capture
 		{
@@ -618,7 +629,7 @@ void ReplicationSystem::DispatchActivateJobs(uint32_t frameNumber)
 			PacketHeader Header;
 			std::vector<uint32_t> Handles;
 		};
-		auto* cap = new Capture{ch, hdr, std::move(ch->PendingActivations)};
+		auto* cap = new Capture{ ch, hdr, std::move(ch->PendingActivations) };
 
 		TrinyxJobs::Dispatch([cap](uint32_t)
 		{
@@ -663,7 +674,7 @@ void ReplicationSystem::DispatchConstructDestroyJobs(uint32_t frameNumber)
 			PacketHeader Header;
 			std::vector<uint32_t> Handles;
 		};
-		auto* cap = new Capture{ch, hdr, handles};
+		auto* cap = new Capture{ ch, hdr, handles };
 
 		TrinyxJobs::Dispatch([cap](uint32_t)
 		{
@@ -744,7 +755,7 @@ void ReplicationSystem::DispatchCorrectionJobs(uint32_t frameNumber)
 		const bool bOwnerResim = (oid > 0 && oid < MaxOwnerIDs && ResimCache[oid].delta > 0);
 
 		if (!bDirty && !bOwnerResim) continue;
-		DirtyCache.push_back({i, record->NetworkID.Value, oid});
+		DirtyCache.push_back({ i, record->NetworkID.Value, oid });
 	}
 
 	if (DirtyCache.empty()) return;
@@ -753,7 +764,11 @@ void ReplicationSystem::DispatchCorrectionJobs(uint32_t frameNumber)
 	// per-client resim is pending (immediate rollback trigger) or on a slow
 	// heartbeat. EntityDelta handles every-frame state sync for the normal path.
 	const bool bHeartbeat = (frameNumber - LastCorrectionHeartbeat >= CorrectionHeartbeatFrames);
-	if (bHeartbeat) { LastCorrectionHeartbeat = frameNumber; Stats.bHeartbeatFired = true; }
+	if (bHeartbeat)
+	{
+		LastCorrectionHeartbeat = frameNumber;
+		Stats.bHeartbeatFired   = true;
+	}
 
 	const DirtyEntityInfo* dirtyPtr = DirtyCache.data();
 	const uint32_t dirtyCount       = static_cast<uint32_t>(DirtyCache.size());
@@ -851,8 +866,10 @@ void ReplicationSystem::DispatchCorrectionJobs(uint32_t frameNumber)
 			pkt.Payload.resize(pkt.Header.PayloadSize);
 			std::memcpy(pkt.Payload.data(), batch.data(), pkt.Payload.size());
 			pkt.Reliable = false;
+
+			const uint16_t sentBytes = pkt.Header.PayloadSize;
 			cap->Channel->SendQueue.Push(std::move(pkt));
-			cap->Stats->StateCorrectionBytes.fetch_add(pkt.Header.PayloadSize, std::memory_order_relaxed);
+			cap->Stats->StateCorrectionBytes.fetch_add(sentBytes, std::memory_order_relaxed);
 			delete cap;
 		}, &BuildCounter, TrinyxJobs::Queue::General);
 	}
@@ -867,9 +884,9 @@ void ReplicationSystem::DispatchDeltaCorrectionJobs(uint32_t frameNumber)
 	if (!TrinyxJobs::IsRunning()) return;
 	if (DirtyCache.empty()) return;
 
-	Registry* reg = AuthorityWorld->GetRegistry();
+	Registry* reg                     = AuthorityWorld->GetRegistry();
 	ComponentCacheBase* temporalCache = reg->GetTemporalCache();
-	const uint32_t ringSize = temporalCache->GetTotalFrameCount();
+	const uint32_t ringSize           = temporalCache->GetTotalFrameCount();
 
 	TemporalFrameHeader* currentHdr =
 		temporalCache->GetFrameHeader(temporalCache->GetActiveReadFrame());
@@ -884,7 +901,7 @@ void ReplicationSystem::DispatchDeltaCorrectionJobs(uint32_t frameNumber)
 	ComponentDeltaRegistry::Get().ForEach([&](ComponentTypeID, const ComponentDeltaFns& fns)
 	{
 		if (fns.IsValid())
-			components.push_back({fns});
+			components.push_back({ fns });
 	});
 
 	if (components.empty()) return;
@@ -898,25 +915,25 @@ void ReplicationSystem::DispatchDeltaCorrectionJobs(uint32_t frameNumber)
 		if (!ch || !ch->CI) continue;
 		if (!ch->CI->bConnected || !ch->CI->bAuthoritySide) continue;
 
-		const uint32_t baselineSlot = ch->LastAckedSimFrame % ringSize;
+		const uint32_t baselineSlot      = ch->LastAckedSimFrame % ringSize;
 		TemporalFrameHeader* baselineHdr = temporalCache->GetFrameHeader(baselineSlot);
 		if (!baselineHdr) continue;
 
 		const uint32_t clientFrame = ch->CI->ToClientFrame(frameNumber);
-		PacketHeader hdr = ch->Channel.PrepareHeader(
+		PacketHeader hdr           = ch->Channel.PrepareHeader(
 			NetMessageType::EntityDelta, 0, clientFrame);
 
 		struct DeltaCapture
 		{
-			ServerClientChannel*     Channel;
-			PacketHeader             Header;
-			const DirtyEntityInfo*   Dirty;
-			uint32_t                 DirtyCount;
-			ComponentCacheBase*      Cache;
-			TemporalFrameHeader*     CurrentHdr;
-			TemporalFrameHeader*     BaselineHdr;
+			ServerClientChannel* Channel;
+			PacketHeader Header;
+			const DirtyEntityInfo* Dirty;
+			uint32_t DirtyCount;
+			ComponentCacheBase* Cache;
+			TemporalFrameHeader* CurrentHdr;
+			TemporalFrameHeader* BaselineHdr;
 			std::vector<ComponentInfo> Components;
-			NetFrameStats*           Stats;
+			NetFrameStats* Stats;
 		};
 
 		auto* cap = new DeltaCapture{
@@ -957,7 +974,7 @@ void ReplicationSystem::DispatchDeltaCorrectionJobs(uint32_t frameNumber)
 
 					for (size_t fi = 0; fi < MaxFields; ++fi)
 					{
-						void* cur  = cap->Cache->GetFieldData(cap->CurrentHdr,  comp.Fns.CacheSlot, fi);
+						void* cur  = cap->Cache->GetFieldData(cap->CurrentHdr, comp.Fns.CacheSlot, fi);
 						void* base = cap->Cache->GetFieldData(cap->BaselineHdr, comp.Fns.CacheSlot, fi);
 						if (!cur || !base) break;
 						curPtrs[fi]  = cur;
@@ -976,7 +993,8 @@ void ReplicationSystem::DispatchDeltaCorrectionJobs(uint32_t frameNumber)
 					if (!w.IsOk() || w.BytesWritten() == 0) continue;
 
 					// If only mask bytes written and all zero, nothing changed — skip.
-					const uint32_t maskBytes = (fieldCount <= 8) ? 1u : (fieldCount <= 16) ? 2u : 4u;
+					const uint32_t maskBytes = (fieldCount <= 8) ? 1u : (fieldCount <= 16) ? 2u
+																						   : 4u;
 					if (w.BytesWritten() <= maskBytes)
 					{
 						uint32_t maskVal = 0;
@@ -1001,7 +1019,7 @@ void ReplicationSystem::DispatchDeltaCorrectionJobs(uint32_t frameNumber)
 					continue;
 				}
 
-				std::memcpy(payload.data() + entityHeaderPos,     &de.netHandleValue, 4);
+				std::memcpy(payload.data() + entityHeaderPos, &de.netHandleValue, 4);
 				payload[entityHeaderPos + 4] = componentCount;
 				++entityCount;
 			}
@@ -1020,8 +1038,10 @@ void ReplicationSystem::DispatchDeltaCorrectionJobs(uint32_t frameNumber)
 			pkt.Header.PayloadSize = static_cast<uint16_t>(payloadSize > 65535 ? 65535 : payloadSize);
 			pkt.Payload            = std::move(payload);
 			pkt.Reliable           = false;
+
+			const uint16_t sentBytes = pkt.Header.PayloadSize;
 			cap->Channel->SendQueue.Push(std::move(pkt));
-			cap->Stats->EntityDeltaBytes.fetch_add(pkt.Header.PayloadSize, std::memory_order_relaxed);
+			cap->Stats->EntityDeltaBytes.fetch_add(sentBytes, std::memory_order_relaxed);
 			cap->Stats->EntityDeltaEntityCount.fetch_add(entityCount, std::memory_order_relaxed);
 
 			LOG_NET_DEBUG_F(nullptr, "[Replication] EntityDelta: %u entities queued", entityCount);
@@ -1046,9 +1066,123 @@ void ReplicationSystem::FlushSendQueues(NetConnectionManager* connMgr)
 			for (auto& pkt : packets)
 			{
 				connMgr->Send(ch->CI->Handle, pkt.Header,
-							  pkt.Payload.empty() ? nullptr : pkt.Payload.data(),
-							  pkt.Reliable);
+					pkt.Payload.empty() ? nullptr : pkt.Payload.data(),
+					pkt.Reliable);
 			}
 		}, &BuildCounter, TrinyxJobs::Queue::General);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Moved out of ReplicationSystem.h
+// ---------------------------------------------------------------------------
+
+ReplicationSystem::~ReplicationSystem()
+{
+	if (ConstructReg) ConstructReg->ClearNetDestroyHooks();
+}
+
+void ReplicationSystem::OnConstructDestroyed(void* ctx, ConstructNetHandle handle)
+{
+	auto* self = static_cast<ReplicationSystem*>(ctx);
+	self->PendingConstructDestroys.Push(handle.Value);
+}
+
+ConstructRef ReplicationSystem::RegisterConstructCore(ConstructRegistry* reg, void* ptr, const std::vector<EntityHandle>& viewHandles,
+	uint8_t ownerID, uint16_t typeHash, int64_t prefabIDRaw)
+{
+	ConstructNetManifest manifest{};
+	manifest.PrefabIndex = typeHash;
+	manifest.NetFlags    = 0;
+
+	const uint32_t spawnFrame = AuthorityWorld && AuthorityWorld->GetLogicThread()
+									? AuthorityWorld->GetLogicThread()->GetLastCompletedFrame()
+									: 0;
+
+	ConstructRef ref = reg->AllocateNetRef(ptr, ownerID, manifest, typeHash, prefabIDRaw, spawnFrame);
+
+	// Assign net handles for any view entity that doesn't have one yet.
+	Registry* entityReg = AuthorityWorld ? AuthorityWorld->GetRegistry() : nullptr;
+	std::vector<uint32_t> netHandleValues(viewHandles.size(), 0);
+	if (entityReg)
+	{
+		for (size_t i = 0; i < viewHandles.size(); ++i)
+		{
+			GlobalEntityHandle gH = entityReg->GlobalEntityRegistry.LookupGlobalHandle(viewHandles[i]);
+			if (gH.GetIndex() == 0) continue;
+			EntityRecord* entRec = entityReg->GlobalEntityRegistry.Records[gH.GetIndex()];
+			if (!entRec) continue;
+			if (entRec->NetworkID.NetIndex == 0) entRec->NetworkID = AssignNetHandle(entityReg, gH, ownerID);
+			netHandleValues[i] = entRec->NetworkID.Value;
+		}
+	}
+
+	const uint8_t viewCount  = static_cast<uint8_t>(viewHandles.size());
+	const size_t payloadSize = sizeof(ConstructSpawnPayload) + viewCount * sizeof(uint32_t);
+	std::vector<uint8_t> buf(payloadSize, 0);
+	auto* payload       = reinterpret_cast<ConstructSpawnPayload*>(buf.data());
+	payload->Handle     = ref.Handle.Value;
+	payload->Manifest   = manifest.Value;
+	payload->SpawnFrame = spawnFrame;
+	payload->ViewCount  = viewCount;
+	uint32_t* trailing  = reinterpret_cast<uint32_t*>(buf.data() + sizeof(ConstructSpawnPayload));
+	for (uint8_t i = 0; i < viewCount; ++i)
+		trailing[i] = netHandleValues[i];
+
+	PendingConstructSpawns.push_back(std::move(buf));
+
+	reg->SetNetDestroyHook(ptr, ref.Handle, &ReplicationSystem::OnConstructDestroyed, this);
+	ConstructReg = reg;
+
+	LOG_ENG_INFO_F("[Replication] RegisterConstruct: ownerID=%u typeHash=%u netIndex=%u views=%u",
+		ownerID, typeHash, ref.Handle.NetIndex, viewCount);
+	return ref;
+}
+
+/// Frees nodes that were pushed but never drained.
+ReplicationSystem::ConstructDestroyQueue::~ConstructDestroyQueue()
+{
+	Node* list = Head.exchange(nullptr, std::memory_order_acquire);
+	while (list)
+	{
+		Node* next = list->Next;
+		delete list;
+		list = next;
+	}
+}
+
+// NOLINTBEGIN(clang-analyzer-cplusplus.NewDeleteLeaks) — ownership passes to Head via the CAS.
+void ReplicationSystem::ConstructDestroyQueue::Push(uint32_t value)
+{
+	Node* node = new Node{ value, nullptr };
+	Node* prev = Head.load(std::memory_order_relaxed);
+	do
+	{
+		node->Next = prev;
+	} while (!Head.compare_exchange_weak(prev, node,
+		std::memory_order_release, std::memory_order_relaxed));
+}
+// NOLINTEND(clang-analyzer-cplusplus.NewDeleteLeaks)
+
+uint32_t ReplicationSystem::ConstructDestroyQueue::Drain(std::vector<uint32_t>& out)
+{
+	Node* list     = Head.exchange(nullptr, std::memory_order_acquire);
+	Node* reversed = nullptr;
+	while (list)
+	{
+		Node* next = list->Next;
+		list->Next = reversed;
+		reversed   = list;
+		list       = next;
+	}
+	uint32_t count = 0;
+	while (reversed)
+	{
+		out.push_back(reversed->Value);
+		Node* next = reversed->Next;
+		delete reversed;
+		reversed = next;
+		++count;
+	}
+	return count;
 }

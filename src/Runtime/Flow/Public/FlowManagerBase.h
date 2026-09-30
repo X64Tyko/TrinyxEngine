@@ -49,7 +49,7 @@ public:
 
 	/// @brief One-time initialization called by @c TrinyxEngine after construction.
 	void Initialize(TrinyxEngine* engine, const EngineConfig* config,
-					int windowWidth, int windowHeight);
+		int windowWidth, int windowHeight);
 
 	// ----- State / Mode registration (call in PostInitialize) -----
 
@@ -220,7 +220,7 @@ protected:
 	std::unique_ptr<WorldBase> ActiveWorld;
 	std::unique_ptr<GameMode> ActiveMode;
 	std::unique_ptr<GameMode> PendingMode;
-	TrinyxJobs::JobCounter    PendingPreloadCounter;
+	TrinyxJobs::JobCounter PendingPreloadCounter;
 	std::string ActiveLevelPath;
 	std::string PendingTravelPath;
 	PlayerBeginConfirmPayload PendingPlayerBeginConfirm{};
@@ -230,7 +230,7 @@ protected:
 	int WindowWidth            = 1920;
 	int WindowHeight           = 1080;
 
-	std::atomic<uint32_t> PendingNetEvents{0};
+	std::atomic<uint32_t> PendingNetEvents{ 0 };
 
 	// Bitmask of ownerIDs that called OnClientLoaded while a mode was preloading.
 	// CheckPendingMode() drains this after Initialize() completes.

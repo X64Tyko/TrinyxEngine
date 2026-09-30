@@ -11,13 +11,13 @@ template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct CCameraLayer : ComponentView<CCameraLayer, WIDTH>
 {
 	TNX_REGISTER_FIELDS(CCameraLayer,
-						BlendAlpha, TransitionSpeed,
-						FOV, ArmLength,
+		BlendAlpha, TransitionSpeed,
+		FOV, ArmLength,
 		OffsetX, OffsetY, OffsetZ,
 		SpringStiffness, SpringDamping,
 		OwnerHandle, TransitionCurveH)
 
-	FloatProxy<WIDTH> BlendAlpha{};      // target blend weight [0, 1]
+	FloatProxy<WIDTH> BlendAlpha{}; // target blend weight [0, 1]
 	FloatProxy<WIDTH> TransitionSpeed{};
 
 	FloatProxy<WIDTH> FOV{};       // degrees; 0 = slot default
@@ -33,12 +33,14 @@ struct CCameraLayer : ComponentView<CCameraLayer, WIDTH>
 	UIntProxy<WIDTH> OwnerHandle{};      // ConstructNetHandle::Value; 0 = unowned
 	UIntProxy<WIDTH> TransitionCurveH{}; // CurveHandle::Value; 0 = linear
 
-	CurveHandle GetTransitionCurve() const requires (WIDTH == FieldWidth::Scalar)
+	CurveHandle GetTransitionCurve() const
+		requires(WIDTH == FieldWidth::Scalar)
 	{
-		return CurveHandle{TransitionCurveH.Value()};
+		return CurveHandle{ TransitionCurveH.Value() };
 	}
 
-	void SetTransitionCurve(CurveHandle h) requires (WIDTH == FieldWidth::Scalar)
+	void SetTransitionCurve(CurveHandle h)
+		requires(WIDTH == FieldWidth::Scalar)
 	{
 		TransitionCurveH = h.Value;
 	}

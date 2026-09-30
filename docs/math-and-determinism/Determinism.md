@@ -41,10 +41,16 @@ Enabling `TNX_DETERMINISM`:
 - Enables deterministic deferred-destruction ordering
 - Disables defrag for live authoritative entities
 
-`TNX_ENABLE_ROLLBACK` implies `TNX_DETERMINISM` and additionally enables:
-- Temporal ring buffer storage (N-frame history)
-- `JPH_CROSS_PLATFORM_DETERMINISTIC` on Jolt
-- The `RollbackSim` system
+`TNX_ENABLE_ROLLBACK` and `TNX_DETERMINISM` are **independent**:
+
+| Flag | Enables |
+|---|---|
+| `TNX_ENABLE_ROLLBACK` | Temporal ring buffer storage (N-frame history), Jolt snapshots, the `RollbackSim` system |
+| `TNX_DETERMINISM` | Fixed32 `SimFloat`, `/fp:precise` / `-ffp-contract=off`, `JPH_CROSS_PLATFORM_DETERMINISTIC` on Jolt |
+
+Rollback without determinism re-simulates reproducibly **on the same machine and binary** — enough for server-side
+reconciliation and editor history. Bit-identical results **across machines** (lockstep peers, cross-platform replays)
+require `TNX_DETERMINISM`. Editor builds always enable rollback (the PIE server reconciles with it).
 
 ---
 

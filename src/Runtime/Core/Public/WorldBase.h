@@ -39,7 +39,7 @@ struct AudioCommand
 	TnxName Name;         ///< Registered sound asset name.
 	float Volume = 1.f;   ///< Playback volume multiplier.
 	float Pitch  = 1.f;   ///< Playback pitch multiplier.
-	bool  Loop   = false; ///< @c true to loop until explicitly stopped.
+	bool Loop    = false; ///< @c true to loop until explicitly stopped.
 };
 
 /**
@@ -93,26 +93,35 @@ public:
 
 	/// @brief Alias for SpawnAndWait.
 	template <TrinyxJobs::ValidJobLambda LAMBDA>
-	void PostAndWait(LAMBDA lambda) { SpawnAndWait(lambda); }
+	void PostAndWait(LAMBDA lambda)
+	{
+		SpawnAndWait(lambda);
+	}
 
 	/// @brief Submit a job with a counter for dependency tracking.
 	template <TrinyxJobs::ValidJobLambda LAMBDA>
-	void Spawn(LAMBDA lambda, TrinyxJobs::JobCounter* counter) { TrinyxJobs::Spawn(lambda, counter, WQHandle); }
+	void Spawn(LAMBDA lambda, TrinyxJobs::JobCounter* counter)
+	{
+		TrinyxJobs::Spawn(lambda, counter, WQHandle);
+	}
 
 	/// @brief Fire-and-forget job submission — no dependency tracking.
 	template <TrinyxJobs::ValidJobLambda LAMBDA>
-	void Post(LAMBDA lambda) { TrinyxJobs::Post(lambda, WQHandle); }
+	void Post(LAMBDA lambda)
+	{
+		TrinyxJobs::Post(lambda, WQHandle);
+	}
 
 	/// @brief Returns the world-scoped job queue handle.
 	TrinyxJobs::WorldQueueHandle GetWorldQueue() const { return WQHandle; }
 
 	// --- Accessors ---
 
-	Registry*        GetRegistry()    const { return RegistryPtr.get(); }
-	JoltPhysics*     GetPhysics()     const { return Physics.get(); }
+	Registry* GetRegistry() const { return RegistryPtr.get(); }
+	JoltPhysics* GetPhysics() const { return Physics.get(); }
 	LogicThreadBase* GetLogicThread() const { return Logic.get(); }
-	InputBuffer*     GetSimInput()    { return &SimInput; }
-	InputBuffer*     GetVizInput()    { return &VizInput; }
+	InputBuffer* GetSimInput() { return &SimInput; }
+	InputBuffer* GetVizInput() { return &VizInput; }
 
 	/**
 	 * @brief Engine-internal: returns the correct sim input buffer for @p ownerID.
@@ -157,8 +166,10 @@ public:
 	void EnsurePlayerInputSlot(uint8_t ownerID)
 	{
 		if (ownerID == 0) return;
-		while (PlayerSimInputs.size() < ownerID) PlayerSimInputs.push_back(std::make_unique<InputBuffer>());
-		while (PlayerVizInputs.size() < ownerID) PlayerVizInputs.push_back(std::make_unique<InputBuffer>());
+		while (PlayerSimInputs.size() < ownerID)
+			PlayerSimInputs.push_back(std::make_unique<InputBuffer>());
+		while (PlayerVizInputs.size() < ownerID)
+			PlayerVizInputs.push_back(std::make_unique<InputBuffer>());
 	}
 
 	/**
@@ -183,9 +194,9 @@ public:
 	/// @brief Returns both input targets (SimInput, VizInput) for batch routing.
 	std::span<InputBuffer* const> GetInputTargets() const { return InputTargets; }
 
-	const EngineConfig& GetConfig()    const { return Config; }
-	EngineConfig&       GetConfigMut()       { return Config; }
-	ConstructRegistry*  GetConstructRegistry() { return Constructs; }
+	const EngineConfig& GetConfig() const { return Config; }
+	EngineConfig& GetConfigMut() { return Config; }
+	ConstructRegistry* GetConstructRegistry() { return Constructs; }
 
 	ReplicationSystem* GetReplicationSystem() const { return Replicator; }
 	void SetReplicationSystem(ReplicationSystem* repl) { Replicator = repl; }
@@ -195,7 +206,7 @@ public:
 	 * @note Overridden by World<..., RollbackSim, ...> when rollback is enabled.
 	 */
 	virtual void EnqueueCorrections(std::vector<EntityTransformCorrection> /*corrections*/,
-									uint32_t /*earliestClientFrame*/)
+		uint32_t /*earliestClientFrame*/)
 	{
 	}
 
@@ -270,27 +281,27 @@ public:
 	 * @note Always 0 on the Authority (local IS server). Set by OwnerNet at handshake.
 	 */
 	uint32_t GetServerFrameOffset() const { return ServerFrameOffset; }
-	void     SetServerFrameOffset(uint32_t offset) { ServerFrameOffset = offset; }
+	void SetServerFrameOffset(uint32_t offset) { ServerFrameOffset = offset; }
 
-	void ResetRegistry()        const; ///< @brief Test-only: wipe all entities, handles, and caches.
+	void ResetRegistry() const;        ///< @brief Test-only: wipe all entities, handles, and caches.
 	void ConfirmLocalRecycles() const; ///< @brief Advance the local handle free-pool after the safety window.
 
 protected:
 	/// @brief Initialize all owned subsystems except LogicThread (created by the derived World<>).
 	bool InitBase(const EngineConfig& config, ConstructRegistry* constructRegistry,
-				  int windowWidth, int windowHeight);
+		int windowWidth, int windowHeight);
 
 	EngineConfig Config;
 
-	std::unique_ptr<Registry>        RegistryPtr;
-	std::unique_ptr<JoltPhysics>     Physics;
+	std::unique_ptr<Registry> RegistryPtr;
+	std::unique_ptr<JoltPhysics> Physics;
 	std::unique_ptr<LogicThreadBase> Logic; ///< Ownership; World<> std::moves the typed instance here.
 
 	InputBuffer SimInput;
 	InputBuffer VizInput;
 	std::vector<std::unique_ptr<InputBuffer>> PlayerSimInputs; ///< Per-slot sim buffers for remote players (ownerID - 1 indexed).
 	std::vector<std::unique_ptr<InputBuffer>> PlayerVizInputs; ///< Per-slot viz buffers for remote players (ownerID - 1 indexed).
-	InputBuffer* InputTargets[2]          = {&SimInput, &VizInput};
+	InputBuffer* InputTargets[2]          = { &SimInput, &VizInput };
 	TrinyxJobs::WorldQueueHandle WQHandle = TrinyxJobs::InvalidWorldQueue;
 
 	TrinyxMPSCRing<NetInputFrame> InputAccumRing;                              ///< Client outbound input ring.
@@ -301,13 +312,13 @@ protected:
 
 	ConstructRegistry* Constructs = nullptr; ///< Non-owning — FlowManager owns the registry.
 	ReplicationSystem* Replicator = nullptr; ///< Non-owning — TrinyxEngine or EditorContext owns it.
-	FlowManagerBase*   FlowMgr    = nullptr; ///< Non-owning — set by FlowManagerBase::CreateWorld.
+	FlowManagerBase* FlowMgr      = nullptr; ///< Non-owning — set by FlowManagerBase::CreateWorld.
 	uint32_t ServerFrameOffset    = 0;       ///< Local→Authority frame delta; set by OwnerNet at handshake.
-	std::atomic<bool> bJobsInitialized{false};
-	std::atomic<bool> bInputAccumEnabled{false}; ///< Gated to true at PlayerBeginConfirm (client-side only).
+	std::atomic<bool> bJobsInitialized{ false };
+	std::atomic<bool> bInputAccumEnabled{ false }; ///< Gated to true at PlayerBeginConfirm (client-side only).
 
 private:
-	uint8_t LocalOwnerID = 0; ///< 0 = Authority/Solo, 1–255 = client. Set once via SetLocalOwnerID.
+	uint8_t LocalOwnerID = 0;    ///< 0 = Authority/Solo, 1–255 = client. Set once via SetLocalOwnerID.
 	bool IsLogicRunning() const; ///< @brief Returns true while the Brain thread is active.
 };
 

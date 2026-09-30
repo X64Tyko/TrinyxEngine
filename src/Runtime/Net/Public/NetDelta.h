@@ -37,40 +37,56 @@
 // ---------------------------------------------------------------------------
 struct NetDeltaWriter
 {
-	uint8_t* Buf      = nullptr;
-	uint32_t Pos      = 0;
-	uint32_t Cap      = 0;
-	bool     Overflow = false;
+	uint8_t* Buf  = nullptr;
+	uint32_t Pos  = 0;
+	uint32_t Cap  = 0;
+	bool Overflow = false;
 
 	void WriteU8(uint8_t v)
 	{
-		if (Pos + 1 > Cap) { Overflow = true; return; }
+		if (Pos + 1 > Cap)
+		{
+			Overflow = true;
+			return;
+		}
 		Buf[Pos++] = v;
 	}
 
 	void WriteU16(uint16_t v)
 	{
-		if (Pos + 2 > Cap) { Overflow = true; return; }
+		if (Pos + 2 > Cap)
+		{
+			Overflow = true;
+			return;
+		}
 		std::memcpy(Buf + Pos, &v, 2);
 		Pos += 2;
 	}
 
 	void WriteU32(uint32_t v)
 	{
-		if (Pos + 4 > Cap) { Overflow = true; return; }
+		if (Pos + 4 > Cap)
+		{
+			Overflow = true;
+			return;
+		}
 		std::memcpy(Buf + Pos, &v, 4);
 		Pos += 4;
 	}
 
 	void WriteBytes(const void* src, uint32_t len)
 	{
-		if (Pos + len > Cap) { Overflow = true; return; }
+		if (Pos + len > Cap)
+		{
+			Overflow = true;
+			return;
+		}
 		std::memcpy(Buf + Pos, src, len);
 		Pos += len;
 	}
 
 	uint32_t BytesWritten() const { return Pos; }
-	bool     IsOk()         const { return !Overflow; }
+	bool IsOk() const { return !Overflow; }
 };
 
 // ---------------------------------------------------------------------------
@@ -80,20 +96,28 @@ struct NetDeltaWriter
 // ---------------------------------------------------------------------------
 struct NetDeltaReader
 {
-	const uint8_t* Buf  = nullptr;
-	uint32_t       Pos  = 0;
-	uint32_t       Size = 0;
-	bool           Error = false;
+	const uint8_t* Buf = nullptr;
+	uint32_t Pos       = 0;
+	uint32_t Size      = 0;
+	bool Error         = false;
 
 	uint8_t ReadU8()
 	{
-		if (Pos + 1 > Size) { Error = true; return 0; }
+		if (Pos + 1 > Size)
+		{
+			Error = true;
+			return 0;
+		}
 		return Buf[Pos++];
 	}
 
 	uint16_t ReadU16()
 	{
-		if (Pos + 2 > Size) { Error = true; return 0; }
+		if (Pos + 2 > Size)
+		{
+			Error = true;
+			return 0;
+		}
 		uint16_t v;
 		std::memcpy(&v, Buf + Pos, 2);
 		Pos += 2;
@@ -102,7 +126,11 @@ struct NetDeltaReader
 
 	uint32_t ReadU32()
 	{
-		if (Pos + 4 > Size) { Error = true; return 0; }
+		if (Pos + 4 > Size)
+		{
+			Error = true;
+			return 0;
+		}
 		uint32_t v;
 		std::memcpy(&v, Buf + Pos, 4);
 		Pos += 4;
@@ -111,7 +139,11 @@ struct NetDeltaReader
 
 	void ReadBytes(void* dst, uint32_t len)
 	{
-		if (Pos + len > Size) { Error = true; return; }
+		if (Pos + len > Size)
+		{
+			Error = true;
+			return;
+		}
 		std::memcpy(dst, Buf + Pos, len);
 		Pos += len;
 	}
@@ -135,7 +167,7 @@ struct ComponentDeltaCtx
 {
 	void* const* Current  = nullptr;
 	void* const* Baseline = nullptr;
-	uint32_t     Index    = 0;
+	uint32_t Index        = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -156,15 +188,13 @@ struct FieldProxyExtract<FieldProxy<FT, W> Class::*>
 // ---------------------------------------------------------------------------
 template <typename T>
 concept HasCustomDeltaSerialize =
-	requires(const ComponentDeltaCtx& ctx, NetDeltaWriter& w)
-	{
+	requires(const ComponentDeltaCtx& ctx, NetDeltaWriter& w) {
 		{ T::DeltaSerialize(ctx, w) } -> std::same_as<void>;
 	};
 
 template <typename T>
 concept HasCustomDeltaDeserialize =
-	requires(const ComponentDeltaCtx& ctx, NetDeltaReader& r)
-	{
+	requires(const ComponentDeltaCtx& ctx, NetDeltaReader& r) {
 		{ T::DeltaDeserialize(ctx, r) } -> std::same_as<bool>;
 	};
 
@@ -179,33 +209,33 @@ concept HasCustomDeltaDeserialize =
 // ---------------------------------------------------------------------------
 namespace DeltaDetail
 {
-	template <size_t I, typename TComp>
-	bool FieldChanged(const ComponentDeltaCtx& ctx)
-	{
-		using Fields = decltype(TComp::DefineFields());
-		using ValueT = typename FieldProxyExtract<std::tuple_element_t<I, Fields>>::ValueType;
-		const ValueT* cur  = static_cast<const ValueT*>(ctx.Current[I])  + ctx.Index;
-		const ValueT* base = static_cast<const ValueT*>(ctx.Baseline[I]) + ctx.Index;
-		return *cur != *base;
-	}
+template <size_t I, typename TComp>
+bool FieldChanged(const ComponentDeltaCtx& ctx)
+{
+	using Fields       = decltype(TComp::DefineFields());
+	using ValueT       = typename FieldProxyExtract<std::tuple_element_t<I, Fields>>::ValueType;
+	const ValueT* cur  = static_cast<const ValueT*>(ctx.Current[I]) + ctx.Index;
+	const ValueT* base = static_cast<const ValueT*>(ctx.Baseline[I]) + ctx.Index;
+	return *cur != *base;
+}
 
-	template <size_t I, typename TComp>
-	void WriteField(const ComponentDeltaCtx& ctx, NetDeltaWriter& writer)
-	{
-		using Fields = decltype(TComp::DefineFields());
-		using ValueT = typename FieldProxyExtract<std::tuple_element_t<I, Fields>>::ValueType;
-		const ValueT* cur = static_cast<const ValueT*>(ctx.Current[I]) + ctx.Index;
-		writer.WriteBytes(cur, sizeof(ValueT));
-	}
+template <size_t I, typename TComp>
+void WriteField(const ComponentDeltaCtx& ctx, NetDeltaWriter& writer)
+{
+	using Fields      = decltype(TComp::DefineFields());
+	using ValueT      = typename FieldProxyExtract<std::tuple_element_t<I, Fields>>::ValueType;
+	const ValueT* cur = static_cast<const ValueT*>(ctx.Current[I]) + ctx.Index;
+	writer.WriteBytes(cur, sizeof(ValueT));
+}
 
-	template <size_t I, typename TComp>
-	void ReadField(const ComponentDeltaCtx& ctx, NetDeltaReader& reader)
-	{
-		using Fields = decltype(TComp::DefineFields());
-		using ValueT = typename FieldProxyExtract<std::tuple_element_t<I, Fields>>::ValueType;
-		ValueT* dst = static_cast<ValueT*>(ctx.Current[I]) + ctx.Index;
-		reader.ReadBytes(dst, sizeof(ValueT));
-	}
+template <size_t I, typename TComp>
+void ReadField(const ComponentDeltaCtx& ctx, NetDeltaReader& reader)
+{
+	using Fields = decltype(TComp::DefineFields());
+	using ValueT = typename FieldProxyExtract<std::tuple_element_t<I, Fields>>::ValueType;
+	ValueT* dst  = static_cast<ValueT*>(ctx.Current[I]) + ctx.Index;
+	reader.ReadBytes(dst, sizeof(ValueT));
+}
 } // namespace DeltaDetail
 
 // ---------------------------------------------------------------------------
@@ -230,9 +260,12 @@ void DefaultDeltaSerialize(const ComponentDeltaCtx& ctx, NetDeltaWriter& writer)
 		((DeltaDetail::FieldChanged<Is, TComp>(ctx) ? (void)(mask |= (1u << Is)) : (void)0), ...);
 	}(std::make_index_sequence<N>{});
 
-	if constexpr (N <= 8)       writer.WriteU8(static_cast<uint8_t>(mask));
-	else if constexpr (N <= 16) writer.WriteU16(static_cast<uint16_t>(mask));
-	else                        writer.WriteU32(mask);
+	if constexpr (N <= 8)
+		writer.WriteU8(static_cast<uint8_t>(mask));
+	else if constexpr (N <= 16)
+		writer.WriteU16(static_cast<uint16_t>(mask));
+	else
+		writer.WriteU32(mask);
 
 	[&]<size_t... Is>(std::index_sequence<Is...>)
 	{
@@ -253,9 +286,12 @@ bool DefaultDeltaDeserialize(const ComponentDeltaCtx& ctx, NetDeltaReader& reade
 	constexpr size_t N = std::tuple_size_v<decltype(TComp::DefineFields())>;
 
 	uint32_t mask = 0;
-	if constexpr (N <= 8)       mask = reader.ReadU8();
-	else if constexpr (N <= 16) mask = reader.ReadU16();
-	else                        mask = reader.ReadU32();
+	if constexpr (N <= 8)
+		mask = reader.ReadU8();
+	else if constexpr (N <= 16)
+		mask = reader.ReadU16();
+	else
+		mask = reader.ReadU32();
 
 	[&]<size_t... Is>(std::index_sequence<Is...>)
 	{
@@ -306,7 +342,7 @@ struct ComponentDeltaFns
 {
 	void (*Serialize)(const ComponentDeltaCtx& ctx, NetDeltaWriter& writer)   = nullptr;
 	bool (*Deserialize)(const ComponentDeltaCtx& ctx, NetDeltaReader& reader) = nullptr;
-	CacheSlotID CacheSlot = 0; // StaticTemporalIndex() — used by DispatchDeltaCorrectionJobs
+	CacheSlotID CacheSlot                                                     = 0; // StaticTemporalIndex() — used by DispatchDeltaCorrectionJobs
 
 	bool IsValid() const { return Serialize != nullptr; }
 };
@@ -316,13 +352,13 @@ ComponentDeltaFns MakeComponentDeltaFns()
 {
 	return {
 		[](const ComponentDeltaCtx& ctx, NetDeltaWriter& writer)
-		{
-			InvokeDeltaSerialize<TComp>(ctx, writer);
-		},
+	{
+		InvokeDeltaSerialize<TComp>(ctx, writer);
+	},
 		[](const ComponentDeltaCtx& ctx, NetDeltaReader& reader) -> bool
-		{
-			return InvokeDeltaDeserialize<TComp>(ctx, reader);
-		}
+	{
+		return InvokeDeltaDeserialize<TComp>(ctx, reader);
+	}
 	};
 }
 
@@ -377,17 +413,18 @@ private:
 //   TNX_REGISTER_COMPONENT(CTransform)
 //   TNX_NET_TEMPORAL(CTransform)
 // ---------------------------------------------------------------------------
-#define TNX_NET_TEMPORAL(ComponentType) \
-	namespace { \
-		struct _##ComponentType##_DeltaRegistrar \
-		{ \
-			_##ComponentType##_DeltaRegistrar() \
-			{ \
-				ComponentDeltaFns fns    = MakeComponentDeltaFns<ComponentType<>>(); \
-				fns.CacheSlot            = ComponentType<>::StaticTemporalIndex(); \
-				ComponentDeltaRegistry::Get().Register( \
-					ComponentType<>::StaticTypeID(), fns); \
-			} \
-		}; \
-		[[maybe_unused]] static _##ComponentType##_DeltaRegistrar _##ComponentType##_delta_reg; \
+#define TNX_NET_TEMPORAL(ComponentType)                                                     \
+	namespace                                                                               \
+	{                                                                                       \
+	struct _##ComponentType##_DeltaRegistrar                                                \
+	{                                                                                       \
+		_##ComponentType##_DeltaRegistrar()                                                 \
+		{                                                                                   \
+			ComponentDeltaFns fns = MakeComponentDeltaFns<ComponentType<>>();               \
+			fns.CacheSlot         = ComponentType<>::StaticTemporalIndex();                 \
+			ComponentDeltaRegistry::Get().Register(                                         \
+				ComponentType<>::StaticTypeID(), fns);                                      \
+		}                                                                                   \
+	};                                                                                      \
+	[[maybe_unused]] static _##ComponentType##_DeltaRegistrar _##ComponentType##_delta_reg; \
 	}

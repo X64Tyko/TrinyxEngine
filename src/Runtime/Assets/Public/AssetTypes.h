@@ -22,16 +22,16 @@
 
 enum class AssetType : uint8_t
 {
-	Invalid      = 0x00,
-	DataAsset    = 0x01, // generic data (config, JSON, etc.)
-	Mesh         = 0x02,
-	Skeleton     = 0x03,
-	Material     = 0x04,
-	Texture      = 0x05,
-	Audio        = 0x06,
-	Animation    = 0x07,
-	Level        = 0x08, // scene files
-	Prefab       = 0x09,
+	Invalid   = 0x00,
+	DataAsset = 0x01, // generic data (config, JSON, etc.)
+	Mesh      = 0x02,
+	Skeleton  = 0x03,
+	Material  = 0x04,
+	Texture   = 0x05,
+	Audio     = 0x06,
+	Animation = 0x07,
+	Level     = 0x08, // scene files
+	Prefab    = 0x09,
 	// 0x0A-0xEF reserved for file-based asset types
 
 	// Code-registered types (not file assets — registered via macros)
@@ -78,7 +78,7 @@ enum class AssetFlags : uint8_t
 	Cooked     = 0x01, // processed for target platform
 	EditorOnly = 0x02, // stripped from shipping builds
 	Streaming  = 0x04, // always streamed, never blocking loaded
-	// 5 bits reserved
+					   // 5 bits reserved
 };
 
 // --- Mutable runtime state — lives exclusively in registry entry, never in the ID ---
@@ -124,10 +124,10 @@ struct AssetID
 
 	// --- Build a complete AssetID from parts ---
 	static AssetID Create(int64_t uuid, AssetType type,
-						  AssetLoadPriority priority = AssetLoadPriority::Default,
-						  AssetPlatform platform     = AssetPlatform::All,
-						  AssetCompression compress  = AssetCompression::Default,
-						  AssetFlags flags           = AssetFlags::None)
+		AssetLoadPriority priority = AssetLoadPriority::Default,
+		AssetPlatform platform     = AssetPlatform::All,
+		AssetCompression compress  = AssetCompression::Default,
+		AssetFlags flags           = AssetFlags::None)
 	{
 		AssetID id;
 		id.SetUUID(uuid);
@@ -170,7 +170,7 @@ inline AssetType AssetTypeFromExtension(const char* ext)
 	{
 		if (ext[3] == 's')
 		{
-			if (ext[4] == 'c') return AssetType::Level;        // .tnxscene
+			if (ext[4] == 'c') return AssetType::Level;    // .tnxscene
 			if (ext[4] == 'k') return AssetType::Skeleton; // .tnxskel, .tnxskin
 		}
 		if (ext[3] == 'p') return AssetType::Prefab; // .tnxprefab
@@ -182,16 +182,10 @@ inline AssetType AssetTypeFromExtension(const char* ext)
 	}
 
 	// Common asset formats
-	if ((ext[0] == 'p' && ext[1] == 'n' && ext[2] == 'g' && ext[3] == '\0') ||
-		(ext[0] == 'j' && ext[1] == 'p' && ext[2] == 'g' && ext[3] == '\0') ||
-		(ext[0] == 'b' && ext[1] == 'm' && ext[2] == 'p' && ext[3] == '\0') ||
-		(ext[0] == 't' && ext[1] == 'g' && ext[2] == 'a' && ext[3] == '\0'))
+	if ((ext[0] == 'p' && ext[1] == 'n' && ext[2] == 'g' && ext[3] == '\0') || (ext[0] == 'j' && ext[1] == 'p' && ext[2] == 'g' && ext[3] == '\0') || (ext[0] == 'b' && ext[1] == 'm' && ext[2] == 'p' && ext[3] == '\0') || (ext[0] == 't' && ext[1] == 'g' && ext[2] == 'a' && ext[3] == '\0'))
 		return AssetType::Texture;
 
-	if ((ext[0] == 'o' && ext[1] == 'b' && ext[2] == 'j' && ext[3] == '\0') ||
-		(ext[0] == 'g' && ext[1] == 'l' && ext[2] == 't' && ext[3] == 'f') ||
-		(ext[0] == 'g' && ext[1] == 'l' && ext[2] == 'b' && ext[3] == '\0') ||
-		(ext[0] == 'f' && ext[1] == 'b' && ext[2] == 'x' && ext[3] == '\0'))
+	if ((ext[0] == 'o' && ext[1] == 'b' && ext[2] == 'j' && ext[3] == '\0') || (ext[0] == 'g' && ext[1] == 'l' && ext[2] == 't' && ext[3] == 'f') || (ext[0] == 'g' && ext[1] == 'l' && ext[2] == 'b' && ext[3] == '\0') || (ext[0] == 'f' && ext[1] == 'b' && ext[2] == 'x' && ext[3] == '\0'))
 		return AssetType::Mesh;
 
 	// Engine binary mesh format
@@ -199,9 +193,7 @@ inline AssetType AssetTypeFromExtension(const char* ext)
 		&& ext[4] == 'e' && ext[5] == 's' && ext[6] == 'h' && ext[7] == '\0')
 		return AssetType::Mesh;
 
-	if ((ext[0] == 'w' && ext[1] == 'a' && ext[2] == 'v' && ext[3] == '\0') ||
-		(ext[0] == 'o' && ext[1] == 'g' && ext[2] == 'g' && ext[3] == '\0') ||
-		(ext[0] == 'm' && ext[1] == 'p' && ext[2] == '3' && ext[3] == '\0'))
+	if ((ext[0] == 'w' && ext[1] == 'a' && ext[2] == 'v' && ext[3] == '\0') || (ext[0] == 'o' && ext[1] == 'g' && ext[2] == 'g' && ext[3] == '\0') || (ext[0] == 'm' && ext[1] == 'p' && ext[2] == '3' && ext[3] == '\0'))
 		return AssetType::Audio;
 
 	if ((ext[0] == 'j' && ext[1] == 's' && ext[2] == 'o' && ext[3] == 'n')) return AssetType::DataAsset;
@@ -218,8 +210,10 @@ inline AssetType AssetTypeFromExtension(const char* ext)
 // Specialisations live in AssetRegistry.h alongside the forward declarations.
 // Usage: AssetTypeOf<SkeletonAsset>  →  AssetType::Skeleton
 // -----------------------------------------------------------------------
-template<typename T> struct AssetTypeTraits;
-template<typename T> inline constexpr AssetType AssetTypeOf = AssetTypeTraits<T>::Type;
+template <typename T>
+struct AssetTypeTraits;
+template <typename T>
+inline constexpr AssetType AssetTypeOf = AssetTypeTraits<T>::Type;
 
 inline const char* AssetTypeName(AssetType type)
 {

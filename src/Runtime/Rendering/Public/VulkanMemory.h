@@ -58,12 +58,12 @@ struct VulkanBuffer
 	VulkanBuffer& operator=(const VulkanBuffer&) = delete;
 
 	VulkanBuffer(VulkanBuffer&& o) noexcept
-		: Buffer(o.Buffer)
-		, Allocation(o.Allocation)
-		, DeviceAddr(o.DeviceAddr)
-		, MappedPtr(o.MappedPtr)
-		, Size(o.Size)
-		, Allocator(o.Allocator)
+		: Buffer(o.Buffer),
+		  Allocation(o.Allocation),
+		  DeviceAddr(o.DeviceAddr),
+		  MappedPtr(o.MappedPtr),
+		  Size(o.Size),
+		  Allocator(o.Allocator)
 	{
 		o.Buffer     = vk::Buffer{};
 		o.Allocation = VK_NULL_HANDLE;
@@ -138,13 +138,13 @@ struct VulkanImage
 	VulkanImage& operator=(const VulkanImage&) = delete;
 
 	VulkanImage(VulkanImage&& o) noexcept
-		: Image(o.Image)
-		, View(o.View)
-		, Allocation(o.Allocation)
-		, Format(o.Format)
-		, Extent(o.Extent)
-		, Allocator(o.Allocator)
-		, Device(o.Device)
+		: Image(o.Image),
+		  View(o.View),
+		  Allocation(o.Allocation),
+		  Format(o.Format),
+		  Extent(o.Extent),
+		  Allocator(o.Allocator),
+		  Device(o.Device)
 	{
 		o.Image      = vk::Image{};
 		o.View       = vk::ImageView{};
@@ -218,9 +218,9 @@ public:
 	/// Set requestDeviceAddress=true to populate VulkanBuffer::DeviceAddr
 	/// (requires BDA support, checked at runtime).
 	[[nodiscard]] VulkanBuffer AllocateBuffer(VkDeviceSize size,
-											  VkBufferUsageFlags usage,
-											  GpuMemoryDomain domain,
-											  bool requestDeviceAddress = false);
+		VkBufferUsageFlags usage,
+		GpuMemoryDomain domain,
+		bool requestDeviceAddress = false);
 
 	// ----------------------------------------------------------------
 	// Image allocation
@@ -229,19 +229,19 @@ public:
 	/// Allocate a DEVICE_LOCAL image + view.
 	/// aspectMask determines the view's subresource (COLOR or DEPTH_BIT).
 	[[nodiscard]] VulkanImage AllocateImage(VkExtent2D extent,
-											VkFormat format,
-											VkImageUsageFlags usage,
-											VkImageAspectFlags aspectMask);
+		VkFormat format,
+		VkImageUsageFlags usage,
+		VkImageAspectFlags aspectMask);
 
 	/// Directly write pixels into a device-local image — no staging buffer, no command buffer.
 	/// Requires bSupportsHostImageCopy (Vulkan 1.4 hostImageCopy feature).
 	/// Image must have been created with VK_IMAGE_USAGE_HOST_TRANSFER_BIT.
 	/// Falls back gracefully: returns false if host image copy is unavailable.
 	bool UploadImage(VulkanImage& image,
-					 const void* pixels,
-					 VkDeviceSize byteSize,
-					 uint32_t width,
-					 uint32_t height);
+		const void* pixels,
+		VkDeviceSize byteSize,
+		uint32_t width,
+		uint32_t height);
 
 	// ----------------------------------------------------------------
 	// Accessors

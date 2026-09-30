@@ -50,14 +50,14 @@ static_assert(sizeof(TnxMeshHeader) == 64, "TnxMeshHeader must be exactly 64 byt
 
 struct MeshAsset
 {
-	std::vector<Vertex>      Vertices;
-	std::vector<uint32_t>    Indices;
-	std::vector<SkinWeights> Skin;    // empty for static meshes
+	std::vector<Vertex> Vertices;
+	std::vector<uint32_t> Indices;
+	std::vector<SkinWeights> Skin; // empty for static meshes
 	float AABBMin[3] = {};
 	float AABBMax[3] = {};
 
 	bool IsSkinned() const { return !Skin.empty(); }
-	bool IsValid()   const { return !Vertices.empty() && !Indices.empty(); }
+	bool IsValid() const { return !Vertices.empty() && !Indices.empty(); }
 };
 
 // -----------------------------------------------------------------------

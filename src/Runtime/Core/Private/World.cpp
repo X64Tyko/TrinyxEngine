@@ -7,7 +7,10 @@
 
 WorldBase::WorldBase() = default;
 
-bool WorldBase::IsLogicRunning() const { return Logic && Logic->IsRunning(); }
+bool WorldBase::IsLogicRunning() const
+{
+	return Logic && Logic->IsRunning();
+}
 
 WorldBase::~WorldBase()
 {
@@ -19,7 +22,7 @@ WorldBase::~WorldBase()
 }
 
 bool WorldBase::InitBase(const EngineConfig& config, ConstructRegistry* constructRegistry,
-						 int windowWidth, int windowHeight)
+	int windowWidth, int windowHeight)
 {
 	(void)windowWidth;
 	(void)windowHeight;
@@ -120,9 +123,9 @@ bool World<TNet, TRollback, TFrame>::Initialize(
 	Logic           = std::move(typedLogic);
 
 	Logic->Initialize(RegistryPtr.get(), &Config, Physics.get(),
-					  &SimInput, &VizInput,
-					  WQHandle, &bJobsInitialized,
-					  windowWidth, windowHeight);
+		&SimInput, &VizInput,
+		WQHandle, &bJobsInitialized,
+		windowWidth, windowHeight);
 	Logic->SetConstructRegistry(Constructs);
 
 	// Initialize the audio command ring (any thread → Sentinel drain).

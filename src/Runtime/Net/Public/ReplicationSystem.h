@@ -37,10 +37,7 @@ class ReplicationSystem
 public:
 	ReplicationSystem() = default;
 
-	~ReplicationSystem()
-	{
-		if (ConstructReg) ConstructReg->ClearNetDestroyHooks();
-	}
+	~ReplicationSystem();
 
 	void Initialize(WorldBase* serverWorld);
 
@@ -62,62 +59,21 @@ public:
 	/// the next DispatchFrameJobs. Returns a valid ConstructRef — safe to pass to Soul::ClaimBody.
 	template <typename T>
 	ConstructRef RegisterConstruct(ConstructRegistry* reg, T* ptr, uint8_t ownerID,
-								   uint16_t typeHash, int64_t prefabIDRaw)
+		uint16_t typeHash, int64_t prefabIDRaw)
 	{
-		ConstructNetManifest manifest{};
-		manifest.PrefabIndex = typeHash;
-		manifest.NetFlags    = 0;
-
-		const uint32_t spawnFrame = AuthorityWorld && AuthorityWorld->GetLogicThread()
-										? AuthorityWorld->GetLogicThread()->GetLastCompletedFrame()
-										: 0;
-
-		ConstructRef ref = reg->AllocateNetRef(ptr, ownerID, manifest, typeHash, prefabIDRaw, spawnFrame);
-
 		std::vector<EntityHandle> viewHandles;
 		ptr->CollectViewHandles(viewHandles);
-
-		// Assign net handles for any view entity that doesn't have one yet.
-		Registry* entityReg = AuthorityWorld ? AuthorityWorld->GetRegistry() : nullptr;
-		std::vector<uint32_t> netHandleValues(viewHandles.size(), 0);
-		if (entityReg)
-		{
-			for (size_t i = 0; i < viewHandles.size(); ++i)
-			{
-				GlobalEntityHandle gH = entityReg->GlobalEntityRegistry.LookupGlobalHandle(viewHandles[i]);
-				if (gH.GetIndex() == 0) continue;
-				EntityRecord* entRec = entityReg->GlobalEntityRegistry.Records[gH.GetIndex()];
-				if (!entRec) continue;
-				if (entRec->NetworkID.NetIndex == 0) entRec->NetworkID = AssignNetHandle(entityReg, gH, ownerID);
-				netHandleValues[i] = entRec->NetworkID.Value;
-			}
-		}
-
-		const uint8_t viewCount  = static_cast<uint8_t>(viewHandles.size());
-		const size_t payloadSize = sizeof(ConstructSpawnPayload) + viewCount * sizeof(uint32_t);
-		std::vector<uint8_t> buf(payloadSize, 0);
-		auto* payload       = reinterpret_cast<ConstructSpawnPayload*>(buf.data());
-		payload->Handle     = ref.Handle.Value;
-		payload->Manifest   = manifest.Value;
-		payload->SpawnFrame = spawnFrame;
-		payload->ViewCount  = viewCount;
-		uint32_t* trailing  = reinterpret_cast<uint32_t*>(buf.data() + sizeof(ConstructSpawnPayload));
-		for (uint8_t i = 0; i < viewCount; ++i) trailing[i] = netHandleValues[i];
-
-		PendingConstructSpawns.push_back(std::move(buf));
-
-		reg->SetNetDestroyHook(ptr, ref.Handle, &ReplicationSystem::OnConstructDestroyed, this);
-		ConstructReg = reg;
-
-		LOG_ENG_INFO_F("[Replication] RegisterConstruct: ownerID=%u typeHash=%u netIndex=%u views=%u",
-					   ownerID, typeHash, ref.Handle.NetIndex, viewCount);
-		return ref;
+		return RegisterConstructCore(reg, ptr, viewHandles, ownerID, typeHash, prefabIDRaw);
 	}
+
+	/// Non-template core of RegisterConstruct: everything that doesn't depend on the Construct type.
+	ConstructRef RegisterConstructCore(ConstructRegistry* reg, void* ptr, const std::vector<EntityHandle>& viewHandles,
+		uint8_t ownerID, uint16_t typeHash, int64_t prefabIDRaw);
 
 	/// Defer a PlayerBeginConfirm until EntitySpawn/ConstructSpawn are in the SendQueue.
 	/// Returns false if no active channel for ownerID (caller falls back to direct send).
 	bool EnqueuePlayerConfirm(uint8_t ownerID, uint32_t serverFrame,
-	                          const RPCHeader& rpcHdr, const void* params, uint16_t paramSize);
+		const RPCHeader& rpcHdr, const void* params, uint16_t paramSize);
 
 	/// Record that the server resimulated ownerID's input from serverFrame.
 	/// Called from AuthoritySim::OnSimInput when an input mismatch fires.
@@ -150,16 +106,16 @@ public:
 	// ---------------------------------------------------------------------------
 	struct NetFrameStats
 	{
-		std::atomic<uint32_t> StateCorrectionBytes{0}; // heartbeat + resim corrections only
-		std::atomic<uint32_t> EntityDeltaBytes{0};
-		std::atomic<uint32_t> EntityDeltaEntityCount{0};
-		uint32_t              DirtyEntityCount   = 0; // Sentinel-only
-		uint32_t              ActiveChannelCount  = 0; // Sentinel-only
-		bool                  bHeartbeatFired    = false; // Sentinel-only
+		std::atomic<uint32_t> StateCorrectionBytes{ 0 }; // heartbeat + resim corrections only
+		std::atomic<uint32_t> EntityDeltaBytes{ 0 };
+		std::atomic<uint32_t> EntityDeltaEntityCount{ 0 };
+		uint32_t DirtyEntityCount   = 0;     // Sentinel-only
+		uint32_t ActiveChannelCount = 0;     // Sentinel-only
+		bool bHeartbeatFired        = false; // Sentinel-only
 		// Stamped by Sentinel via Commit() at the END of DispatchFrameJobs, after all
 		// jobs are dispatched. Panel skips sampling if this hasn't changed since last read,
 		// preventing duplicate ring-buffer entries when render ticks faster than Sentinel.
-		std::atomic<uint32_t> FrameNumber{0};
+		std::atomic<uint32_t> FrameNumber{ 0 };
 
 		void Reset()
 		{
@@ -203,11 +159,7 @@ private:
 	/// Allocates a NetIndex, wires NetToRecord, sets the record's NetworkID.
 	EntityNetHandle AssignNetHandle(Registry* reg, GlobalEntityHandle gHandle, uint8_t ownerID = 0);
 
-	static void OnConstructDestroyed(void* ctx, ConstructNetHandle handle)
-	{
-		auto* self = static_cast<ReplicationSystem*>(ctx);
-		self->PendingConstructDestroys.Push(handle.Value);
-	}
+	static void OnConstructDestroyed(void* ctx, ConstructNetHandle handle);
 
 	// Logic thread pushes; Sentinel drains in DispatchFrameJobs.
 	struct ConstructDestroyQueue
@@ -218,38 +170,16 @@ private:
 			Node* Next = nullptr;
 		};
 
-		void Push(uint32_t value)
-		{
-			Node* node = new Node{value, nullptr};
-			Node* prev = Head.load(std::memory_order_relaxed);
-			do { node->Next = prev; } while (!Head.compare_exchange_weak(prev, node,
-																		 std::memory_order_release, std::memory_order_relaxed));
-		}
+		ConstructDestroyQueue()                                        = default;
+		ConstructDestroyQueue(const ConstructDestroyQueue&)            = delete;
+		ConstructDestroyQueue& operator=(const ConstructDestroyQueue&) = delete;
+		~ConstructDestroyQueue();
 
-		uint32_t Drain(std::vector<uint32_t>& out)
-		{
-			Node* list     = Head.exchange(nullptr, std::memory_order_acquire);
-			Node* reversed = nullptr;
-			while (list)
-			{
-				Node* next = list->Next;
-				list->Next = reversed;
-				reversed   = list;
-				list       = next;
-			}
-			uint32_t count = 0;
-			while (reversed)
-			{
-				out.push_back(reversed->Value);
-				Node* next = reversed->Next;
-				delete reversed;
-				reversed = next;
-				++count;
-			}
-			return count;
-		}
+		void Push(uint32_t value);
 
-		std::atomic<Node*> Head{nullptr};
+		uint32_t Drain(std::vector<uint32_t>& out);
+
+		std::atomic<Node*> Head{ nullptr };
 	};
 
 	ConstructDestroyQueue PendingConstructDestroys;
@@ -288,7 +218,7 @@ private:
 		const SimFloat* rotQy = nullptr;
 		const SimFloat* rotQz = nullptr;
 		const SimFloat* rotQw = nullptr;
-		uint32_t delta     = 0;
+		uint32_t delta        = 0;
 	};
 
 	ResimSnapshot ResimCache[MaxOwnerIDs]{};

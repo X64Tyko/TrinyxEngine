@@ -19,7 +19,7 @@ bool CameraManager::AddLayerRaw(CameraSlot slot, CameraLayer* layer)
 void CameraManager::RemoveLayer(CameraSlot slot, uint32_t ownerHandle)
 {
 	Slot& s = Slots[static_cast<uint8_t>(slot)];
-	for (uint8_t i = 0; i < s.Count; )
+	for (uint8_t i = 0; i < s.Count;)
 	{
 		if (s.Layers[i]->OwnerHandle == ownerHandle)
 			s.Layers[i] = s.Layers[--s.Count]; // swap-erase
@@ -35,7 +35,7 @@ void CameraManager::RemoveLayer(CameraSlot slot, CameraLayer* layer)
 	{
 		if (s.Layers[i] == layer)
 		{
-			s.Layers[i] = s.Layers[--s.Count];
+			s.Layers[i]       = s.Layers[--s.Count];
 			s.Layers[s.Count] = nullptr;
 			return;
 		}
@@ -92,8 +92,8 @@ WorldCameraState CameraManager::Resolve() const
 			const CameraLayer* layer = slot.Layers[l];
 			if (!layer->Active || layer->TransitionAlpha <= 0.0f || !layer->StateFn) continue;
 			layer->StateFn(const_cast<CameraLayer*>(layer), state);
-			state.Valid  = true;
-			slotTouched  = true;
+			state.Valid = true;
+			slotTouched = true;
 		}
 
 		// Blend pass — BlendMix layers contribute a weighted average.
@@ -105,21 +105,20 @@ WorldCameraState CameraManager::Resolve() const
 			const CameraLayer* layer = slot.Layers[l];
 			if (!layer->Active || layer->TransitionAlpha <= 0.0f || !layer->BlendFn) continue;
 
-			const SimFloat w = layer->TransitionAlpha *
-				(layer->BlendWeightFn ? layer->BlendWeightFn(const_cast<CameraLayer*>(layer)) : 1.0f);
+			const SimFloat w = layer->TransitionAlpha * (layer->BlendWeightFn ? layer->BlendWeightFn(const_cast<CameraLayer*>(layer)) : 1.0f);
 			if (w <= 0.0f) continue;
 
 			WorldCameraState contrib = state;
 			layer->BlendFn(const_cast<CameraLayer*>(layer), w, contrib);
 
-			blended.Position     = blended.Position + contrib.Position * w;
-			blended.Rotation.x  += contrib.Rotation.x * w;
-			blended.Rotation.y  += contrib.Rotation.y * w;
-			blended.Rotation.z  += contrib.Rotation.z * w;
-			blended.Rotation.w  += contrib.Rotation.w * w;
-			blended.FOV         += contrib.FOV * w;
-			totalWeight     += w;
-			slotTouched      = true;
+			blended.Position = blended.Position + contrib.Position * w;
+			blended.Rotation.x += contrib.Rotation.x * w;
+			blended.Rotation.y += contrib.Rotation.y * w;
+			blended.Rotation.z += contrib.Rotation.z * w;
+			blended.Rotation.w += contrib.Rotation.w * w;
+			blended.FOV += contrib.FOV * w;
+			totalWeight += w;
+			slotTouched = true;
 		}
 
 		if (totalWeight > 0.0f)
@@ -127,12 +126,13 @@ WorldCameraState CameraManager::Resolve() const
 			const SimFloat inv = 1.0f / totalWeight;
 			state.Position     = blended.Position * inv;
 			// NLERP: normalize the accumulated weighted quaternion sum
-			state.Rotation     = Quat(blended.Rotation.x * inv,
-			                         blended.Rotation.y * inv,
-			                         blended.Rotation.z * inv,
-			                         blended.Rotation.w * inv).Normalized();
-			state.FOV          = blended.FOV * inv;
-			state.Valid        = true;
+			state.Rotation = Quat(blended.Rotation.x * inv,
+				blended.Rotation.y * inv,
+				blended.Rotation.z * inv,
+				blended.Rotation.w * inv)
+								 .Normalized();
+			state.FOV      = blended.FOV * inv;
+			state.Valid    = true;
 		}
 
 		(void)slotTouched;
@@ -146,7 +146,7 @@ void CameraManager::DispatchOrientationDelta(SimFloat dyaw, SimFloat dpitch)
 	// Highest-priority slot first (Cinematic → World), last-pushed layer first within slot.
 	for (int8_t s = static_cast<int8_t>(CameraSlotCount) - 1; s >= 0; --s)
 	{
-		const Slot& slot = Slots[s];
+		const Slot& slot  = Slots[s];
 		bool slotConsumed = false;
 
 		for (int8_t l = static_cast<int8_t>(slot.Count) - 1; l >= 0; --l)
@@ -157,7 +157,11 @@ void CameraManager::DispatchOrientationDelta(SimFloat dyaw, SimFloat dpitch)
 			layer->OrientationFn(layer, dyaw, dpitch);
 
 			if (layer->Consume == ConsumeScope::Stack) return;
-			if (layer->Consume == ConsumeScope::Slot)  { slotConsumed = true; break; }
+			if (layer->Consume == ConsumeScope::Slot)
+			{
+				slotConsumed = true;
+				break;
+			}
 			// ConsumeScope::None — continue
 		}
 

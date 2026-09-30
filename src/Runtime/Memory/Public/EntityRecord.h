@@ -26,9 +26,9 @@ protected:
 	struct
 	{
 		uint64_t HandleIndex : UniqueIndex_Bits; // index into LocalToRecord
-		uint64_t ClassType   : TypeKey_Bits;     // entity class — enables handle-driven creation/mutation
-		uint64_t Generation  : Generation_Bits;  // generation at creation — compare against EntityInfo for ABA detection
-		uint64_t reserved    : 8;
+		uint64_t ClassType : TypeKey_Bits;       // entity class — enables handle-driven creation/mutation
+		uint64_t Generation : Generation_Bits;   // generation at creation — compare against EntityInfo for ABA detection
+		uint64_t reserved : 8;
 	};
 
 public:
@@ -64,10 +64,10 @@ protected:
 
 	struct
 	{
-		uint64_t Index       : UniqueIndex_Bits; // The index into the Entity Archive
-		uint64_t Generation  : Generation_Bits;  // used to compare against the slot generation, mismatch means our handle is old
-		uint64_t PrefabIndex : 16;               // index into the AssetRegistry loaded prefabs, Since these are only mutable in the registry we can track reference counts and safely unload prefabs unless pinned by users.
-		uint64_t reserved    : 8;                // reserved for internal use later.
+		uint64_t Index : UniqueIndex_Bits;     // The index into the Entity Archive
+		uint64_t Generation : Generation_Bits; // used to compare against the slot generation, mismatch means our handle is old
+		uint64_t PrefabIndex : 16;             // index into the AssetRegistry loaded prefabs, Since these are only mutable in the registry we can track reference counts and safely unload prefabs unless pinned by users.
+		uint64_t reserved : 8;                 // reserved for internal use later.
 	};
 
 public:
@@ -77,9 +77,9 @@ public:
 	}
 
 	GlobalEntityHandle(uint32_t index, uint32_t generation, uint32_t prefabIndex)
-		: Index(index)
-		, Generation(generation)
-		, PrefabIndex(prefabIndex)
+		: Index(index),
+		  Generation(generation),
+		  PrefabIndex(prefabIndex)
 	{
 	}
 
@@ -105,8 +105,8 @@ static_assert(sizeof(GlobalEntityHandle) == 8, "GlobalEntityHandle must be 8 byt
 // Their location in cache, network, or Handle lists.
 struct EntityRecord
 {
-	//uint32_t ArchiveKey  = 0; // This entities key in the Entity Archive
-	// Set up by the systems responsible for ECS<->OOP and ECS<->Network allocation
+	// uint32_t ArchiveKey  = 0; // This entities key in the Entity Archive
+	//  Set up by the systems responsible for ECS<->OOP and ECS<->Network allocation
 	EntityNetHandle NetworkID{}; // deterministic network replicated entity ID
 	EntityHandle LHandle;        // Local handle — index into LocalToRecord (OOP land)
 
@@ -147,7 +147,8 @@ private:
 
 	// Private GetRecord - mutable access for Registry only
 	template <typename T>
-	EntityRecord* GetRecordPtr(T handle) requires (std::same_as<std::remove_cvref_t<T>, EntityHandle> || std::same_as<std::remove_cvref_t<T>, EntityNetHandle> || std::same_as<std::remove_cvref_t<T>, EntityCacheHandle>)
+	EntityRecord* GetRecordPtr(T handle)
+		requires(std::same_as<std::remove_cvref_t<T>, EntityHandle> || std::same_as<std::remove_cvref_t<T>, EntityNetHandle> || std::same_as<std::remove_cvref_t<T>, EntityCacheHandle>)
 	{
 		if (!IsHandleValid(handle)) return nullptr;
 
@@ -164,7 +165,8 @@ private:
 public:
 	// Public read-only API - returns record by value (can't modify internal state)
 	template <typename T>
-	EntityRecord GetRecord(T handle) const requires (std::same_as<std::remove_cvref_t<T>, EntityHandle> || std::same_as<std::remove_cvref_t<T>, EntityNetHandle> || std::same_as<std::remove_cvref_t<T>, EntityCacheHandle>)
+	EntityRecord GetRecord(T handle) const
+		requires(std::same_as<std::remove_cvref_t<T>, EntityHandle> || std::same_as<std::remove_cvref_t<T>, EntityNetHandle> || std::same_as<std::remove_cvref_t<T>, EntityCacheHandle>)
 	{
 		const GlobalEntityHandle& gHandle = LookupGlobalHandle(handle);
 		return Records[gHandle.GetIndex()];

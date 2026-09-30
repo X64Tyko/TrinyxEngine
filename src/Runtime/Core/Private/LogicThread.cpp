@@ -1,21 +1,26 @@
 #include "LogicThread.h"
 #include "QuatMath.h"
 
+#ifdef TNX_ENABLE_ROLLBACK
+// RollbackSim's TLogic member templates are only instantiated from LogicThread's explicit instantiations below,
+// so their bodies are private to this translation unit.
+#include "RollbackImpl.h"
+#endif
+
 // ---------------------------------------------------------------------------
 // Template aliases for readability in method signatures
 // ---------------------------------------------------------------------------
-#define TMPL template <typename TNet, typename TRollback, typename TFrame>
-#define LogicThread   LogicThread<TNet, TRollback, TFrame>
+#define TMPL        template <typename TNet, typename TRollback, typename TFrame>
+#define LogicThread LogicThread<TNet, TRollback, TFrame>
 
 // ---------------------------------------------------------------------------
 // Initialize
 // ---------------------------------------------------------------------------
-TMPL
-void LogicThread::Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
-							 InputBuffer* simInput, InputBuffer* vizInput,
-							 TrinyxJobs::WorldQueueHandle worldQueue,
-							 const std::atomic<bool>* jobsInitialized,
-							 int windowWidth, int windowHeight)
+TMPL void LogicThread::Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
+	InputBuffer* simInput, InputBuffer* vizInput,
+	TrinyxJobs::WorldQueueHandle worldQueue,
+	const std::atomic<bool>* jobsInitialized,
+	int windowWidth, int windowHeight)
 {
 	RegistryPtr        = registry;
 	ConfigPtr          = config;
@@ -40,8 +45,7 @@ void LogicThread::Initialize(Registry* registry, const EngineConfig* config, Jol
 // ---------------------------------------------------------------------------
 // Start / Stop / Join
 // ---------------------------------------------------------------------------
-TMPL
-void LogicThread::Start()
+TMPL void LogicThread::Start()
 {
 	bIsRunning.store(true, std::memory_order_release);
 	Thread = std::thread(&LogicThread::ThreadMain, this);
@@ -49,15 +53,13 @@ void LogicThread::Start()
 	LOG_ENG_INFO("[LogicThread] Started");
 }
 
-TMPL
-void LogicThread::Stop()
+TMPL void LogicThread::Stop()
 {
 	bIsRunning.store(false, std::memory_order_release);
 	LOG_ENG_INFO("[LogicThread] Stop requested");
 }
 
-TMPL
-void LogicThread::Join()
+TMPL void LogicThread::Join()
 {
 	if (Thread.joinable())
 	{
@@ -69,8 +71,7 @@ void LogicThread::Join()
 // ---------------------------------------------------------------------------
 // TickPause (editor path)
 // ---------------------------------------------------------------------------
-TMPL
-bool LogicThread::TickPause(const uint64_t perfFrequency, const uint64_t frameStartCounter, double dt)
+TMPL bool LogicThread::TickPause(const uint64_t perfFrequency, const uint64_t frameStartCounter, double dt)
 {
 	if (bSimPaused.load(std::memory_order_acquire)) [[unlikely]]
 	{
@@ -91,8 +92,7 @@ bool LogicThread::TickPause(const uint64_t perfFrequency, const uint64_t frameSt
 // ---------------------------------------------------------------------------
 // PhysicsLoop
 // ---------------------------------------------------------------------------
-TMPL
-void LogicThread::PhysicsLoop(const SimFloat fixedStepTime)
+TMPL void LogicThread::PhysicsLoop(const SimFloat fixedStepTime)
 {
 	PrePhysics(fixedStepTime);
 	ScalarPrePhysicsBatch.Execute(fixedStepTime);
@@ -100,14 +100,14 @@ void LogicThread::PhysicsLoop(const SimFloat fixedStepTime)
 	if (FrameNumber % PhysicsDivizor == 0)
 	{
 		PhysicsPtr->PullActiveTransforms(RegistryPtr);
-		
+
 		PhysicsPtr->FlushPendingBodies(RegistryPtr);
 		PhysicsPtr->PushKinematicTransforms(RegistryPtr, fixedStepTime.ToFloat());
 		ScalarPhysicsStepBatch.Execute(fixedStepTime * PhysicsDivizor);
-		
+
 		PhysicsPtr->ProcessContacts(RegistryPtr);
 		Rollback.SaveSnapshot(*this);
-		
+
 		TrinyxJobs::Dispatch([this, fixedStepTime](uint32_t)
 		{
 			PhysicsPtr->Step(fixedStepTime.ToFloat() * PhysicsDivizor);
@@ -123,9 +123,8 @@ void LogicThread::PhysicsLoop(const SimFloat fixedStepTime)
 // ---------------------------------------------------------------------------
 // FixedUpdate
 // ---------------------------------------------------------------------------
-TMPL
-bool LogicThread::FixedUpdate(const uint64_t perfFrequency, const SimFloat fixedStepTime,
-							  const int MaxPhysSubSteps, const uint64_t frameStartCounter)
+TMPL bool LogicThread::FixedUpdate(const uint64_t perfFrequency, const SimFloat fixedStepTime,
+	const int MaxPhysSubSteps, const uint64_t frameStartCounter)
 {
 	if (Accumulator.load(std::memory_order_relaxed) <= 0) [[unlikely]]
 	{
@@ -150,7 +149,7 @@ bool LogicThread::FixedUpdate(const uint64_t perfFrequency, const SimFloat fixed
 			PhysicsLoop(fixedStepTime);
 
 			Accumulator.store(Accumulator.load(std::memory_order_relaxed) + fixedStepTime.ToDouble(),
-							  std::memory_order_relaxed);
+				std::memory_order_relaxed);
 			++steps;
 			SimulationTime += fixedStepTime.ToDouble();
 
@@ -179,8 +178,7 @@ bool LogicThread::FixedUpdate(const uint64_t perfFrequency, const SimFloat fixed
 // ---------------------------------------------------------------------------
 // ThreadMain
 // ---------------------------------------------------------------------------
-TMPL
-void LogicThread::ThreadMain()
+TMPL void LogicThread::ThreadMain()
 {
 	const uint64_t perfFrequency = SDL_GetPerformanceFrequency();
 	uint64_t lastCounter         = SDL_GetPerformanceCounter();
@@ -242,8 +240,7 @@ void LogicThread::ThreadMain()
 // ---------------------------------------------------------------------------
 // ProcessSimInput
 // ---------------------------------------------------------------------------
-TMPL
-bool LogicThread::ProcessSimInput(SimFloat /*dt*/)
+TMPL bool LogicThread::ProcessSimInput(SimFloat /*dt*/)
 {
 	SimInput->Swap();
 	return NetMode.OnSimInput(FrameNumber, *this);
@@ -252,8 +249,7 @@ bool LogicThread::ProcessSimInput(SimFloat /*dt*/)
 // ---------------------------------------------------------------------------
 // ProcessVizInput
 // ---------------------------------------------------------------------------
-TMPL
-void LogicThread::ProcessVizInput(SimFloat dt)
+TMPL void LogicThread::ProcessVizInput(SimFloat dt)
 {
 	VizInput->Swap();
 
@@ -262,7 +258,7 @@ void LogicThread::ProcessVizInput(SimFloat dt)
 	// Free-fly fallback — skip when CameraManager has active layers.
 	if (LocalCameraManager && LocalCameraManager->HasActiveLayers()) return;
 
-	CamYaw   += VizInput->GetMouseDX() * CamMouseSens;
+	CamYaw += VizInput->GetMouseDX() * CamMouseSens;
 	CamPitch -= VizInput->GetMouseDY() * CamMouseSens;
 
 	constexpr SimFloat MaxPitch = SimFloat(1.5533f);
@@ -274,11 +270,11 @@ void LogicThread::ProcessVizInput(SimFloat dt)
 	SimFloat sinPitch = FastSin(CamPitch);
 	SimFloat cosPitch = FastCos(CamPitch);
 
-	Vector3 forward{sinYaw * cosPitch, sinPitch, -cosYaw * cosPitch};
-	Vector3 right{cosYaw, 0, sinYaw};
-	Vector3 up{0, 1, 0};
+	Vector3 forward{ sinYaw * cosPitch, sinPitch, -cosYaw * cosPitch };
+	Vector3 right{ cosYaw, 0, sinYaw };
+	Vector3 up{ 0, 1, 0 };
 
-	Vector3 moveDir{0, 0, 0};
+	Vector3 moveDir{ 0, 0, 0 };
 
 	if (VizInput->IsActionDown(Action::MoveForward)) moveDir = moveDir + forward;
 	if (VizInput->IsActionDown(Action::MoveBackward)) moveDir = moveDir - forward;
@@ -294,22 +290,19 @@ void LogicThread::ProcessVizInput(SimFloat dt)
 // ---------------------------------------------------------------------------
 // ScalarUpdate / PrePhysics / PostPhysics
 // ---------------------------------------------------------------------------
-TMPL
-void LogicThread::ScalarUpdate(SimFloat dt)
+TMPL void LogicThread::ScalarUpdate(SimFloat dt)
 {
 	TNX_ZONE_N("Logic_Update");
 	RegistryPtr->InvokeScalarUpdate(dt);
 }
 
-TMPL
-void LogicThread::PrePhysics(SimFloat dt)
+TMPL void LogicThread::PrePhysics(SimFloat dt)
 {
 	TNX_ZONE_N("Logic_FixedUpdate");
 	RegistryPtr->InvokePrePhys(dt);
 }
 
-TMPL
-void LogicThread::PostPhysics(SimFloat dt)
+TMPL void LogicThread::PostPhysics(SimFloat dt)
 {
 	TNX_ZONE_N("Logic_FixedUpdate");
 	RegistryPtr->InvokePostPhys(dt);
@@ -318,8 +311,7 @@ void LogicThread::PostPhysics(SimFloat dt)
 // ---------------------------------------------------------------------------
 // PublishCompletedFrame
 // ---------------------------------------------------------------------------
-TMPL
-void LogicThread::PublishCompletedFrame()
+TMPL void LogicThread::PublishCompletedFrame()
 {
 	TNX_ZONE_N("Logic_PublishFrame");
 
@@ -330,8 +322,8 @@ void LogicThread::PublishCompletedFrame()
 	header->TotalAllocatedEntities = static_cast<uint32_t>(RegistryPtr->GetTotalEntityCount());
 
 	SimFloat activeFOV = SimFloat(60.0f);
-	Vector3  activePos = CamPos;
-	Quat     activeRot = QuatFromYawPitch(CamYaw, CamPitch);
+	Vector3 activePos  = CamPos;
+	Quat activeRot     = QuatFromYawPitch(CamYaw, CamPitch);
 
 	if (LocalCameraManager)
 	{
@@ -363,14 +355,14 @@ void LogicThread::PublishCompletedFrame()
 	if (VizInput->GetSwapPerfCount() != 0)
 	{
 		double bufferMs = static_cast<double>(VizInput->GetCurrentSwapTime() - VizInput->GetSwapPerfCount())
-			/ static_cast<double>(SDL_GetPerformanceFrequency()) * 1000.0;
+						  / static_cast<double>(SDL_GetPerformanceFrequency()) * 1000.0;
 		LOG_ENG_DEBUG_F("[Latency] Buffer: %.2fms (input wait in swap buffer)", bufferMs);
 	}
 #endif
 #endif
 
-	header->SunDirection     = Vector3{0.0f, -1.0f, 0.0f};
-	header->SunColor         = Vector3{1.0f, 1.0f, 1.0f};
+	header->SunDirection     = Vector3{ 0.0f, -1.0f, 0.0f };
+	header->SunColor         = Vector3{ 1.0f, 1.0f, 1.0f };
 	header->AmbientIntensity = SimFloat(0.2f);
 
 	LastCompletedFrame.store(FrameNumber, std::memory_order_release);
@@ -380,8 +372,7 @@ void LogicThread::PublishCompletedFrame()
 // ---------------------------------------------------------------------------
 // WaitForTiming
 // ---------------------------------------------------------------------------
-TMPL
-void LogicThread::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)
+TMPL void LogicThread::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)
 {
 	TNX_ZONE_N("Logic_WaitTiming");
 
@@ -412,13 +403,11 @@ void LogicThread::WaitForTiming(uint64_t frameStart, uint64_t perfFrequency)
 // ---------------------------------------------------------------------------
 // TrackFPS
 // ---------------------------------------------------------------------------
-TMPL
-void LogicThread::TrackFPS()
+TMPL void LogicThread::TrackFPS()
 {
 	FpsFrameCount++;
-	const double now = SDL_GetPerformanceCounter() /
-		static_cast<double>(SDL_GetPerformanceFrequency());
-	FpsTimer     += now - LastFPSCheck;
+	const double now = SDL_GetPerformanceCounter() / static_cast<double>(SDL_GetPerformanceFrequency());
+	FpsTimer += now - LastFPSCheck;
 	LastFPSCheck = now;
 
 	if (FpsTimer >= 1.0) [[unlikely]]
@@ -447,8 +436,7 @@ void LogicThread::TrackFPS()
 // ---------------------------------------------------------------------------
 // TickOnce — synchronous one-frame tick for editor
 // ---------------------------------------------------------------------------
-TMPL
-void LogicThread::TickOnce()
+TMPL void LogicThread::TickOnce()
 {
 	// Ensure no background thread is running (we are single-threaded here)
 	if (bIsRunning.load(std::memory_order_acquire)) return; // already running; don't interfere
@@ -465,7 +453,7 @@ void LogicThread::TickOnce()
 
 	// Accumulate exactly one fixed step
 	double acc = Accumulator.load(std::memory_order_relaxed);
-	acc        -= fixedStep;
+	acc -= fixedStep;
 	if (acc < -0.25) acc = -0.25;
 	Accumulator.store(acc, std::memory_order_relaxed);
 
@@ -497,9 +485,9 @@ void LogicThread::TickOnce()
 #undef TMPL
 #undef LogicThread
 
-template class ::LogicThread<SoloSim,      NoRollback,  GameFrame>;
+template class ::LogicThread<SoloSim, NoRollback, GameFrame>;
 #ifdef TNX_ENABLE_NETWORK
-template class ::LogicThread<AuthoritySim, NoRollback,  GameFrame>;
+template class ::LogicThread<AuthoritySim, NoRollback, GameFrame>;
 template class ::LogicThread<OwnerSim, NoRollback, GameFrame>;
 #endif
 #ifdef TNX_ENABLE_ROLLBACK

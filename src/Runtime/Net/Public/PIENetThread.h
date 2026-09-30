@@ -70,8 +70,8 @@ private:
 
 	struct ClientEntry
 	{
-		HSteamNetConnection Handle = 0; // client-side GNS handle — used for routing before OwnerID is assigned
-		uint8_t OwnerID            = 0; // 0 = unassigned (handshake not yet complete)
+		HSteamNetConnection Handle = 0;       // client-side GNS handle — used for routing before OwnerID is assigned
+		uint8_t OwnerID            = 0;       // 0 = unassigned (handshake not yet complete)
 		WorldBase* OwnerWorld      = nullptr; // non-owning — EditorContext owns the World via FlowManager
 		std::unique_ptr<OwnerNet> Handler;
 	};

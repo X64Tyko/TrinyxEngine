@@ -10,7 +10,7 @@ JoltCharacter::~JoltCharacter()
 }
 
 void JoltCharacter::Initialize(JoltPhysics* physics, JPH::RVec3 position,
-							   float capsuleRadius, float capsuleHalfHeight)
+	float capsuleRadius, float capsuleHalfHeight)
 {
 	Physics = physics;
 
@@ -34,7 +34,11 @@ void JoltCharacter::Initialize(JoltPhysics* physics, JPH::RVec3 position,
 
 void JoltCharacter::Shutdown()
 {
-	if (!Character) { Physics = nullptr; return; }
+	if (!Character)
+	{
+		Physics = nullptr;
+		return;
+	}
 
 	if (Physics)
 	{
@@ -43,11 +47,11 @@ void JoltCharacter::Shutdown()
 	}
 
 	Character = nullptr; // triggers CharacterVirtual::~CharacterVirtual() while PhysSystem is still alive
-	Physics = nullptr;
+	Physics   = nullptr;
 }
 
 void JoltCharacter::Update(JPH::Vec3 desiredVelocity, JPH::Vec3 gravity, float dt,
-						   JPH::TempAllocator& allocator)
+	JPH::TempAllocator& allocator)
 {
 	if (!Character) return;
 
@@ -66,7 +70,7 @@ void JoltCharacter::Update(JPH::Vec3 desiredVelocity, JPH::Vec3 gravity, float d
 	else
 	{
 		// In air: keep current vertical velocity and accumulate gravity.
-		new_velocity  = current_vertical_velocity;
+		new_velocity = current_vertical_velocity;
 		new_velocity += gravity * dt;
 	}
 
@@ -90,10 +94,22 @@ void JoltCharacter::Update(JPH::Vec3 desiredVelocity, JPH::Vec3 gravity, float d
 		allocator);
 }
 
-JPH::RVec3 JoltCharacter::GetPosition() const { return Character->GetPosition(); }
-JPH::Quat JoltCharacter::GetRotation() const { return Character->GetRotation(); }
-JPH::Vec3 JoltCharacter::GetLinearVelocity() const { return Character->GetLinearVelocity(); }
-void JoltCharacter::SetPosition(JPH::RVec3 position) { if (Character) Character->SetPosition(position); }
+JPH::RVec3 JoltCharacter::GetPosition() const
+{
+	return Character->GetPosition();
+}
+JPH::Quat JoltCharacter::GetRotation() const
+{
+	return Character->GetRotation();
+}
+JPH::Vec3 JoltCharacter::GetLinearVelocity() const
+{
+	return Character->GetLinearVelocity();
+}
+void JoltCharacter::SetPosition(JPH::RVec3 position)
+{
+	if (Character) Character->SetPosition(position);
+}
 
 bool JoltCharacter::IsGrounded() const
 {
@@ -101,8 +117,8 @@ bool JoltCharacter::IsGrounded() const
 }
 
 void JoltCharacter::SyncToSlab(SimFloat* posX, SimFloat* posY, SimFloat* posZ,
-							   SimFloat* rotX, SimFloat* rotY, SimFloat* rotZ, SimFloat* rotW,
-							   uint32_t index)
+	SimFloat* rotX, SimFloat* rotY, SimFloat* rotZ, SimFloat* rotW,
+	uint32_t index)
 {
 	if (!Character) return;
 	JPH::RVec3 pos = GetPosition();

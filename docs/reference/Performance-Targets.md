@@ -121,12 +121,18 @@ Full frame resim includes PrePhysics + Physics Step + FlushPendingBodies + PullA
 
 ### Temporal Slab (100K entities)
 
-| Ring depth | Logic frames | Memory |
-|---|---|---|
-| 8 (minimum) | ~15.6ms @ 512Hz | ~270MB |
-| 128 (full rollback) | ~250ms @ 512Hz | ~34MB field data + ring overhead |
+Temporal slab size = `MAX_CACHED_ENTITIES × bytes per entity × TemporalFrameCount`. At 92 bytes/entity
+([ECS & Storage](../architecture/ECS-And-Storage.md#memory-sizing)):
 
-Rollback enabled: ~270MB without rollback history; ~34MB field data verified at rollback validation. Total memory usage under active rollback is significantly higher — see `EngineConfig::TemporalFrameCount`.
+| Ring depth | History @ 512Hz | Memory |
+|---|---|---|
+| 8 (minimum) | ~15.6ms | ~74MB |
+| 32 (engine default) | ~62.5ms | ~294MB |
+| 128 (editor / full rollback) | ~250ms | ~1.18GB |
+
+The 34MB figure in [Rollback Netcode](../networking/Rollback-Netcode.md) is the temporal field data compared byte-for-byte
+in the 2026-03-29 validation run, not the full ring allocation. Measured allocations scale with the configured
+`MAX_CACHED_ENTITIES` and component set — see `EngineConfig::TemporalFrameCount`.
 
 ---
 

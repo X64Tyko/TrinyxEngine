@@ -73,7 +73,11 @@ TNX_IMPL_SERVER(Soul, PlayerBegin, PlayerBeginRequestPayload)
 	}
 
 	LOG_NET_INFO_F(this, "[Soul] PlayerBegin handler: ownerID=%u repState=%d",
-				   OwnerID, static_cast<int>(ctx.CI->RepState));
+		OwnerID, static_cast<int>(ctx.CI->RepState));
+
+	// A retry that crossed our confirm in flight: the spawn already succeeded and the confirm is
+	// on its way. Rejecting now would tell the Owner to tear down a confirmed body.
+	if (ctx.CI->RepState == ClientRepState::Playing) return;
 
 	if (ctx.CI->RepState != ClientRepState::Loaded)
 	{
@@ -90,9 +94,9 @@ TNX_IMPL_SERVER(Soul, PlayerBegin, PlayerBeginRequestPayload)
 
 	if (result.has_value())
 	{
-		const WorldBase* w            = FlowMgr ? FlowMgr->GetWorld() : nullptr;
-		const LogicThreadBase* logic  = w ? w->GetLogicThread() : nullptr;
-		const uint32_t spawnFrame = logic ? logic->GetLastCompletedFrame() : 0;
+		const WorldBase* w           = FlowMgr ? FlowMgr->GetWorld() : nullptr;
+		const LogicThreadBase* logic = w ? w->GetLogicThread() : nullptr;
+		const uint32_t spawnFrame    = logic ? logic->GetLastCompletedFrame() : 0;
 
 		const uint32_t clientSpawnFrame = ctx.CI ? ctx.CI->ToClientFrame(spawnFrame) : spawnFrame;
 
@@ -118,12 +122,12 @@ TNX_IMPL_SERVER(Soul, PlayerBegin, PlayerBeginRequestPayload)
 		WorldBase* confirmWorld = FlowMgr ? FlowMgr->GetWorld() : nullptr;
 		ReplicationSystem* repl = confirmWorld ? confirmWorld->GetReplicationSystem() : nullptr;
 		RPCHeader rpcHdr{ RPCMethodID<PlayerBeginConfirmPayload>(),
-		                  static_cast<uint16_t>(sizeof(PlayerBeginConfirmPayload)) };
+			static_cast<uint16_t>(sizeof(PlayerBeginConfirmPayload)) };
 		if (!repl || !repl->EnqueuePlayerConfirm(OwnerID, spawnFrame, rpcHdr, &confirm, sizeof(confirm)))
 			PlayerBeginConfirm(confirm);
 
 		LOG_NET_INFO_F(this, "[Soul] PlayerBeginConfirm enqueued (ownerID=%u, pos=%.1f,%.1f,%.1f, serverFrame=%u clientFrame=%u)",
-					   OwnerID, confirm.PosX.ToFloat(), confirm.PosY.ToFloat(), confirm.PosZ.ToFloat(), spawnFrame, clientSpawnFrame);
+			OwnerID, confirm.PosX.ToFloat(), confirm.PosY.ToFloat(), confirm.PosZ.ToFloat(), spawnFrame, clientSpawnFrame);
 	}
 	else
 	{
@@ -161,7 +165,8 @@ TNX_IMPL_CLIENT(Soul, PlayerBeginConfirm, PlayerBeginConfirmPayload)
 	}
 
 	// Open the input accumulator gate — no frames should be pushed before Playing.
-	if (FlowMgr) if (WorldBase* w = FlowMgr->GetWorld()) w->EnableInputAccum();
+	if (FlowMgr)
+		if (WorldBase* w = FlowMgr->GetWorld()) w->EnableInputAccum();
 
 	if (FlowMgr)
 	{
@@ -172,7 +177,7 @@ TNX_IMPL_CLIENT(Soul, PlayerBeginConfirm, PlayerBeginConfirmPayload)
 	}
 
 	LOG_NET_INFO_F(this, "[Soul] PlayerBeginConfirm received (PredictionID=%u, pos=%.1f,%.1f,%.1f)",
-				   params.PredictionID, params.PosX.ToFloat(), params.PosY.ToFloat(), params.PosZ.ToFloat());
+		params.PredictionID, params.PosX.ToFloat(), params.PosY.ToFloat(), params.PosZ.ToFloat());
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +197,7 @@ TNX_IMPL_CLIENT(Soul, PlayerBeginReject, PlayerBeginRejectPayload)
 	if (FlowMgr) FlowMgr->PostNetEvent(static_cast<uint8_t>(FlowEventID::PlayerBeginReject));
 
 	LOG_NET_WARN_F(this, "[Soul] PlayerBeginReject received (PredictionID=%u, reason=%u)",
-				   params.PredictionID, params.Reason);
+		params.PredictionID, params.Reason);
 }
 
 #endif // TNX_ENABLE_NETWORK

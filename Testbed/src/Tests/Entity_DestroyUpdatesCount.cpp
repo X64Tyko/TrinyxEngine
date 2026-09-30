@@ -10,7 +10,7 @@
 RUNTIME_TEST(Entity_DestroyUpdatesCount)
 {
 	static EntityHandle created{};
-	static uint32_t countAfterCreate = 0;
+	static uint32_t countAfterCreate  = 0;
 	static uint32_t countAfterDestroy = 0;
 
 	Engine.Spawn([](uint32_t)

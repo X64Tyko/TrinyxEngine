@@ -23,8 +23,8 @@ class JoltJobSystemAdapter final : public JPH::JobSystemWithBarrier
 {
 public:
 	JoltJobSystemAdapter(JPH::uint inMaxJobs, JPH::uint inMaxBarriers, TrinyxJobs::JobCounter* jobCounter)
-		: JobSystemWithBarrier(inMaxBarriers)
-		, JobCounter(jobCounter)
+		: JobSystemWithBarrier(inMaxBarriers),
+		  JobCounter(jobCounter)
 	{
 		mJobs.Init(inMaxJobs, inMaxJobs);
 	}
@@ -38,8 +38,8 @@ public:
 	}
 
 	JobHandle CreateJob(const char* inName, JPH::ColorArg inColor,
-						const JobFunction& inJobFunction,
-						JPH::uint32 inNumDependencies = 0) override
+		const JobFunction& inJobFunction,
+		JPH::uint32 inNumDependencies = 0) override
 	{
 		// Allocate from free list. If full, Jolt asserts internally.
 		uint32_t idx = mJobs.ConstructObject(inName, inColor, this, inJobFunction, inNumDependencies);
@@ -54,7 +54,7 @@ public:
 protected:
 	void QueueJob(Job* inJob) override
 	{
-		//TNX_ZONE_NC("Jolt_QueueJob", 0xFF8800);
+		// TNX_ZONE_NC("Jolt_QueueJob", 0xFF8800);
 
 		// Take a reference so the job stays alive until our lambda completes.
 		inJob->AddRef();
@@ -63,17 +63,18 @@ protected:
 		// raw pointer (8 bytes), well within the 48-byte payload limit.
 		TrinyxJobs::Dispatch(
 			[inJob](uint32_t)
-			{
-				//TNX_ZONE_NC("Jolt_ExecJob", 0xFF8800);
-				inJob->Execute();
-				inJob->Release();
-			},
+		{
+			// TNX_ZONE_NC("Jolt_ExecJob", 0xFF8800);
+			inJob->Execute();
+			inJob->Release();
+		},
 			JobCounter, TrinyxJobs::Queue::Physics);
 	}
 
 	void QueueJobs(Job** inJobs, JPH::uint inNumJobs) override
 	{
-		for (JPH::uint i = 0; i < inNumJobs; ++i) QueueJob(inJobs[i]);
+		for (JPH::uint i = 0; i < inNumJobs; ++i)
+			QueueJob(inJobs[i]);
 	}
 
 	void FreeJob(Job* inJob) override

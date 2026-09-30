@@ -13,9 +13,9 @@ struct PacketHeader;
 /// @brief A fully built packet waiting for the Sentinel drain pass to send it.
 struct PendingPacket
 {
-	PacketHeader       Header;
+	PacketHeader Header;
 	std::vector<uint8_t> Payload;
-	bool               Reliable = false;
+	bool Reliable = false;
 };
 
 /// @brief Lock-free MPSC queue for @ref PendingPacket.
@@ -28,16 +28,38 @@ struct PendingPacketQueue
 	struct Node
 	{
 		PendingPacket Packet;
-		Node*         Next = nullptr;
+		Node* Next = nullptr;
 	};
 
+	PendingPacketQueue()                                     = default;
+	PendingPacketQueue(const PendingPacketQueue&)            = delete;
+	PendingPacketQueue& operator=(const PendingPacketQueue&) = delete;
+
+	/// Frees packets that were pushed but never drained (e.g. client dropped mid-frame).
+	~PendingPacketQueue()
+	{
+		Node* list = Head.exchange(nullptr, std::memory_order_acquire);
+		while (list)
+		{
+			Node* next = list->Next;
+			delete list;
+			list = next;
+		}
+	}
+
+	// Ownership of each node passes to Head via the CAS; the static analyzer can't follow the
+	// atomic and reports a leak. Nodes are freed by Drain() or the destructor.
+	// NOLINTBEGIN(clang-analyzer-cplusplus.NewDeleteLeaks)
 	void Push(PendingPacket&& pkt)
 	{
-		Node* node  = new Node{ std::move(pkt), nullptr };
-		Node* prev  = Head.load(std::memory_order_relaxed);
-		do { node->Next = prev; }
-		while (!Head.compare_exchange_weak(prev, node, std::memory_order_release, std::memory_order_relaxed));
+		Node* node = new Node{ std::move(pkt), nullptr };
+		Node* prev = Head.load(std::memory_order_relaxed);
+		do
+		{
+			node->Next = prev;
+		} while (!Head.compare_exchange_weak(prev, node, std::memory_order_release, std::memory_order_relaxed));
 	}
+	// NOLINTEND(clang-analyzer-cplusplus.NewDeleteLeaks)
 
 	/// @brief Drain all pending packets into @p out in dispatch order.
 	/// @param[out] out Receives packets in the order they were pushed.
@@ -49,10 +71,10 @@ struct PendingPacketQueue
 		Node* reversed = nullptr;
 		while (list)
 		{
-			Node* next  = list->Next;
-			list->Next  = reversed;
-			reversed    = list;
-			list        = next;
+			Node* next = list->Next;
+			list->Next = reversed;
+			reversed   = list;
+			list       = next;
 		}
 
 		while (reversed)
@@ -60,7 +82,7 @@ struct PendingPacketQueue
 			out.push_back(std::move(reversed->Packet));
 			Node* next = reversed->Next;
 			delete reversed;
-			reversed   = next;
+			reversed = next;
 		}
 	}
 
@@ -77,20 +99,20 @@ private:
 /// Lives inside the World's @ref ReplicationSystem — PIE worlds are isolated naturally.
 struct ServerClientChannel
 {
-	PlayerInputLog       InputLog;                                   ///< Inbound input frames from this Owner.
-	std::vector<bool>    Replicated;                                 ///< Per-slab-index spawn tracking; true = EntitySpawn sent.
-	std::vector<uint32_t> PendingActivations;                       ///< Net handle values queued for EntityActivate; drained once Playing.
-	NetChannel           Channel;                                    ///< Typed per-connection send wrapper.
-	PendingPacketQueue   SendQueue;                                  ///< Worker-push / Sentinel-drain MPSC queue.
-	std::optional<PendingPacket> PendingPlayerConfirm;              ///< Held until spawns are in SendQueue; pushed in Flush().
-	uint32_t PendingPlayerConfirmSpawnFrame = 0;                    ///< Minimum LastDispatchedFrame before confirm may be pushed.
-	ConnectionInfo*      CI                = nullptr;                ///< GNS connection state (non-owning).
-	uint8_t              OwnerID           = 0;                      ///< Stable session identity (1–255; 0 = server).
-	uint32_t             LastAckedSimFrame = 0;                      ///< Last simulation frame this client confirmed receiving.
+	PlayerInputLog InputLog;                           ///< Inbound input frames from this Owner.
+	std::vector<bool> Replicated;                      ///< Per-slab-index spawn tracking; true = EntitySpawn sent.
+	std::vector<uint32_t> PendingActivations;          ///< Net handle values queued for EntityActivate; drained once Playing.
+	NetChannel Channel;                                ///< Typed per-connection send wrapper.
+	PendingPacketQueue SendQueue;                      ///< Worker-push / Sentinel-drain MPSC queue.
+	std::optional<PendingPacket> PendingPlayerConfirm; ///< Held until spawns are in SendQueue; pushed in Flush().
+	uint32_t PendingPlayerConfirmSpawnFrame = 0;       ///< Minimum LastDispatchedFrame before confirm may be pushed.
+	ConnectionInfo* CI                      = nullptr; ///< GNS connection state (non-owning).
+	uint8_t OwnerID                         = 0;       ///< Stable session identity (1–255; 0 = server).
+	uint32_t LastAckedSimFrame              = 0;       ///< Last simulation frame this client confirmed receiving.
 
 	/// @brief Open the channel — allocates the input log and sets @c OwnerID.
 	void Open(uint8_t ownerID, uint32_t logDepth, ConnectionInfo* ci,
-	          NetConnectionManager* mgr, uint32_t entityCapacity = 0);
+		NetConnectionManager* mgr, uint32_t entityCapacity = 0);
 
 	/// @brief Close the channel and release all resources.
 	void Close();
@@ -117,4 +139,3 @@ struct ServerClientChannel
 		if (Replicated.size() < count) Replicated.resize(count, false);
 	}
 };
-

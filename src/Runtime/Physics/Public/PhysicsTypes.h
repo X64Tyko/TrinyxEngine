@@ -9,13 +9,13 @@
 struct PhysicsOnHitData
 {
 	EntityHandle HitEntity;
-	void*        HitConstruct = nullptr;
-	Vector3      HitNormal;
-	float        Penetration;
+	void* HitConstruct = nullptr;
+	Vector3 HitNormal;
+	float Penetration;
 };
 
 struct PhysicsOverlapData
 {
 	EntityHandle OverlappedEntity;
-	void*        OverlappedConstruct = nullptr;
+	void* OverlappedConstruct = nullptr;
 };

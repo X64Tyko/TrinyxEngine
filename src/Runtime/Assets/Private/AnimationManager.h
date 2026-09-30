@@ -31,8 +31,8 @@ static_assert(sizeof(GpuAnimBoneTrack) == 8, "GpuAnimBoneTrack must be 8 bytes")
 struct GpuAnimKeyframe
 {
 	float time;
-	float tx, ty, tz;      ///< Translation.
-	float rx, ry, rz, rw;  ///< Rotation quaternion (normalized).
+	float tx, ty, tz;     ///< Translation.
+	float rx, ry, rz, rw; ///< Rotation quaternion (normalized).
 };
 
 static_assert(sizeof(GpuAnimKeyframe) == 32, "GpuAnimKeyframe must be 32 bytes");
@@ -43,15 +43,15 @@ class AnimationManager
 {
 public:
 	static constexpr uint32_t MAX_ANIM_SLOTS        = 2048;
-	static constexpr uint32_t MAX_TOTAL_BONE_TRACKS = 131072; // avg 64 bones × 2048 anims
+	static constexpr uint32_t MAX_TOTAL_BONE_TRACKS = 131072;  // avg 64 bones × 2048 anims
 	static constexpr uint32_t MAX_TOTAL_KEYFRAMES   = 4194304; // ~4M keyframes
 
 	struct AnimSlot
 	{
-		uint32_t trackOffset;    // first GpuAnimBoneTrack in TrackBuffer for this anim
+		uint32_t trackOffset; // first GpuAnimBoneTrack in TrackBuffer for this anim
 		uint32_t boneCount;
 		uint32_t keyframeOffset; // first GpuAnimKeyframe in KeyframeBuffer for this anim
-		float    duration;
+		float duration;
 	};
 
 	static AnimationManager& Get()
@@ -79,11 +79,11 @@ public:
 		return (slot > 0 && slot < AnimCount) ? Slots[slot].duration : 0.f;
 	}
 
-	uint64_t        GetTrackBufferAddr()    const { return TrackBuffer.DeviceAddr; }
-	uint64_t        GetKeyframeBufferAddr() const { return KeyframeBuffer.DeviceAddr; }
-	uint64_t        GetAnimSlotAddr()       const { return AnimSlotBuffer.DeviceAddr; }
-	const AnimSlot& GetSlot(uint32_t slot)  const { return Slots[slot]; }
-	uint32_t        GetAnimCount()          const { return AnimCount; }
+	uint64_t GetTrackBufferAddr() const { return TrackBuffer.DeviceAddr; }
+	uint64_t GetKeyframeBufferAddr() const { return KeyframeBuffer.DeviceAddr; }
+	uint64_t GetAnimSlotAddr() const { return AnimSlotBuffer.DeviceAddr; }
+	const AnimSlot& GetSlot(uint32_t slot) const { return Slots[slot]; }
+	uint32_t GetAnimCount() const { return AnimCount; }
 
 	/// Submit all pending PersistentMapped writes to the GPU; called once per render frame.
 	void FlushPendingUploads();
@@ -112,15 +112,15 @@ private:
 	/// Does NOT call Register() — caller owns that.
 	uint32_t CommitToSlot(const AnimationAsset& asset, AssetID id);
 
-	VulkanBuffer TrackBuffer;     // GpuAnimBoneTrack[MAX_TOTAL_BONE_TRACKS], PersistentMapped + BDA
-	VulkanBuffer KeyframeBuffer;  // GpuAnimKeyframe[MAX_TOTAL_KEYFRAMES], PersistentMapped + BDA
-	VulkanBuffer AnimSlotBuffer;  // GpuAnimSlotInfo[MAX_ANIM_SLOTS], PersistentMapped + BDA
+	VulkanBuffer TrackBuffer;    // GpuAnimBoneTrack[MAX_TOTAL_BONE_TRACKS], PersistentMapped + BDA
+	VulkanBuffer KeyframeBuffer; // GpuAnimKeyframe[MAX_TOTAL_KEYFRAMES], PersistentMapped + BDA
+	VulkanBuffer AnimSlotBuffer; // GpuAnimSlotInfo[MAX_ANIM_SLOTS], PersistentMapped + BDA
 
-	AnimSlot               Slots[MAX_ANIM_SLOTS]{};
-	AssetID                SlotIDs[MAX_ANIM_SLOTS]{};
-	AnimationAsset         CpuCopies[MAX_ANIM_SLOTS];
+	AnimSlot Slots[MAX_ANIM_SLOTS]{};
+	AssetID SlotIDs[MAX_ANIM_SLOTS]{};
+	AnimationAsset CpuCopies[MAX_ANIM_SLOTS];
 	TrinyxJobs::JobCounter GpuUploadCounter;
-	uint32_t               NextTrack    = 0;
-	uint32_t               NextKeyframe = 0;
-	uint32_t               AnimCount    = 1; // slot 0 reserved as invalid sentinel
+	uint32_t NextTrack    = 0;
+	uint32_t NextKeyframe = 0;
+	uint32_t AnimCount    = 1; // slot 0 reserved as invalid sentinel
 };

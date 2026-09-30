@@ -43,6 +43,10 @@ struct LogEntry
 class Logger
 {
 public:
+	/// True when a debugger is attached to this process (checked on every call — a debugger
+	/// can attach at any time). Used by TNX_DEBUG_BREAK.
+	static bool IsDebuggerAttached();
+
 	static Logger& Get()
 	{
 		static Logger Instance;
@@ -58,7 +62,8 @@ public:
 	// Set minimum log level for all channels
 	void SetMinLevel(LogLevel level)
 	{
-		for (auto& ml : MinLevel) ml = level;
+		for (auto& ml : MinLevel)
+			ml = level;
 	}
 
 	// Set minimum log level for a specific channel
@@ -91,7 +96,7 @@ private:
 private:
 	std::ofstream LogFile;
 	std::mutex Mutex;
-	LogLevel MinLevel[static_cast<uint8_t>(LogChannel::Count)] = {LogLevel::Debug, LogLevel::Debug};
+	LogLevel MinLevel[static_cast<uint8_t>(LogChannel::Count)] = { LogLevel::Debug, LogLevel::Debug };
 	bool bInitialized                                          = false;
 
 	// Ring buffer for editor consumption (written under Mutex)
@@ -116,12 +121,17 @@ private:
 #define TNX_BREAKPOINT() __builtin_trap()
 #endif
 
-// TNX_DEBUG_BREAK() — breakpoint in debug builds, no-op in release.
+// TNX_DEBUG_BREAK() — breakpoint in debug builds when a debugger is attached; no-op otherwise
+// (and always a no-op in release). Unattended debug runs (tests, headless, playtests) keep going.
 // Safe to scatter through code as development aids.
 #ifdef NDEBUG
 #define TNX_DEBUG_BREAK() ((void)0)
 #else
-#define TNX_DEBUG_BREAK() TNX_BREAKPOINT()
+#define TNX_DEBUG_BREAK()                                   \
+	do                                                      \
+	{                                                       \
+		if (Logger::IsDebuggerAttached()) TNX_BREAKPOINT(); \
+	} while (0)
 #endif
 
 // TNX_FATAL_BREAK() — always fires. Breakpoint if debugger attached, crash if not.
@@ -131,103 +141,129 @@ private:
 // ---------- Engine channel macros (LOG_ENG_*) ----------
 // Used by all engine-internal subsystems. Filter via EngineLogLevel in *.ini.
 
-#define LOG_ENG_TRACE(msg)  Logger::Get().Log(LogLevel::Trace,   LogChannel::Engine, __FILE__, __LINE__, msg)
-#define LOG_ENG_DEBUG(msg)  Logger::Get().Log(LogLevel::Debug,   LogChannel::Engine, __FILE__, __LINE__, msg)
-#define LOG_ENG_INFO(msg)   Logger::Get().Log(LogLevel::Info,    LogChannel::Engine, __FILE__, __LINE__, msg)
+#define LOG_ENG_TRACE(msg)  Logger::Get().Log(LogLevel::Trace, LogChannel::Engine, __FILE__, __LINE__, msg)
+#define LOG_ENG_DEBUG(msg)  Logger::Get().Log(LogLevel::Debug, LogChannel::Engine, __FILE__, __LINE__, msg)
+#define LOG_ENG_INFO(msg)   Logger::Get().Log(LogLevel::Info, LogChannel::Engine, __FILE__, __LINE__, msg)
 #define LOG_ENG_WARN(msg)   Logger::Get().Log(LogLevel::Warning, LogChannel::Engine, __FILE__, __LINE__, msg)
-#define LOG_ENG_ERROR(msg)  Logger::Get().Log(LogLevel::Error,   LogChannel::Engine, __FILE__, __LINE__, msg)
-#define LOG_ENG_FATAL(msg)  Logger::Get().Log(LogLevel::Fatal,   LogChannel::Engine, __FILE__, __LINE__, msg)
-#define LOG_ENG_ALWAYS(msg) Logger::Get().Log(LogLevel::Always,  LogChannel::Engine, __FILE__, __LINE__, msg)
+#define LOG_ENG_ERROR(msg)  Logger::Get().Log(LogLevel::Error, LogChannel::Engine, __FILE__, __LINE__, msg)
+#define LOG_ENG_FATAL(msg)  Logger::Get().Log(LogLevel::Fatal, LogChannel::Engine, __FILE__, __LINE__, msg)
+#define LOG_ENG_ALWAYS(msg) Logger::Get().Log(LogLevel::Always, LogChannel::Engine, __FILE__, __LINE__, msg)
 
-#define LOG_ENG_TRACE_F(fmt, ...) do { \
-    char StrigLogBuff[512]; \
-    snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
-    LOG_ENG_TRACE(StrigLogBuff); \
-} while(0)
+#define LOG_ENG_TRACE_F(fmt, ...)                                       \
+	do                                                                  \
+	{                                                                   \
+		char StrigLogBuff[512];                                         \
+		snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
+		LOG_ENG_TRACE(StrigLogBuff);                                    \
+	} while (0)
 
-#define LOG_ENG_DEBUG_F(fmt, ...) do { \
-    char StrigLogBuff[512]; \
-    snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
-    LOG_ENG_DEBUG(StrigLogBuff); \
-} while(0)
+#define LOG_ENG_DEBUG_F(fmt, ...)                                       \
+	do                                                                  \
+	{                                                                   \
+		char StrigLogBuff[512];                                         \
+		snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
+		LOG_ENG_DEBUG(StrigLogBuff);                                    \
+	} while (0)
 
-#define LOG_ENG_INFO_F(fmt, ...) do { \
-    char StrigLogBuff[512]; \
-    snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
-    LOG_ENG_INFO(StrigLogBuff); \
-} while(0)
+#define LOG_ENG_INFO_F(fmt, ...)                                        \
+	do                                                                  \
+	{                                                                   \
+		char StrigLogBuff[512];                                         \
+		snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
+		LOG_ENG_INFO(StrigLogBuff);                                     \
+	} while (0)
 
-#define LOG_ENG_WARN_F(fmt, ...) do { \
-    char StrigLogBuff[512]; \
-    snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
-    LOG_ENG_WARN(StrigLogBuff); \
-} while(0)
+#define LOG_ENG_WARN_F(fmt, ...)                                        \
+	do                                                                  \
+	{                                                                   \
+		char StrigLogBuff[512];                                         \
+		snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
+		LOG_ENG_WARN(StrigLogBuff);                                     \
+	} while (0)
 
-#define LOG_ENG_ERROR_F(fmt, ...) do { \
-    char StrigLogBuff[512]; \
-    snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
-    LOG_ENG_ERROR(StrigLogBuff); \
-    TNX_DEBUG_BREAK(); \
-} while(0)
+#define LOG_ENG_ERROR_F(fmt, ...)                                       \
+	do                                                                  \
+	{                                                                   \
+		char StrigLogBuff[512];                                         \
+		snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
+		LOG_ENG_ERROR(StrigLogBuff);                                    \
+		TNX_DEBUG_BREAK();                                              \
+	} while (0)
 
-#define LOG_ENG_FATAL_F(fmt, ...) do { \
-    char StrigLogBuff[512]; \
-    snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
-    LOG_ENG_FATAL(StrigLogBuff); \
-    TNX_FATAL_BREAK(); \
-} while(0)
+#define LOG_ENG_FATAL_F(fmt, ...)                                       \
+	do                                                                  \
+	{                                                                   \
+		char StrigLogBuff[512];                                         \
+		snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
+		LOG_ENG_FATAL(StrigLogBuff);                                    \
+		TNX_FATAL_BREAK();                                              \
+	} while (0)
 
-#define LOG_ENG_ALWAYS_F(fmt, ...) do { \
-    char StrigLogBuff[512]; \
-    snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
-    LOG_ENG_ALWAYS(StrigLogBuff); \
-} while(0)
+#define LOG_ENG_ALWAYS_F(fmt, ...)                                      \
+	do                                                                  \
+	{                                                                   \
+		char StrigLogBuff[512];                                         \
+		snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
+		LOG_ENG_ALWAYS(StrigLogBuff);                                   \
+	} while (0)
 
 // ---------- Game channel macros (LOG_*) ----------
 // Used by game-layer code: GameMode, GameState, Constructs, custom systems.
 // Filter independently via GameLogLevel in *.ini.
 
-#define LOG_TRACE(msg) Logger::Get().Log(LogLevel::Trace,   LogChannel::Game, __FILE__, __LINE__, msg)
-#define LOG_DEBUG(msg) Logger::Get().Log(LogLevel::Debug,   LogChannel::Game, __FILE__, __LINE__, msg)
-#define LOG_INFO(msg)  Logger::Get().Log(LogLevel::Info,    LogChannel::Game, __FILE__, __LINE__, msg)
+#define LOG_TRACE(msg) Logger::Get().Log(LogLevel::Trace, LogChannel::Game, __FILE__, __LINE__, msg)
+#define LOG_DEBUG(msg) Logger::Get().Log(LogLevel::Debug, LogChannel::Game, __FILE__, __LINE__, msg)
+#define LOG_INFO(msg)  Logger::Get().Log(LogLevel::Info, LogChannel::Game, __FILE__, __LINE__, msg)
 #define LOG_WARN(msg)  Logger::Get().Log(LogLevel::Warning, LogChannel::Game, __FILE__, __LINE__, msg)
-#define LOG_ERROR(msg) Logger::Get().Log(LogLevel::Error,   LogChannel::Game, __FILE__, __LINE__, msg)
-#define LOG_FATAL(msg) Logger::Get().Log(LogLevel::Fatal,   LogChannel::Game, __FILE__, __LINE__, msg)
+#define LOG_ERROR(msg) Logger::Get().Log(LogLevel::Error, LogChannel::Game, __FILE__, __LINE__, msg)
+#define LOG_FATAL(msg) Logger::Get().Log(LogLevel::Fatal, LogChannel::Game, __FILE__, __LINE__, msg)
 
-#define LOG_TRACE_F(fmt, ...) do { \
-    char StrigLogBuff[512]; \
-    snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
-    LOG_TRACE(StrigLogBuff); \
-} while(0)
+#define LOG_TRACE_F(fmt, ...)                                           \
+	do                                                                  \
+	{                                                                   \
+		char StrigLogBuff[512];                                         \
+		snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
+		LOG_TRACE(StrigLogBuff);                                        \
+	} while (0)
 
-#define LOG_DEBUG_F(fmt, ...) do { \
-    char StrigLogBuff[512]; \
-    snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
-    LOG_DEBUG(StrigLogBuff); \
-} while(0)
+#define LOG_DEBUG_F(fmt, ...)                                           \
+	do                                                                  \
+	{                                                                   \
+		char StrigLogBuff[512];                                         \
+		snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
+		LOG_DEBUG(StrigLogBuff);                                        \
+	} while (0)
 
-#define LOG_INFO_F(fmt, ...) do { \
-    char StrigLogBuff[512]; \
-    snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
-    LOG_INFO(StrigLogBuff); \
-} while(0)
+#define LOG_INFO_F(fmt, ...)                                            \
+	do                                                                  \
+	{                                                                   \
+		char StrigLogBuff[512];                                         \
+		snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
+		LOG_INFO(StrigLogBuff);                                         \
+	} while (0)
 
-#define LOG_WARN_F(fmt, ...) do { \
-    char StrigLogBuff[512]; \
-    snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
-    LOG_WARN(StrigLogBuff); \
-} while(0)
+#define LOG_WARN_F(fmt, ...)                                            \
+	do                                                                  \
+	{                                                                   \
+		char StrigLogBuff[512];                                         \
+		snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
+		LOG_WARN(StrigLogBuff);                                         \
+	} while (0)
 
-#define LOG_ERROR_F(fmt, ...) do { \
-    char StrigLogBuff[512]; \
-    snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
-    LOG_ERROR(StrigLogBuff); \
-    TNX_DEBUG_BREAK(); \
-} while(0)
+#define LOG_ERROR_F(fmt, ...)                                           \
+	do                                                                  \
+	{                                                                   \
+		char StrigLogBuff[512];                                         \
+		snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
+		LOG_ERROR(StrigLogBuff);                                        \
+		TNX_DEBUG_BREAK();                                              \
+	} while (0)
 
-#define LOG_FATAL_F(fmt, ...) do { \
-    char StrigLogBuff[512]; \
-    snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
-    LOG_FATAL(StrigLogBuff); \
-    TNX_FATAL_BREAK(); \
-} while(0)
+#define LOG_FATAL_F(fmt, ...)                                           \
+	do                                                                  \
+	{                                                                   \
+		char StrigLogBuff[512];                                         \
+		snprintf(StrigLogBuff, sizeof(StrigLogBuff), fmt, __VA_ARGS__); \
+		LOG_FATAL(StrigLogBuff);                                        \
+		TNX_FATAL_BREAK();                                              \
+	} while (0)

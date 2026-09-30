@@ -88,16 +88,16 @@ public:
 
 		const uint32_t localF = GetWorld()->GetLogicThread()->GetLastCompletedFrame() + 1;
 		const int32_t srvF    = static_cast<int32_t>(localF)
-			+ static_cast<int32_t>(GetWorld()->GetServerFrameOffset());
-		const bool bMoving = simInput && simInput->IsActionDown(Action::MoveForward);
+								+ static_cast<int32_t>(GetWorld()->GetServerFrameOffset());
+		const bool bMoving    = simInput && simInput->IsActionDown(Action::MoveForward);
 
 		if (srvF >= 1020 && srvF <= 1060)
 		{
 			LOG_NET_INFO_F(soul,
-						   "[Cube] localF=%u srvF=%d moving=%d resim=%d pos=%.6f",
-						   localF, srvF, bMoving ? 1 : 0,
-						   GetWorld()->GetLogicThread()->IsResimulating() ? 1 : 0,
-						   Body.Transform.PosX.Value().ToFloat());
+				"[Cube] localF=%u srvF=%d moving=%d resim=%d pos=%.6f",
+				localF, srvF, bMoving ? 1 : 0,
+				GetWorld()->GetLogicThread()->IsResimulating() ? 1 : 0,
+				Body.Transform.PosX.Value().ToFloat());
 		}
 
 		if (!bMoving) return; // Echo souls have no input
@@ -155,29 +155,32 @@ public:
 
 		switch (Phase)
 		{
-			case TestPhase::Waiting: if (srvFrame >= MoveTriggerSrvFrame)
+			case TestPhase::Waiting:
+				if (srvFrame >= MoveTriggerSrvFrame)
 				{
 					Phase               = TestPhase::Moving;
 					MovingUntilSrvFrame = srvFrame + static_cast<int32_t>(MoveFrames);
 					InjectKey(SDL_SCANCODE_W, true);
 					LOG_NET_INFO_F(CubePtr->GetOwnerSoul(),
-								   "[DeterminismDriver] >> Moving for %u frames  (localF=%u  srvF=%d  until srvF=%d)",
-								   MoveFrames, localFrame, srvFrame, MovingUntilSrvFrame);
+						"[DeterminismDriver] >> Moving for %u frames  (localF=%u  srvF=%d  until srvF=%d)",
+						MoveFrames, localFrame, srvFrame, MovingUntilSrvFrame);
 				}
 				break;
 
-			case TestPhase::Moving: if (srvFrame >= MovingUntilSrvFrame)
+			case TestPhase::Moving:
+				if (srvFrame >= MovingUntilSrvFrame)
 				{
 					Phase                 = TestPhase::Cooling;
 					CooldownUntilSrvFrame = srvFrame + static_cast<int32_t>(CooldownFrames);
 					InjectKey(SDL_SCANCODE_W, false);
 					LOG_NET_INFO_F(CubePtr->GetOwnerSoul(),
-								   "[DeterminismDriver] >> Stopped — cooling down %u frames  (localF=%u  srvF=%d  until srvF=%d)",
-								   CooldownFrames, localFrame, srvFrame, CooldownUntilSrvFrame);
+						"[DeterminismDriver] >> Stopped — cooling down %u frames  (localF=%u  srvF=%d  until srvF=%d)",
+						CooldownFrames, localFrame, srvFrame, CooldownUntilSrvFrame);
 				}
 				break;
 
-			case TestPhase::Cooling: if (srvFrame >= CooldownUntilSrvFrame)
+			case TestPhase::Cooling:
+				if (srvFrame >= CooldownUntilSrvFrame)
 				{
 					Phase = TestPhase::Done;
 					DumpSlabState();
@@ -189,7 +192,13 @@ public:
 	}
 
 private:
-	enum class TestPhase { Waiting, Moving, Cooling, Done };
+	enum class TestPhase
+	{
+		Waiting,
+		Moving,
+		Cooling,
+		Done
+	};
 
 	static constexpr uint32_t WaitFrames     = 1024;
 	static constexpr uint32_t MoveFrames     = 4096;
@@ -214,7 +223,7 @@ private:
 	int32_t GetCurrentServerFrame() const
 	{
 		return static_cast<int32_t>(GetCurrentLocalFrame())
-			+ static_cast<int32_t>(GetWorld()->GetServerFrameOffset());
+			   + static_cast<int32_t>(GetWorld()->GetServerFrameOffset());
 	}
 
 	// ---------------------------------------------------------------------------
@@ -277,9 +286,9 @@ private:
 
 		LOG_NET_INFO(CubePtr->GetOwnerSoul(), "[DeterminismDriver] ==================== SLAB DUMP ====================");
 		LOG_INFO_F("[DeterminismDriver] localFrame=%u  serverFrame=%d  offset=%d  slot=%u  ringSize=%u",
-				   currentAbsFrame, currentSrvFrame, offset, currentSlot, totalFrames);
+			currentAbsFrame, currentSrvFrame, offset, currentSlot, totalFrames);
 		LOG_INFO_F("[DeterminismDriver] localIndex=%u  archetype=%u  moveFrames=%u  cooldown=%u",
-				   localIdx, arch->ArchClassID, MoveFrames, CooldownFrames);
+			localIdx, arch->ArchClassID, MoveFrames, CooldownFrames);
 		LOG_INFO("[DeterminismDriver] ---------------------------------------------------");
 
 		void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
@@ -300,18 +309,21 @@ private:
 				auto* fa = static_cast<SimFloat*>(base);
 				switch (fdesc.componentSlotIndex)
 				{
-					case 0: posX = fa[localIdx];
+					case 0:
+						posX = fa[localIdx];
 						break;
-					case 1: posY = fa[localIdx];
+					case 1:
+						posY = fa[localIdx];
 						break;
-					case 2: posZ = fa[localIdx];
+					case 2:
+						posZ = fa[localIdx];
 						break;
 					default: break;
 				}
 			}
 
 			LOG_INFO_F("[DeterminismDriver]  slot=%2u  localF=%5u  srvF=%5d  pos=(%8.4f, %8.4f, %8.4f)",
-					   slot, absFrame, static_cast<int32_t>(absFrame) + offset, posX.ToFloat(), posY.ToFloat(), posZ.ToFloat());
+				slot, absFrame, static_cast<int32_t>(absFrame) + offset, posX.ToFloat(), posY.ToFloat(), posZ.ToFloat());
 		}
 
 		LOG_INFO("[DeterminismDriver] ==================== END DUMP =====================");

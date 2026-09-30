@@ -66,7 +66,11 @@ TEST(Net_InputFrameRouting)
 	HSteamNetConnection serverSideConn = 0;
 	for (const auto& ci : mgr->GetConnections())
 	{
-		if (ci.Handle != clientConn) { serverSideConn = ci.Handle; break; }
+		if (ci.Handle != clientConn)
+		{
+			serverSideConn = ci.Handle;
+			break;
+		}
 	}
 	ASSERT(serverSideConn != 0);
 	mgr->AssignOwnerID(serverSideConn, 1);
@@ -88,12 +92,12 @@ TEST(Net_InputFrameRouting)
 	constexpr uint8_t kWScancode = 26;
 
 	InputWindowPacket payload{};
-	payload.FirstFrame                                = kSimFrame;
-	payload.FrameCount                                = 1;
-	payload.Frames[0].Frame                           = kSimFrame;
+	payload.FirstFrame      = kSimFrame;
+	payload.FrameCount      = 1;
+	payload.Frames[0].Frame = kSimFrame;
 	payload.Frames[0].State.KeyState[kWScancode >> 3] |= (1u << (kWScancode & 7));
-	payload.Frames[0].State.MouseDX                   = 1.5f;
-	payload.Frames[0].State.MouseDY                   = -0.5f;
+	payload.Frames[0].State.MouseDX = 1.5f;
+	payload.Frames[0].State.MouseDY = -0.5f;
 
 	PacketHeader header{};
 	header.Type        = static_cast<uint8_t>(NetMessageType::InputFrame);

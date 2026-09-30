@@ -36,10 +36,10 @@ void main() {
     // Apply instance scale and position
     vec3 rotatedPos = rotationMatrix(instanceRotation) * (inPosition * instanceScale);
     vec3 worldPos = rotatedPos + instancePosition;
-    
+
     // Transform to clip space
     gl_Position = camera.viewProj * vec4(worldPos, 1.0);
-    
+
     // Pass color to fragment shader
     fragColor = instanceColor;
 }

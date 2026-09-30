@@ -25,75 +25,76 @@ static void WriteFieldValue(void* dst, size_t fieldSize, FieldValueType valueTyp
 	switch (valueType)
 	{
 		case FieldValueType::Fixed32:
-			{
-				SimFloat f = SimFloat(val.AsFloat());
-				std::memcpy(dst, &f, 4);
-				break;
-			}
+		{
+			SimFloat f = SimFloat(val.AsFloat());
+			std::memcpy(dst, &f, 4);
+			break;
+		}
 		case FieldValueType::Float32:
-			{
-				SimFloat f = SimFloat(val.AsFloat());
-				std::memcpy(dst, &f, 4);
-				break;
-			}
+		{
+			SimFloat f = SimFloat(val.AsFloat());
+			std::memcpy(dst, &f, 4);
+			break;
+		}
 		case FieldValueType::Float64:
-			{
-				double d = val.AsNumber();
-				std::memcpy(dst, &d, 8);
-				break;
-			}
+		{
+			double d = val.AsNumber();
+			std::memcpy(dst, &d, 8);
+			break;
+		}
 		case FieldValueType::Int32:
-			{
-				auto v = static_cast<int32_t>(val.AsInt());
-				std::memcpy(dst, &v, 4);
-				break;
-			}
+		{
+			auto v = static_cast<int32_t>(val.AsInt());
+			std::memcpy(dst, &v, 4);
+			break;
+		}
 		case FieldValueType::Uint32:
-			{
-				auto v = static_cast<uint32_t>(val.AsInt());
-				std::memcpy(dst, &v, 4);
-				break;
-			}
+		{
+			auto v = static_cast<uint32_t>(val.AsInt());
+			std::memcpy(dst, &v, 4);
+			break;
+		}
 		case FieldValueType::Int64:
-			{
-				auto v = static_cast<int64_t>(val.AsNumber());
-				std::memcpy(dst, &v, 8);
-				break;
-			}
+		{
+			auto v = static_cast<int64_t>(val.AsNumber());
+			std::memcpy(dst, &v, 8);
+			break;
+		}
 		case FieldValueType::Uint64:
-			{
-				auto v = static_cast<uint64_t>(val.AsNumber());
-				std::memcpy(dst, &v, 8);
-				break;
-			}
+		{
+			auto v = static_cast<uint64_t>(val.AsNumber());
+			std::memcpy(dst, &v, 8);
+			break;
+		}
 		default:
 			switch (fieldSize)
 			{
 				case 4:
-					{
-						SimFloat f = SimFloat(val.AsFloat());
-						std::memcpy(dst, &f, 4);
-						break;
-					}
+				{
+					SimFloat f = SimFloat(val.AsFloat());
+					std::memcpy(dst, &f, 4);
+					break;
+				}
 				case 8:
-					{
-						double d = val.AsNumber();
-						std::memcpy(dst, &d, 8);
-						break;
-					}
+				{
+					double d = val.AsNumber();
+					std::memcpy(dst, &d, 8);
+					break;
+				}
 				case 2:
-					{
-						auto v = static_cast<uint16_t>(val.AsInt());
-						std::memcpy(dst, &v, 2);
-						break;
-					}
+				{
+					auto v = static_cast<uint16_t>(val.AsInt());
+					std::memcpy(dst, &v, 2);
+					break;
+				}
 				case 1:
-					{
-						auto v = static_cast<uint8_t>(val.AsInt());
-						std::memcpy(dst, &v, 1);
-						break;
-					}
-				default: LOG_ENG_WARN_F("[EntityBuilder] Unsupported field size %zu, skipping", fieldSize);
+				{
+					auto v = static_cast<uint8_t>(val.AsInt());
+					std::memcpy(dst, &v, 1);
+					break;
+				}
+				default:
+					LOG_ENG_WARN_F("[EntityBuilder] Unsupported field size %zu, skipping", fieldSize);
 					break;
 			}
 			break;
@@ -117,11 +118,11 @@ static std::vector<std::pair<const char*, FieldLookup>> BuildFieldMap(const Arch
 	{
 		const auto* fields = cfr.GetFields(fdesc.componentID);
 		const char* name   = (fields && fdesc.componentSlotIndex < fields->size())
-							   ? (*fields)[fdesc.componentSlotIndex].Name
-							   : nullptr;
+								 ? (*fields)[fdesc.componentSlotIndex].Name
+								 : nullptr;
 		if (name)
 		{
-			map.push_back({name, {fdesc.fieldSlotIndex, fdesc.fieldSize, fdesc.valueType, fdesc.refAssetType}});
+			map.push_back({ name, { fdesc.fieldSlotIndex, fdesc.fieldSize, fdesc.valueType, fdesc.refAssetType } });
 		}
 	}
 	return map;
@@ -205,7 +206,7 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 					if (!field)
 					{
 						LOG_ENG_WARN_F("[EntityBuilder] Unknown field '%s.%s' on entity type '%s'",
-									   compName.c_str(), fieldName.c_str(), typeName.c_str());
+							compName.c_str(), fieldName.c_str(), typeName.c_str());
 						continue;
 					}
 
@@ -214,8 +215,16 @@ EntityHandle EntityBuilder::SpawnEntity(Registry* reg, const JsonValue& entityJs
 					if (field->RefAssetType != AssetType::Invalid && fieldVal.IsString())
 					{
 						auto* fieldPtr = static_cast<uint32_t*>(fieldArrayTable[field->ArrayIndex]) + localIndex;
-						AssetLoad  onLoaded;  onLoaded.BindStatic([](void* c, uint32_t s) { *static_cast<uint32_t*>(c) = s; }, fieldPtr);
-						AssetEvict onEvicted; onEvicted.BindStatic([](void* c) { *static_cast<uint32_t*>(c) = 0; }, fieldPtr);
+						AssetLoad onLoaded;
+						onLoaded.BindStatic([](void* c, uint32_t s)
+						{
+							*static_cast<uint32_t*>(c) = s;
+						}, fieldPtr);
+						AssetEvict onEvicted;
+						onEvicted.BindStatic([](void* c)
+						{
+							*static_cast<uint32_t*>(c) = 0;
+						}, fieldPtr);
 						AssetRegistry::RegisterPendingCheckout(TnxName(fieldVal.AsString().c_str()), field->RefAssetType, onLoaded, onEvicted);
 					}
 					else
@@ -296,7 +305,7 @@ static size_t SpawnSceneInternal(Registry* reg, const JsonValue& sceneJson, bool
 // Spawn all entities from a prefab or scene JSON with full recursive prefab support.
 // Returns number of entities spawned. Construct prefabs are skipped (count = 0).
 static size_t SpawnFromAssetJSON(Registry* reg, const std::string& path,
-								 const JsonValue* componentOverrides, bool bBackground)
+	const JsonValue* componentOverrides, bool bBackground)
 {
 	if (ActivePrefabLoads.count(path))
 	{
@@ -357,7 +366,7 @@ static size_t SpawnSceneInternal(Registry* reg, const JsonValue& sceneJson, bool
 			if (path.empty())
 			{
 				LOG_ENG_WARN_F("[EntityBuilder] Prefab AssetID %lld not found in registry",
-							   static_cast<long long>(static_cast<int64_t>(prefabRef->AsNumber())));
+					static_cast<long long>(static_cast<int64_t>(prefabRef->AsNumber())));
 				continue;
 			}
 			count += SpawnFromAssetJSON(reg, path, entry.Find("overrides"), bBackground);
@@ -389,7 +398,7 @@ size_t EntityBuilder::SpawnFromFile(Registry* reg, const char* filePath, bool bB
 }
 
 size_t EntityBuilder::SpawnFromFileTracked(Registry* reg, const char* filePath, bool bBackground,
-										   std::vector<GlobalEntityHandle>& outHandles)
+	std::vector<GlobalEntityHandle>& outHandles)
 {
 	ActiveHandleCollector = &outHandles;
 	size_t count          = SpawnFromAssetJSON(reg, filePath, nullptr, bBackground);
@@ -403,7 +412,7 @@ size_t EntityBuilder::StreamChunkTracked(Registry* reg, const AssetID& assetID, 
 	if (path.empty())
 	{
 		LOG_ENG_ERROR_F("[EntityBuilder] StreamChunkTracked: AssetID %lld not found in registry",
-						static_cast<long long>(assetID.Raw));
+			static_cast<long long>(assetID.Raw));
 		return 0;
 	}
 
@@ -422,13 +431,11 @@ std::vector<uint32_t> EntityBuilder::ActivateStreamedChunk(Registry* reg, int64_
 	ComponentCacheBase* cache       = reg->GetTemporalCache();
 	TemporalFrameHeader* writeHdr   = cache->GetFrameHeader(cache->GetActiveWriteFrame());
 	const ComponentTypeID flagsSlot = CacheSlotMeta<>::StaticTemporalIndex();
-	auto* flags = static_cast<int32_t*>(cache->GetFieldData(writeHdr, flagsSlot, 0));
+	auto* flags                     = static_cast<int32_t*>(cache->GetFieldData(writeHdr, flagsSlot, 0));
 	if (!flags) return {};
 
 	constexpr int32_t activateMask = static_cast<int32_t>(
-		static_cast<uint32_t>(TemporalFlagBits::Active) |
-		static_cast<uint32_t>(TemporalFlagBits::Dirty)  |
-		static_cast<uint32_t>(TemporalFlagBits::DirtiedFrame));
+		static_cast<uint32_t>(TemporalFlagBits::Active) | static_cast<uint32_t>(TemporalFlagBits::Dirty) | static_cast<uint32_t>(TemporalFlagBits::DirtiedFrame));
 
 	std::vector<uint32_t> activatedSlabs;
 	activatedSlabs.reserve(innerIt->second.size());
@@ -472,75 +479,75 @@ static JsonValue ReadFieldValue(const void* src, size_t fieldSize, FieldValueTyp
 	switch (valueType)
 	{
 		case FieldValueType::Fixed32:
-			{
-				SimFloat f;
-				std::memcpy(&f, src, 4);
-				return JsonValue::Number(f.ToDouble());
-			}
+		{
+			SimFloat f;
+			std::memcpy(&f, src, 4);
+			return JsonValue::Number(f.ToDouble());
+		}
 		case FieldValueType::Float32:
-			{
-				SimFloat f;
-				std::memcpy(&f, src, 4);
-				return JsonValue::Number(f.ToDouble());
-			}
+		{
+			SimFloat f;
+			std::memcpy(&f, src, 4);
+			return JsonValue::Number(f.ToDouble());
+		}
 		case FieldValueType::Float64:
-			{
-				double d;
-				std::memcpy(&d, src, 8);
-				return JsonValue::Number(d);
-			}
+		{
+			double d;
+			std::memcpy(&d, src, 8);
+			return JsonValue::Number(d);
+		}
 		case FieldValueType::Int32:
-			{
-				int32_t v;
-				std::memcpy(&v, src, 4);
-				return JsonValue::Number(static_cast<double>(v));
-			}
+		{
+			int32_t v;
+			std::memcpy(&v, src, 4);
+			return JsonValue::Number(static_cast<double>(v));
+		}
 		case FieldValueType::Uint32:
-			{
-				uint32_t v;
-				std::memcpy(&v, src, 4);
-				return JsonValue::Number(static_cast<double>(v));
-			}
+		{
+			uint32_t v;
+			std::memcpy(&v, src, 4);
+			return JsonValue::Number(static_cast<double>(v));
+		}
 		case FieldValueType::Int64:
-			{
-				int64_t v;
-				std::memcpy(&v, src, 8);
-				return JsonValue::Number(static_cast<double>(v));
-			}
+		{
+			int64_t v;
+			std::memcpy(&v, src, 8);
+			return JsonValue::Number(static_cast<double>(v));
+		}
 		case FieldValueType::Uint64:
-			{
-				uint64_t v;
-				std::memcpy(&v, src, 8);
-				return JsonValue::Number(static_cast<double>(v));
-			}
+		{
+			uint64_t v;
+			std::memcpy(&v, src, 8);
+			return JsonValue::Number(static_cast<double>(v));
+		}
 		default:
 			// Fallback: dispatch on size
 			switch (fieldSize)
 			{
 				case 4:
-					{
-						SimFloat f;
-						std::memcpy(&f, src, 4);
-						return JsonValue::Number(f.ToDouble());
-					}
+				{
+					SimFloat f;
+					std::memcpy(&f, src, 4);
+					return JsonValue::Number(f.ToDouble());
+				}
 				case 8:
-					{
-						double d;
-						std::memcpy(&d, src, 8);
-						return JsonValue::Number(d);
-					}
+				{
+					double d;
+					std::memcpy(&d, src, 8);
+					return JsonValue::Number(d);
+				}
 				case 2:
-					{
-						uint16_t v;
-						std::memcpy(&v, src, 2);
-						return JsonValue::Number(static_cast<double>(v));
-					}
+				{
+					uint16_t v;
+					std::memcpy(&v, src, 2);
+					return JsonValue::Number(static_cast<double>(v));
+				}
 				case 1:
-					{
-						uint8_t v;
-						std::memcpy(&v, src, 1);
-						return JsonValue::Number(static_cast<double>(v));
-					}
+				{
+					uint8_t v;
+					std::memcpy(&v, src, 1);
+					return JsonValue::Number(static_cast<double>(v));
+				}
 				default: return JsonValue::Number(0.0);
 			}
 	}
@@ -561,8 +568,8 @@ JsonValue EntityBuilder::SerializeEntity(Registry* reg, Archetype* arch, size_t 
 	Chunk* chunk = arch->Chunks[chunkIdx];
 	void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 	arch->BuildFieldArrayTable(chunk, fieldArrayTable,
-							   reg->GetTemporalCache()->GetActiveWriteFrame(),
-							   reg->GetVolatileCache()->GetActiveWriteFrame());
+		reg->GetTemporalCache()->GetActiveWriteFrame(),
+		reg->GetVolatileCache()->GetActiveWriteFrame());
 
 	const auto& CFR      = ReflectionRegistry::Get();
 	JsonValue components = JsonValue::Object();
@@ -620,7 +627,7 @@ EntityBuilder::SceneMeta EntityBuilder::ParseSceneMeta(const JsonValue& sceneJso
 }
 
 JsonValue EntityBuilder::SerializeScene(Registry* reg, const char* sceneName,
-										const char* defaultState, const char* defaultMode)
+	const char* defaultState, const char* defaultMode)
 {
 	JsonValue scene = JsonValue::Object();
 	scene["name"]   = JsonValue::String(sceneName);
@@ -639,8 +646,8 @@ JsonValue EntityBuilder::SerializeScene(Registry* reg, const char* sceneName,
 
 			void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 			arch->BuildFieldArrayTable(arch->Chunks[ci], fieldArrayTable,
-									   reg->GetTemporalCache()->GetActiveWriteFrame(),
-									   reg->GetVolatileCache()->GetActiveWriteFrame());
+				reg->GetTemporalCache()->GetActiveWriteFrame(),
+				reg->GetVolatileCache()->GetActiveWriteFrame());
 
 			const auto* flagsArr = (arch->GetFieldArrayCount() > 0 && fieldArrayTable[0])
 									   ? static_cast<const int32_t*>(fieldArrayTable[0])
@@ -663,7 +670,7 @@ JsonValue EntityBuilder::SerializeScene(Registry* reg, const char* sceneName,
 }
 
 bool EntityBuilder::SaveToFile(Registry* reg, const char* sceneName, const char* filePath,
-							   const char* defaultState, const char* defaultMode)
+	const char* defaultState, const char* defaultMode)
 {
 	JsonValue scene  = SerializeScene(reg, sceneName, defaultState, defaultMode);
 	std::string json = JsonWrite(scene, true);

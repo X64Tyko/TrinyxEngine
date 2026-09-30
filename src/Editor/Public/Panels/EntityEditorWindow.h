@@ -11,25 +11,25 @@
 /// One open Entity type in the editor — component list + spawn-init graph.
 struct EntityDoc
 {
-    std::string TypeName;
-    std::string FilePath;
+	std::string TypeName;
+	std::string FilePath;
 
-    struct ComponentEntry
-    {
-        char TypeName[64]  = "CTransform";
-        bool bSelected     = false;
-    };
+	struct ComponentEntry
+	{
+		char TypeName[64] = "CTransform";
+		bool bSelected    = false;
+	};
 
-    std::vector<ComponentEntry> Components;
+	std::vector<ComponentEntry> Components;
 
-    /// Spawn initializer graph — sets default field values.
-    NodeGraphCanvas SpawnGraph;
+	/// Spawn initializer graph — sets default field values.
+	NodeGraphCanvas SpawnGraph;
 
-    char OutputPath[512] = {};
-    char StatusMsg[256]  = {};
-    bool bStatusError    = false;
+	char OutputPath[512] = {};
+	char StatusMsg[256]  = {};
+	bool bStatusError    = false;
 
-    explicit EntityDoc(const char* typeName, const char* filePath = nullptr);
+	explicit EntityDoc(const char* typeName, const char* filePath = nullptr);
 };
 
 /// Dockable editor window for Entity types.
@@ -38,26 +38,26 @@ struct EntityDoc
 class EntityEditorWindow : public EditorPanel
 {
 public:
-    EntityEditorWindow();
-    ~EntityEditorWindow() override = default;
+	EntityEditorWindow();
+	~EntityEditorWindow() override = default;
 
-    void Draw(EditorState& state) override;
+	void Draw(EditorState& state) override;
 
-    /// Open (or focus) an Entity type by name. Parses filePath when provided.
-    void OpenEntity(const char* typeName, const char* filePath = nullptr);
+	/// Open (or focus) an Entity type by name. Parses filePath when provided.
+	void OpenEntity(const char* typeName, const char* filePath = nullptr);
 
 private:
-    std::vector<EntityDoc> Docs;
-    int ActiveTab = 0;
+	std::vector<EntityDoc> Docs;
+	int ActiveTab = 0;
 
-    char NewTypeBuf[64] = "EMyEntity";
-    bool bShowNewDialog = false;
+	char NewTypeBuf[64] = "EMyEntity";
+	bool bShowNewDialog = false;
 
-    bool bLeftPaneVisible  = true;
-    bool bRightPaneVisible = true;
+	bool bLeftPaneVisible  = true;
+	bool bRightPaneVisible = true;
 
-    void DrawTabBar();
-    void DrawComponentPanel(EntityDoc& doc, float height);
-    void DrawSpawnGraph(EntityDoc& doc, float width, float height);
-    void DrawInfoPanel(EntityDoc& doc, float height, EditorState& state);
+	void DrawTabBar();
+	void DrawComponentPanel(EntityDoc& doc, float height);
+	void DrawSpawnGraph(EntityDoc& doc, float width, float height);
+	void DrawInfoPanel(EntityDoc& doc, float height, EditorState& state);
 };

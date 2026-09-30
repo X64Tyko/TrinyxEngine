@@ -46,10 +46,10 @@ public:
 	 * @param jobsInitialized Engine jobs-ready gate; Brain spins on this before draining the queue.
 	 */
 	virtual void Initialize(Registry* registry, const EngineConfig* config, JoltPhysics* physics,
-							InputBuffer* simInput, InputBuffer* vizInput,
-							TrinyxJobs::WorldQueueHandle worldQueue,
-							const std::atomic<bool>* jobsInitialized,
-							int windowWidth, int windowHeight) = 0;
+		InputBuffer* simInput, InputBuffer* vizInput,
+		TrinyxJobs::WorldQueueHandle worldQueue,
+		const std::atomic<bool>* jobsInitialized,
+		int windowWidth, int windowHeight) = 0;
 
 	virtual void Start() = 0; ///< @brief Spawn the Brain thread and begin the fixed-rate loop.
 	virtual void Stop()  = 0; ///< @brief Signal the Brain thread to exit after the current frame.
@@ -128,7 +128,7 @@ public:
 	/// @brief Set the free-fly camera position and orientation for editor/debug use.
 	void SetFreeFlyCamera(SimFloat x, SimFloat y, SimFloat z, SimFloat yaw, SimFloat pitch)
 	{
-		CamPos   = Vector3{x, y, z};
+		CamPos   = Vector3{ x, y, z };
 		CamYaw   = yaw;
 		CamPitch = pitch;
 	}
@@ -152,86 +152,86 @@ public:
 	}
 
 	/// @note Updated ~once/second by TrackFPS; relaxed reads are acceptable for display.
-	float GetLogicFPS()     const { return LogicFPS.load(std::memory_order_relaxed); }
+	float GetLogicFPS() const { return LogicFPS.load(std::memory_order_relaxed); }
 	float GetLogicFrameMs() const { return LogicFrameMs.load(std::memory_order_relaxed); }
-	float GetFixedFPS()     const { return FixedFPS.load(std::memory_order_relaxed); }
+	float GetFixedFPS() const { return FixedFPS.load(std::memory_order_relaxed); }
 	float GetFixedFrameMs() const { return FixedFrameMs.load(std::memory_order_relaxed); }
 
 	// --- Construct tick batches — public so Constructs can self-register at spawn time ---
-	ConstructBatch ScalarPrePhysicsBatch;   ///< Runs before PrePhysics wide sweeps each fixed step.
-	ConstructBatch ScalarPostPhysicsBatch;  ///< Runs after PostPhysics wide sweeps each fixed step.
-	ConstructBatch ScalarUpdateBatch;       ///< Runs each variadic (uncapped) logic tick.
-	ConstructBatch ScalarPhysicsStepBatch;  ///< Runs between FlushPendingBodies and the Jolt step.
+	ConstructBatch ScalarPrePhysicsBatch;  ///< Runs before PrePhysics wide sweeps each fixed step.
+	ConstructBatch ScalarPostPhysicsBatch; ///< Runs after PostPhysics wide sweeps each fixed step.
+	ConstructBatch ScalarUpdateBatch;      ///< Runs each variadic (uncapped) logic tick.
+	ConstructBatch ScalarPhysicsStepBatch; ///< Runs between FlushPendingBodies and the Jolt step.
 
 protected:
 	friend struct RollbackSim;
 
 	// --- Non-owning references — bound at Initialize time ---
-	Registry*                    RegistryPtr        = nullptr;
-	const EngineConfig*          ConfigPtr          = nullptr;
-	JoltPhysics*                 PhysicsPtr         = nullptr;
-	ComponentCacheBase*          TemporalCache      = nullptr;
-	ConstructRegistry*           ConstructsPtr      = nullptr;
-	CameraManager*               LocalCameraManager = nullptr;
-	TrinyxJobs::WorldQueueHandle WQHandle           = TrinyxJobs::InvalidWorldQueue;
-	const std::atomic<bool>*     JobsInitPtr        = nullptr;
+	Registry* RegistryPtr                 = nullptr;
+	const EngineConfig* ConfigPtr         = nullptr;
+	JoltPhysics* PhysicsPtr               = nullptr;
+	ComponentCacheBase* TemporalCache     = nullptr;
+	ConstructRegistry* ConstructsPtr      = nullptr;
+	CameraManager* LocalCameraManager     = nullptr;
+	TrinyxJobs::WorldQueueHandle WQHandle = TrinyxJobs::InvalidWorldQueue;
+	const std::atomic<bool>* JobsInitPtr  = nullptr;
 
 	InputBuffer* SimInput = nullptr; ///< Non-owning; WorldBase owns the buffer.
 	InputBuffer* VizInput = nullptr; ///< Non-owning; WorldBase owns the buffer.
 
 	// --- Camera state (FPS-style: yaw around Y, pitch around X) ---
-	Vector3  CamPos{0.0f, 0.0f, 0.0};
+	Vector3 CamPos{ 0.0f, 0.0f, 0.0 };
 	SimFloat CamYaw   = 0.0f;
 	SimFloat CamPitch = 0.0f;
 
 	// Last published camera state — used as Prev* in the next frame header so temporal
 	// interpolation spans exactly 1 fixed step, not 3 (the ring-buffer slot period).
-	Vector3  LastPubCamPos{};
-	Quat     LastPubCamRot{};
+	Vector3 LastPubCamPos{};
+	Quat LastPubCamRot{};
 	SimFloat LastPubCamFoV = SimFloat(60.0f);
 
 	static constexpr SimFloat CamMoveSpeed = SimFloat(20.0f);  ///< Free-fly camera speed (sim units/s).
 	static constexpr SimFloat CamMouseSens = SimFloat(0.002f); ///< Free-fly mouse sensitivity (rad/pixel).
 
-	std::atomic<uint32_t> LastCompletedFrame{0}; ///< Frame mailbox; last completed frame the Render thread may read.
+	std::atomic<uint32_t> LastCompletedFrame{ 0 }; ///< Frame mailbox; last completed frame the Render thread may read.
 
 	// --- Threading ---
-	std::thread       Thread;
-	std::atomic<bool> bIsRunning{false};
-	std::atomic<bool>     bSimPaused{false};
-	std::atomic<uint32_t> PausedAtFrame{0};
+	std::thread Thread;
+	std::atomic<bool> bIsRunning{ false };
+	std::atomic<bool> bSimPaused{ false };
+	std::atomic<uint32_t> PausedAtFrame{ 0 };
 
 	// --- Timing ---
-	std::atomic<double> Accumulator{0.0};
-	double   SimulationTime     = 0.0;
-	uint32_t FrameNumber        = 0;
-	uint32_t PhysicsDivizor     = 1;
-	int      WindowWidth        = 1920;
-	int      WindowHeight       = 1080;
-	double   FixedStepTimeCache = 0.0; ///< Cached from EngineConfig at Initialize time.
+	std::atomic<double> Accumulator{ 0.0 };
+	double SimulationTime     = 0.0;
+	uint32_t FrameNumber      = 0;
+	uint32_t PhysicsDivizor   = 1;
+	int WindowWidth           = 1920;
+	int WindowHeight          = 1080;
+	double FixedStepTimeCache = 0.0; ///< Cached from EngineConfig at Initialize time.
 
 	// --- FPS tracking (Brain writes, editor reads) ---
 	uint32_t FpsFrameCount = 0;
-	double   FpsTimer      = 0.0;
+	double FpsTimer        = 0.0;
 	uint32_t FpsFixedCount = 0;
-	double   FpsFixedTimer = 0.0;
-	double   LastFPSCheck  = 0.0;
+	double FpsFixedTimer   = 0.0;
+	double LastFPSCheck    = 0.0;
 
-	std::atomic<float> LogicFPS{0.0f};
-	std::atomic<float> LogicFrameMs{0.0f};
-	std::atomic<float> FixedFPS{0.0f};
-	std::atomic<float> FixedFrameMs{0.0f};
+	std::atomic<float> LogicFPS{ 0.0f };
+	std::atomic<float> LogicFrameMs{ 0.0f };
+	std::atomic<float> FixedFPS{ 0.0f };
+	std::atomic<float> FixedFrameMs{ 0.0f };
 
 	// --- Rollback state ---
 	// bRollbackActive is Logic-thread-only (no sync needed).
 	// All other rollback atomics are written from any thread.
-	bool                  bRollbackActive{false};
-	std::atomic<uint32_t> PendingRollbackFrame{UINT32_MAX};
-	std::atomic<bool>     bRollbackTestRequested{false};
+	bool bRollbackActive{ false };
+	std::atomic<uint32_t> PendingRollbackFrame{ UINT32_MAX };
+	std::atomic<bool> bRollbackTestRequested{ false };
 #ifdef TNX_TESTING
-	std::atomic<bool> bRollbackTestComplete{false};
+	std::atomic<bool> bRollbackTestComplete{ false };
 	///< Set by ExecuteRollbackTest when done; cleared by RequestRollbackTest.
-	std::atomic<bool> bRollbackTestPassed{false};
+	std::atomic<bool> bRollbackTestPassed{ false };
 	///< True if the last test was byte-perfect; valid after bRollbackTestComplete.
 #endif
 
@@ -239,7 +239,7 @@ protected:
 	/// target a frame whose Jolt snapshot predates the level geometry. Written on the Logic
 	/// thread; relaxed ordering is sufficient because visibility is guaranteed by the spawn
 	/// handshake that precedes any EnqueueSpawnRollback call.
-	std::atomic<uint32_t> EarliestValidRollbackFrame{0};
+	std::atomic<uint32_t> EarliestValidRollbackFrame{ 0 };
 };
 
 /** @} */

@@ -15,22 +15,28 @@
 static const char* StripTypePrefix(const char* name)
 {
 	if (!name) return "(unknown)";
-	if (std::strncmp(name, "class ", 6)  == 0) return name + 6;
+	if (std::strncmp(name, "class ", 6) == 0) return name + 6;
 	if (std::strncmp(name, "struct ", 7) == 0) return name + 7;
 	return name;
 }
 
 void WorldOutlinerPanel::Draw(EditorState& state)
 {
-	if (!BeginPadded()) { ImGui::End(); return; }
+	if (!BeginPadded())
+	{
+		ImGui::End();
+		return;
+	}
 
 	ConstructRegistry* cr = state.LogicPtr ? state.LogicPtr->GetConstructRegistry() : nullptr;
 
 	uint32_t constructCount = cr ? cr->GetCount() : 0;
 	uint32_t archetypeCount = state.RegistryPtr
-		? static_cast<uint32_t>(state.RegistryPtr->GetArchetypes().size()) : 0;
-	uint32_t entityCount = state.RegistryPtr
-		? state.RegistryPtr->GetTotalEntityCount() : 0;
+								  ? static_cast<uint32_t>(state.RegistryPtr->GetArchetypes().size())
+								  : 0;
+	uint32_t entityCount    = state.RegistryPtr
+								  ? state.RegistryPtr->GetTotalEntityCount()
+								  : 0;
 
 	TnxWidgets::PanelHeader(nullptr, "World Outliner", [&]()
 	{
@@ -49,18 +55,18 @@ void WorldOutlinerPanel::Draw(EditorState& state)
 	});
 
 	ImGui::BeginChild("##OutlinerBody", ImVec2(0, 0), ImGuiChildFlags_None,
-					  ImGuiWindowFlags_HorizontalScrollbar);
+		ImGuiWindowFlags_HorizontalScrollbar);
 
 	// -----------------------------------------------------------------------
 	// Root: CONSTRUCTS
 	// -----------------------------------------------------------------------
 	{
-		ImGui::PushStyleColor(ImGuiCol_Header,        TnxStyle::Color::BgElev);
+		ImGui::PushStyleColor(ImGuiCol_Header, TnxStyle::Color::BgElev);
 		ImGui::PushStyleColor(ImGuiCol_HeaderHovered, TnxStyle::Color::PurpleFaint);
-		ImGui::PushStyleColor(ImGuiCol_HeaderActive,  TnxStyle::Color::PurpleSoft);
-		ImGui::PushStyleColor(ImGuiCol_Text,          TnxStyle::Color::FgMuted);
+		ImGui::PushStyleColor(ImGuiCol_HeaderActive, TnxStyle::Color::PurpleSoft);
+		ImGui::PushStyleColor(ImGuiCol_Text, TnxStyle::Color::FgMuted);
 		bool constructsOpen = ImGui::CollapsingHeader("CONSTRUCTS##root",
-													  ImGuiTreeNodeFlags_DefaultOpen);
+			ImGuiTreeNodeFlags_DefaultOpen);
 		ImGui::PopStyleColor(4);
 
 		if (constructsOpen)
@@ -72,11 +78,11 @@ void WorldOutlinerPanel::Draw(EditorState& state)
 					const char* displayName = StripTypePrefix(rawTypeName);
 
 					bool selected = (state.Selection == EditorState::SelectionType::Construct
-								  && state.SelectedConstructID == id);
+									 && state.SelectedConstructID == id);
 
 					ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf
-						| ImGuiTreeNodeFlags_NoTreePushOnOpen
-						| ImGuiTreeNodeFlags_SpanFullWidth;
+											   | ImGuiTreeNodeFlags_NoTreePushOnOpen
+											   | ImGuiTreeNodeFlags_SpanFullWidth;
 					if (selected) flags |= ImGuiTreeNodeFlags_Selected;
 
 					char label[128];
@@ -92,8 +98,8 @@ void WorldOutlinerPanel::Draw(EditorState& state)
 					// Right-align the construct ID, dimmed
 					char idStr[24];
 					snprintf(idStr, sizeof(idStr), "#%u", id);
-					float idW  = ImGui::CalcTextSize(idStr).x;
-					float posX = ImGui::GetWindowWidth() - idW - ImGui::GetScrollX() - 12.0f;
+					float idW       = ImGui::CalcTextSize(idStr).x;
+					float posX      = ImGui::GetWindowWidth() - idW - ImGui::GetScrollX() - 12.0f;
 					float labelEndX = ImGui::GetCursorPosX() + ImGui::CalcTextSize(displayName).x + 24.0f;
 					if (posX > labelEndX)
 					{
@@ -127,12 +133,12 @@ void WorldOutlinerPanel::Draw(EditorState& state)
 	// -----------------------------------------------------------------------
 	if (state.RegistryPtr)
 	{
-		ImGui::PushStyleColor(ImGuiCol_Header,        TnxStyle::Color::BgElev);
+		ImGui::PushStyleColor(ImGuiCol_Header, TnxStyle::Color::BgElev);
 		ImGui::PushStyleColor(ImGuiCol_HeaderHovered, TnxStyle::Color::PurpleFaint);
-		ImGui::PushStyleColor(ImGuiCol_HeaderActive,  TnxStyle::Color::PurpleSoft);
-		ImGui::PushStyleColor(ImGuiCol_Text,          TnxStyle::Color::FgMuted);
+		ImGui::PushStyleColor(ImGuiCol_HeaderActive, TnxStyle::Color::PurpleSoft);
+		ImGui::PushStyleColor(ImGuiCol_Text, TnxStyle::Color::FgMuted);
 		bool archetypesOpen = ImGui::CollapsingHeader("ARCHETYPES##root",
-													  ImGuiTreeNodeFlags_DefaultOpen);
+			ImGuiTreeNodeFlags_DefaultOpen);
 		ImGui::PopStyleColor(4);
 
 		if (archetypesOpen)
@@ -142,7 +148,7 @@ void WorldOutlinerPanel::Draw(EditorState& state)
 				if (!arch) continue;
 
 				bool archetypeSelected = (state.Selection == EditorState::SelectionType::Archetype
-					&& state.SelectedClassID == key.ID);
+										  && state.SelectedClassID == key.ID);
 
 				char label[256];
 				snprintf(label, sizeof(label), "%s###arch_%u", arch->DebugName, key.ID);
@@ -157,8 +163,8 @@ void WorldOutlinerPanel::Draw(EditorState& state)
 				// Right-align entity count
 				char countStr[32];
 				snprintf(countStr, sizeof(countStr), "%u ent", arch->TotalEntityCount);
-				float cntW  = ImGui::CalcTextSize(countStr).x;
-				float posX  = ImGui::GetWindowWidth() - cntW - ImGui::GetScrollX() - 12.0f;
+				float cntW = ImGui::CalcTextSize(countStr).x;
+				float posX = ImGui::GetWindowWidth() - cntW - ImGui::GetScrollX() - 12.0f;
 				ImGui::SameLine(posX);
 				ImGui::PushStyleColor(ImGuiCol_Text, TnxStyle::Color::FgDim);
 				ImGui::TextUnformatted(countStr);
@@ -176,15 +182,15 @@ void WorldOutlinerPanel::Draw(EditorState& state)
 				{
 					for (size_t ci = 0; ci < arch->Chunks.size(); ++ci)
 					{
-						Chunk* chunk         = arch->Chunks[ci];
-						uint32_t liveCount   = arch->GetLiveChunkCount(ci);
+						Chunk* chunk       = arch->Chunks[ci];
+						uint32_t liveCount = arch->GetLiveChunkCount(ci);
 
 						char chunkLabel[128];
 						snprintf(chunkLabel, sizeof(chunkLabel), "chunk %zu  (%u)###chunk_%u_%zu",
-								 ci, liveCount, key.ID, ci);
+							ci, liveCount, key.ID, ci);
 
 						ImGuiTreeNodeFlags chunkFlags = ImGuiTreeNodeFlags_OpenOnArrow;
-						bool chunkOpen = ImGui::TreeNodeEx(chunkLabel, chunkFlags);
+						bool chunkOpen                = ImGui::TreeNodeEx(chunkLabel, chunkFlags);
 
 						if (chunkOpen)
 						{
@@ -193,13 +199,13 @@ void WorldOutlinerPanel::Draw(EditorState& state)
 								uint32_t cacheIdx = static_cast<uint32_t>(chunk->Header.CacheIndexStart) + ei;
 
 								bool entitySelected = (state.Selection == EditorState::SelectionType::Entity
-									&& state.SelectedCacheIndex == cacheIdx);
+													   && state.SelectedCacheIndex == cacheIdx);
 
 								char entLabel[64];
 								snprintf(entLabel, sizeof(entLabel), "e 0x%06X###ent_%u", cacheIdx, cacheIdx);
 
 								ImGuiTreeNodeFlags entFlags = ImGuiTreeNodeFlags_Leaf
-									| ImGuiTreeNodeFlags_NoTreePushOnOpen;
+															  | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 								if (entitySelected) entFlags |= ImGuiTreeNodeFlags_Selected;
 
 								ImGui::PushStyleColor(ImGuiCol_Text, TnxStyle::Color::FgDim);

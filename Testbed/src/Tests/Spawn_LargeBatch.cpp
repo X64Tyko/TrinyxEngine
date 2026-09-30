@@ -10,7 +10,7 @@
 // path and that the Registry's live-count accounting doesn't drift.
 RUNTIME_TEST(Spawn_LargeBatch)
 {
-	Registry* Reg = Engine.GetRegistry();
+	Registry* Reg   = Engine.GetRegistry();
 	uint32_t before = Reg->GetTotalEntityCount();
 
 	Engine.Spawn([](uint32_t)

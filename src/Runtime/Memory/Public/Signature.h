@@ -63,12 +63,12 @@ struct Signature
 // Hash specialization for std::unordered_map
 namespace std
 {
-	template <>
-	struct hash<Signature>
+template <>
+struct hash<Signature>
+{
+	size_t operator()(const Signature& Sig) const noexcept
 	{
-		size_t operator()(const Signature& Sig) const noexcept
-		{
-			return Sig.Bits.hash();
-		}
-	};
-}
+		return Sig.Bits.hash();
+	}
+};
+} // namespace std

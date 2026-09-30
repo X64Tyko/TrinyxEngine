@@ -20,8 +20,8 @@ struct CNodeTransform : ComponentView<CNodeTransform, WIDTH>
 	FloatProxy<WIDTH> RotQz;
 	FloatProxy<WIDTH> RotQw;
 
-	Vec3Accessor<WIDTH> Position{PosX, PosY, PosZ};
-	QuatAccessor<WIDTH> Rotation{RotQx, RotQy, RotQz, RotQw};
+	Vec3Accessor<WIDTH> Position{ PosX, PosY, PosZ };
+	QuatAccessor<WIDTH> Rotation{ RotQx, RotQy, RotQz, RotQw };
 };
 
 TNX_REGISTER_COMPONENT(CNodeTransform)

@@ -94,14 +94,14 @@ struct Fixed32
 	constexpr Fixed32 operator++(int)
 	{
 		Fixed32 t = *this;
-		value     += Scale;
+		value += Scale;
 		return t;
 	}
 
 	constexpr Fixed32 operator--(int)
 	{
 		Fixed32 t = *this;
-		value     -= Scale;
+		value -= Scale;
 		return t;
 	}
 
@@ -178,9 +178,9 @@ struct Fixed32
 // positions stay exact: (int64_t(pos.value) * unit.value) >> ScaleLog2.
 struct FixedUnit : Fixed32
 {
-	static constexpr int32_t Scale    = FixedUnitsPerRadian; // 268,435,456 = 1<<28
-	static constexpr int64_t Scale64  = static_cast<int64_t>(Scale);
-	static constexpr int      ScaleLog2 = 28;
+	static constexpr int32_t Scale   = FixedUnitsPerRadian; // 268,435,456 = 1<<28
+	static constexpr int64_t Scale64 = static_cast<int64_t>(Scale);
+	static constexpr int ScaleLog2   = 28;
 
 	// --- Construction --------------------------------------------------------
 
@@ -288,8 +288,14 @@ struct FixedUnit : Fixed32
 
 // --- Binary arithmetic — Fixed32 op Fixed32 ---------------------------------
 
-constexpr Fixed32 operator+(Fixed32 a, Fixed32 b) { return Fixed32::FromRaw(a.value + b.value); }
-constexpr Fixed32 operator-(Fixed32 a, Fixed32 b) { return Fixed32::FromRaw(a.value - b.value); }
+constexpr Fixed32 operator+(Fixed32 a, Fixed32 b)
+{
+	return Fixed32::FromRaw(a.value + b.value);
+}
+constexpr Fixed32 operator-(Fixed32 a, Fixed32 b)
+{
+	return Fixed32::FromRaw(a.value - b.value);
+}
 
 constexpr Fixed32 operator*(Fixed32 a, Fixed32 b)
 {
@@ -301,22 +307,46 @@ constexpr Fixed32 operator/(Fixed32 a, Fixed32 b)
 	return Fixed32::FromRaw(static_cast<int32_t>((static_cast<int64_t>(a.value) * Fixed32::Scale64) / b.value));
 }
 
-constexpr Fixed32 operator%(Fixed32 a, Fixed32 b) { return Fixed32::FromRaw(a.value % b.value); }
+constexpr Fixed32 operator%(Fixed32 a, Fixed32 b)
+{
+	return Fixed32::FromRaw(a.value % b.value);
+}
 
 // --- Binary arithmetic — Fixed32 op int / int op Fixed32 --------------------
 // Mirrors float ↔ int semantics: + and - promote int to "value with units",
 // * and / treat int as a unitless scalar so the multiply is single-precision fast.
 
-constexpr Fixed32 operator+(Fixed32 a, int32_t b) { return Fixed32::FromRaw(a.value + b * Fixed32::Scale); }
-constexpr Fixed32 operator+(int32_t a, Fixed32 b) { return Fixed32::FromRaw(a * Fixed32::Scale + b.value); }
+constexpr Fixed32 operator+(Fixed32 a, int32_t b)
+{
+	return Fixed32::FromRaw(a.value + b * Fixed32::Scale);
+}
+constexpr Fixed32 operator+(int32_t a, Fixed32 b)
+{
+	return Fixed32::FromRaw(a * Fixed32::Scale + b.value);
+}
 
-constexpr Fixed32 operator-(Fixed32 a, int32_t b) { return Fixed32::FromRaw(a.value - b * Fixed32::Scale); }
-constexpr Fixed32 operator-(int32_t a, Fixed32 b) { return Fixed32::FromRaw(a * Fixed32::Scale - b.value); }
+constexpr Fixed32 operator-(Fixed32 a, int32_t b)
+{
+	return Fixed32::FromRaw(a.value - b * Fixed32::Scale);
+}
+constexpr Fixed32 operator-(int32_t a, Fixed32 b)
+{
+	return Fixed32::FromRaw(a * Fixed32::Scale - b.value);
+}
 
-constexpr Fixed32 operator*(Fixed32 a, int32_t b) { return Fixed32::FromRaw(a.value * b); }
-constexpr Fixed32 operator*(int32_t a, Fixed32 b) { return Fixed32::FromRaw(a * b.value); }
+constexpr Fixed32 operator*(Fixed32 a, int32_t b)
+{
+	return Fixed32::FromRaw(a.value * b);
+}
+constexpr Fixed32 operator*(int32_t a, Fixed32 b)
+{
+	return Fixed32::FromRaw(a * b.value);
+}
 
-constexpr Fixed32 operator/(Fixed32 a, int32_t b) { return Fixed32::FromRaw(a.value / b); }
+constexpr Fixed32 operator/(Fixed32 a, int32_t b)
+{
+	return Fixed32::FromRaw(a.value / b);
+}
 
 constexpr Fixed32 operator/(int32_t a, Fixed32 b)
 {
@@ -330,29 +360,83 @@ constexpr Fixed32 operator/(int32_t a, Fixed32 b)
 // overload-resolution error rather than silently converting. Use FromFloat /
 // ToFloat at the boundary instead.
 #ifdef TNX_FIXED_IMPLICIT_FLOAT
-constexpr Fixed32 operator+(Fixed32 a, float b) { return a + Fixed32::FromFloat(b); }
-constexpr Fixed32 operator+(float a, Fixed32 b) { return Fixed32::FromFloat(a) + b; }
-constexpr Fixed32 operator-(Fixed32 a, float b) { return a - Fixed32::FromFloat(b); }
-constexpr Fixed32 operator-(float a, Fixed32 b) { return Fixed32::FromFloat(a) - b; }
-constexpr Fixed32 operator*(Fixed32 a, float b) { return a * Fixed32::FromFloat(b); }
-constexpr Fixed32 operator*(float a, Fixed32 b) { return Fixed32::FromFloat(a) * b; }
-constexpr Fixed32 operator/(Fixed32 a, float b) { return a / Fixed32::FromFloat(b); }
-constexpr Fixed32 operator/(float a, Fixed32 b) { return Fixed32::FromFloat(a) / b; }
+constexpr Fixed32 operator+(Fixed32 a, float b)
+{
+	return a + Fixed32::FromFloat(b);
+}
+constexpr Fixed32 operator+(float a, Fixed32 b)
+{
+	return Fixed32::FromFloat(a) + b;
+}
+constexpr Fixed32 operator-(Fixed32 a, float b)
+{
+	return a - Fixed32::FromFloat(b);
+}
+constexpr Fixed32 operator-(float a, Fixed32 b)
+{
+	return Fixed32::FromFloat(a) - b;
+}
+constexpr Fixed32 operator*(Fixed32 a, float b)
+{
+	return a * Fixed32::FromFloat(b);
+}
+constexpr Fixed32 operator*(float a, Fixed32 b)
+{
+	return Fixed32::FromFloat(a) * b;
+}
+constexpr Fixed32 operator/(Fixed32 a, float b)
+{
+	return a / Fixed32::FromFloat(b);
+}
+constexpr Fixed32 operator/(float a, Fixed32 b)
+{
+	return Fixed32::FromFloat(a) / b;
+}
 
-constexpr Fixed32 operator+(Fixed32 a, double b) { return a + Fixed32::FromDouble(b); }
-constexpr Fixed32 operator+(double a, Fixed32 b) { return Fixed32::FromDouble(a) + b; }
-constexpr Fixed32 operator-(Fixed32 a, double b) { return a - Fixed32::FromDouble(b); }
-constexpr Fixed32 operator-(double a, Fixed32 b) { return Fixed32::FromDouble(a) - b; }
-constexpr Fixed32 operator*(Fixed32 a, double b) { return a * Fixed32::FromDouble(b); }
-constexpr Fixed32 operator*(double a, Fixed32 b) { return Fixed32::FromDouble(a) * b; }
-constexpr Fixed32 operator/(Fixed32 a, double b) { return a / Fixed32::FromDouble(b); }
-constexpr Fixed32 operator/(double a, Fixed32 b) { return Fixed32::FromDouble(a) / b; }
+constexpr Fixed32 operator+(Fixed32 a, double b)
+{
+	return a + Fixed32::FromDouble(b);
+}
+constexpr Fixed32 operator+(double a, Fixed32 b)
+{
+	return Fixed32::FromDouble(a) + b;
+}
+constexpr Fixed32 operator-(Fixed32 a, double b)
+{
+	return a - Fixed32::FromDouble(b);
+}
+constexpr Fixed32 operator-(double a, Fixed32 b)
+{
+	return Fixed32::FromDouble(a) - b;
+}
+constexpr Fixed32 operator*(Fixed32 a, double b)
+{
+	return a * Fixed32::FromDouble(b);
+}
+constexpr Fixed32 operator*(double a, Fixed32 b)
+{
+	return Fixed32::FromDouble(a) * b;
+}
+constexpr Fixed32 operator/(Fixed32 a, double b)
+{
+	return a / Fixed32::FromDouble(b);
+}
+constexpr Fixed32 operator/(double a, Fixed32 b)
+{
+	return Fixed32::FromDouble(a) / b;
+}
 #endif
 
 // --- Binary arithmetic — FixedUnit op FixedUnit ---------------------------------
 
-constexpr FixedUnit operator+(FixedUnit a, FixedUnit b) { return FixedUnit::FromRaw(a.value + b.value); }
-constexpr FixedUnit operator-(FixedUnit a, FixedUnit b) { return FixedUnit::FromRaw(a.value - b.value); }
+constexpr FixedUnit operator+(FixedUnit a, FixedUnit b)
+{
+	return FixedUnit::FromRaw(a.value + b.value);
+}
+constexpr FixedUnit operator-(FixedUnit a, FixedUnit b)
+{
+	return FixedUnit::FromRaw(a.value - b.value);
+}
 
 constexpr FixedUnit operator*(FixedUnit a, FixedUnit b)
 {
@@ -367,16 +451,37 @@ constexpr FixedUnit operator/(FixedUnit a, FixedUnit b)
 // --- Binary arithmetic — FixedUnit op int / int op FixedUnit --------------------
 // + and - treat int as a whole unit (1 = Scale). * and / are unitless scalars.
 
-constexpr FixedUnit operator+(FixedUnit a, int32_t b) { return FixedUnit::FromRaw(a.value + b * FixedUnit::Scale); }
-constexpr FixedUnit operator+(int32_t a, FixedUnit b) { return FixedUnit::FromRaw(a * FixedUnit::Scale + b.value); }
+constexpr FixedUnit operator+(FixedUnit a, int32_t b)
+{
+	return FixedUnit::FromRaw(a.value + b * FixedUnit::Scale);
+}
+constexpr FixedUnit operator+(int32_t a, FixedUnit b)
+{
+	return FixedUnit::FromRaw(a * FixedUnit::Scale + b.value);
+}
 
-constexpr FixedUnit operator-(FixedUnit a, int32_t b) { return FixedUnit::FromRaw(a.value - b * FixedUnit::Scale); }
-constexpr FixedUnit operator-(int32_t a, FixedUnit b) { return FixedUnit::FromRaw(a * FixedUnit::Scale - b.value); }
+constexpr FixedUnit operator-(FixedUnit a, int32_t b)
+{
+	return FixedUnit::FromRaw(a.value - b * FixedUnit::Scale);
+}
+constexpr FixedUnit operator-(int32_t a, FixedUnit b)
+{
+	return FixedUnit::FromRaw(a * FixedUnit::Scale - b.value);
+}
 
-constexpr FixedUnit operator*(FixedUnit a, int32_t b) { return FixedUnit::FromRaw(a.value * b); }
-constexpr FixedUnit operator*(int32_t a, FixedUnit b) { return FixedUnit::FromRaw(a * b.value); }
+constexpr FixedUnit operator*(FixedUnit a, int32_t b)
+{
+	return FixedUnit::FromRaw(a.value * b);
+}
+constexpr FixedUnit operator*(int32_t a, FixedUnit b)
+{
+	return FixedUnit::FromRaw(a * b.value);
+}
 
-constexpr FixedUnit operator/(FixedUnit a, int32_t b) { return FixedUnit::FromRaw(a.value / b); }
+constexpr FixedUnit operator/(FixedUnit a, int32_t b)
+{
+	return FixedUnit::FromRaw(a.value / b);
+}
 
 // --- Cross-type: Fixed32 scaled by FixedUnit ------------------------------------
 // FixedUnit::Scale is a power of 2 (1<<ScaleLog2), so division is a pure right shift.
@@ -401,12 +506,12 @@ constexpr Fixed32 FixedSqrt(Fixed32 x)
 	if (x.value <= 0) return Fixed32::FromRaw(0);
 
 	// Compute integer sqrt of (raw * Scale) — result is raw of sqrt(x).
-	int64_t n  = static_cast<int64_t>(x.value) * Fixed32::Scale;
-	int64_t r  = n; // initial guess
+	int64_t n = static_cast<int64_t>(x.value) * Fixed32::Scale;
+	int64_t r = n; // initial guess
 	// Newton's method for integer sqrt: r = (r + n/r) / 2
 	while (r > (n / r))
 	{
-		r  = (r + n / r) >> 1;
+		r = (r + n / r) >> 1;
 	}
 	return Fixed32::FromRaw(static_cast<int32_t>(r));
 }

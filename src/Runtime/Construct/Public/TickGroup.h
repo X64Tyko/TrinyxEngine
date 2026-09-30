@@ -21,7 +21,7 @@ DEFINE_CALLBACK(ConstructTickFn, SimFloat)
 
 struct ConstructTickEntry
 {
-	ConstructTickFn   Tick;
-	TickGroup         Group;
-	int16_t           OrderWithinGroup;
+	ConstructTickFn Tick;
+	TickGroup Group;
+	int16_t OrderWithinGroup;
 };

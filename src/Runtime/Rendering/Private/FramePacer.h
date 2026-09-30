@@ -23,7 +23,7 @@ public:
 	void Initialize(SDL_GPUDevice* _device)
 	{
 		device = _device;
-		// Pre-allocate fences? No, SDL3 acquires them on demand usually, 
+		// Pre-allocate fences? No, SDL3 acquires them on demand usually,
 		// but we need handles to wait on.
 		// Actually, SDL3's AcquireGPUFence creates a new handle.
 		// We just hold the pointer.

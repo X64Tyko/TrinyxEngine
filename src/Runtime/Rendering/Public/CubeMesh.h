@@ -23,69 +23,99 @@
 // -----------------------------------------------------------------------
 namespace CubeMesh
 {
-	inline Vertex MakeVert(float px, float py, float pz, float nx, float ny, float nz)
-	{
-		Vertex v{};
-		v.px        = px;
-		v.py        = py;
-		v.pz        = pz;
-		v.n_oct16x2 = OctEncode(nx, ny, nz);
-		v.u         = 0.0f;
-		v.v         = 0.0f;
-		v.t_oct16x2 = OctEncode(0.0f, 0.0f, 1.0f); // default tangent +Z
-		v.mask      = 0;
-		v.flags     = 0;
-		v.pad       = 0;
-		return v;
-	}
-
-	// 24 unique vertices — 4 per face — so each face can have its own
-	// flat normal without sharing vertices across faces.
-	// Winding: CCW front-face (Vulkan default).
-	inline const Vertex Vertices[] = {
-		// +Z front face  (normal  0, 0, 1)
-		MakeVert(-0.5f, -0.5f, 0.5f, 0, 0, 1),
-		MakeVert(0.5f, -0.5f, 0.5f, 0, 0, 1),
-		MakeVert(0.5f, 0.5f, 0.5f, 0, 0, 1),
-		MakeVert(-0.5f, 0.5f, 0.5f, 0, 0, 1),
-		// -Z back face   (normal  0, 0,-1)
-		MakeVert(0.5f, -0.5f, -0.5f, 0, 0, -1),
-		MakeVert(-0.5f, -0.5f, -0.5f, 0, 0, -1),
-		MakeVert(-0.5f, 0.5f, -0.5f, 0, 0, -1),
-		MakeVert(0.5f, 0.5f, -0.5f, 0, 0, -1),
-		// +X right face  (normal  1, 0, 0)
-		MakeVert(0.5f, -0.5f, 0.5f, 1, 0, 0),
-		MakeVert(0.5f, -0.5f, -0.5f, 1, 0, 0),
-		MakeVert(0.5f, 0.5f, -0.5f, 1, 0, 0),
-		MakeVert(0.5f, 0.5f, 0.5f, 1, 0, 0),
-		// -X left face   (normal -1, 0, 0)
-		MakeVert(-0.5f, -0.5f, -0.5f, -1, 0, 0),
-		MakeVert(-0.5f, -0.5f, 0.5f, -1, 0, 0),
-		MakeVert(-0.5f, 0.5f, 0.5f, -1, 0, 0),
-		MakeVert(-0.5f, 0.5f, -0.5f, -1, 0, 0),
-		// +Y top face    (normal  0, 1, 0)
-		MakeVert(-0.5f, 0.5f, 0.5f, 0, 1, 0),
-		MakeVert(0.5f, 0.5f, 0.5f, 0, 1, 0),
-		MakeVert(0.5f, 0.5f, -0.5f, 0, 1, 0),
-		MakeVert(-0.5f, 0.5f, -0.5f, 0, 1, 0),
-		// -Y bottom face (normal  0,-1, 0)
-		MakeVert(-0.5f, -0.5f, -0.5f, 0, -1, 0),
-		MakeVert(0.5f, -0.5f, -0.5f, 0, -1, 0),
-		MakeVert(0.5f, -0.5f, 0.5f, 0, -1, 0),
-		MakeVert(-0.5f, -0.5f, 0.5f, 0, -1, 0),
-	};
-
-	// Two triangles per face × 6 faces = 12 triangles = 36 indices.
-	// uint32 for consistency with the mega-buffer pipeline.
-	constexpr uint32_t Indices[] = {
-		0, 1, 2, 2, 3, 0,       // +Z front
-		4, 5, 6, 6, 7, 4,       // -Z back
-		8, 9, 10, 10, 11, 8,    // +X right
-		12, 13, 14, 14, 15, 12, // -X left
-		16, 17, 18, 18, 19, 16, // +Y top
-		20, 21, 22, 22, 23, 20, // -Y bottom
-	};
-
-	constexpr size_t VertexCount = sizeof(Vertices) / sizeof(Vertex);
-	constexpr size_t IndexCount  = sizeof(Indices) / sizeof(uint32_t);
+inline Vertex MakeVert(float px, float py, float pz, float nx, float ny, float nz)
+{
+	Vertex v{};
+	v.px        = px;
+	v.py        = py;
+	v.pz        = pz;
+	v.n_oct16x2 = OctEncode(nx, ny, nz);
+	v.u         = 0.0f;
+	v.v         = 0.0f;
+	v.t_oct16x2 = OctEncode(0.0f, 0.0f, 1.0f); // default tangent +Z
+	v.mask      = 0;
+	v.flags     = 0;
+	v.pad       = 0;
+	return v;
 }
+
+// 24 unique vertices — 4 per face — so each face can have its own
+// flat normal without sharing vertices across faces.
+// Winding: CCW front-face (Vulkan default).
+inline const Vertex Vertices[] = {
+	// +Z front face  (normal  0, 0, 1)
+	MakeVert(-0.5f, -0.5f, 0.5f, 0, 0, 1),
+	MakeVert(0.5f, -0.5f, 0.5f, 0, 0, 1),
+	MakeVert(0.5f, 0.5f, 0.5f, 0, 0, 1),
+	MakeVert(-0.5f, 0.5f, 0.5f, 0, 0, 1),
+	// -Z back face   (normal  0, 0,-1)
+	MakeVert(0.5f, -0.5f, -0.5f, 0, 0, -1),
+	MakeVert(-0.5f, -0.5f, -0.5f, 0, 0, -1),
+	MakeVert(-0.5f, 0.5f, -0.5f, 0, 0, -1),
+	MakeVert(0.5f, 0.5f, -0.5f, 0, 0, -1),
+	// +X right face  (normal  1, 0, 0)
+	MakeVert(0.5f, -0.5f, 0.5f, 1, 0, 0),
+	MakeVert(0.5f, -0.5f, -0.5f, 1, 0, 0),
+	MakeVert(0.5f, 0.5f, -0.5f, 1, 0, 0),
+	MakeVert(0.5f, 0.5f, 0.5f, 1, 0, 0),
+	// -X left face   (normal -1, 0, 0)
+	MakeVert(-0.5f, -0.5f, -0.5f, -1, 0, 0),
+	MakeVert(-0.5f, -0.5f, 0.5f, -1, 0, 0),
+	MakeVert(-0.5f, 0.5f, 0.5f, -1, 0, 0),
+	MakeVert(-0.5f, 0.5f, -0.5f, -1, 0, 0),
+	// +Y top face    (normal  0, 1, 0)
+	MakeVert(-0.5f, 0.5f, 0.5f, 0, 1, 0),
+	MakeVert(0.5f, 0.5f, 0.5f, 0, 1, 0),
+	MakeVert(0.5f, 0.5f, -0.5f, 0, 1, 0),
+	MakeVert(-0.5f, 0.5f, -0.5f, 0, 1, 0),
+	// -Y bottom face (normal  0,-1, 0)
+	MakeVert(-0.5f, -0.5f, -0.5f, 0, -1, 0),
+	MakeVert(0.5f, -0.5f, -0.5f, 0, -1, 0),
+	MakeVert(0.5f, -0.5f, 0.5f, 0, -1, 0),
+	MakeVert(-0.5f, -0.5f, 0.5f, 0, -1, 0),
+};
+
+// Two triangles per face × 6 faces = 12 triangles = 36 indices.
+// uint32 for consistency with the mega-buffer pipeline.
+constexpr uint32_t Indices[] = {
+	0,
+	1,
+	2,
+	2,
+	3,
+	0, // +Z front
+	4,
+	5,
+	6,
+	6,
+	7,
+	4, // -Z back
+	8,
+	9,
+	10,
+	10,
+	11,
+	8, // +X right
+	12,
+	13,
+	14,
+	14,
+	15,
+	12, // -X left
+	16,
+	17,
+	18,
+	18,
+	19,
+	16, // +Y top
+	20,
+	21,
+	22,
+	22,
+	23,
+	20, // -Y bottom
+};
+
+constexpr size_t VertexCount = sizeof(Vertices) / sizeof(Vertex);
+constexpr size_t IndexCount  = sizeof(Indices) / sizeof(uint32_t);
+} // namespace CubeMesh

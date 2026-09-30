@@ -45,15 +45,36 @@ enum class NetMessageType : uint8_t
 inline const char* NetMessageTypeName(uint8_t type)
 {
 	static constexpr const char* kNames[] = {
-		"ConnectionHandshake", "InputFrame", "StateCorrection", "EntitySpawn",
-		"EntityDestroy", "Ping", "Pong", "FlowEvent",
-		"PlayerBeginRequest", "PlayerBeginConfirm", "PlayerBeginReject", "ClockSync",
-		"TravelNotify", "LevelReady", "GameModeManifest", "ClientModeManifest",
-		"SoulRPC", "ConstructSpawn", "ConstructDestroy", "EntityDelta", "InputFrameDelta",
-		"EntityActivate", "StreamLoad", "StreamReady", "ChunkActivate", "Custom", "Unknown",
+		"ConnectionHandshake",
+		"InputFrame",
+		"StateCorrection",
+		"EntitySpawn",
+		"EntityDestroy",
+		"Ping",
+		"Pong",
+		"FlowEvent",
+		"PlayerBeginRequest",
+		"PlayerBeginConfirm",
+		"PlayerBeginReject",
+		"ClockSync",
+		"TravelNotify",
+		"LevelReady",
+		"GameModeManifest",
+		"ClientModeManifest",
+		"SoulRPC",
+		"ConstructSpawn",
+		"ConstructDestroy",
+		"EntityDelta",
+		"InputFrameDelta",
+		"EntityActivate",
+		"StreamLoad",
+		"StreamReady",
+		"ChunkActivate",
+		"Custom",
+		"Unknown",
 	};
 	static_assert(static_cast<size_t>(NetMessageType::Count) == 27,
-				  "NetMessageTypeName table out of sync with NetMessageType enum");
+		"NetMessageTypeName table out of sync with NetMessageType enum");
 	return type < static_cast<uint8_t>(NetMessageType::Count) ? kNames[type] : "???";
 }
 
@@ -74,21 +95,17 @@ static constexpr size_t AckBitfield_Bytes      = 4;                         // 3
 static constexpr size_t AckedClientFrame_Bytes = 4;                         // last client frame the server has consumed input for
 
 static constexpr size_t PacketHeader_ExpectedSize =
-	PacketType_Bytes + PacketFlags_Bytes + PayloadSize_Bytes +
-	SequenceNum_Bytes + FrameNumber_Bytes +
-	SenderID_Bytes + 1 /* padding */ + Timestamp_Bytes +
-	AckSequenceNum_Bytes + AckBitfield_Bytes +
-	AckedClientFrame_Bytes;
+	PacketType_Bytes + PacketFlags_Bytes + PayloadSize_Bytes + SequenceNum_Bytes + FrameNumber_Bytes + SenderID_Bytes + 1 /* padding */ + Timestamp_Bytes + AckSequenceNum_Bytes + AckBitfield_Bytes + AckedClientFrame_Bytes;
 
 // ---------------------------------------------------------------------------
 // Packet flags
 // ---------------------------------------------------------------------------
 namespace PacketFlag
 {
-	static constexpr uint8_t HasAck       = 1 << 0; // AckSequenceNum + AckBitfield are meaningful
-	static constexpr uint8_t HasTimestamp = 1 << 1; // Timestamp is meaningful (default on)
-	static constexpr uint8_t DefaultFlags = HasTimestamp;
-}
+static constexpr uint8_t HasAck       = 1 << 0; // AckSequenceNum + AckBitfield are meaningful
+static constexpr uint8_t HasTimestamp = 1 << 1; // Timestamp is meaningful (default on)
+static constexpr uint8_t DefaultFlags = HasTimestamp;
+} // namespace PacketFlag
 
 // ---------------------------------------------------------------------------
 // PacketHeader — prepended to every network message.
@@ -125,7 +142,7 @@ struct PacketHeader
 	const char* ToString(char* buf, size_t sz) const
 	{
 		snprintf(buf, sz, "%s | sender=%u | seq=%u | frame=%u | sz=%u",
-				 NetMessageTypeName(Type), SenderID, SequenceNum, FrameNumber, PayloadSize);
+			NetMessageTypeName(Type), SenderID, SequenceNum, FrameNumber, PayloadSize);
 		return buf;
 	}
 
@@ -151,7 +168,7 @@ struct PacketHeader
 };
 
 static_assert(sizeof(PacketHeader) == PacketHeader_ExpectedSize,
-			  "PacketHeader size mismatch — if you changed a *_Bytes constant, update the struct layout to match");
+	"PacketHeader size mismatch — if you changed a *_Bytes constant, update the struct layout to match");
 static_assert(sizeof(PacketHeader) == 28, "PacketHeader must be 28 bytes");
 
 // ---------------------------------------------------------------------------
@@ -183,7 +200,7 @@ struct BaseNetPayload
 	static constexpr void ValidateTrivial()
 	{
 		static_assert(std::is_trivially_copyable_v<TDerived>,
-					  "Net payloads must be trivially copyable -- no vtable, no std::string, no unique_ptr");
+			"Net payloads must be trivially copyable -- no vtable, no std::string, no unique_ptr");
 	}
 };
 
@@ -385,16 +402,16 @@ static_assert(sizeof(PlayerBeginRequestPayload) == 32, "PlayerBeginRequestPayloa
 // ---------------------------------------------------------------------------
 struct PlayerBeginConfirmPayload
 {
-	uint32_t NetHandle;     // ConstructNetHandle.Value for the spawned body Construct
-	uint32_t PredictionID;  // Echoed from PlayerBeginRequestPayload
+	uint32_t NetHandle;        // ConstructNetHandle.Value for the spawned body Construct
+	uint32_t PredictionID;     // Echoed from PlayerBeginRequestPayload
 	SimFloat PosX, PosY, PosZ; // Authoritative spawn position
-	uint16_t Generation;    // ConstructRef generation — client uses this to form a valid ConstructRef
+	uint16_t Generation;       // ConstructRef generation — client uses this to form a valid ConstructRef
 	uint16_t _Pad;
 	uint32_t SpawnFrame; // Server sim frame at which the spawn was confirmed.
-	// Client seeds LastServerAckedFrame = SpawnFrame - 1 so
-	// TickInputSend() starts its window at SpawnFrame, not frame 1.
-	// Server seeds LastAckedClientFrame similarly so the first ACK
-	// heartbeat doesn't retroactively open a huge unacked window.
+						 // Client seeds LastServerAckedFrame = SpawnFrame - 1 so
+						 // TickInputSend() starts its window at SpawnFrame, not frame 1.
+						 // Server seeds LastAckedClientFrame similarly so the first ACK
+						 // heartbeat doesn't retroactively open a huge unacked window.
 };
 
 static_assert(sizeof(PlayerBeginConfirmPayload) == 28, "PlayerBeginConfirmPayload must be 28 bytes");
@@ -516,10 +533,10 @@ static_assert(sizeof(TravelPayload) == 256, "TravelPayload must be 256 bytes");
 // ---------------------------------------------------------------------------
 struct StreamLoadPayload
 {
-	int64_t  AssetID;        // content AssetID — client resolves to path via AssetRegistry
-	uint16_t InstanceIndex;  // 0 for first load; increment for multiple instances of the same asset
-	uint8_t  bAutoActivate;  // 1 = activate immediately on load; 0 = wait for ChunkActivate
-	uint8_t  _Pad[5];
+	int64_t AssetID;        // content AssetID — client resolves to path via AssetRegistry
+	uint16_t InstanceIndex; // 0 for first load; increment for multiple instances of the same asset
+	uint8_t bAutoActivate;  // 1 = activate immediately on load; 0 = wait for ChunkActivate
+	uint8_t _Pad[5];
 };
 
 static_assert(sizeof(StreamLoadPayload) == 16, "StreamLoadPayload must be 16 bytes");
@@ -531,9 +548,9 @@ static_assert(sizeof(StreamLoadPayload) == 16, "StreamLoadPayload must be 16 byt
 // ---------------------------------------------------------------------------
 struct StreamReadyPayload
 {
-	int64_t  AssetID;
+	int64_t AssetID;
 	uint16_t InstanceIndex;
-	uint8_t  _Pad[6];
+	uint8_t _Pad[6];
 };
 
 static_assert(sizeof(StreamReadyPayload) == 16, "StreamReadyPayload must be 16 bytes");
@@ -545,9 +562,9 @@ static_assert(sizeof(StreamReadyPayload) == 16, "StreamReadyPayload must be 16 b
 // ---------------------------------------------------------------------------
 struct ChunkActivatePayload
 {
-	int64_t  AssetID;
+	int64_t AssetID;
 	uint16_t InstanceIndex;
-	uint8_t  _Pad[6];
+	uint8_t _Pad[6];
 };
 
 static_assert(sizeof(ChunkActivatePayload) == 16, "ChunkActivatePayload must be 16 bytes");
@@ -632,7 +649,7 @@ struct PredictionLedger
 		{
 			if (!e.Active)
 			{
-				e = {predID, frame, ref, uuid, true};
+				e = { predID, frame, ref, uuid, true };
 				return;
 			}
 		}
@@ -640,7 +657,8 @@ struct PredictionLedger
 
 	Entry* Find(uint32_t predID)
 	{
-		for (auto& e : Entries) if (e.Active && e.PredictionID == predID) return &e;
+		for (auto& e : Entries)
+			if (e.Active && e.PredictionID == predID) return &e;
 		return nullptr;
 	}
 
@@ -677,9 +695,11 @@ struct InputSnapshot
 	SimFloat MouseDY     = SimFloat(0.f);
 	uint8_t MouseButtons = 0;
 	uint8_t _Pad[3]      = {};
+	SimFloat ViewYaw     = SimFloat(0.f); // absolute control rotation (radians) — persistent, not a delta
+	SimFloat ViewPitch   = SimFloat(0.f);
 };
 
-static_assert(sizeof(InputSnapshot) == 76, "InputSnapshot must be 76 bytes");
+static_assert(sizeof(InputSnapshot) == 84, "InputSnapshot must be 84 bytes");
 
 // Window sizing: must cover the full unacked span between server ACKs.
 // At 512Hz sim / 30Hz NetworkUpdateHz, the server ACKs every ~17 sim frames.
@@ -700,38 +720,14 @@ struct NetInputFrame
 	NetInputEvent Events[8]; // discrete events that occurred within this frame
 };
 
-static_assert(sizeof(NetInputFrame) == 4 + 76 + 4 + 64, "NetInputFrame size mismatch");
-
-// ---------------------------------------------------------------------------
-// InputDeltaFlags — bitmask in each delta frame's Flags byte.
-//
-// Delta frame wire layout (each frame after the base):
-//   [Frame:        4 bytes]
-//   [Flags:        1 byte]   InputDeltaFlags bitmask
-//   [KeyState:    64 bytes]  if HasKeyState  — held-key bitfield (changed from prev frame)
-//   [MouseDX:      4 bytes]  if HasMouseDX
-//   [MouseDY:      4 bytes]  if HasMouseDY
-//   [MouseButtons: 1 byte]   if HasMouseButtons — changed from prev frame
-//   [EventCount:   1 byte]   if HasEvents
-//   [Events: EventCount*8]   if HasEvents
-// ---------------------------------------------------------------------------
-namespace InputDeltaFlags
-{
-	static constexpr uint8_t HasKeyState     = 1 << 0; // KeyState changed from previous frame
-	static constexpr uint8_t HasMouseDX      = 1 << 1; // MouseDX is non-zero this frame
-	static constexpr uint8_t HasMouseDY      = 1 << 2; // MouseDY is non-zero this frame
-	static constexpr uint8_t HasMouseButtons = 1 << 3; // MouseButtons changed from previous frame
-	static constexpr uint8_t HasEvents       = 1 << 4; // discrete events present
-}
+static_assert(sizeof(NetInputFrame) == 156, "NetInputFrame must be 156 bytes");
 
 // Header for InputFrameDelta payload (NetMessageType::InputFrameDelta).
-// Wire layout after this header:
-//   [NetInputFrame base: sizeof(NetInputFrame) bytes]  full first frame in the window
-//   [DeltaFrame[1..FrameCount-1]: variable]            one per remaining frame
+// Encoded and decoded only by InputWindowCodec, which documents the layout after it.
 struct InputDeltaPacketHeader
 {
-	uint32_t FirstFrame;  // absolute frame number of Frames[0]
-	uint32_t FrameCount;  // total frames in this window (base + deltas)
+	uint32_t FirstFrame; // absolute frame number of Frames[0]
+	uint32_t FrameCount; // total frames in this window (base + deltas)
 };
 static_assert(sizeof(InputDeltaPacketHeader) == 8, "InputDeltaPacketHeader must be 8 bytes");
 
@@ -746,5 +742,4 @@ struct InputWindowPacket
 };
 
 static_assert(sizeof(InputWindowPacket) == 8 + MaxWindowFrames * sizeof(NetInputFrame),
-			  "InputWindowPacket size mismatch");
-
+	"InputWindowPacket size mismatch");

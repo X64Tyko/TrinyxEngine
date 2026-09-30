@@ -1,0 +1,4 @@
+# Third-party code keeps its upstream formatting.
+libs/**
+vendor/**
+cmake-build-*/**

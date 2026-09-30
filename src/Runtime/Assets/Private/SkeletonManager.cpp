@@ -17,7 +17,7 @@ bool SkeletonManager::Initialize(VulkanMemory* vkMem)
 		MAX_TOTAL_BONES * sizeof(GpuBoneData),
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		GpuMemoryDomain::PersistentMapped,
-		/*requestDeviceAddress=*/ true);
+		/*requestDeviceAddress=*/true);
 
 	if (!BoneDataBuffer.IsValid())
 	{
@@ -31,7 +31,7 @@ bool SkeletonManager::Initialize(VulkanMemory* vkMem)
 		MAX_TOTAL_BONES * sizeof(uint32_t),
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		GpuMemoryDomain::PersistentMapped,
-		/*requestDeviceAddress=*/ true);
+		/*requestDeviceAddress=*/true);
 
 	if (!BoneParentBuffer.IsValid())
 	{
@@ -46,7 +46,7 @@ bool SkeletonManager::Initialize(VulkanMemory* vkMem)
 		MAX_SKELETON_SLOTS * sizeof(GpuSkeletonSlotInfo),
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		GpuMemoryDomain::PersistentMapped,
-		/*requestDeviceAddress=*/ true);
+		/*requestDeviceAddress=*/true);
 
 	if (!SkeletonSlotBuffer.IsValid())
 	{
@@ -57,11 +57,14 @@ bool SkeletonManager::Initialize(VulkanMemory* vkMem)
 	std::memset(SkeletonSlotBuffer.MappedPtr, 0, MAX_SKELETON_SLOTS * sizeof(GpuSkeletonSlotInfo));
 
 	LOG_ENG_INFO_F("[SkeletonManager] Initialized (max bones: %u, buffer: %.1f MB)",
-				   MAX_TOTAL_BONES,
-				   static_cast<float>(MAX_TOTAL_BONES * sizeof(GpuBoneData)) / (1024.f * 1024.f));
+		MAX_TOTAL_BONES,
+		static_cast<float>(MAX_TOTAL_BONES * sizeof(GpuBoneData)) / (1024.f * 1024.f));
 
 	AssetRegistry::Get().RegisterUploadChecker(
-		[](void*) { return SkeletonManager::Get().IsUploadComplete(); }, nullptr);
+		[](void*)
+	{
+		return SkeletonManager::Get().IsUploadComplete();
+	}, nullptr);
 	return true;
 }
 
@@ -95,22 +98,22 @@ uint32_t SkeletonManager::CommitToSlot(const SkeletonAsset& asset, AssetID id)
 		return UINT32_MAX;
 	}
 
-	uint32_t slotID    = SkeletonCount++;
-	SlotIDs[slotID]    = id;
+	uint32_t slotID = SkeletonCount++;
+	SlotIDs[slotID] = id;
 
 	if (id.IsValid()) AssetRegistry::Get().RegisterSlot(AssetType::Skeleton, slotID, id);
 
 	Slots[slotID].boneOffset = NextBoneOffset;
 	Slots[slotID].boneCount  = asset.boneCount;
 
-	auto* gpuSlots = static_cast<GpuSkeletonSlotInfo*>(SkeletonSlotBuffer.MappedPtr);
+	auto* gpuSlots              = static_cast<GpuSkeletonSlotInfo*>(SkeletonSlotBuffer.MappedPtr);
 	gpuSlots[slotID].boneOffset = NextBoneOffset;
 	gpuSlots[slotID].boneCount  = asset.boneCount;
 
 	// Fill CPU shadow (needed synchronously for chain walks / socket queries).
 	for (uint32_t i = 0; i < asset.boneCount; ++i)
 		std::memcpy(BoneData[NextBoneOffset + i].inverseBindPose,
-		            asset.bones[i].inverseBindPose, sizeof(float) * 16);
+			asset.bones[i].inverseBindPose, sizeof(float) * 16);
 
 	CpuCopies[slotID] = asset; // full copy — bones + sockets retained for chain walks
 
@@ -123,8 +126,8 @@ uint32_t SkeletonManager::CommitToSlot(const SkeletonAsset& asset, AssetID id)
 	// Fill GPU bone buffers synchronously — PersistentMapped, so writes are immediately
 	// visible to the GPU. Mirrors MeshManager's synchronous approach so that OnLoaded
 	// fires on the calling (Logic) thread with valid FieldProxy cursors.
-	GpuBoneData* gpuBones   = static_cast<GpuBoneData*>(BoneDataBuffer.MappedPtr) + NextBoneOffset;
-	uint32_t*    gpuParents = static_cast<uint32_t*>(BoneParentBuffer.MappedPtr) + NextBoneOffset;
+	GpuBoneData* gpuBones = static_cast<GpuBoneData*>(BoneDataBuffer.MappedPtr) + NextBoneOffset;
+	uint32_t* gpuParents  = static_cast<uint32_t*>(BoneParentBuffer.MappedPtr) + NextBoneOffset;
 	for (uint32_t i = 0; i < asset.boneCount; ++i)
 	{
 		std::memcpy(gpuBones[i].inverseBindPose, asset.bones[i].inverseBindPose, sizeof(float) * 16);
@@ -145,7 +148,7 @@ uint32_t SkeletonManager::CommitToSlot(const SkeletonAsset& asset, AssetID id)
 	NextBoneOffset += asset.boneCount;
 
 	LOG_ENG_INFO_F("[SkeletonManager] Loaded skeleton slot %u (%u bones, %u sockets)",
-				   slotID, asset.boneCount, asset.socketCount);
+		slotID, asset.boneCount, asset.socketCount);
 	return slotID;
 }
 
@@ -194,7 +197,7 @@ uint32_t SkeletonManager::LoadSkeleton(TnxName name)
 	if (!entry)
 	{
 		LOG_ENG_ERROR_F("[SkeletonManager] LoadSkeleton: TnxName '%s' not in registry",
-						name.GetStr());
+			name.GetStr());
 		return UINT32_MAX;
 	}
 	return LoadSkeleton(entry->ID);

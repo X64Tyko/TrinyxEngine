@@ -29,7 +29,7 @@ public:
 	{
 		// Accumulate gravity
 		forces.ForceY += body.VelY * 0.0f; // placeholder — Jolt will own this path
-		body.VelY     += Gravity * dt;
+		body.VelY += Gravity * dt;
 
 		// Integrate velocity into position
 		transform.PosX += body.VelX * dt;

@@ -40,6 +40,6 @@ public:
 	}
 
 	const char* Title;
-	bool bVisible            = true;
-	bool bForceMainViewport  = false;
+	bool bVisible           = true;
+	bool bForceMainViewport = false;
 };

@@ -12,21 +12,21 @@
 class NodeScriptPanel : public EditorPanel
 {
 public:
-    NodeScriptPanel();
-    ~NodeScriptPanel() override = default;
+	NodeScriptPanel();
+	~NodeScriptPanel() override = default;
 
-    void Draw(EditorState& state) override;
+	void Draw(EditorState& state) override;
 
 private:
-    NodeGraphCanvas Canvas;
+	NodeGraphCanvas Canvas;
 
-    char        TargetEntityName[64] = "EMyEntity";
-    char        OutputPath[512]      = {};
-    std::string GeneratedCode;
-    bool        bShowCodePreview     = false;
-    char        StatusMsg[1024]      = {};
-    bool        bStatusError         = false;
+	char TargetEntityName[64] = "EMyEntity";
+	char OutputPath[512]      = {};
+	std::string GeneratedCode;
+	bool bShowCodePreview = false;
+	char StatusMsg[1024]  = {};
+	bool bStatusError     = false;
 
-    void GenerateCode();
-    bool ExportToFile();
+	void GenerateCode();
+	bool ExportToFile();
 };

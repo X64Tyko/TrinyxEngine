@@ -35,17 +35,17 @@
 //   8       4     DataSize: payload byte count (little-endian uint32)
 //   12      N     Payload: verbatim compressed source bytes
 // ---------------------------------------------------------------------------
-static constexpr uint32_t kTnxAudioMagic   = 0x41584E54u; // "TNXA" little-endian
-static constexpr uint8_t  kTnxAudioVersion = 1;
-static constexpr uint8_t  kInnerWAV        = 0;
-static constexpr uint8_t  kInnerOGG        = 1;
+static constexpr uint32_t kTnxAudioMagic  = 0x41584E54u; // "TNXA" little-endian
+static constexpr uint8_t kTnxAudioVersion = 1;
+static constexpr uint8_t kInnerWAV        = 0;
+static constexpr uint8_t kInnerOGG        = 1;
 
 #pragma pack(push, 1)
 struct TnxAudioHeader
 {
 	uint32_t Magic;
-	uint8_t  Version;
-	uint8_t  InnerFormat;
+	uint8_t Version;
+	uint8_t InnerFormat;
 	uint16_t Reserved;
 	uint32_t DataSize;
 };
@@ -81,8 +81,8 @@ static SoundAsset* DecodeWAVFromMemory(const uint8_t* data, uint32_t size, const
 	}
 
 	SDL_AudioSpec spec{};
-	uint8_t* buf  = nullptr;
-	uint32_t len  = 0;
+	uint8_t* buf = nullptr;
+	uint32_t len = 0;
 
 	if (!SDL_LoadWAV_IO(io, true, &spec, &buf, &len))
 	{
@@ -101,7 +101,7 @@ static SoundAsset* DecodeWAVFromMemory(const uint8_t* data, uint32_t size, const
 	}
 	else if (spec.format == SDL_AUDIO_S16)
 	{
-		int n = static_cast<int>(len / sizeof(int16_t));
+		int n      = static_cast<int>(len / sizeof(int16_t));
 		asset->PCM = S16ToFloat(reinterpret_cast<int16_t*>(buf), n);
 	}
 	else
@@ -135,7 +135,7 @@ static SoundAsset* DecodeOGGFromMemory(const uint8_t* data, uint32_t size, const
 	short* decoded = nullptr;
 
 	int frameCount = stb_vorbis_decode_memory(data, static_cast<int>(size),
-	                                           &channels, &sampleRate, &decoded);
+		&channels, &sampleRate, &decoded);
 	if (frameCount < 0 || !decoded)
 	{
 		LOG_ENG_ERROR_F("[Audio] stb_vorbis_decode_memory failed for '%s'", logName);
@@ -175,8 +175,8 @@ SoundAsset* LoadSound(const char* path)
 
 		TnxAudioHeader hdr{};
 		if (fread(&hdr, sizeof(hdr), 1, f) != 1
-		    || hdr.Magic != kTnxAudioMagic
-		    || hdr.Version != kTnxAudioVersion)
+			|| hdr.Magic != kTnxAudioMagic
+			|| hdr.Version != kTnxAudioVersion)
 		{
 			LOG_ENG_ERROR_F("[Audio] LoadSound: invalid .tnxaudio header in '%s'", path);
 			fclose(f);
@@ -205,7 +205,7 @@ SoundAsset* LoadSound(const char* path)
 
 		if (asset)
 			LOG_ENG_INFO_F("[Audio] Loaded .tnxaudio '%s': %dHz %dch %d frames",
-			               path, asset->SampleRate, asset->Channels, asset->Frames);
+				path, asset->SampleRate, asset->Channels, asset->Frames);
 		return asset;
 	}
 
@@ -222,7 +222,7 @@ SoundAsset* LoadSound(const char* path)
 			return nullptr;
 		}
 
-		auto* asset = new SoundAsset();
+		auto* asset       = new SoundAsset();
 		asset->Channels   = spec.channels;
 		asset->SampleRate = spec.freq;
 
@@ -233,7 +233,7 @@ SoundAsset* LoadSound(const char* path)
 		}
 		else if (spec.format == SDL_AUDIO_S16)
 		{
-			int n = static_cast<int>(len / sizeof(int16_t));
+			int n      = static_cast<int>(len / sizeof(int16_t));
 			asset->PCM = S16ToFloat(reinterpret_cast<int16_t*>(buf), n);
 		}
 		else
@@ -258,7 +258,7 @@ SoundAsset* LoadSound(const char* path)
 		SDL_free(buf);
 		asset->Frames = static_cast<int>(asset->PCM.size()) / asset->Channels;
 		LOG_ENG_INFO_F("[Audio] Loaded WAV '%s': %dHz %dch %d frames",
-		               path, asset->SampleRate, asset->Channels, asset->Frames);
+			path, asset->SampleRate, asset->Channels, asset->Frames);
 		return asset;
 	}
 
@@ -284,7 +284,7 @@ SoundAsset* LoadSound(const char* path)
 		free(decoded);
 
 		LOG_ENG_INFO_F("[Audio] Loaded OGG '%s': %dHz %dch %d frames",
-		               path, asset->SampleRate, asset->Channels, asset->Frames);
+			path, asset->SampleRate, asset->Channels, asset->Frames);
 		return asset;
 	}
 
@@ -362,7 +362,7 @@ bool ExportTnxAudio(const char* srcPath, const char* dstPath)
 	hdr.DataSize    = static_cast<uint32_t>(payload.size());
 
 	bool ok = (fwrite(&hdr, sizeof(hdr), 1, dst) == 1)
-	       && (fwrite(payload.data(), 1, payload.size(), dst) == payload.size());
+			  && (fwrite(payload.data(), 1, payload.size(), dst) == payload.size());
 	fclose(dst);
 
 	if (!ok)

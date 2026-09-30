@@ -43,7 +43,7 @@ struct ProjectileSetup
 /// @brief Spawn CubeEntity instances and write field data from @p setups.
 /// @param[out] outIds Receives the @c EntityHandle of each spawned entity.
 inline void WriteCubeSetups(Registry* reg, const std::vector<CubeSetup>& setups,
-                             std::vector<EntityHandle>& outIds)
+	std::vector<EntityHandle>& outIds)
 {
 	int32_t totalCount               = static_cast<int32_t>(setups.size());
 	std::vector<EntityHandle> newIds = reg->Create<CubeEntity<>>(totalCount);
@@ -104,7 +104,7 @@ inline void WriteCubeSetups(Registry* reg, const std::vector<CubeSetup>& setups,
 /// @brief Spawn Projectile instances and write field data from @p setups.
 /// @param[out] outIds Receives the @c EntityHandle of each spawned entity.
 inline void WriteProjectileSetups(Registry* reg, const std::vector<ProjectileSetup>& setups,
-                                   std::vector<EntityHandle>& outIds)
+	std::vector<EntityHandle>& outIds)
 {
 	int32_t totalCount               = static_cast<int32_t>(setups.size());
 	std::vector<EntityHandle> newIds = reg->Create<Projectile<>>(totalCount);
@@ -153,7 +153,7 @@ inline void WriteProjectileSetups(Registry* reg, const std::vector<ProjectileSet
 /// @brief Spawn SuperCube instances and write field data from @p setups.
 /// @param[out] outIds Receives the @c EntityHandle of each spawned entity.
 inline void WriteSuperCubeSetups(Registry* reg, const std::vector<CubeSetup>& setups,
-                                  std::vector<EntityHandle>& outIds)
+	std::vector<EntityHandle>& outIds)
 {
 	int32_t totalCount               = static_cast<int32_t>(setups.size());
 	std::vector<EntityHandle> newIds = reg->Create<SuperCube<>>(totalCount);

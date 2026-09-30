@@ -18,15 +18,15 @@
 template <FieldWidth WIDTH = FieldWidth::Scalar>
 class EPlayerCharacter : public ESkeletalEntity<EPlayerCharacter, WIDTH>
 {
-    TNX_REGISTER_SCHEMA(EPlayerCharacter, ESkeletalEntity)
-	
+	TNX_REGISTER_SCHEMA(EPlayerCharacter, ESkeletalEntity)
+
 	void Initialize()
-    {
-    	ESkeletalEntity<EPlayerCharacter, WIDTH>::Initialize();
-    }
-	
+	{
+		ESkeletalEntity<EPlayerCharacter, WIDTH>::Initialize();
+	}
+
 	void PostPhysics(SimFloat dt)
-    {
-    	ESkeletalEntity<EPlayerCharacter, WIDTH>::PostPhysics(dt);
-    }
+	{
+		ESkeletalEntity<EPlayerCharacter, WIDTH>::PostPhysics(dt);
+	}
 };

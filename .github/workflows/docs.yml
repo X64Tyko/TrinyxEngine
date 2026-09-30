@@ -18,6 +18,8 @@ permissions:
 jobs:
   build-docs:
     name: Generate Doxygen
+    # GitHub Pages isn't available for private repos on the free plan.
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 

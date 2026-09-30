@@ -21,11 +21,13 @@ Trinyx uses a **Visibility Buffer (VizBuffer)** architecture. The hardware raste
 Phase 1 of the full pipeline is operational:
 
 - **Raw Vulkan** — volk 1.4.304 + VMA 3.3.0 (`vk::raii::`)
-- **Slang shaders** — `predicate.slang`, `prefix_sum.slang`, `scatter.slang`, `cube.vert`, `cube.frag`
+- **Slang shaders** — compute: `predicate`, `prefix_sum`, `scatter`, `build_draws`, `sort_instances`, `skinning`; graphics: `cube.vert`, `cube.frag`, viewport gradient
 - **Buffer Device Address** — `GpuFrameData` struct holds all BDAs; no per-frame descriptor set updates
-- **3-pass compute pipeline** — predicate → prefix_sum → scatter (see [GPU Pipeline](GPU-Pipeline.md))
+- **5-pass compute pipeline** — predicate → prefix_sum → scatter → build_draws → sort_instances (see [GPU Pipeline](GPU-Pipeline.md))
+- **Per-mesh indirect draws** — one `DrawIndexedIndirect` command per mesh type, instances sorted by mesh
+- **GPU skinning** — compute skinning for skeletal entities with indirect dispatch
+- **Shading** — a single directional light (Lambert). No textures, materials, shadows, or post-processing yet
 - **5 PersistentMapped field slabs** — cycle independently from 2 GPU frame-in-flight slots, decoupling Logic from VSync
-- **`DrawIndexedIndirect`** — driven by the scatter pass `DrawArgs.instanceCount`
 - **Dirty-bit-driven partial upload** — only modified entities uploaded per frame (see [Dirty Bit Upload](Dirty-Bit-Upload.md))
 
 ---
@@ -99,6 +101,10 @@ Transparency frame budget goal: **< 4.0 ms** within a 16.6 ms frame.
 | Item | Status |
 |---|---|
 | Frustum culling + HZB test in predicate pass | Pending |
+| Texture pipeline (import, compression, mips, streaming) | Not yet designed |
+| Material model and authoring | Not yet designed |
+| Shadows | Not yet designed |
+| Tonemapping and post-process stack | Not yet designed |
 | State-sorted rendering (64-bit sort keys, GPU radix sort) | Designed |
 | VizBuffer raster pass + HZB generation | Designed |
 | Material resolve compute pass | Designed |

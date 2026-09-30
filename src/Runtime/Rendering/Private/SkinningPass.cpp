@@ -13,7 +13,11 @@ static std::vector<uint32_t> ReadSPIRV_Skin(const char* path)
 	fseek(f, 0, SEEK_END);
 	const long size = ftell(f);
 	fseek(f, 0, SEEK_SET);
-	if (size <= 0 || (size % 4) != 0) { fclose(f); return {}; }
+	if (size <= 0 || (size % 4) != 0)
+	{
+		fclose(f);
+		return {};
+	}
 	std::vector<uint32_t> code(static_cast<size_t>(size) / 4);
 	fread(code.data(), 1, static_cast<size_t>(size), f);
 	fclose(f);
@@ -21,14 +25,14 @@ static std::vector<uint32_t> ReadSPIRV_Skin(const char* path)
 }
 
 bool SkinningPass::Initialize(VkDevice device, VkPipelineLayout pipelineLayout,
-                               VulkanMemory* vkMem, uint32_t maxCachedEntities)
+	VulkanMemory* vkMem, uint32_t maxCachedEntities)
 {
 	// SkinMatrix: device-local (written by compute, read by vertex shader).
 	SkinMatrixBuffer = vkMem->AllocateBuffer(
 		static_cast<VkDeviceSize>(MaxSkeletalInstances) * MaxBonesPerEntity * sizeof(float) * 16,
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		GpuMemoryDomain::DeviceLocal,
-		/*requestDeviceAddress=*/ true);
+		/*requestDeviceAddress=*/true);
 
 	if (!SkinMatrixBuffer.IsValid())
 	{
@@ -41,7 +45,7 @@ bool SkinningPass::Initialize(VkDevice device, VkPipelineLayout pipelineLayout,
 		static_cast<VkDeviceSize>(MaxSkeletalInstances) * sizeof(uint32_t),
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		GpuMemoryDomain::DeviceLocal,
-		/*requestDeviceAddress=*/ true);
+		/*requestDeviceAddress=*/true);
 
 	if (!SkeletalListBuffer.IsValid())
 	{
@@ -55,7 +59,7 @@ bool SkinningPass::Initialize(VkDevice device, VkPipelineLayout pipelineLayout,
 		static_cast<VkDeviceSize>(maxCachedEntities) * sizeof(uint32_t),
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 		GpuMemoryDomain::DeviceLocal,
-		/*requestDeviceAddress=*/ true);
+		/*requestDeviceAddress=*/true);
 
 	if (!SkeletalIdxByEntityBuffer.IsValid())
 	{
@@ -68,10 +72,9 @@ bool SkinningPass::Initialize(VkDevice device, VkPipelineLayout pipelineLayout,
 	// y=1 and z=1 are set here and never changed.
 	SkeletalDispatchArgsBuffer = vkMem->AllocateBuffer(
 		sizeof(uint32_t) * 3,
-		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
-		VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 		GpuMemoryDomain::PersistentMapped,
-		/*requestDeviceAddress=*/ true);
+		/*requestDeviceAddress=*/true);
 
 	if (!SkeletalDispatchArgsBuffer.IsValid())
 	{
@@ -79,9 +82,9 @@ bool SkinningPass::Initialize(VkDevice device, VkPipelineLayout pipelineLayout,
 		return false;
 	}
 	auto* args = static_cast<uint32_t*>(SkeletalDispatchArgsBuffer.MappedPtr);
-	args[0] = 0; // x = skeletalCount, zeroed each frame
-	args[1] = 1; // y = 1
-	args[2] = 1; // z = 1
+	args[0]    = 0; // x = skeletalCount, zeroed each frame
+	args[1]    = 1; // y = 1
+	args[2]    = 1; // z = 1
 
 	auto code = ReadSPIRV_Skin(TNX_SHADER_DIR "/compute/skinning.spv");
 	if (code.empty())
@@ -126,8 +129,8 @@ bool SkinningPass::Initialize(VkDevice device, VkPipelineLayout pipelineLayout,
 	PipeLayout = pipelineLayout;
 
 	LOG_ENG_INFO_F("[SkinningPass] Initialized (SkinMatrix: %.1f MB, SkeletalList: %u slots, pipeline ready)",
-	               static_cast<float>(MaxSkeletalInstances * MaxBonesPerEntity * sizeof(float) * 16) / (1024.f * 1024.f),
-	               MaxSkeletalInstances);
+		static_cast<float>(MaxSkeletalInstances * MaxBonesPerEntity * sizeof(float) * 16) / (1024.f * 1024.f),
+		MaxSkeletalInstances);
 	return true;
 }
 
@@ -138,7 +141,7 @@ void SkinningPass::Destroy(VkDevice device)
 		vkDestroyPipeline(device, Pipeline, nullptr);
 		Pipeline = VK_NULL_HANDLE;
 	}
-	SkinMatrixBuffer          = {};
+	SkinMatrixBuffer           = {};
 	SkeletalListBuffer         = {};
 	SkeletalIdxByEntityBuffer  = {};
 	SkeletalDispatchArgsBuffer = {};
@@ -152,6 +155,6 @@ void SkinningPass::Dispatch(VkCommandBuffer cmd, uint64_t fdAddr)
 
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline);
 	vkCmdPushConstants(cmd, PipeLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
-	                   0, sizeof(uint64_t), &fdAddr);
+		0, sizeof(uint64_t), &fdAddr);
 	vkCmdDispatchIndirect(cmd, static_cast<VkBuffer>(SkeletalDispatchArgsBuffer.Buffer), 0);
 }

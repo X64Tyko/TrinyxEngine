@@ -12,7 +12,6 @@ class ECamera : public EntityView<ECamera, WIDTH>
 	TNX_REGISTER_SCHEMA(ECamera, EntityView, Transform, CameraLayer)
 
 public:
-	CTransform<WIDTH>  Transform;
+	CTransform<WIDTH> Transform;
 	CCameraLayer<WIDTH> CameraLayer;
-
 };

@@ -15,23 +15,23 @@
 /// @param FuncName  Name of the resulting type alias.
 /// @param Size      Maximum number of simultaneous bindings (compile-time, stored in-place).
 #define DEFINE_FIXED_MULTICALLBACK(FuncName, Size, ...) \
-using FuncName = MultiCallback<void, true, Size, __VA_ARGS__>;
+	using FuncName = MultiCallback<void, true, Size, __VA_ARGS__>;
 
 /// @brief Declares a dynamically-growing MultiCallback type with void return and default capacity 16.
 /// @param FuncName  Name of the resulting type alias.
 #define DEFINE_MULTICAST_CALLBACK(FuncName, ...) \
-using FuncName = MultiCallback<void, false, 16, __VA_ARGS__>;
+	using FuncName = MultiCallback<void, false, 16, __VA_ARGS__>;
 
 /// @brief Declares a single-binding Callback type with a custom return type.
 /// @param RetVal    Return type of the callback.
 /// @param FuncName  Name of the resulting type alias.
 #define DEFINE_CALLBACK_RET(RetVal, FuncName, ...) \
-using FuncName = Callback<RetVal, __VA_ARGS__>;
+	using FuncName = Callback<RetVal, __VA_ARGS__>;
 
 /// @brief Declares a single-binding Callback type with void return.
 /// @param FuncName  Name of the resulting type alias.
 #define DEFINE_CALLBACK(FuncName, ...) \
-using FuncName = Callback<void, __VA_ARGS__>;
+	using FuncName = Callback<void, __VA_ARGS__>;
 
 #define DEFINE_CALLBACK_VOID(FuncName) \
 	using FuncName = Callback<void>;
@@ -49,9 +49,9 @@ using FuncName = Callback<void, __VA_ARGS__>;
 template <typename Ret, typename... Args>
 struct Callback
 {
-	using Fn      = Ret(*)(void*, Args...); ///< Thunk signature: context pointer followed by call args.
-	void* bindObj = nullptr;                ///< Context pointer passed as first argument to the thunk.
-	Fn    stub    = nullptr;                ///< Stateless dispatch thunk; null when unbound.
+	using Fn      = Ret (*)(void*, Args...); ///< Thunk signature: context pointer followed by call args.
+	void* bindObj = nullptr;                 ///< Context pointer passed as first argument to the thunk.
+	Fn stub       = nullptr;                 ///< Stateless dispatch thunk; null when unbound.
 
 	/// @brief Invoke the bound function. Undefined behaviour if @c IsBound() is false.
 	FORCE_INLINE Ret operator()(Args... args) const { return stub(bindObj, args...); }
@@ -59,11 +59,14 @@ struct Callback
 	/// @brief Bind a member function. Stores the object pointer and synthesizes a thunk.
 	/// @tparam T     Object type that owns @p MemFn.
 	/// @tparam MemFn Pointer-to-member to dispatch to.
-	template <typename T, Ret(T::*MemFn)(Args...)>
+	template <typename T, Ret (T::*MemFn)(Args...)>
 	void Bind(T* obj)
 	{
 		bindObj = obj;
-		stub    = [](void* ptr, Args... args) -> Ret { return (static_cast<T*>(ptr)->*MemFn)(args...); };
+		stub    = [](void* ptr, Args... args) -> Ret
+		{
+			return (static_cast<T*>(ptr)->*MemFn)(args...);
+		};
 	}
 
 	/// @brief Bind a free function or capturing-context thunk.
@@ -138,7 +141,7 @@ struct MultiCallback
 
 	/// @brief Bind a member function to the next available slot.
 	/// @note Asserts (via LOG_ENG_ERROR) if all slots are occupied.
-	template <typename T, Ret(T::*MemFn)(Args...)>
+	template <typename T, Ret (T::*MemFn)(Args...)>
 	void Bind(T* obj)
 	{
 		if constexpr (Fixed)
@@ -190,7 +193,8 @@ struct MultiCallback
 	}
 
 	/// @brief Invoke all bound listeners in registration order.
-	FORCE_INLINE void operator()(Args... args) const requires std::is_void_v<Ret>
+	FORCE_INLINE void operator()(Args... args) const
+		requires std::is_void_v<Ret>
 	{
 		for (auto& cb : Bindings)
 		{
@@ -199,16 +203,20 @@ struct MultiCallback
 	}
 
 	/// @brief Remove the first binding that matches @p obj and @p MemFn.
-	template <typename T, Ret(T::*MemFn)(Args...)>
+	template <typename T, Ret (T::*MemFn)(Args...)>
 	void Unbind(T* obj)
 	{
-		auto tempStub = [](void* ptr, Args... args) -> Ret { return (static_cast<T*>(ptr)->*MemFn)(args...); };
+		auto tempStub = [](void* ptr, Args... args) -> Ret
+		{
+			return (static_cast<T*>(ptr)->*MemFn)(args...);
+		};
 		for (size_t i = 0; i < Bindings.size(); ++i)
 		{
 			auto& cb = Bindings.Data[i];
 			if (cb.IsBound() && cb.bindObj == obj && tempStub == cb.stub)
 			{
-				if constexpr (Fixed) cb.Reset();
+				if constexpr (Fixed)
+					cb.Reset();
 				else
 				{
 					std::swap(cb, Bindings.Data.back());
@@ -227,7 +235,8 @@ struct MultiCallback
 			auto& cb = Bindings.Data[i];
 			if (cb.IsBound() && cb.stub == fn && cb.bindObj == ctx)
 			{
-				if constexpr (Fixed) cb.Reset();
+				if constexpr (Fixed)
+					cb.Reset();
 				else
 				{
 					std::swap(cb, Bindings.Data.back());
@@ -258,7 +267,8 @@ struct MultiCallback
 					Bindings.Data.pop_back();
 				}
 			}
-			else ++i;
+			else
+				++i;
 		}
 	}
 
@@ -267,7 +277,8 @@ struct MultiCallback
 	{
 		if constexpr (Fixed)
 		{
-			for (auto& cb : Bindings) cb.Reset();
+			for (auto& cb : Bindings)
+				cb.Reset();
 		}
 		else
 		{
@@ -280,10 +291,14 @@ struct MultiCallback
 	{
 		if constexpr (Fixed)
 		{
-			for (auto& cb : Bindings) { if (cb.IsBound()) return true; }
+			for (auto& cb : Bindings)
+			{
+				if (cb.IsBound()) return true;
+			}
 			return false;
 		}
-		else return !Bindings.empty();
+		else
+			return !Bindings.empty();
 	}
 };
 

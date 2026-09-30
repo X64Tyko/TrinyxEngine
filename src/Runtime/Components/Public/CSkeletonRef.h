@@ -19,7 +19,8 @@ struct CSkeletonRef : ComponentView<CSkeletonRef, WIDTH>
 		AssetType::Skeleton, // SkeletonID
 	};
 
-	void SetSkeleton(TnxName name) requires (WIDTH == FieldWidth::Scalar)
+	void SetSkeleton(TnxName name)
+		requires(WIDTH == FieldWidth::Scalar)
 	{
 		OnSkelLoad.Bind<CSkeletonRef, &CSkeletonRef::SetSkeletonID>(this);
 		OnSkelEvict.Bind<CSkeletonRef, &CSkeletonRef::ResetSkeletonID>(this);
@@ -27,10 +28,20 @@ struct CSkeletonRef : ComponentView<CSkeletonRef, WIDTH>
 	}
 
 private:
-	AssetLoad  OnSkelLoad;
+	AssetLoad OnSkelLoad;
 	AssetEvict OnSkelEvict;
-	void SetSkeletonID(uint32_t newID) requires (WIDTH == FieldWidth::Scalar) { SkeletonID = newID; OnSkelLoad.Reset(); }
-	void ResetSkeletonID()             requires (WIDTH == FieldWidth::Scalar) { SkeletonID = 0u;    OnSkelEvict.Reset(); }
+	void SetSkeletonID(uint32_t newID)
+		requires(WIDTH == FieldWidth::Scalar)
+	{
+		SkeletonID = newID;
+		OnSkelLoad.Reset();
+	}
+	void ResetSkeletonID()
+		requires(WIDTH == FieldWidth::Scalar)
+	{
+		SkeletonID = 0u;
+		OnSkelEvict.Reset();
+	}
 };
 
 TNX_REGISTER_COMPONENT(CSkeletonRef)

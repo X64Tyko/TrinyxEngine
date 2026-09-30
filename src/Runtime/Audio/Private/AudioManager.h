@@ -22,7 +22,7 @@ struct Voice
 	SDL_AudioStream* Stream   = nullptr;
 	SoundHandle Handle        = SoundHandle::Invalid();
 	const SoundAsset* Asset   = nullptr;
-	std::atomic<float> Volume = {1.f};
+	std::atomic<float> Volume = { 1.f };
 	float FadeTarget          = 0.f;
 	float FadeRate            = 0.f; // units/sec; negative = fading out
 	uint8_t Priority          = 128;

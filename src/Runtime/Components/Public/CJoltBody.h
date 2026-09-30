@@ -5,18 +5,18 @@
 // Shape type constants for the Shape field.
 namespace JoltShapeType
 {
-	constexpr uint32_t Box     = 0; // HalfExtentX/Y/Z = half-dimensions
-	constexpr uint32_t Sphere  = 1; // HalfExtentX = radius; Y/Z unused
-	constexpr uint32_t Capsule = 2; // HalfExtentX = radius; HalfExtentY = half-height; Z unused
-}
+constexpr uint32_t Box     = 0; // HalfExtentX/Y/Z = half-dimensions
+constexpr uint32_t Sphere  = 1; // HalfExtentX = radius; Y/Z unused
+constexpr uint32_t Capsule = 2; // HalfExtentX = radius; HalfExtentY = half-height; Z unused
+} // namespace JoltShapeType
 
 // Motion type constants for the Motion field.
 namespace JoltMotion
 {
-	constexpr uint32_t Static    = 0; // Immovable (floors, walls)
-	constexpr uint32_t Kinematic = 1; // Moved by code, not by forces
-	constexpr uint32_t Dynamic   = 2; // Fully simulated by Jolt
-}
+constexpr uint32_t Static    = 0; // Immovable (floors, walls)
+constexpr uint32_t Kinematic = 1; // Moved by code, not by forces
+constexpr uint32_t Dynamic   = 2; // Fully simulated by Jolt
+} // namespace JoltMotion
 
 // JoltBody component — declares that an entity participates in Jolt physics.
 //
@@ -37,7 +37,7 @@ template <FieldWidth WIDTH = FieldWidth::Scalar>
 struct CJoltBody : ComponentView<CJoltBody, WIDTH>
 {
 	TNX_VOLATILE_FIELDS(CJoltBody, Physics, Shape, HalfExtentX, HalfExtentY, HalfExtentZ,
-						Motion, Mass, Friction, Restitution, IsSensor)
+		Motion, Mass, Friction, Restitution, IsSensor)
 
 	// Shape geometry
 	UIntProxy<WIDTH> Shape;        // JoltShapeType:: constant

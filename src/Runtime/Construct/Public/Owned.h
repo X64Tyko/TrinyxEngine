@@ -31,7 +31,7 @@ template <typename T>
 class Owned
 {
 public:
-	Owned()  = default;
+	Owned() = default;
 
 	~Owned()
 	{

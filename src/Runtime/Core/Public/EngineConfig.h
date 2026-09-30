@@ -58,14 +58,14 @@ struct EngineConfig
 	int FixedUpdateHz         = Unset; ///< Fixed-timestep logic rate (e.g., 128 or 512 Hz).
 	int PhysicsUpdateInterval = Unset; ///< Fixed steps per Jolt step. 8 = 64 Hz physics at 512 Hz sim.
 
-	int NetworkUpdateHz   = Unset; ///< State-correction send rate ("tick rate"). Lower = less bandwidth.
-	int ClockSyncProbes   = Unset; ///< RTT probe count during Synchronizing before computing InputLead. Default: 8, range: 1–255.
-	int InputPollHz       = Unset; ///< Sentinel input-poll rate; higher = lower input latency.
-	int InputNetHz        = Unset; ///< Rate at which the client sends InputFrame packets to the Authority.
+	int NetworkUpdateHz = Unset; ///< State-correction send rate ("tick rate"). Lower = less bandwidth.
+	int ClockSyncProbes = Unset; ///< RTT probe count during Synchronizing before computing InputLead. Default: 8, range: 1–255.
+	int InputPollHz     = Unset; ///< Sentinel input-poll rate; higher = lower input latency.
+	int InputNetHz      = Unset; ///< Rate at which the client sends InputFrame packets to the Authority.
 
 	/// @brief Artificial input delay in sim frames for lockstep/deterministic play.
 	/// @note 0 = disabled (default). Brain reads input for (currentFrame - InputDelayFrames).
-	int InputDelayFrames  = 0;
+	int InputDelayFrames = 0;
 
 	/// @brief Max sim frames the Authority may predict ahead of a client's last received input.
 	/// @note 0 = strict lockstep. Covers one delivery batch + RTT headroom + startup timing offset.
@@ -80,7 +80,7 @@ struct EngineConfig
 
 	/// @brief Dirty entity count below which GPU slab upload runs inline on the render thread.
 	/// @note Below this count, job dispatch + WaitForCounter overhead exceeds the upload work. Default: 256.
-	int SlabUploadInlineThreshold    = Unset;
+	int SlabUploadInlineThreshold = Unset;
 	/// @brief Dirty entity count below which a single bundled job uploads all fields sequentially.
 	/// @note Above this threshold, one job per field is dispatched for parallel throughput. Default: 4096.
 	int SlabUploadSingleJobThreshold = Unset;
@@ -89,7 +89,7 @@ struct EngineConfig
 	char DefaultScene[256] = ""; ///< Scene to load on startup (relative to ProjectDir/content/).
 	char DefaultState[256] = ""; ///< Flow state name to load on startup (e.g., "MainMenu").
 
-	uint16_t NetPort     = 27015;        ///< GNS connection port (CLI: --port).
+	uint16_t NetPort     = 27015;       ///< GNS connection port (CLI: --port).
 	char NetAddress[128] = "127.0.0.1"; ///< Remote address for client connections (CLI: --client <ip>).
 
 	int EngineLogLevel = Unset; ///< Min log level for the engine channel. 0=Trace … 4=Error.

@@ -3,9 +3,9 @@
 #include <cstdint>
 #include <type_traits>
 
-#include "Types.h"             // FieldWidth, FORCE_INLINE
-#include "Fixed32.h"           // Fixed32
-#include "SchemaValidation.h"  // IsFieldProxy — used by FieldMask::Choose
+#include "Types.h"            // FieldWidth, FORCE_INLINE
+#include "Fixed32.h"          // Fixed32
+#include "SchemaValidation.h" // IsFieldProxy — used by FieldMask::Choose
 
 // ---------------------------------------------------------------------------
 // SIMDTraits — per-(type, width, ISA) primitives for FieldProxy and friends.
@@ -68,13 +68,22 @@ inline constexpr int kSIMDWide32Lanes = 1;
 // correctly under both ISAs without sprinkling #ifdefs into each call site.
 #if defined(TNX_SIMD_AVX512)
 using WideMaskType = __mmask16;
-inline __mmask16 AllLanesActiveMask() { return static_cast<__mmask16>(0xFFFF); }
+inline __mmask16 AllLanesActiveMask()
+{
+	return static_cast<__mmask16>(0xFFFF);
+}
 #elif defined(TNX_SIMD_AVX2)
 using WideMaskType = __m256i;
-inline __m256i AllLanesActiveMask() { return _mm256_set1_epi64x(-1); }
+inline __m256i AllLanesActiveMask()
+{
+	return _mm256_set1_epi64x(-1);
+}
 #else
 using WideMaskType = int32_t;
-inline int32_t AllLanesActiveMask() { return -1; }
+inline int32_t AllLanesActiveMask()
+{
+	return -1;
+}
 #endif
 
 // --- FieldMask forward decl (defined per ISA below) ------------------------
@@ -89,17 +98,17 @@ struct FieldMask;
 
 namespace SIMDTraitsDetail
 {
-	template <typename T>
-	inline constexpr bool always_false_v = false;
+template <typename T>
+inline constexpr bool always_false_v = false;
 }
 
 template <typename T, FieldWidth WIDTH>
 struct SIMDTraits
 {
 	static_assert(WIDTH == FieldWidth::Scalar,
-				  "SIMDTraits: no Wide/WideMask specialization for this type on the active "
-				  "SIMD ISA. Add a specialization in SIMDTraits.h or restrict the field to "
-				  "FieldWidth::Scalar.");
+		"SIMDTraits: no Wide/WideMask specialization for this type on the active "
+		"SIMD ISA. Add a specialization in SIMDTraits.h or restrict the field to "
+		"FieldWidth::Scalar.");
 	using VecType = T;
 };
 
@@ -135,32 +144,32 @@ struct SIMDTraits<SimFloatImpl<float>, WIDTH>
 
 	static FORCE_INLINE FieldMask<SimFloatImpl<float>, VecType, WIDTH> GT(VecType a, VecType b)
 	{
-		return {Underlying::GT(a, b).mask};
+		return { Underlying::GT(a, b).mask };
 	}
 
 	static FORCE_INLINE FieldMask<SimFloatImpl<float>, VecType, WIDTH> LT(VecType a, VecType b)
 	{
-		return {Underlying::LT(a, b).mask};
+		return { Underlying::LT(a, b).mask };
 	}
 
 	static FORCE_INLINE FieldMask<SimFloatImpl<float>, VecType, WIDTH> EQ(VecType a, VecType b)
 	{
-		return {Underlying::EQ(a, b).mask};
+		return { Underlying::EQ(a, b).mask };
 	}
 
 	static FORCE_INLINE FieldMask<SimFloatImpl<float>, VecType, WIDTH> NEQ(VecType a, VecType b)
 	{
-		return {Underlying::NEQ(a, b).mask};
+		return { Underlying::NEQ(a, b).mask };
 	}
 
 	static FORCE_INLINE FieldMask<SimFloatImpl<float>, VecType, WIDTH> GE(VecType a, VecType b)
 	{
-		return {Underlying::GE(a, b).mask};
+		return { Underlying::GE(a, b).mask };
 	}
 
 	static FORCE_INLINE FieldMask<SimFloatImpl<float>, VecType, WIDTH> LE(VecType a, VecType b)
 	{
-		return {Underlying::LE(a, b).mask};
+		return { Underlying::LE(a, b).mask };
 	}
 
 	static FORCE_INLINE VecType Blend(VecType a, VecType b) { return Underlying::Blend(a, b); }
@@ -201,32 +210,32 @@ struct SIMDTraits<SimFloatImpl<Fixed32>, WIDTH>
 
 	static FORCE_INLINE FieldMask<SimFloatImpl<Fixed32>, VecType, WIDTH> GT(VecType a, VecType b)
 	{
-		return {Underlying::GT(a, b).mask};
+		return { Underlying::GT(a, b).mask };
 	}
 
 	static FORCE_INLINE FieldMask<SimFloatImpl<Fixed32>, VecType, WIDTH> LT(VecType a, VecType b)
 	{
-		return {Underlying::LT(a, b).mask};
+		return { Underlying::LT(a, b).mask };
 	}
 
 	static FORCE_INLINE FieldMask<SimFloatImpl<Fixed32>, VecType, WIDTH> EQ(VecType a, VecType b)
 	{
-		return {Underlying::EQ(a, b).mask};
+		return { Underlying::EQ(a, b).mask };
 	}
 
 	static FORCE_INLINE FieldMask<SimFloatImpl<Fixed32>, VecType, WIDTH> NEQ(VecType a, VecType b)
 	{
-		return {Underlying::NEQ(a, b).mask};
+		return { Underlying::NEQ(a, b).mask };
 	}
 
 	static FORCE_INLINE FieldMask<SimFloatImpl<Fixed32>, VecType, WIDTH> GE(VecType a, VecType b)
 	{
-		return {Underlying::GE(a, b).mask};
+		return { Underlying::GE(a, b).mask };
 	}
 
 	static FORCE_INLINE FieldMask<SimFloatImpl<Fixed32>, VecType, WIDTH> LE(VecType a, VecType b)
 	{
-		return {Underlying::LE(a, b).mask};
+		return { Underlying::LE(a, b).mask };
 	}
 
 	// Blend is not available for Fixed32 (int vector) – omit.
@@ -245,7 +254,7 @@ struct SIMDTraits<SimFloatImpl<Fixed32>, WIDTH>
 // --- Count mask helper (always 32-bit integer vector) -----------------------
 namespace FieldProxyConsts
 {
-	static const __m256i element_indices = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+static const __m256i element_indices = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
 }
 
 // --- FieldMask --------------------------------------------------------------
@@ -263,16 +272,24 @@ struct FieldMask
 	FORCE_INLINE decltype(auto) Choose(TVAL&& TrueVal, FVAL&& FalseVal) const
 	{
 		VecType falseV;
-		if constexpr (std::is_same_v<FVAL, VecType>) falseV = FalseVal;
-		else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<FVAL>>::value) falseV = Traits::load(&FalseVal.WriteArray[FalseVal.index]);
-		else if constexpr (std::is_same_v<FVAL, std::remove_cvref_t<FieldType>>) falseV = Traits::set1(FalseVal);
-		else falseV                                                                     = Traits::set1(FalseVal);
+		if constexpr (std::is_same_v<FVAL, VecType>)
+			falseV = FalseVal;
+		else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<FVAL>>::value)
+			falseV = Traits::load(&FalseVal.WriteArray[FalseVal.index]);
+		else if constexpr (std::is_same_v<FVAL, std::remove_cvref_t<FieldType>>)
+			falseV = Traits::set1(FalseVal);
+		else
+			falseV = Traits::set1(FalseVal);
 
 		VecType trueV;
-		if constexpr (std::is_same_v<TVAL, VecType>) trueV = TrueVal;
-		else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<TVAL>>::value) trueV = Traits::load(&TrueVal.WriteArray[TrueVal.index]);
-		else if constexpr (std::is_same_v<TVAL, std::remove_cvref_t<FieldType>>) trueV = Traits::set1(TrueVal);
-		else trueV                                                                     = Traits::set1(TrueVal);
+		if constexpr (std::is_same_v<TVAL, VecType>)
+			trueV = TrueVal;
+		else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<TVAL>>::value)
+			trueV = Traits::load(&TrueVal.WriteArray[TrueVal.index]);
+		else if constexpr (std::is_same_v<TVAL, std::remove_cvref_t<FieldType>>)
+			trueV = Traits::set1(TrueVal);
+		else
+			trueV = Traits::set1(TrueVal);
 
 		if constexpr (std::is_same_v<VecType, __m256>)
 		{
@@ -311,7 +328,10 @@ struct SIMDTraits<float, WIDTH>
 		{
 			_mm256_storeu_ps(ptr, _mm256_blendv_ps(_mm256_loadu_ps(ptr), val, _mm256_castsi256_ps(mask)));
 		}
-		else { _mm256_storeu_ps(ptr, val); }
+		else
+		{
+			_mm256_storeu_ps(ptr, val);
+		}
 	}
 
 	static FORCE_INLINE void stream(float* ptr, [[maybe_unused]] __m256i mask, VecType val)
@@ -320,7 +340,10 @@ struct SIMDTraits<float, WIDTH>
 		{
 			_mm256_storeu_ps(ptr, _mm256_blendv_ps(_mm256_loadu_ps(ptr), val, _mm256_castsi256_ps(mask)));
 		}
-		else { _mm256_stream_ps(ptr, val); }
+		else
+		{
+			_mm256_stream_ps(ptr, val);
+		}
 	}
 
 	static FORCE_INLINE VecType set1(float val) { return _mm256_set1_ps(val); }
@@ -328,12 +351,12 @@ struct SIMDTraits<float, WIDTH>
 	static FORCE_INLINE VecType sub(VecType a, VecType b) { return _mm256_sub_ps(a, b); }
 	static FORCE_INLINE VecType mul(VecType a, VecType b) { return _mm256_mul_ps(a, b); }
 	static FORCE_INLINE VecType div(VecType a, VecType b) { return _mm256_div_ps(a, b); }
-	static FORCE_INLINE FieldMask<float, VecType, WIDTH> GT(VecType a, VecType b) { return {_mm256_cmp_ps(a, b, _CMP_GT_OQ)}; }
-	static FORCE_INLINE FieldMask<float, VecType, WIDTH> LT(VecType a, VecType b) { return {_mm256_cmp_ps(a, b, _CMP_LT_OQ)}; }
-	static FORCE_INLINE FieldMask<float, VecType, WIDTH> GE(VecType a, VecType b) { return {_mm256_cmp_ps(a, b, _CMP_GE_OQ)}; }
-	static FORCE_INLINE FieldMask<float, VecType, WIDTH> LE(VecType a, VecType b) { return {_mm256_cmp_ps(a, b, _CMP_LE_OQ)}; }
-	static FORCE_INLINE FieldMask<float, VecType, WIDTH> EQ(VecType a, VecType b) { return {_mm256_cmp_ps(a, b, _CMP_EQ_OQ)}; }
-	static FORCE_INLINE FieldMask<float, VecType, WIDTH> NEQ(VecType a, VecType b) { return {_mm256_cmp_ps(a, b, _CMP_NEQ_OQ)}; }
+	static FORCE_INLINE FieldMask<float, VecType, WIDTH> GT(VecType a, VecType b) { return { _mm256_cmp_ps(a, b, _CMP_GT_OQ) }; }
+	static FORCE_INLINE FieldMask<float, VecType, WIDTH> LT(VecType a, VecType b) { return { _mm256_cmp_ps(a, b, _CMP_LT_OQ) }; }
+	static FORCE_INLINE FieldMask<float, VecType, WIDTH> GE(VecType a, VecType b) { return { _mm256_cmp_ps(a, b, _CMP_GE_OQ) }; }
+	static FORCE_INLINE FieldMask<float, VecType, WIDTH> LE(VecType a, VecType b) { return { _mm256_cmp_ps(a, b, _CMP_LE_OQ) }; }
+	static FORCE_INLINE FieldMask<float, VecType, WIDTH> EQ(VecType a, VecType b) { return { _mm256_cmp_ps(a, b, _CMP_EQ_OQ) }; }
+	static FORCE_INLINE FieldMask<float, VecType, WIDTH> NEQ(VecType a, VecType b) { return { _mm256_cmp_ps(a, b, _CMP_NEQ_OQ) }; }
 	static FORCE_INLINE VecType Blend(VecType a, VecType b) { return _mm256_blendv_ps(a, b, _mm256_cmp_ps(a, b, _CMP_GT_OQ)); }
 	static FORCE_INLINE VecType min(VecType a, VecType b) { return _mm256_min_ps(a, b); }
 	static FORCE_INLINE VecType max(VecType a, VecType b) { return _mm256_max_ps(a, b); }
@@ -371,7 +394,10 @@ struct SIMDTraits<int32_t, WIDTH>
 		{
 			_mm256_storeu_si256((__m256i*)ptr, _mm256_blendv_epi8(_mm256_loadu_si256((const __m256i*)ptr), val, mask));
 		}
-		else { _mm256_storeu_si256((__m256i*)ptr, val); }
+		else
+		{
+			_mm256_storeu_si256((__m256i*)ptr, val);
+		}
 	}
 
 	static FORCE_INLINE void stream(int32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
@@ -380,7 +406,10 @@ struct SIMDTraits<int32_t, WIDTH>
 		{
 			_mm256_storeu_si256((__m256i*)ptr, _mm256_blendv_epi8(_mm256_loadu_si256((const __m256i*)ptr), val, mask));
 		}
-		else { _mm256_stream_si256((__m256i*)ptr, val); }
+		else
+		{
+			_mm256_stream_si256((__m256i*)ptr, val);
+		}
 	}
 
 	static FORCE_INLINE VecType set1(int32_t val) { return _mm256_set1_epi32(val); }
@@ -393,27 +422,28 @@ struct SIMDTraits<int32_t, WIDTH>
 		alignas(32) int32_t aData[8], bData[8], result[8];
 		_mm256_store_si256((__m256i*)aData, a);
 		_mm256_store_si256((__m256i*)bData, b);
-		for (int i = 0; i < 8; ++i) result[i] = aData[i] / bData[i];
+		for (int i = 0; i < 8; ++i)
+			result[i] = aData[i] / bData[i];
 		return _mm256_load_si256((__m256i*)result);
 	}
 
-	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> GT(VecType a, VecType b) { return {_mm256_cmpgt_epi32(a, b)}; }
-	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> LT(VecType a, VecType b) { return {_mm256_cmpgt_epi32(b, a)}; }
-	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> EQ(VecType a, VecType b) { return {_mm256_cmpeq_epi32(a, b)}; }
+	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> GT(VecType a, VecType b) { return { _mm256_cmpgt_epi32(a, b) }; }
+	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> LT(VecType a, VecType b) { return { _mm256_cmpgt_epi32(b, a) }; }
+	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> EQ(VecType a, VecType b) { return { _mm256_cmpeq_epi32(a, b) }; }
 
 	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> NEQ(VecType a, VecType b)
 	{
-		return {_mm256_andnot_si256(_mm256_cmpeq_epi32(a, b), _mm256_set1_epi32(-1))};
+		return { _mm256_andnot_si256(_mm256_cmpeq_epi32(a, b), _mm256_set1_epi32(-1)) };
 	}
 
 	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> GE(VecType a, VecType b)
 	{
-		return {_mm256_andnot_si256(_mm256_cmpgt_epi32(b, a), _mm256_set1_epi32(-1))};
+		return { _mm256_andnot_si256(_mm256_cmpgt_epi32(b, a), _mm256_set1_epi32(-1)) };
 	}
 
 	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> LE(VecType a, VecType b)
 	{
-		return {_mm256_andnot_si256(_mm256_cmpgt_epi32(a, b), _mm256_set1_epi32(-1))};
+		return { _mm256_andnot_si256(_mm256_cmpgt_epi32(a, b), _mm256_set1_epi32(-1)) };
 	}
 
 	static FORCE_INLINE VecType min(VecType a, VecType b) { return _mm256_min_epi32(a, b); }
@@ -424,7 +454,8 @@ struct SIMDTraits<int32_t, WIDTH>
 	{
 		alignas(32) int32_t aData[8], result[8];
 		_mm256_store_si256((__m256i*)aData, a);
-		for (int i = 0; i < 8; ++i) result[i] = FixedSqrt(Fixed32::FromRaw(aData[i])).Raw();
+		for (int i = 0; i < 8; ++i)
+			result[i] = FixedSqrt(Fixed32::FromRaw(aData[i])).Raw();
 		return _mm256_load_si256((__m256i*)result);
 	}
 
@@ -467,10 +498,10 @@ struct SIMDTraits<int32_t, WIDTH>
 
 	static FORCE_INLINE int hsum(VecType v)
 	{
-		__m128i lo  = _mm256_castsi256_si128(v);
-		__m128i hi  = _mm256_extracti128_si256(v, 1);
-		__m128i s   = _mm_add_epi32(lo, hi);
-		s = _mm_add_epi32(s, _mm_shuffle_epi32(s, _MM_SHUFFLE(2, 3, 0, 1)));
+		__m128i lo = _mm256_castsi256_si128(v);
+		__m128i hi = _mm256_extracti128_si256(v, 1);
+		__m128i s  = _mm_add_epi32(lo, hi);
+		s          = _mm_add_epi32(s, _mm_shuffle_epi32(s, _MM_SHUFFLE(2, 3, 0, 1)));
 		return _mm_cvtsi128_si32(_mm_add_epi32(s, _mm_shuffle_epi32(s, _MM_SHUFFLE(1, 0, 3, 2))));
 	}
 };
@@ -488,7 +519,10 @@ struct SIMDTraits<uint32_t, WIDTH>
 		{
 			_mm256_storeu_si256((__m256i*)ptr, _mm256_blendv_epi8(_mm256_loadu_si256((const __m256i*)ptr), val, mask));
 		}
-		else { _mm256_storeu_si256((__m256i*)ptr, val); }
+		else
+		{
+			_mm256_storeu_si256((__m256i*)ptr, val);
+		}
 	}
 
 	static FORCE_INLINE void stream(uint32_t* ptr, [[maybe_unused]] __m256i mask, VecType val)
@@ -497,7 +531,10 @@ struct SIMDTraits<uint32_t, WIDTH>
 		{
 			_mm256_storeu_si256((__m256i*)ptr, _mm256_blendv_epi8(_mm256_loadu_si256((const __m256i*)ptr), val, mask));
 		}
-		else { _mm256_stream_si256((__m256i*)ptr, val); }
+		else
+		{
+			_mm256_stream_si256((__m256i*)ptr, val);
+		}
 	}
 
 	static FORCE_INLINE VecType set1(uint32_t val) { return _mm256_set1_epi32(val); }
@@ -510,29 +547,30 @@ struct SIMDTraits<uint32_t, WIDTH>
 		alignas(32) uint32_t aData[8], bData[8], result[8];
 		_mm256_store_si256((__m256i*)aData, a);
 		_mm256_store_si256((__m256i*)bData, b);
-		for (int i = 0; i < 8; ++i) result[i] = aData[i] / bData[i];
+		for (int i = 0; i < 8; ++i)
+			result[i] = aData[i] / bData[i];
 		return _mm256_load_si256((__m256i*)result);
 	}
 
-	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> GT(VecType a, VecType b) { return {_mm256_cmpgt_epi32(a, b)}; }
-	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> LT(VecType a, VecType b) { return {_mm256_cmpgt_epi32(b, a)}; }
-	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> EQ(VecType a, VecType b) { return {_mm256_cmpeq_epi32(a, b)}; }
+	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> GT(VecType a, VecType b) { return { _mm256_cmpgt_epi32(a, b) }; }
+	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> LT(VecType a, VecType b) { return { _mm256_cmpgt_epi32(b, a) }; }
+	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> EQ(VecType a, VecType b) { return { _mm256_cmpeq_epi32(a, b) }; }
 
 	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> NEQ(VecType a, VecType b)
 	{
-		return {_mm256_andnot_si256(_mm256_cmpeq_epi32(a, b), _mm256_set1_epi32(-1))};
+		return { _mm256_andnot_si256(_mm256_cmpeq_epi32(a, b), _mm256_set1_epi32(-1)) };
 	}
 
 	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> GE(VecType a, VecType b)
 	{
 		// Flip sign bit to convert unsigned compare to signed
 		const __m256i signBit = _mm256_set1_epi32(0x80000000);
-		return {_mm256_cmpgt_epi32(_mm256_xor_si256(a, signBit), _mm256_xor_si256(b, signBit))};
+		return { _mm256_cmpgt_epi32(_mm256_xor_si256(a, signBit), _mm256_xor_si256(b, signBit)) };
 	}
 
 	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> LE(VecType a, VecType b)
 	{
-		return {_mm256_andnot_si256(GE(a, b).mask, _mm256_set1_epi32(-1))};
+		return { _mm256_andnot_si256(GE(a, b).mask, _mm256_set1_epi32(-1)) };
 	}
 
 	static FORCE_INLINE VecType min(VecType a, VecType b) { return _mm256_min_epu32(a, b); }
@@ -605,13 +643,13 @@ struct SIMDTraits<Fixed32, WIDTH>
 		return _mm256_load_si256((__m256i*)result);
 	}
 
-	static FORCE_INLINE FieldMask<Fixed32, VecType, WIDTH> GT(VecType a, VecType b) { return {_mm256_cmpgt_epi32(a, b)}; }
-	static FORCE_INLINE FieldMask<Fixed32, VecType, WIDTH> LT(VecType a, VecType b) { return {_mm256_cmpgt_epi32(b, a)}; }
-	static FORCE_INLINE FieldMask<Fixed32, VecType, WIDTH> EQ(VecType a, VecType b) { return {_mm256_cmpeq_epi32(a, b)}; }
+	static FORCE_INLINE FieldMask<Fixed32, VecType, WIDTH> GT(VecType a, VecType b) { return { _mm256_cmpgt_epi32(a, b) }; }
+	static FORCE_INLINE FieldMask<Fixed32, VecType, WIDTH> LT(VecType a, VecType b) { return { _mm256_cmpgt_epi32(b, a) }; }
+	static FORCE_INLINE FieldMask<Fixed32, VecType, WIDTH> EQ(VecType a, VecType b) { return { _mm256_cmpeq_epi32(a, b) }; }
 
 	static FORCE_INLINE FieldMask<Fixed32, VecType, WIDTH> NEQ(VecType a, VecType b)
 	{
-		return {_mm256_andnot_si256(_mm256_cmpeq_epi32(a, b), _mm256_set1_epi32(-1))};
+		return { _mm256_andnot_si256(_mm256_cmpeq_epi32(a, b), _mm256_set1_epi32(-1)) };
 	}
 
 	static FORCE_INLINE VecType min(VecType a, VecType b) { return IntT::min(a, b); }
@@ -649,16 +687,24 @@ struct FieldMask
 	FORCE_INLINE decltype(auto) Choose(TVAL&& TrueVal, FVAL&& FalseVal) const
 	{
 		VecType falseV;
-		if constexpr (std::is_same_v<FVAL, VecType>) falseV = FalseVal;
-		else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<FVAL>>::value) falseV = Traits::load(&FalseVal.WriteArray[FalseVal.index]);
-		else if constexpr (std::is_same_v<FVAL, std::remove_cvref_t<FieldType>>) falseV = Traits::set1(FalseVal);
-		else falseV                                                                     = Traits::set1(FalseVal);
+		if constexpr (std::is_same_v<FVAL, VecType>)
+			falseV = FalseVal;
+		else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<FVAL>>::value)
+			falseV = Traits::load(&FalseVal.WriteArray[FalseVal.index]);
+		else if constexpr (std::is_same_v<FVAL, std::remove_cvref_t<FieldType>>)
+			falseV = Traits::set1(FalseVal);
+		else
+			falseV = Traits::set1(FalseVal);
 
 		VecType trueV;
-		if constexpr (std::is_same_v<TVAL, VecType>) trueV = TrueVal;
-		else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<TVAL>>::value) trueV = Traits::load(&TrueVal.WriteArray[TrueVal.index]);
-		else if constexpr (std::is_same_v<TVAL, std::remove_cvref_t<FieldType>>) trueV = Traits::set1(TrueVal);
-		else trueV                                                                     = Traits::set1(TrueVal);
+		if constexpr (std::is_same_v<TVAL, VecType>)
+			trueV = TrueVal;
+		else if constexpr (SchemaValidation::IsFieldProxy<std::remove_cvref_t<TVAL>>::value)
+			trueV = Traits::load(&TrueVal.WriteArray[TrueVal.index]);
+		else if constexpr (std::is_same_v<TVAL, std::remove_cvref_t<FieldType>>)
+			trueV = Traits::set1(TrueVal);
+		else
+			trueV = Traits::set1(TrueVal);
 
 		if constexpr (std::is_same_v<VecType, __m512>)
 			return _mm512_mask_blend_ps(mask, falseV, trueV);
@@ -676,19 +722,19 @@ struct FieldMask
 // --- Shared helpers ---------------------------------------------------------
 namespace FieldProxyConsts512
 {
-	// GenerateCountMask: low `count` bits set, rest clear.
-	FORCE_INLINE __mmask16 CountMask(int32_t count)
-	{
-		return static_cast<__mmask16>((1u << count) - 1);
-	}
-
-	FORCE_INLINE void StoreFlagsOr16(int32_t* flagsPtr, int32_t value)
-	{
-		__m512i f = _mm512_loadu_si512(static_cast<const void*>(flagsPtr));
-		f         = _mm512_or_si512(f, _mm512_set1_epi32(value));
-		_mm512_storeu_si512(static_cast<void*>(flagsPtr), f);
-	}
+// GenerateCountMask: low `count` bits set, rest clear.
+FORCE_INLINE __mmask16 CountMask(int32_t count)
+{
+	return static_cast<__mmask16>((1u << count) - 1);
 }
+
+FORCE_INLINE void StoreFlagsOr16(int32_t* flagsPtr, int32_t value)
+{
+	__m512i f = _mm512_loadu_si512(static_cast<const void*>(flagsPtr));
+	f         = _mm512_or_si512(f, _mm512_set1_epi32(value));
+	_mm512_storeu_si512(static_cast<void*>(flagsPtr), f);
+}
+} // namespace FieldProxyConsts512
 
 // --- float ------------------------------------------------------------------
 template <FieldWidth WIDTH>
@@ -720,23 +766,23 @@ struct SIMDTraits<float, WIDTH>
 	static FORCE_INLINE VecType mul(VecType a, VecType b) { return _mm512_mul_ps(a, b); }
 	static FORCE_INLINE VecType div(VecType a, VecType b) { return _mm512_div_ps(a, b); }
 
-	static FORCE_INLINE FieldMask<float, VecType, WIDTH> GT(VecType a, VecType b)  { return {_mm512_cmp_ps_mask(a, b, _CMP_GT_OQ)}; }
-	static FORCE_INLINE FieldMask<float, VecType, WIDTH> LT(VecType a, VecType b)  { return {_mm512_cmp_ps_mask(a, b, _CMP_LT_OQ)}; }
-	static FORCE_INLINE FieldMask<float, VecType, WIDTH> GE(VecType a, VecType b)  { return {_mm512_cmp_ps_mask(a, b, _CMP_GE_OQ)}; }
-	static FORCE_INLINE FieldMask<float, VecType, WIDTH> LE(VecType a, VecType b)  { return {_mm512_cmp_ps_mask(a, b, _CMP_LE_OQ)}; }
-	static FORCE_INLINE FieldMask<float, VecType, WIDTH> EQ(VecType a, VecType b)  { return {_mm512_cmp_ps_mask(a, b, _CMP_EQ_OQ)}; }
-	static FORCE_INLINE FieldMask<float, VecType, WIDTH> NEQ(VecType a, VecType b) { return {_mm512_cmp_ps_mask(a, b, _CMP_NEQ_OQ)}; }
+	static FORCE_INLINE FieldMask<float, VecType, WIDTH> GT(VecType a, VecType b) { return { _mm512_cmp_ps_mask(a, b, _CMP_GT_OQ) }; }
+	static FORCE_INLINE FieldMask<float, VecType, WIDTH> LT(VecType a, VecType b) { return { _mm512_cmp_ps_mask(a, b, _CMP_LT_OQ) }; }
+	static FORCE_INLINE FieldMask<float, VecType, WIDTH> GE(VecType a, VecType b) { return { _mm512_cmp_ps_mask(a, b, _CMP_GE_OQ) }; }
+	static FORCE_INLINE FieldMask<float, VecType, WIDTH> LE(VecType a, VecType b) { return { _mm512_cmp_ps_mask(a, b, _CMP_LE_OQ) }; }
+	static FORCE_INLINE FieldMask<float, VecType, WIDTH> EQ(VecType a, VecType b) { return { _mm512_cmp_ps_mask(a, b, _CMP_EQ_OQ) }; }
+	static FORCE_INLINE FieldMask<float, VecType, WIDTH> NEQ(VecType a, VecType b) { return { _mm512_cmp_ps_mask(a, b, _CMP_NEQ_OQ) }; }
 
 	static FORCE_INLINE VecType Blend(VecType a, VecType b)
 	{
 		return _mm512_mask_blend_ps(_mm512_cmp_ps_mask(a, b, _CMP_GT_OQ), a, b);
 	}
 
-	static FORCE_INLINE VecType min(VecType a, VecType b)   { return _mm512_min_ps(a, b); }
-	static FORCE_INLINE VecType max(VecType a, VecType b)   { return _mm512_max_ps(a, b); }
-	static FORCE_INLINE VecType abs(VecType a)               { return _mm512_abs_ps(a); }
-	static FORCE_INLINE VecType sqrt(VecType a)              { return _mm512_sqrt_ps(a); }
-	static FORCE_INLINE VecType rsqrt(VecType a)             { return _mm512_rsqrt14_ps(a); }
+	static FORCE_INLINE VecType min(VecType a, VecType b) { return _mm512_min_ps(a, b); }
+	static FORCE_INLINE VecType max(VecType a, VecType b) { return _mm512_max_ps(a, b); }
+	static FORCE_INLINE VecType abs(VecType a) { return _mm512_abs_ps(a); }
+	static FORCE_INLINE VecType sqrt(VecType a) { return _mm512_sqrt_ps(a); }
+	static FORCE_INLINE VecType rsqrt(VecType a) { return _mm512_rsqrt14_ps(a); }
 
 	static FORCE_INLINE __mmask16 GenerateCountMask(int32_t count) { return FieldProxyConsts512::CountMask(count); }
 	static FORCE_INLINE void StoreFlagsOr(int32_t* flagsPtr, int32_t value) { FieldProxyConsts512::StoreFlagsOr16(flagsPtr, value); }
@@ -776,26 +822,28 @@ struct SIMDTraits<int32_t, WIDTH>
 		alignas(64) int32_t aData[16], bData[16], result[16];
 		_mm512_store_si512(static_cast<void*>(aData), a);
 		_mm512_store_si512(static_cast<void*>(bData), b);
-		for (int i = 0; i < 16; ++i) result[i] = aData[i] / bData[i];
+		for (int i = 0; i < 16; ++i)
+			result[i] = aData[i] / bData[i];
 		return _mm512_load_si512(static_cast<const void*>(result));
 	}
 
-	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> GT(VecType a, VecType b)  { return {_mm512_cmpgt_epi32_mask(a, b)}; }
-	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> LT(VecType a, VecType b)  { return {_mm512_cmpgt_epi32_mask(b, a)}; }
-	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> EQ(VecType a, VecType b)  { return {_mm512_cmpeq_epi32_mask(a, b)}; }
-	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> NEQ(VecType a, VecType b) { return {_mm512_cmpneq_epi32_mask(a, b)}; }
-	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> GE(VecType a, VecType b)  { return {_mm512_cmpge_epi32_mask(a, b)}; }
-	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> LE(VecType a, VecType b)  { return {_mm512_cmple_epi32_mask(a, b)}; }
+	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> GT(VecType a, VecType b) { return { _mm512_cmpgt_epi32_mask(a, b) }; }
+	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> LT(VecType a, VecType b) { return { _mm512_cmpgt_epi32_mask(b, a) }; }
+	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> EQ(VecType a, VecType b) { return { _mm512_cmpeq_epi32_mask(a, b) }; }
+	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> NEQ(VecType a, VecType b) { return { _mm512_cmpneq_epi32_mask(a, b) }; }
+	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> GE(VecType a, VecType b) { return { _mm512_cmpge_epi32_mask(a, b) }; }
+	static FORCE_INLINE FieldMask<int32_t, VecType, WIDTH> LE(VecType a, VecType b) { return { _mm512_cmple_epi32_mask(a, b) }; }
 
 	static FORCE_INLINE VecType min(VecType a, VecType b) { return _mm512_min_epi32(a, b); }
 	static FORCE_INLINE VecType max(VecType a, VecType b) { return _mm512_max_epi32(a, b); }
-	static FORCE_INLINE VecType abs(VecType a)             { return _mm512_abs_epi32(a); }
+	static FORCE_INLINE VecType abs(VecType a) { return _mm512_abs_epi32(a); }
 
 	static FORCE_INLINE VecType sqrt(VecType a)
 	{
 		alignas(64) int32_t aData[16], result[16];
 		_mm512_store_si512(static_cast<void*>(aData), a);
-		for (int i = 0; i < 16; ++i) result[i] = FixedSqrt(Fixed32::FromRaw(aData[i])).Raw();
+		for (int i = 0; i < 16; ++i)
+			result[i] = FixedSqrt(Fixed32::FromRaw(aData[i])).Raw();
 		return _mm512_load_si512(static_cast<const void*>(result));
 	}
 
@@ -806,7 +854,11 @@ struct SIMDTraits<int32_t, WIDTH>
 		for (int i = 0; i < 16; ++i)
 		{
 			Fixed32 x = Fixed32::FromRaw(aData[i]);
-			if (x.Raw() <= 0) { result[i] = 0; continue; }
+			if (x.Raw() <= 0)
+			{
+				result[i] = 0;
+				continue;
+			}
 			Fixed32 s = FixedSqrt(x);
 			result[i] = (Fixed32::FromFloat(1.0f) / s).Raw();
 		}
@@ -830,7 +882,7 @@ struct SIMDTraits<int32_t, WIDTH>
 		__m128i lo2 = _mm256_castsi256_si128(s);
 		__m128i hi2 = _mm256_extracti128_si256(s, 1);
 		__m128i s2  = _mm_add_epi32(lo2, hi2);
-		s2 = _mm_add_epi32(s2, _mm_shuffle_epi32(s2, _MM_SHUFFLE(2, 3, 0, 1)));
+		s2          = _mm_add_epi32(s2, _mm_shuffle_epi32(s2, _MM_SHUFFLE(2, 3, 0, 1)));
 		return _mm_cvtsi128_si32(_mm_add_epi32(s2, _mm_shuffle_epi32(s2, _MM_SHUFFLE(1, 0, 3, 2))));
 	}
 };
@@ -870,16 +922,17 @@ struct SIMDTraits<uint32_t, WIDTH>
 		alignas(64) uint32_t aData[16], bData[16], result[16];
 		_mm512_store_si512(static_cast<void*>(aData), a);
 		_mm512_store_si512(static_cast<void*>(bData), b);
-		for (int i = 0; i < 16; ++i) result[i] = aData[i] / bData[i];
+		for (int i = 0; i < 16; ++i)
+			result[i] = aData[i] / bData[i];
 		return _mm512_load_si512(static_cast<const void*>(result));
 	}
 
-	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> GT(VecType a, VecType b)  { return {_mm512_cmpgt_epu32_mask(a, b)}; }
-	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> LT(VecType a, VecType b)  { return {_mm512_cmplt_epu32_mask(a, b)}; }
-	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> EQ(VecType a, VecType b)  { return {_mm512_cmpeq_epu32_mask(a, b)}; }
-	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> NEQ(VecType a, VecType b) { return {_mm512_cmpneq_epu32_mask(a, b)}; }
-	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> GE(VecType a, VecType b)  { return {_mm512_cmpge_epu32_mask(a, b)}; }
-	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> LE(VecType a, VecType b)  { return {_mm512_cmple_epu32_mask(a, b)}; }
+	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> GT(VecType a, VecType b) { return { _mm512_cmpgt_epu32_mask(a, b) }; }
+	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> LT(VecType a, VecType b) { return { _mm512_cmplt_epu32_mask(a, b) }; }
+	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> EQ(VecType a, VecType b) { return { _mm512_cmpeq_epu32_mask(a, b) }; }
+	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> NEQ(VecType a, VecType b) { return { _mm512_cmpneq_epu32_mask(a, b) }; }
+	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> GE(VecType a, VecType b) { return { _mm512_cmpge_epu32_mask(a, b) }; }
+	static FORCE_INLINE FieldMask<uint32_t, VecType, WIDTH> LE(VecType a, VecType b) { return { _mm512_cmple_epu32_mask(a, b) }; }
 
 	static FORCE_INLINE VecType min(VecType a, VecType b) { return _mm512_min_epu32(a, b); }
 	static FORCE_INLINE VecType max(VecType a, VecType b) { return _mm512_max_epu32(a, b); }
@@ -940,14 +993,14 @@ struct SIMDTraits<Fixed32, WIDTH>
 		return _mm512_load_si512(static_cast<const void*>(result));
 	}
 
-	static FORCE_INLINE FieldMask<Fixed32, VecType, WIDTH> GT(VecType a, VecType b)  { return {_mm512_cmpgt_epi32_mask(a, b)}; }
-	static FORCE_INLINE FieldMask<Fixed32, VecType, WIDTH> LT(VecType a, VecType b)  { return {_mm512_cmpgt_epi32_mask(b, a)}; }
-	static FORCE_INLINE FieldMask<Fixed32, VecType, WIDTH> EQ(VecType a, VecType b)  { return {_mm512_cmpeq_epi32_mask(a, b)}; }
-	static FORCE_INLINE FieldMask<Fixed32, VecType, WIDTH> NEQ(VecType a, VecType b) { return {_mm512_cmpneq_epi32_mask(a, b)}; }
+	static FORCE_INLINE FieldMask<Fixed32, VecType, WIDTH> GT(VecType a, VecType b) { return { _mm512_cmpgt_epi32_mask(a, b) }; }
+	static FORCE_INLINE FieldMask<Fixed32, VecType, WIDTH> LT(VecType a, VecType b) { return { _mm512_cmpgt_epi32_mask(b, a) }; }
+	static FORCE_INLINE FieldMask<Fixed32, VecType, WIDTH> EQ(VecType a, VecType b) { return { _mm512_cmpeq_epi32_mask(a, b) }; }
+	static FORCE_INLINE FieldMask<Fixed32, VecType, WIDTH> NEQ(VecType a, VecType b) { return { _mm512_cmpneq_epi32_mask(a, b) }; }
 
 	static FORCE_INLINE VecType min(VecType a, VecType b) { return IntT::min(a, b); }
 	static FORCE_INLINE VecType max(VecType a, VecType b) { return IntT::max(a, b); }
-	static FORCE_INLINE VecType abs(VecType a)             { return _mm512_abs_epi32(a); }
+	static FORCE_INLINE VecType abs(VecType a) { return _mm512_abs_epi32(a); }
 
 	static FORCE_INLINE __mmask16 GenerateCountMask(int32_t count) { return IntT::GenerateCountMask(count); }
 	static FORCE_INLINE void StoreFlagsOr(int32_t* flagsPtr, int32_t value) { IntT::StoreFlagsOr(flagsPtr, value); }
@@ -963,24 +1016,24 @@ template <FieldWidth WIDTH>
 struct SIMDTraits<float, WIDTH>
 {
 	static_assert(SIMDTraitsDetail::always_false_v<float>,
-				  "NEON SIMDTraits<float> not yet implemented. Fill in this specialization.");
+		"NEON SIMDTraits<float> not yet implemented. Fill in this specialization.");
 };
 template <FieldWidth WIDTH>
 struct SIMDTraits<int32_t, WIDTH>
 {
 	static_assert(SIMDTraitsDetail::always_false_v<int32_t>,
-				  "NEON SIMDTraits<int32_t> not yet implemented. Fill in this specialization.");
+		"NEON SIMDTraits<int32_t> not yet implemented. Fill in this specialization.");
 };
 template <FieldWidth WIDTH>
 struct SIMDTraits<uint32_t, WIDTH>
 {
 	static_assert(SIMDTraitsDetail::always_false_v<uint32_t>,
-				  "NEON SIMDTraits<uint32_t> not yet implemented. Fill in this specialization.");
+		"NEON SIMDTraits<uint32_t> not yet implemented. Fill in this specialization.");
 };
 template <FieldWidth WIDTH>
 struct SIMDTraits<Fixed32, WIDTH>
 {
 	static_assert(SIMDTraitsDetail::always_false_v<Fixed32>,
-				  "NEON SIMDTraits<Fixed32> not yet implemented. Fill in this specialization.");
+		"NEON SIMDTraits<Fixed32> not yet implemented. Fill in this specialization.");
 };
 #endif // TNX_SIMD_NEON

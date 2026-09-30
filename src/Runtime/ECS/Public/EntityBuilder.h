@@ -68,7 +68,7 @@ struct EntityBuilder
 	/// @brief Like @ref SpawnFromFile but also collects @ref GlobalEntityHandle of each spawned entity.
 	/// @param[out] outHandles Receives a handle per successfully spawned entity.
 	static size_t SpawnFromFileTracked(Registry* reg, const char* filePath, bool bBackground,
-									   std::vector<GlobalEntityHandle>& outHandles);
+		std::vector<GlobalEntityHandle>& outHandles);
 
 	/// @brief Load by @ref AssetID — resolves the path via @c AssetRegistry::ResolvePath.
 	static size_t SpawnFromAsset(Registry* reg, const AssetID& id, bool bBackground = false)
@@ -90,7 +90,7 @@ struct EntityBuilder
 		if (path.empty())
 		{
 			LOG_ENG_ERROR_F("[EntityBuilder] SpawnTyped: AssetID not found in registry (raw=%lld)",
-							static_cast<long long>(prefabID.Raw));
+				static_cast<long long>(prefabID.Raw));
 			return EntityHandle{};
 		}
 		return SpawnEntityFromFile(reg, path.c_str(), bBackground);
@@ -118,10 +118,10 @@ struct EntityBuilder
 	/// @brief Serialize all entities in the registry into a scene JSON document.
 	/// @return JSON: @code { "name": "...", "entities": [ ... ], "defaultState": "...", "defaultMode": "..." } @endcode
 	static JsonValue SerializeScene(Registry* reg, const char* sceneName,
-									const char* defaultState = nullptr, const char* defaultMode = nullptr);
+		const char* defaultState = nullptr, const char* defaultMode = nullptr);
 
 	/// @brief Save a scene to disk.
 	/// @return @c true on success.
 	static bool SaveToFile(Registry* reg, const char* sceneName, const char* filePath,
-						   const char* defaultState = nullptr, const char* defaultMode = nullptr);
+		const char* defaultState = nullptr, const char* defaultMode = nullptr);
 };

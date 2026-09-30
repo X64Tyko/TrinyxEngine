@@ -12,6 +12,7 @@
 #include "FlowManagerBase.h"
 #include "FlowState.h"
 #include "Input.h"
+#include "InputWindowCodec.h"
 #include "LogicThread.h"
 #include "NetChannel.h"
 #include "NetConnectionManager.h"
@@ -32,8 +33,8 @@
 // ---------------------------------------------------------------------------
 
 void OwnerNet::WriteEntitySpawnFields([[maybe_unused]] Registry* reg, EntityRecord* record,
-									  const EntitySpawnPayload& payload,
-									  uint32_t temporalFrame, uint32_t volatileFrame)
+	const EntitySpawnPayload& payload,
+	uint32_t temporalFrame, uint32_t volatileFrame)
 {
 	Archetype* arch   = record->Arch;
 	Chunk* chunk      = record->TargetChunk;
@@ -61,19 +62,26 @@ void OwnerNet::WriteEntitySpawnFields([[maybe_unused]] Registry* reg, EntityReco
 		{
 			switch (fdesc.componentSlotIndex)
 			{
-				case 0: floatArr[localIdx] = payload.PosX;
+				case 0:
+					floatArr[localIdx] = payload.PosX;
 					break;
-				case 1: floatArr[localIdx] = payload.PosY;
+				case 1:
+					floatArr[localIdx] = payload.PosY;
 					break;
-				case 2: floatArr[localIdx] = payload.PosZ;
+				case 2:
+					floatArr[localIdx] = payload.PosZ;
 					break;
-				case 3: floatArr[localIdx] = payload.RotQx;
+				case 3:
+					floatArr[localIdx] = payload.RotQx;
 					break;
-				case 4: floatArr[localIdx] = payload.RotQy;
+				case 4:
+					floatArr[localIdx] = payload.RotQy;
 					break;
-				case 5: floatArr[localIdx] = payload.RotQz;
+				case 5:
+					floatArr[localIdx] = payload.RotQz;
 					break;
-				case 6: floatArr[localIdx] = payload.RotQw;
+				case 6:
+					floatArr[localIdx] = payload.RotQw;
 					break;
 				default: break;
 			}
@@ -82,11 +90,14 @@ void OwnerNet::WriteEntitySpawnFields([[maybe_unused]] Registry* reg, EntityReco
 		{
 			switch (fdesc.componentSlotIndex)
 			{
-				case 0: floatArr[localIdx] = payload.ScaleX;
+				case 0:
+					floatArr[localIdx] = payload.ScaleX;
 					break;
-				case 1: floatArr[localIdx] = payload.ScaleY;
+				case 1:
+					floatArr[localIdx] = payload.ScaleY;
 					break;
-				case 2: floatArr[localIdx] = payload.ScaleZ;
+				case 2:
+					floatArr[localIdx] = payload.ScaleZ;
 					break;
 				default: break;
 			}
@@ -95,13 +106,17 @@ void OwnerNet::WriteEntitySpawnFields([[maybe_unused]] Registry* reg, EntityReco
 		{
 			switch (fdesc.componentSlotIndex)
 			{
-				case 0: floatArr[localIdx] = payload.ColorR;
+				case 0:
+					floatArr[localIdx] = payload.ColorR;
 					break;
-				case 1: floatArr[localIdx] = payload.ColorG;
+				case 1:
+					floatArr[localIdx] = payload.ColorG;
 					break;
-				case 2: floatArr[localIdx] = payload.ColorB;
+				case 2:
+					floatArr[localIdx] = payload.ColorB;
 					break;
-				case 3: floatArr[localIdx] = payload.ColorA;
+				case 3:
+					floatArr[localIdx] = payload.ColorA;
 					break;
 				default: break;
 			}
@@ -137,7 +152,7 @@ void OwnerNet::HandleEntitySpawn(Registry* reg, const EntitySpawnPayload& payloa
 	ClassID classType = static_cast<ClassID>(manifest.ClassType);
 
 	GlobalEntityHandle gHandle;
-	reg->CreateInternal(classType, {&gHandle, 1});
+	reg->CreateInternal(classType, { &gHandle, 1 });
 	if (gHandle.GetIndex() == 0)
 	{
 		LOG_ENG_WARN_F("[Replication] Failed to create entity ClassID %u", classType);
@@ -165,13 +180,13 @@ void OwnerNet::HandleEntitySpawn(Registry* reg, const EntitySpawnPayload& payloa
 	{
 		void* initTable[MAX_FIELDS_PER_ARCHETYPE];
 		arch->BuildFieldArrayTable(chunk, initTable,
-								   reg->GetTemporalCache()->GetActiveWriteFrame(),
-								   reg->GetVolatileCache()->GetActiveWriteFrame());
+			reg->GetTemporalCache()->GetActiveWriteFrame(),
+			reg->GetVolatileCache()->GetActiveWriteFrame());
 		initFn(initTable, initTable[0], localIdx);
 
 		arch->BuildFieldArrayTable(chunk, initTable,
-								   reg->GetTemporalCache()->GetActiveReadFrame(),
-								   reg->GetVolatileCache()->GetActiveReadFrame());
+			reg->GetTemporalCache()->GetActiveReadFrame(),
+			reg->GetVolatileCache()->GetActiveReadFrame());
 		initFn(initTable, initTable[0], localIdx);
 	}
 
@@ -183,37 +198,35 @@ void OwnerNet::HandleEntitySpawn(Registry* reg, const EntitySpawnPayload& payloa
 	{
 		GlobalEntityHandle capturedGH      = gHandle;
 		EntitySpawnPayload capturedPayload = payload;
-		reg->PushServerEvent({
-			frame,
+		reg->PushServerEvent({ frame,
 			[capturedGH, capturedPayload, reg]()
+		{
+			EntityRecord* rec = reg->GlobalEntityRegistry.Records[capturedGH.GetIndex()];
+			if (!rec || !rec->IsValid()) return;
+			WriteEntitySpawnFields(reg, rec, capturedPayload,
+				reg->GetTemporalCache()->GetActiveWriteFrame(),
+				reg->GetVolatileCache()->GetActiveWriteFrame());
+			// Set DirtiedFrame so PropagateFrameResim scatter-copies this entity forward.
+			ComponentCacheBase* c      = reg->GetTemporalCache();
+			TemporalFrameHeader* wHdr  = c->GetFrameHeader(c->GetActiveWriteFrame());
+			const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
+			auto* wFlags               = static_cast<int32_t*>(c->GetFieldData(wHdr, slot, 0));
+			if (wFlags)
 			{
-				EntityRecord* rec = reg->GlobalEntityRegistry.Records[capturedGH.GetIndex()];
-				if (!rec || !rec->IsValid()) return;
-				WriteEntitySpawnFields(reg, rec, capturedPayload,
-									   reg->GetTemporalCache()->GetActiveWriteFrame(),
-									   reg->GetVolatileCache()->GetActiveWriteFrame());
-				// Set DirtiedFrame so PropagateFrameResim scatter-copies this entity forward.
-				ComponentCacheBase* c     = reg->GetTemporalCache();
-				TemporalFrameHeader* wHdr = c->GetFrameHeader(c->GetActiveWriteFrame());
-				const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
-				auto* wFlags = static_cast<int32_t*>(c->GetFieldData(wHdr, slot, 0));
-				if (wFlags)
-				{
-					const uint32_t slabIdx = static_cast<uint32_t>(rec->CacheEntityIndex);
-					wFlags[slabIdx] |= static_cast<int32_t>(TemporalFlagBits::Dirty)
-					                |  static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
-				}
+				const uint32_t slabIdx = static_cast<uint32_t>(rec->CacheEntityIndex);
+				wFlags[slabIdx] |= static_cast<int32_t>(TemporalFlagBits::Dirty)
+								   | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
 			}
-		});
+		} });
 	}
 #else
 	// Write into both write and read frames so FieldProxy reads see correct data immediately.
 	WriteEntitySpawnFields(reg, record, payload,
-						   reg->GetTemporalCache()->GetActiveWriteFrame(),
-						   reg->GetVolatileCache()->GetActiveWriteFrame());
+		reg->GetTemporalCache()->GetActiveWriteFrame(),
+		reg->GetVolatileCache()->GetActiveWriteFrame());
 	WriteEntitySpawnFields(reg, record, payload,
-						   reg->GetTemporalCache()->GetActiveReadFrame(),
-						   reg->GetVolatileCache()->GetActiveReadFrame());
+		reg->GetTemporalCache()->GetActiveReadFrame(),
+		reg->GetVolatileCache()->GetActiveReadFrame());
 
 	// WriteEntitySpawnFields bypasses FieldProxy so Dirty|DirtiedFrame are never ORed in.
 	// Set them explicitly on the write frame so the GPU dirty-bit upload sees this entity.
@@ -221,12 +234,12 @@ void OwnerNet::HandleEntitySpawn(Registry* reg, const EntitySpawnPayload& payloa
 		ComponentCacheBase* cache       = reg->GetTemporalCache();
 		TemporalFrameHeader* writeHdr   = cache->GetFrameHeader(cache->GetActiveWriteFrame());
 		const ComponentTypeID flagsSlot = CacheSlotMeta<>::StaticTemporalIndex();
-		auto* writeFlags = static_cast<int32_t*>(cache->GetFieldData(writeHdr, flagsSlot, 0));
+		auto* writeFlags                = static_cast<int32_t*>(cache->GetFieldData(writeHdr, flagsSlot, 0));
 		if (writeFlags)
 		{
 			const uint32_t slabIdx = static_cast<uint32_t>(record->CacheEntityIndex);
 			writeFlags[slabIdx] |= static_cast<int32_t>(TemporalFlagBits::Dirty)
-			                    |  static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
+								   | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
 		}
 	}
 #endif
@@ -237,26 +250,26 @@ void OwnerNet::HandleEntitySpawn(Registry* reg, const EntitySpawnPayload& payloa
 // Called on the Logic thread via a Post() lambda.
 // ---------------------------------------------------------------------------
 
-void OwnerNet::HandleEntityActivate(Registry* reg, const uint32_t* netHandles, uint32_t count, uint32_t frame)
+void OwnerNet::HandleEntityActivate(Registry* reg, const uint32_t* netHandles, uint32_t count, [[maybe_unused]] uint32_t frame)
 {
-	ComponentCacheBase* cache    = reg->GetTemporalCache();
-	TemporalFrameHeader* writeHdr = cache->GetFrameHeader(cache->GetActiveWriteFrame());
-	TemporalFrameHeader* readHdr  = cache->GetFrameHeader(cache->GetActiveReadFrame());
+	ComponentCacheBase* cache       = reg->GetTemporalCache();
+	TemporalFrameHeader* writeHdr   = cache->GetFrameHeader(cache->GetActiveWriteFrame());
+	TemporalFrameHeader* readHdr    = cache->GetFrameHeader(cache->GetActiveReadFrame());
 	const ComponentTypeID flagsSlot = CacheSlotMeta<>::StaticTemporalIndex();
 
 	auto* writeFlags = static_cast<int32_t*>(cache->GetFieldData(writeHdr, flagsSlot, 0));
-	auto* readFlags  = static_cast<int32_t*>(cache->GetFieldData(readHdr,  flagsSlot, 0));
+	auto* readFlags  = static_cast<int32_t*>(cache->GetFieldData(readHdr, flagsSlot, 0));
 	if (!writeFlags) return;
 
 	const int32_t activeBit = static_cast<int32_t>(TemporalFlagBits::Active);
 	const int32_t dirtyBits = static_cast<int32_t>(TemporalFlagBits::Dirty)
-	                        | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
+							  | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
 
 	for (uint32_t k = 0; k < count; ++k)
 	{
 		EntityNetHandle nh{};
-		nh.Value              = netHandles[k];
-		EntityRecord* record  = reg->GlobalEntityRegistry.GetRecordPtr(nh);
+		nh.Value             = netHandles[k];
+		EntityRecord* record = reg->GlobalEntityRegistry.GetRecordPtr(nh);
 		if (!record || !record->IsValid()) continue;
 
 		const uint32_t slabIdx = static_cast<uint32_t>(record->CacheEntityIndex);
@@ -267,26 +280,23 @@ void OwnerNet::HandleEntityActivate(Registry* reg, const uint32_t* netHandles, u
 #ifdef TNX_ENABLE_ROLLBACK
 	{
 		std::vector<uint32_t> capturedHandles(netHandles, netHandles + count);
-		reg->PushServerEvent({
-			frame,
-			[reg, capturedHandles = std::move(capturedHandles)]()
+		reg->PushAppliedServerEvent([reg, capturedHandles = std::move(capturedHandles)]()
+		{
+			ComponentCacheBase* c      = reg->GetTemporalCache();
+			TemporalFrameHeader* wHdr  = c->GetFrameHeader(c->GetActiveWriteFrame());
+			const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
+			auto* wFlags               = static_cast<int32_t*>(c->GetFieldData(wHdr, slot, 0));
+			if (!wFlags) return;
+			const int32_t bits = static_cast<int32_t>(TemporalFlagBits::Active)
+								 | static_cast<int32_t>(TemporalFlagBits::Dirty)
+								 | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
+			for (uint32_t nhVal : capturedHandles)
 			{
-				ComponentCacheBase* c     = reg->GetTemporalCache();
-				TemporalFrameHeader* wHdr = c->GetFrameHeader(c->GetActiveWriteFrame());
-				const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
-				auto* wFlags = static_cast<int32_t*>(c->GetFieldData(wHdr, slot, 0));
-				if (!wFlags) return;
-				const int32_t bits = static_cast<int32_t>(TemporalFlagBits::Active)
-				                   | static_cast<int32_t>(TemporalFlagBits::Dirty)
-				                   | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
-				for (uint32_t nhVal : capturedHandles)
-				{
-					EntityNetHandle nh{};
-					nh.Value             = nhVal;
-					EntityRecord* rec    = reg->GlobalEntityRegistry.GetRecordPtr(nh);
-					if (!rec || !rec->IsValid()) continue;
-					wFlags[static_cast<uint32_t>(rec->CacheEntityIndex)] |= bits;
-				}
+				EntityNetHandle nh{};
+				nh.Value          = nhVal;
+				EntityRecord* rec = reg->GlobalEntityRegistry.GetRecordPtr(nh);
+				if (!rec || !rec->IsValid()) continue;
+				wFlags[static_cast<uint32_t>(rec->CacheEntityIndex)] |= bits;
 			}
 		});
 	}
@@ -298,8 +308,8 @@ void OwnerNet::HandleEntityActivate(Registry* reg, const uint32_t* netHandles, u
 // ---------------------------------------------------------------------------
 
 void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry* entries,
-									  uint32_t count, [[maybe_unused]] uint32_t clientFrame,
-									  [[maybe_unused]] WorldBase* world, [[maybe_unused]] uint32_t LastAckedFrame)
+	uint32_t count, [[maybe_unused]] uint32_t clientFrame,
+	[[maybe_unused]] WorldBase* world, [[maybe_unused]] uint32_t LastAckedFrame)
 {
 #ifdef TNX_ENABLE_ROLLBACK
 	constexpr SimFloat kDivergenceThresholdSq = SimFloat(0.01f * 0.01f);
@@ -312,7 +322,7 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 	if (clientFrame < oldestSlab)
 	{
 		LOG_ENG_DEBUG_F("[Replication] Skipping stale StateCorrection: frame=%u (oldest=%u, ring depth=%u)",
-						clientFrame, oldestSlab, ringSize);
+			clientFrame, oldestSlab, ringSize);
 		return;
 	}
 
@@ -356,11 +366,14 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 					auto* fa = static_cast<SimFloat*>(base);
 					switch (fdesc.componentSlotIndex)
 					{
-						case 0: resimX = fa[localIdx];
+						case 0:
+							resimX = fa[localIdx];
 							break;
-						case 1: resimY = fa[localIdx];
+						case 1:
+							resimY = fa[localIdx];
 							break;
-						case 2: resimZ = fa[localIdx];
+						case 2:
+							resimZ = fa[localIdx];
 							break;
 						default: break;
 					}
@@ -372,8 +385,8 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 				if (rdx * rdx + rdy * rdy + rdz * rdz > kDivergenceThresholdSq)
 				{
 					LOG_ENG_WARN_F("[Replication] ResimRoot divergence: netHandle=%u resimFrame=%u dist=%.4fm",
-								   entry.NetHandle, clientResimFrame,
-								   Sqrt(rdx * rdx + rdy * rdy + rdz * rdz).ToDouble());
+						entry.NetHandle, clientResimFrame,
+						Sqrt(rdx * rdx + rdy * rdy + rdz * rdz).ToDouble());
 					bPushCorrection = true;
 				}
 			}
@@ -391,11 +404,14 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 			auto* fa = static_cast<SimFloat*>(base);
 			switch (fdesc.componentSlotIndex)
 			{
-				case 0: predictedX = fa[localIdx];
+				case 0:
+					predictedX = fa[localIdx];
 					break;
-				case 1: predictedY = fa[localIdx];
+				case 1:
+					predictedY = fa[localIdx];
 					break;
-				case 2: predictedZ = fa[localIdx];
+				case 2:
+					predictedZ = fa[localIdx];
 					break;
 				default: break;
 			}
@@ -407,7 +423,7 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 		if (dx * dx + dy * dy + dz * dz > kDivergenceThresholdSq)
 		{
 			LOG_ENG_WARN_F("[Replication] Divergence: netHandle=%u frame=%u dist=%.4fm",
-						   entry.NetHandle, clientFrame, Sqrt(dx * dx + dy * dy + dz * dz).ToDouble());
+				entry.NetHandle, clientFrame, Sqrt(dx * dx + dy * dy + dz * dz).ToDouble());
 			bPushCorrection = true;
 		}
 
@@ -415,27 +431,21 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 		{
 			if (entry.ResimFrameDelta > 0)
 			{
-				corrections.push_back({
-					entry.NetHandle, clientFrame - entry.ResimFrameDelta,
+				corrections.push_back({ entry.NetHandle, clientFrame - entry.ResimFrameDelta,
 					entry.ResimPosX, entry.ResimPosY, entry.ResimPosZ,
-					entry.ResimRotQx, entry.ResimRotQy, entry.ResimRotQz, entry.ResimRotQw
-				});
+					entry.ResimRotQx, entry.ResimRotQy, entry.ResimRotQz, entry.ResimRotQw });
 			}
 			else if (clientFrame < currentF)
 			{
-				corrections.push_back({
-					entry.NetHandle, clientFrame,
+				corrections.push_back({ entry.NetHandle, clientFrame,
 					entry.PosX, entry.PosY, entry.PosZ,
-					entry.RotQx, entry.RotQy, entry.RotQz, entry.RotQw
-				});
+					entry.RotQx, entry.RotQy, entry.RotQz, entry.RotQw });
 			}
 			else
 			{
-				predictedCorrections.push_back({
-					entry.NetHandle, clientFrame,
+				predictedCorrections.push_back({ entry.NetHandle, clientFrame,
 					entry.PosX, entry.PosY, entry.PosZ,
-					entry.RotQx, entry.RotQy, entry.RotQz, entry.RotQw
-				});
+					entry.RotQx, entry.RotQy, entry.RotQz, entry.RotQw });
 			}
 		}
 	}
@@ -443,7 +453,8 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 	if (!corrections.empty() && world)
 	{
 		uint32_t earliest = UINT32_MAX;
-		for (const auto& c : corrections) earliest = std::min(earliest, c.ClientFrame);
+		for (const auto& c : corrections)
+			earliest = std::min(earliest, c.ClientFrame);
 		world->EnqueueCorrections(std::move(corrections), earliest);
 	}
 
@@ -469,12 +480,12 @@ void OwnerNet::HandleStateCorrections(Registry* reg, const StateCorrectionEntry*
 
 		void* fieldArrayTable[MAX_FIELDS_PER_ARCHETYPE];
 		arch->BuildFieldArrayTable(chunk, fieldArrayTable,
-								   reg->GetTemporalCache()->GetActiveWriteFrame(),
-								   reg->GetVolatileCache()->GetActiveWriteFrame());
+			reg->GetTemporalCache()->GetActiveWriteFrame(),
+			reg->GetVolatileCache()->GetActiveWriteFrame());
 
 		Registry::WriteEntityTransformFields(fieldArrayTable, arch, localIdx,
-		                                     entry.PosX, entry.PosY, entry.PosZ,
-		                                     entry.RotQx, entry.RotQy, entry.RotQz, entry.RotQw);
+			entry.PosX, entry.PosY, entry.PosZ,
+			entry.RotQx, entry.RotQy, entry.RotQz, entry.RotQw);
 	}
 #endif
 }
@@ -509,7 +520,7 @@ void OwnerNet::HandleEntityDelta(Registry* reg, const uint8_t* payload, uint32_t
 	if (!writeHdr) return;
 
 	// Build CacheSlot → fns lookup once per message.
-	constexpr size_t MaxCacheSlots = 256;
+	constexpr size_t MaxCacheSlots                 = 256;
 	const ComponentDeltaFns* bySlot[MaxCacheSlots] = {};
 	ComponentDeltaRegistry::Get().ForEach([&](ComponentTypeID, const ComponentDeltaFns& fns)
 	{
@@ -521,7 +532,7 @@ void OwnerNet::HandleEntityDelta(Registry* reg, const uint8_t* payload, uint32_t
 	for (uint16_t e = 0; e < entityCount; ++e)
 	{
 		const uint32_t netHandleVal = pkt.ReadU32();
-		const uint8_t  compCount    = pkt.ReadU8();
+		const uint8_t compCount     = pkt.ReadU8();
 		if (!pkt.IsOk()) break;
 
 		EntityNetHandle nh{};
@@ -569,7 +580,7 @@ void OwnerNet::HandleEntityDelta(Registry* reg, const uint8_t* payload, uint32_t
 				ComponentDeltaCtx ctx{ fieldPtrs, nullptr, slabIdx };
 				if (!fns->Deserialize(ctx, compReader))
 					LOG_ENG_WARN_F("[ClientNet] EntityDelta: deserialize error entity=%u slot=%u",
-								   netHandleVal, cacheSlot);
+						netHandleVal, cacheSlot);
 			}
 
 			// Always consume exactly DeltaLen bytes regardless of deserialize outcome.
@@ -579,10 +590,10 @@ void OwnerNet::HandleEntityDelta(Registry* reg, const uint8_t* payload, uint32_t
 		if (record)
 		{
 			const ComponentTypeID flagsSlot = CacheSlotMeta<>::StaticTemporalIndex();
-			auto* flags = static_cast<int32_t*>(cache->GetFieldData(writeHdr, flagsSlot, 0));
+			auto* flags                     = static_cast<int32_t*>(cache->GetFieldData(writeHdr, flagsSlot, 0));
 			if (flags)
 				flags[record->CacheEntityIndex] |= static_cast<int32_t>(TemporalFlagBits::Dirty)
-				                                 | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
+												   | static_cast<int32_t>(TemporalFlagBits::DirtiedFrame);
 		}
 
 		if (!pkt.IsOk()) break;
@@ -595,7 +606,7 @@ void OwnerNet::HandleEntityDelta(Registry* reg, const uint8_t* payload, uint32_t
 // ---------------------------------------------------------------------------
 
 bool OwnerNet::HandleConstructSpawn(ConstructRegistry* reg, Registry* entityReg,
-									WorldBase* clientWorld, const uint8_t* data, size_t len)
+	WorldBase* clientWorld, const uint8_t* data, size_t len)
 {
 	if (len < sizeof(ConstructSpawnPayload))
 	{
@@ -704,448 +715,450 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 	switch (type)
 	{
 		case NetMessageType::InputFrame:
-			{
-				break;
-			}
+		{
+			break;
+		}
 
 		case NetMessageType::Ping:
-			{
-				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-				if (ci) NetChannel(ci, ConnectionMgr).SendPong(msg.Header);
-				break;
-			}
+		{
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (ci) NetChannel(ci, ConnectionMgr).SendPong(msg.Header);
+			break;
+		}
 
 		case NetMessageType::Pong:
+		{
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (ci)
 			{
-				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-				if (ci)
-				{
-					const uint16_t now  = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
-					const uint16_t sent = msg.Header.Timestamp;
-					const SimFloat rtt  = SimFloat(static_cast<uint16_t>(now - sent));
-					if (ci->RTT_ms <= 0.0f) ci->RTT_ms = rtt;
-					else ci->RTT_ms                    = ci->RTT_ms * SimFloat(0.875f) + rtt * SimFloat(0.125f);
+				const uint16_t now  = static_cast<uint16_t>(SDL_GetTicks() & 0xFFFF);
+				const uint16_t sent = msg.Header.Timestamp;
+				const SimFloat rtt  = SimFloat(static_cast<uint16_t>(now - sent));
+				if (ci->RTT_ms <= 0.0f)
+					ci->RTT_ms = rtt;
+				else
+					ci->RTT_ms = ci->RTT_ms * SimFloat(0.875f) + rtt * SimFloat(0.125f);
 
-					if (ci->bOwnerInitiated
-						&& ci->RepState == ClientRepState::Synchronizing
-						&& ci->ClockSyncProbesRecvd < 8)
-					{
-						ci->ClockSyncProbesRecvd++;
-					}
+				if (ci->bOwnerInitiated
+					&& ci->RepState == ClientRepState::Synchronizing
+					&& ci->ClockSyncProbesRecvd < 8)
+				{
+					ci->ClockSyncProbesRecvd++;
 				}
-				break;
 			}
+			break;
+		}
 
 		case NetMessageType::ConnectionHandshake:
+		{
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (!ci)
 			{
-				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-				if (!ci)
-				{
-					LOG_ENG_WARN_F("[ClientNet] ConnectionHandshake from unknown connection %u", msg.Connection);
-					break;
-				}
-
-				if (msg.Header.SenderID == 0)
-				{
-					LOG_ENG_WARN("[ClientNet] Invalid HandshakeAccept — SenderID is 0");
-					break;
-				}
-
-				ConnectionMgr->AssignOwnerID(msg.Connection, msg.Header.SenderID);
-
-				// Promote the world from the temporary slot-0 registration (set in
-				// PIENetThread::AddClient) to the real ownerID slot so subsequent handlers
-				// (TravelNotify, FlowEvent/ServerReady) can find it before
-				// PIENetThread::UpdateClientOwnerID is called from the startup loop.
-				// PIE serializes connections so this is race-free. Concurrent production
-				// connections are not safe here — addressed when GNS multi-connection support lands.
-				if (WorldMap[msg.Header.SenderID] == nullptr && WorldMap[0] != nullptr) WorldMap[msg.Header.SenderID] = WorldMap[0];
-
-				if (msg.Payload.size() >= sizeof(HandshakePayload))
-				{
-					const auto* hsPay          = reinterpret_cast<const HandshakePayload*>(msg.Payload.data());
-					ci->ServerFrameAtHandshake = hsPay->ServerFrame;
-
-					// Record our own frame so we can translate local frame numbers to
-					// server-relative frames when building InputFrame packets.
-					WorldBase* w                        = WorldMap[msg.Header.SenderID];
-					ci->ClientLocalFrameAtHandshake = (w && w->GetLogicThread())
-														  ? w->GetLogicThread()->GetLastCompletedFrame()
-														  : 0;
-					if (w) w->SetServerFrameOffset(ci->GetFrameOffset());
-				}
-				ci->RepState = ClientRepState::Synchronizing;
-
-				{
-					WorldBase* origWorld = WorldMap[msg.Header.SenderID];
-					if (origWorld && origWorld->GetFlowManager()) origWorld->GetFlowManager()->OnLocalOwnerConnected(msg.Header.SenderID);
-					Soul* soul = (origWorld && origWorld->GetFlowManager()) ? origWorld->GetFlowManager()->GetSoul(msg.Header.SenderID) : nullptr;
-					LOG_NET_INFO_F(soul, "[ClientNet] HandshakeAccept received — OwnerID=%u serverFrame=%u",
-								   msg.Header.SenderID, ci->ServerFrameAtHandshake);
-				}
+				LOG_ENG_WARN_F("[ClientNet] ConnectionHandshake from unknown connection %u", msg.Connection);
 				break;
 			}
+
+			if (msg.Header.SenderID == 0)
+			{
+				LOG_ENG_WARN("[ClientNet] Invalid HandshakeAccept — SenderID is 0");
+				break;
+			}
+
+			ConnectionMgr->AssignOwnerID(msg.Connection, msg.Header.SenderID);
+
+			// Promote the world from the temporary slot-0 registration (set in
+			// PIENetThread::AddClient) to the real ownerID slot so subsequent handlers
+			// (TravelNotify, FlowEvent/ServerReady) can find it before
+			// PIENetThread::UpdateClientOwnerID is called from the startup loop.
+			// PIE serializes connections so this is race-free. Concurrent production
+			// connections are not safe here — addressed when GNS multi-connection support lands.
+			if (WorldMap[msg.Header.SenderID] == nullptr && WorldMap[0] != nullptr) WorldMap[msg.Header.SenderID] = WorldMap[0];
+
+			if (msg.Payload.size() >= sizeof(HandshakePayload))
+			{
+				const auto* hsPay          = reinterpret_cast<const HandshakePayload*>(msg.Payload.data());
+				ci->ServerFrameAtHandshake = hsPay->ServerFrame;
+
+				// Record our own frame so we can translate local frame numbers to
+				// server-relative frames when building InputFrame packets.
+				WorldBase* w                    = WorldMap[msg.Header.SenderID];
+				ci->ClientLocalFrameAtHandshake = (w && w->GetLogicThread())
+													  ? w->GetLogicThread()->GetLastCompletedFrame()
+													  : 0;
+				if (w) w->SetServerFrameOffset(ci->GetFrameOffset());
+			}
+			ci->RepState = ClientRepState::Synchronizing;
+
+			{
+				WorldBase* origWorld = WorldMap[msg.Header.SenderID];
+				if (origWorld && origWorld->GetFlowManager()) origWorld->GetFlowManager()->OnLocalOwnerConnected(msg.Header.SenderID);
+				Soul* soul = (origWorld && origWorld->GetFlowManager()) ? origWorld->GetFlowManager()->GetSoul(msg.Header.SenderID) : nullptr;
+				LOG_NET_INFO_F(soul, "[ClientNet] HandshakeAccept received — OwnerID=%u serverFrame=%u",
+					msg.Header.SenderID, ci->ServerFrameAtHandshake);
+			}
+			break;
+		}
 
 		case NetMessageType::ClockSync:
+		{
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (!ci) break;
+
+			if (msg.Payload.size() < sizeof(ClockSyncPayload))
 			{
-				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-				if (!ci) break;
-
-				if (msg.Payload.size() < sizeof(ClockSyncPayload))
-				{
-					LOG_ENG_WARN_F("[ClientNet] ClockSync payload too small (%zu)", msg.Payload.size());
-					break;
-				}
-
-				const uint32_t tickRate = (Config->FixedUpdateHz == EngineConfig::Unset)
-											  ? 128u
-											  : static_cast<uint32_t>(Config->FixedUpdateHz);
-				const float stepMs = 1000.0f / static_cast<float>(tickRate);
-				// InputLead is kept on ConnectionInfo for diagnostics but is no longer used
-				// to offset packet frame tags — the logic thread stamps each frame exactly.
-				ci->InputLead = static_cast<uint32_t>(ci->RTT_ms.ToFloat() * 0.5f / stepMs) + 2u;
-
-				// Guard: ClockSync (unreliable) can arrive after TravelNotify (reliable).
-				if (ci->RepState == ClientRepState::Synchronizing)
-				{
-					ci->RepState     = ClientRepState::Loading;
-					WorldBase* origWorld = WorldMap[ci->OwnerID];
-					Soul* soul       = (origWorld && origWorld->GetFlowManager()) ? origWorld->GetFlowManager()->GetSoul(ci->OwnerID) : nullptr;
-					LOG_NET_INFO_F(soul, "[ClientNet] ClockSync complete — InputLead=%u RTT=%.1fms → Loading",
-								   ci->InputLead, ci->RTT_ms.ToFloat());
-				}
-				else
-				{
-					WorldBase* origWorld = WorldMap[ci->OwnerID];
-					Soul* soul       = (origWorld && origWorld->GetFlowManager()) ? origWorld->GetFlowManager()->GetSoul(ci->OwnerID) : nullptr;
-					LOG_NET_WARN_F(soul,
-								   "[ClientNet] ClockSync arrived late (RepState=%d, already past Synchronizing) — "
-								   "InputLead=%u updated, state unchanged",
-								   static_cast<int>(ci->RepState), ci->InputLead);
-				}
+				LOG_ENG_WARN_F("[ClientNet] ClockSync payload too small (%zu)", msg.Payload.size());
 				break;
 			}
+
+			const uint32_t tickRate = (Config->FixedUpdateHz == EngineConfig::Unset)
+										  ? 128u
+										  : static_cast<uint32_t>(Config->FixedUpdateHz);
+			const float stepMs      = 1000.0f / static_cast<float>(tickRate);
+			// InputLead is kept on ConnectionInfo for diagnostics but is no longer used
+			// to offset packet frame tags — the logic thread stamps each frame exactly.
+			ci->InputLead = static_cast<uint32_t>(ci->RTT_ms.ToFloat() * 0.5f / stepMs) + 2u;
+
+			// Guard: ClockSync (unreliable) can arrive after TravelNotify (reliable).
+			if (ci->RepState == ClientRepState::Synchronizing)
+			{
+				ci->RepState         = ClientRepState::Loading;
+				WorldBase* origWorld = WorldMap[ci->OwnerID];
+				Soul* soul           = (origWorld && origWorld->GetFlowManager()) ? origWorld->GetFlowManager()->GetSoul(ci->OwnerID) : nullptr;
+				LOG_NET_INFO_F(soul, "[ClientNet] ClockSync complete — InputLead=%u RTT=%.1fms → Loading",
+					ci->InputLead, ci->RTT_ms.ToFloat());
+			}
+			else
+			{
+				WorldBase* origWorld = WorldMap[ci->OwnerID];
+				Soul* soul           = (origWorld && origWorld->GetFlowManager()) ? origWorld->GetFlowManager()->GetSoul(ci->OwnerID) : nullptr;
+				LOG_NET_WARN_F(soul,
+					"[ClientNet] ClockSync arrived late (RepState=%d, already past Synchronizing) — "
+					"InputLead=%u updated, state unchanged",
+					static_cast<int>(ci->RepState), ci->InputLead);
+			}
+			break;
+		}
 
 		case NetMessageType::TravelNotify:
+		{
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (!ci) break;
+
+			if (msg.Payload.size() < sizeof(TravelPayload))
 			{
-				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-				if (!ci) break;
-
-				if (msg.Payload.size() < sizeof(TravelPayload))
-				{
-					LOG_ENG_WARN_F("[ClientNet] TravelNotify payload too small (%zu)", msg.Payload.size());
-					break;
-				}
-
-				const auto* travelMsg = reinterpret_cast<const TravelPayload*>(msg.Payload.data());
-				ci->RepState          = ClientRepState::LevelLoading;
-
-				{
-					WorldBase* clientWorld = WorldMap[ci->OwnerID];
-					FlowManagerBase* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
-					Soul* soul             = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
-					LOG_NET_INFO_F(soul, "[ClientNet] TravelNotify received — loading level '%s'", travelMsg->LevelPath);
-					if (flow) flow->PostTravelNotify(travelMsg->LevelPath);
-				}
-				// LevelReady is deferred — AcknowledgeLevelReady() fires once the
-				// StreamingManager completes the background load batch.
+				LOG_ENG_WARN_F("[ClientNet] TravelNotify payload too small (%zu)", msg.Payload.size());
 				break;
 			}
+
+			const auto* travelMsg = reinterpret_cast<const TravelPayload*>(msg.Payload.data());
+			ci->RepState          = ClientRepState::LevelLoading;
+
+			{
+				WorldBase* clientWorld = WorldMap[ci->OwnerID];
+				FlowManagerBase* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
+				Soul* soul             = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
+				LOG_NET_INFO_F(soul, "[ClientNet] TravelNotify received — loading level '%s'", travelMsg->LevelPath);
+				if (flow) flow->PostTravelNotify(travelMsg->LevelPath);
+			}
+			// LevelReady is deferred — AcknowledgeLevelReady() fires once the
+			// StreamingManager completes the background load batch.
+			break;
+		}
 
 		case NetMessageType::FlowEvent:
+		{
+			if (msg.Payload.size() < sizeof(FlowEventPayload))
 			{
-				if (msg.Payload.size() < sizeof(FlowEventPayload))
+				LOG_ENG_WARN_F("[ClientNet] FlowEvent payload too small (%zu)", msg.Payload.size());
+				break;
+			}
+
+			const auto* ev     = reinterpret_cast<const FlowEventPayload*>(msg.Payload.data());
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (!ci) break;
+
+			{
+				WorldBase* clientWorld = WorldMap[ci->OwnerID];
+				FlowManagerBase* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
+				Soul* soul             = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
+
+				if (ci->RepState == ClientRepState::LevelLoaded
+					&& ev->EventID == static_cast<uint8_t>(FlowEventID::ServerReady))
 				{
-					LOG_ENG_WARN_F("[ClientNet] FlowEvent payload too small (%zu)", msg.Payload.size());
-					break;
-				}
+					ci->RepState = ClientRepState::Loaded;
 
-				const auto* ev     = reinterpret_cast<const FlowEventPayload*>(msg.Payload.data());
-				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-				if (!ci) break;
-
-				{
-					WorldBase* clientWorld = WorldMap[ci->OwnerID];
-					FlowManagerBase* flow  = clientWorld ? clientWorld->GetFlowManager() : nullptr;
-					Soul* soul             = flow ? flow->GetSoul(ci->OwnerID) : nullptr;
-
-					if (ci->RepState == ClientRepState::LevelLoaded
-						&& ev->EventID == static_cast<uint8_t>(FlowEventID::ServerReady))
+					// Flush deferred spawns so entities exist before the Alive→Active sweep.
+					FlushDeferredEntitySpawns();
 					{
-						ci->RepState = ClientRepState::Loaded;
-
-						// Flush deferred spawns so entities exist before the Alive→Active sweep.
-						FlushDeferredEntitySpawns();
+						auto it = DeferredConstructSpawns.begin();
+						while (it != DeferredConstructSpawns.end())
 						{
-							auto it = DeferredConstructSpawns.begin();
-							while (it != DeferredConstructSpawns.end())
-							{
-								if (TrySpawnDeferred(*it)) it = DeferredConstructSpawns.erase(it);
-								else ++it;
-							}
+							if (TrySpawnDeferred(*it))
+								it = DeferredConstructSpawns.erase(it);
+							else
+								++it;
 						}
+					}
 
-						if (clientWorld)
+					if (clientWorld)
+					{
+						Registry* sweepReg = clientWorld->GetRegistry();
+						clientWorld->PostAndWait([sweepReg](uint32_t)
 						{
-							Registry* sweepReg         = clientWorld->GetRegistry();
-							const uint32_t sweepFrame  = msg.Header.FrameNumber;
-							clientWorld->PostAndWait([sweepReg, sweepFrame](uint32_t)
+							sweepReg->SweepAliveFlagsToActive();
+#ifdef TNX_ENABLE_ROLLBACK
+							sweepReg->PushAppliedServerEvent([sweepReg]()
 							{
 								sweepReg->SweepAliveFlagsToActive();
-#ifdef TNX_ENABLE_ROLLBACK
-								sweepReg->PushServerEvent({
-									sweepFrame,
-									[sweepReg]() { sweepReg->SweepAliveFlagsToActive(); }
-								});
-#endif
 							});
-						}
-
-						if (flow) flow->SendPlayerBeginRequest(NetChannel(ci, ConnectionMgr), msg.Header.FrameNumber, ci->Predictions);
-						ci->PlayerBeginSentAt = SDL_GetTicks();
-
-						LOG_NET_INFO(soul, "[ClientNet] FlowEvent::ServerReady → Loaded");
-					}
-					else if (ev->EventID == static_cast<uint8_t>(FlowEventID::ServerReady))
-					{
-						LOG_NET_WARN_F(soul,
-									   "[ClientNet] FlowEvent::ServerReady in unexpected RepState=%d "
-									   "(expected LevelLoaded=%d) -- player begin skipped",
-									   static_cast<int>(ci->RepState),
-									   static_cast<int>(ClientRepState::LevelLoaded));
+#endif
+						});
 					}
 
-					if (flow) flow->PostNetEvent(ev->EventID);
+					if (flow) flow->SendPlayerBeginRequest(NetChannel(ci, ConnectionMgr), msg.Header.FrameNumber, ci->Predictions);
+					ci->PlayerBeginSentAt = SDL_GetTicks();
+
+					LOG_NET_INFO(soul, "[ClientNet] FlowEvent::ServerReady → Loaded");
 				}
-				break;
+				else if (ev->EventID == static_cast<uint8_t>(FlowEventID::ServerReady))
+				{
+					LOG_NET_WARN_F(soul,
+						"[ClientNet] FlowEvent::ServerReady in unexpected RepState=%d "
+						"(expected LevelLoaded=%d) -- player begin skipped",
+						static_cast<int>(ci->RepState),
+						static_cast<int>(ClientRepState::LevelLoaded));
+				}
+
+				if (flow) flow->PostNetEvent(ev->EventID);
 			}
+			break;
+		}
 
 		case NetMessageType::EntitySpawn:
+		{
+			if (msg.Payload.size() < sizeof(EntitySpawnPayload) || msg.Payload.size() % sizeof(EntitySpawnPayload) != 0)
 			{
-				if (msg.Payload.size() < sizeof(EntitySpawnPayload) ||
-					msg.Payload.size() % sizeof(EntitySpawnPayload) != 0)
-				{
-					LOG_ENG_WARN_F("[ClientNet] EntitySpawn payload bad size (%zu)", msg.Payload.size());
-					break;
-				}
-
-				ConnectionInfo* ci    = ConnectionMgr->FindConnection(msg.Connection);
-				const uint8_t ownerID = ci ? ci->OwnerID : 0;
-				if (!WorldMap[ownerID])
-				{
-					LOG_ENG_WARN_F("[ClientNet] EntitySpawn but no client world for OwnerID %u", ownerID);
-					break;
-				}
-
-				// Defer to TickReplication — never block the fast-path message loop.
-				DeferredEntitySpawn deferred{ownerID, msg.Header.FrameNumber, msg.Payload};
-				DeferredEntitySpawns.push_back(std::move(deferred));
+				LOG_ENG_WARN_F("[ClientNet] EntitySpawn payload bad size (%zu)", msg.Payload.size());
 				break;
 			}
+
+			ConnectionInfo* ci    = ConnectionMgr->FindConnection(msg.Connection);
+			const uint8_t ownerID = ci ? ci->OwnerID : 0;
+			if (!WorldMap[ownerID])
+			{
+				LOG_ENG_WARN_F("[ClientNet] EntitySpawn but no client world for OwnerID %u", ownerID);
+				break;
+			}
+
+			// Defer to TickReplication — never block the fast-path message loop.
+			DeferredEntitySpawn deferred{ ownerID, msg.Header.FrameNumber, msg.Payload };
+			DeferredEntitySpawns.push_back(std::move(deferred));
+			break;
+		}
 
 		case NetMessageType::ConstructSpawn:
+		{
+			if (msg.Payload.size() < sizeof(ConstructSpawnPayload))
 			{
-				if (msg.Payload.size() < sizeof(ConstructSpawnPayload))
-				{
-					LOG_ENG_WARN_F("[ClientNet] ConstructSpawn payload too small (%zu)", msg.Payload.size());
-					break;
-				}
-
-				ConnectionInfo* ci    = ConnectionMgr->FindConnection(msg.Connection);
-				const uint8_t ownerID = ci ? ci->OwnerID : 0;
-				WorldBase* clientWorld    = WorldMap[ownerID];
-				if (!clientWorld)
-				{
-					LOG_ENG_WARN_F("[ClientNet] ConstructSpawn but no client world for OwnerID %u", ownerID);
-					break;
-				}
-
-				DeferredConstructSpawn deferred{ownerID, msg.Header.FrameNumber, msg.Payload};
-
-				// Try immediately — if entities aren't ready yet, push to deferred queue.
-				if (!TrySpawnDeferred(deferred)) DeferredConstructSpawns.push_back(std::move(deferred));
+				LOG_ENG_WARN_F("[ClientNet] ConstructSpawn payload too small (%zu)", msg.Payload.size());
 				break;
 			}
+
+			ConnectionInfo* ci     = ConnectionMgr->FindConnection(msg.Connection);
+			const uint8_t ownerID  = ci ? ci->OwnerID : 0;
+			WorldBase* clientWorld = WorldMap[ownerID];
+			if (!clientWorld)
+			{
+				LOG_ENG_WARN_F("[ClientNet] ConstructSpawn but no client world for OwnerID %u", ownerID);
+				break;
+			}
+
+			DeferredConstructSpawn deferred{ ownerID, msg.Header.FrameNumber, msg.Payload };
+
+			// Try immediately — if entities aren't ready yet, push to deferred queue.
+			if (!TrySpawnDeferred(deferred)) DeferredConstructSpawns.push_back(std::move(deferred));
+			break;
+		}
 
 		case NetMessageType::StateCorrection:
+		{
+			if (msg.Payload.size() < sizeof(StateCorrectionEntry))
 			{
-				if (msg.Payload.size() < sizeof(StateCorrectionEntry))
-				{
-					LOG_ENG_WARN("[ClientNet] StateCorrection payload too small");
-					break;
-				}
-
-				ConnectionInfo* ci    = ConnectionMgr->FindConnection(msg.Connection);
-				const uint8_t ownerID = ci ? ci->OwnerID : 0;
-				WorldBase* clientWorld    = WorldMap[ownerID];
-				if (!clientWorld || !ci) break;
-
-				const uint32_t clientFrame = msg.Header.FrameNumber;
-
-				const uint32_t entryCount = static_cast<uint32_t>(
-					msg.Payload.size() / sizeof(StateCorrectionEntry));
-				const auto* entries = reinterpret_cast<const StateCorrectionEntry*>(msg.Payload.data());
-
-				Registry* corrReg = clientWorld->GetRegistry();
-
-				// Heap-allocate so the fire-and-forget Post lambda can safely outlive this scope.
-				// The lambda owns the vector and deletes it after use.
-				struct CorrCapture
-				{
-					Registry* reg;
-					WorldBase* world;
-					std::vector<StateCorrectionEntry>* corrs;
-					uint32_t clientFrame;
-					uint32_t LastAckedFrame;
-				};
-				static_assert(sizeof(CorrCapture) <= 48, "CorrCapture exceeds job payload limit");
-
-				auto* corrHeap = new std::vector<StateCorrectionEntry>(entries, entries + entryCount);
-				CorrCapture cap{corrReg, clientWorld, corrHeap, clientFrame, ci->LastServerAckedFrame};
-				clientWorld->Post([cap](uint32_t)
-				{
-					HandleStateCorrections(cap.reg, cap.corrs->data(),
-										   static_cast<uint32_t>(cap.corrs->size()), cap.clientFrame, cap.world, cap.LastAckedFrame);
-					delete cap.corrs;
-			});
+				LOG_ENG_WARN("[ClientNet] StateCorrection payload too small");
 				break;
 			}
+
+			ConnectionInfo* ci     = ConnectionMgr->FindConnection(msg.Connection);
+			const uint8_t ownerID  = ci ? ci->OwnerID : 0;
+			WorldBase* clientWorld = WorldMap[ownerID];
+			if (!clientWorld || !ci) break;
+
+			const uint32_t clientFrame = msg.Header.FrameNumber;
+
+			const uint32_t entryCount = static_cast<uint32_t>(
+				msg.Payload.size() / sizeof(StateCorrectionEntry));
+			const auto* entries = reinterpret_cast<const StateCorrectionEntry*>(msg.Payload.data());
+
+			Registry* corrReg = clientWorld->GetRegistry();
+
+			// Heap-allocate so the fire-and-forget Post lambda can safely outlive this scope.
+			// The lambda owns the vector and deletes it after use.
+			struct CorrCapture
+			{
+				Registry* reg;
+				WorldBase* world;
+				std::vector<StateCorrectionEntry>* corrs;
+				uint32_t clientFrame;
+				uint32_t LastAckedFrame;
+			};
+			static_assert(sizeof(CorrCapture) <= 48, "CorrCapture exceeds job payload limit");
+
+			auto* corrHeap = new std::vector<StateCorrectionEntry>(entries, entries + entryCount);
+			CorrCapture cap{ corrReg, clientWorld, corrHeap, clientFrame, ci->LastServerAckedFrame };
+			clientWorld->Post([cap](uint32_t)
+			{
+				HandleStateCorrections(cap.reg, cap.corrs->data(),
+					static_cast<uint32_t>(cap.corrs->size()), cap.clientFrame, cap.world, cap.LastAckedFrame);
+				delete cap.corrs;
+			});
+			break;
+		}
 
 		case NetMessageType::EntityDestroy:
+		{
+			const uint32_t count = static_cast<uint32_t>(msg.Payload.size() / sizeof(uint32_t));
+			if (count == 0) break;
+
+			ConnectionInfo* ci     = ConnectionMgr->FindConnection(msg.Connection);
+			const uint8_t ownerID  = ci ? ci->OwnerID : 0;
+			WorldBase* clientWorld = WorldMap[ownerID];
+			if (!clientWorld) break;
+
+			Registry* entityReg = clientWorld->GetRegistry();
+
+			// Copy handles for the Post lambda — payload lifetime is not guaranteed.
+			auto* handlesCopy = new std::vector<uint32_t>(
+				reinterpret_cast<const uint32_t*>(msg.Payload.data()),
+				reinterpret_cast<const uint32_t*>(msg.Payload.data()) + count);
+
+			clientWorld->Post([entityReg, handlesCopy](uint32_t)
 			{
-				const uint32_t count = static_cast<uint32_t>(msg.Payload.size() / sizeof(uint32_t));
-				if (count == 0) break;
-
-				ConnectionInfo* ci     = ConnectionMgr->FindConnection(msg.Connection);
-				const uint8_t ownerID  = ci ? ci->OwnerID : 0;
-				WorldBase* clientWorld = WorldMap[ownerID];
-				if (!clientWorld) break;
-
-				Registry* entityReg = clientWorld->GetRegistry();
-
-				// Copy handles for the Post lambda — payload lifetime is not guaranteed.
-				auto* handlesCopy = new std::vector<uint32_t>(
-					reinterpret_cast<const uint32_t*>(msg.Payload.data()),
-					reinterpret_cast<const uint32_t*>(msg.Payload.data()) + count);
-
-				clientWorld->Post([entityReg, handlesCopy](uint32_t)
+				for (uint32_t val : *handlesCopy)
 				{
-					for (uint32_t val : *handlesCopy)
-					{
-						EntityNetHandle nh{};
-						nh.Value             = val;
-						EntityRecord* Record = entityReg->GlobalEntityRegistry.GetRecordPtr(nh);
-						if (!Record) continue;
-						entityReg->DestroyRecord(*Record);
-					}
-					delete handlesCopy;
-				});
-				break;
-			}
+					EntityNetHandle nh{};
+					nh.Value             = val;
+					EntityRecord* Record = entityReg->GlobalEntityRegistry.GetRecordPtr(nh);
+					if (!Record) continue;
+					entityReg->DestroyRecord(*Record);
+				}
+				delete handlesCopy;
+			});
+			break;
+		}
 
 		case NetMessageType::EntityActivate:
+		{
+			const uint32_t count = static_cast<uint32_t>(msg.Payload.size() / sizeof(uint32_t));
+			if (count == 0) break;
+
+			ConnectionInfo* ci     = ConnectionMgr->FindConnection(msg.Connection);
+			const uint8_t ownerID  = ci ? ci->OwnerID : 0;
+			WorldBase* clientWorld = WorldMap[ownerID];
+			if (!clientWorld) break;
+
+			Registry* entityReg = clientWorld->GetRegistry();
+
+			auto* handlesCopy = new std::vector<uint32_t>(
+				reinterpret_cast<const uint32_t*>(msg.Payload.data()),
+				reinterpret_cast<const uint32_t*>(msg.Payload.data()) + count);
+
+			const uint32_t activateFrame = msg.Header.FrameNumber;
+			clientWorld->Post([entityReg, handlesCopy, activateFrame](uint32_t)
 			{
-				const uint32_t count = static_cast<uint32_t>(msg.Payload.size() / sizeof(uint32_t));
-				if (count == 0) break;
-
-				ConnectionInfo* ci     = ConnectionMgr->FindConnection(msg.Connection);
-				const uint8_t ownerID  = ci ? ci->OwnerID : 0;
-				WorldBase* clientWorld = WorldMap[ownerID];
-				if (!clientWorld) break;
-
-				Registry* entityReg = clientWorld->GetRegistry();
-
-				auto* handlesCopy = new std::vector<uint32_t>(
-					reinterpret_cast<const uint32_t*>(msg.Payload.data()),
-					reinterpret_cast<const uint32_t*>(msg.Payload.data()) + count);
-
-				const uint32_t activateFrame = msg.Header.FrameNumber;
-				clientWorld->Post([entityReg, handlesCopy, activateFrame](uint32_t)
-				{
-					HandleEntityActivate(entityReg, handlesCopy->data(),
-										 static_cast<uint32_t>(handlesCopy->size()), activateFrame);
-					delete handlesCopy;
-				});
-				break;
-			}
+				HandleEntityActivate(entityReg, handlesCopy->data(),
+					static_cast<uint32_t>(handlesCopy->size()), activateFrame);
+				delete handlesCopy;
+			});
+			break;
+		}
 
 		case NetMessageType::ConstructDestroy:
+		{
+			const uint32_t count = static_cast<uint32_t>(msg.Payload.size() / sizeof(uint32_t));
+			if (count == 0) break;
+
+			ConnectionInfo* ci     = ConnectionMgr->FindConnection(msg.Connection);
+			const uint8_t ownerID  = ci ? ci->OwnerID : 0;
+			WorldBase* clientWorld = WorldMap[ownerID];
+			if (!clientWorld) break;
+
+			ConstructRegistry* constructs = clientWorld->GetConstructRegistry();
+			if (!constructs) break;
+
+			auto* handlesCopy = new std::vector<uint32_t>(
+				reinterpret_cast<const uint32_t*>(msg.Payload.data()),
+				reinterpret_cast<const uint32_t*>(msg.Payload.data()) + count);
+
+			clientWorld->Post([constructs, handlesCopy](uint32_t)
 			{
-				const uint32_t count = static_cast<uint32_t>(msg.Payload.size() / sizeof(uint32_t));
-				if (count == 0) break;
-
-				ConnectionInfo* ci     = ConnectionMgr->FindConnection(msg.Connection);
-				const uint8_t ownerID  = ci ? ci->OwnerID : 0;
-				WorldBase* clientWorld = WorldMap[ownerID];
-				if (!clientWorld) break;
-
-				ConstructRegistry* constructs = clientWorld->GetConstructRegistry();
-				if (!constructs) break;
-
-				auto* handlesCopy = new std::vector<uint32_t>(
-					reinterpret_cast<const uint32_t*>(msg.Payload.data()),
-					reinterpret_cast<const uint32_t*>(msg.Payload.data()) + count);
-
-				clientWorld->Post([constructs, handlesCopy](uint32_t)
+				for (uint32_t val : *handlesCopy)
 				{
-					for (uint32_t val : *handlesCopy)
-					{
-						ConstructNetHandle nh{};
-						nh.Value = val;
-						constructs->DestroyByNetHandle(nh);
-					}
-					delete handlesCopy;
-				});
-				break;
-			}
+					ConstructNetHandle nh{};
+					nh.Value = val;
+					constructs->DestroyByNetHandle(nh);
+				}
+				delete handlesCopy;
+			});
+			break;
+		}
 
 		case NetMessageType::SoulRPC:
+		{
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (!ci) break;
+
+			if (msg.Payload.size() >= sizeof(RPCHeader))
 			{
-				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-				if (!ci) break;
+				const auto* rpcHdrPeek = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
+				LOG_ENG_INFO_F("[ClientNet] SoulRPC received: ownerID=%u methodID=%u repState=%d",
+					ci->OwnerID, rpcHdrPeek->MethodID, static_cast<int>(ci->RepState));
+			}
 
-				if (msg.Payload.size() >= sizeof(RPCHeader))
-				{
-					const auto* rpcHdrPeek = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
-					LOG_ENG_INFO_F("[ClientNet] SoulRPC received: ownerID=%u methodID=%u repState=%d",
-								   ci->OwnerID, rpcHdrPeek->MethodID, static_cast<int>(ci->RepState));
-				}
-
-				if (msg.Payload.size() < sizeof(RPCHeader))
-				{
-					LOG_ENG_WARN_F("[ClientNet] SoulRPC payload too small (%zu bytes)", msg.Payload.size());
-					break;
-				}
-
-				const auto* rpcHdr      = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
-				const uint8_t* params   = msg.Payload.data() + sizeof(RPCHeader);
-				const size_t paramBytes = msg.Payload.size() - sizeof(RPCHeader);
-
-				if (paramBytes < rpcHdr->ParamSize)
-				{
-					LOG_ENG_WARN_F("[ClientNet] SoulRPC param underrun (MethodID=%u, want=%u, got=%zu)",
-								   rpcHdr->MethodID, rpcHdr->ParamSize, paramBytes);
-					break;
-				}
-
-				{
-					WorldBase* clientWorld = WorldMap[ci->OwnerID];
-					if (FlowManagerBase* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr)
-					{
-						if (Soul* soul = flow->GetSoul(ci->OwnerID))
-						{
-							RPCContext ctx{ci, ConnectionMgr};
-							soul->DispatchClientRPC(ctx, *rpcHdr, params);
-						}
-						else
-						{
-							LOG_NET_WARN_F(soul, "[ClientNet] SoulRPC: no Soul for ownerID=%u (MethodID=%u)",
-										   ci->OwnerID, rpcHdr->MethodID);
-						}
-					}
-				}
+			if (msg.Payload.size() < sizeof(RPCHeader))
+			{
+				LOG_ENG_WARN_F("[ClientNet] SoulRPC payload too small (%zu bytes)", msg.Payload.size());
 				break;
 			}
+
+			const auto* rpcHdr      = reinterpret_cast<const RPCHeader*>(msg.Payload.data());
+			const uint8_t* params   = msg.Payload.data() + sizeof(RPCHeader);
+			const size_t paramBytes = msg.Payload.size() - sizeof(RPCHeader);
+
+			if (paramBytes < rpcHdr->ParamSize)
+			{
+				LOG_ENG_WARN_F("[ClientNet] SoulRPC param underrun (MethodID=%u, want=%u, got=%zu)",
+					rpcHdr->MethodID, rpcHdr->ParamSize, paramBytes);
+				break;
+			}
+
+			{
+				WorldBase* clientWorld = WorldMap[ci->OwnerID];
+				if (FlowManagerBase* flow = clientWorld ? clientWorld->GetFlowManager() : nullptr)
+				{
+					if (Soul* soul = flow->GetSoul(ci->OwnerID))
+					{
+						RPCContext ctx{ ci, ConnectionMgr };
+						soul->DispatchClientRPC(ctx, *rpcHdr, params);
+					}
+					else
+					{
+						LOG_NET_WARN_F(soul, "[ClientNet] SoulRPC: no Soul for ownerID=%u (MethodID=%u)",
+							ci->OwnerID, rpcHdr->MethodID);
+					}
+				}
+			}
+			break;
+		}
 
 		// Legacy cases — superseded by SoulRPC. Kept for wire-compat; remove once server is updated.
 		case NetMessageType::PlayerBeginConfirm:
@@ -1157,149 +1170,145 @@ void OwnerNet::HandleMessage(const ReceivedMessage& msg)
 			break;
 
 		case NetMessageType::GameModeManifest:
+		{
+			struct BaseManifest : GameModeManifestPayload<BaseManifest>
 			{
-				struct BaseManifest : GameModeManifestPayload<BaseManifest>
-				{
-				};
-				if (msg.Header.PayloadSize < sizeof(BaseManifest))
-				{
-					LOG_ENG_WARN_F("[ClientNet] GameModeManifest too small (got %u)", msg.Header.PayloadSize);
-					break;
-				}
-				// TODO: forward raw bytes to GameMode::OnGameModeManifest(payload, size)
-				const auto* base = reinterpret_cast<const BaseManifest*>(msg.Payload.data());
-				LOG_ENG_INFO_F("[ClientNet] GameModeManifest received (seq=%u, mode='%s') — GameMode routing not yet wired",
-							   base->SequenceID, base->ModeName);
+			};
+			if (msg.Header.PayloadSize < sizeof(BaseManifest))
+			{
+				LOG_ENG_WARN_F("[ClientNet] GameModeManifest too small (got %u)", msg.Header.PayloadSize);
 				break;
 			}
+			// TODO: forward raw bytes to GameMode::OnGameModeManifest(payload, size)
+			const auto* base = reinterpret_cast<const BaseManifest*>(msg.Payload.data());
+			LOG_ENG_INFO_F("[ClientNet] GameModeManifest received (seq=%u, mode='%s') — GameMode routing not yet wired",
+				base->SequenceID, base->ModeName);
+			break;
+		}
 
 		case NetMessageType::EntityDelta:
-			{
-				ConnectionInfo* ci     = ConnectionMgr->FindConnection(msg.Connection);
-				const uint8_t ownerID  = ci ? ci->OwnerID : 0;
-				WorldBase* clientWorld = WorldMap[ownerID];
-				if (!clientWorld || !ci || msg.Payload.empty()) break;
+		{
+			ConnectionInfo* ci     = ConnectionMgr->FindConnection(msg.Connection);
+			const uint8_t ownerID  = ci ? ci->OwnerID : 0;
+			WorldBase* clientWorld = WorldMap[ownerID];
+			if (!clientWorld || !ci || msg.Payload.empty()) break;
 
-				auto* payloadCopy = new std::vector<uint8_t>(msg.Payload);
-				Registry* reg     = clientWorld->GetRegistry();
-				clientWorld->Post([reg, payloadCopy](uint32_t)
-				{
-					HandleEntityDelta(reg, payloadCopy->data(),
-									  static_cast<uint32_t>(payloadCopy->size()));
-					delete payloadCopy;
-				});
-				break;
-			}
+			auto* payloadCopy = new std::vector<uint8_t>(msg.Payload);
+			Registry* reg     = clientWorld->GetRegistry();
+			clientWorld->Post([reg, payloadCopy](uint32_t)
+			{
+				HandleEntityDelta(reg, payloadCopy->data(),
+					static_cast<uint32_t>(payloadCopy->size()));
+				delete payloadCopy;
+			});
+			break;
+		}
 
 		case NetMessageType::StreamLoad:
+		{
+			if (msg.Payload.size() < sizeof(StreamLoadPayload))
 			{
-				if (msg.Payload.size() < sizeof(StreamLoadPayload))
-				{
-					LOG_ENG_WARN_F("[ClientNet] StreamLoad payload too small (%zu)", msg.Payload.size());
-					break;
-				}
-				const auto* pl = reinterpret_cast<const StreamLoadPayload*>(msg.Payload.data());
-
-				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-				if (!ci) break;
-				WorldBase* clientWorld = WorldMap[ci->OwnerID];
-				Registry*  reg         = clientWorld ? clientWorld->GetRegistry() : nullptr;
-				if (!reg) break;
-
-				const int64_t  assetIDRaw    = pl->AssetID;
-				const uint16_t instanceIndex = pl->InstanceIndex;
-				const bool     bAutoActivate = pl->bAutoActivate != 0;
-
-				AssetID assetID{assetIDRaw};
-				const uint32_t serverFrame = msg.Header.FrameNumber;
-				clientWorld->SpawnAndWait([reg, assetID, instanceIndex, bAutoActivate, serverFrame](uint32_t)
-				{
-					size_t count = EntityBuilder::StreamChunkTracked(reg, assetID, instanceIndex);
-					LOG_ENG_INFO_F("[ClientNet] StreamLoad: spawned %zu entities (assetID=%ld, inst=%u)",
-								   count, assetID.Raw, static_cast<unsigned>(instanceIndex));
-
-					if (bAutoActivate)
-					{
-						auto slabs = EntityBuilder::ActivateStreamedChunk(reg, assetID.Raw, instanceIndex);
-						LOG_ENG_INFO_F("[ClientNet] StreamLoad auto-activated %zu entities", slabs.size());
-#ifdef TNX_ENABLE_ROLLBACK
-						if (!slabs.empty())
-						{
-							auto slabsCopy = std::make_shared<std::vector<uint32_t>>(std::move(slabs));
-							reg->PushServerEvent({serverFrame, [reg, slabsCopy]()
-							{
-								ComponentCacheBase* cache = reg->GetTemporalCache();
-								TemporalFrameHeader* hdr  = cache->GetFrameHeader(cache->GetActiveWriteFrame());
-								const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
-								auto* flags = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
-								if (!flags) return;
-								constexpr int32_t mask = static_cast<int32_t>(
-									static_cast<uint32_t>(TemporalFlagBits::Active) |
-									static_cast<uint32_t>(TemporalFlagBits::Dirty)  |
-									static_cast<uint32_t>(TemporalFlagBits::DirtiedFrame));
-								for (uint32_t idx : *slabsCopy) flags[idx] |= mask;
-							}});
-						}
-#endif
-					}
-				});
-
-				if (!bAutoActivate)
-				{
-					StreamReadyPayload ready{};
-					ready.AssetID        = assetIDRaw;
-					ready.InstanceIndex  = instanceIndex;
-					NetChannel(ci, ConnectionMgr).Send(NetMessageType::StreamReady, ready, /*reliable=*/true);
-				}
+				LOG_ENG_WARN_F("[ClientNet] StreamLoad payload too small (%zu)", msg.Payload.size());
 				break;
 			}
+			const auto* pl = reinterpret_cast<const StreamLoadPayload*>(msg.Payload.data());
 
-		case NetMessageType::ChunkActivate:
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (!ci) break;
+			WorldBase* clientWorld = WorldMap[ci->OwnerID];
+			Registry* reg          = clientWorld ? clientWorld->GetRegistry() : nullptr;
+			if (!reg) break;
+
+			const int64_t assetIDRaw     = pl->AssetID;
+			const uint16_t instanceIndex = pl->InstanceIndex;
+			const bool bAutoActivate     = pl->bAutoActivate != 0;
+
+			AssetID assetID{ assetIDRaw };
+			clientWorld->SpawnAndWait([reg, assetID, instanceIndex, bAutoActivate](uint32_t)
 			{
-				if (msg.Payload.size() < sizeof(ChunkActivatePayload))
+				size_t count = EntityBuilder::StreamChunkTracked(reg, assetID, instanceIndex);
+				LOG_ENG_INFO_F("[ClientNet] StreamLoad: spawned %zu entities (assetID=%ld, inst=%u)",
+					count, assetID.Raw, static_cast<unsigned>(instanceIndex));
+
+				if (bAutoActivate)
 				{
-					LOG_ENG_WARN_F("[ClientNet] ChunkActivate payload too small (%zu)", msg.Payload.size());
-					break;
-				}
-				const auto* pl = reinterpret_cast<const ChunkActivatePayload*>(msg.Payload.data());
-
-				ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
-				if (!ci) break;
-				WorldBase* clientWorld = WorldMap[ci->OwnerID];
-				Registry*  reg         = clientWorld ? clientWorld->GetRegistry() : nullptr;
-				if (!reg) break;
-
-				const int64_t  assetIDRaw    = pl->AssetID;
-				const uint16_t instanceIndex = pl->InstanceIndex;
-				const uint32_t serverFrame   = msg.Header.FrameNumber;
-
-				clientWorld->PostAndWait([reg, assetIDRaw, instanceIndex, serverFrame](uint32_t)
-				{
-					auto slabs = EntityBuilder::ActivateStreamedChunk(reg, assetIDRaw, instanceIndex);
-					LOG_ENG_INFO_F("[ClientNet] ChunkActivate: activated %zu entities (assetID=%ld, inst=%u)",
-								   slabs.size(), assetIDRaw, static_cast<unsigned>(instanceIndex));
+					auto slabs = EntityBuilder::ActivateStreamedChunk(reg, assetID.Raw, instanceIndex);
+					LOG_ENG_INFO_F("[ClientNet] StreamLoad auto-activated %zu entities", slabs.size());
 #ifdef TNX_ENABLE_ROLLBACK
 					if (!slabs.empty())
 					{
 						auto slabsCopy = std::make_shared<std::vector<uint32_t>>(std::move(slabs));
-						reg->PushServerEvent({serverFrame, [reg, slabsCopy]()
+						reg->PushAppliedServerEvent([reg, slabsCopy]()
 						{
-							ComponentCacheBase* cache = reg->GetTemporalCache();
-							TemporalFrameHeader* hdr  = cache->GetFrameHeader(cache->GetActiveWriteFrame());
+							ComponentCacheBase* cache  = reg->GetTemporalCache();
+							TemporalFrameHeader* hdr   = cache->GetFrameHeader(cache->GetActiveWriteFrame());
 							const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
-							auto* flags = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
+							auto* flags                = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
 							if (!flags) return;
 							constexpr int32_t mask = static_cast<int32_t>(
-								static_cast<uint32_t>(TemporalFlagBits::Active) |
-								static_cast<uint32_t>(TemporalFlagBits::Dirty)  |
-								static_cast<uint32_t>(TemporalFlagBits::DirtiedFrame));
-							for (uint32_t idx : *slabsCopy) flags[idx] |= mask;
-						}});
+								static_cast<uint32_t>(TemporalFlagBits::Active) | static_cast<uint32_t>(TemporalFlagBits::Dirty) | static_cast<uint32_t>(TemporalFlagBits::DirtiedFrame));
+							for (uint32_t idx : *slabsCopy)
+								flags[idx] |= mask;
+						});
 					}
 #endif
-				});
+				}
+			});
+
+			if (!bAutoActivate)
+			{
+				StreamReadyPayload ready{};
+				ready.AssetID       = assetIDRaw;
+				ready.InstanceIndex = instanceIndex;
+				NetChannel(ci, ConnectionMgr).Send(NetMessageType::StreamReady, ready, /*reliable=*/true);
+			}
+			break;
+		}
+
+		case NetMessageType::ChunkActivate:
+		{
+			if (msg.Payload.size() < sizeof(ChunkActivatePayload))
+			{
+				LOG_ENG_WARN_F("[ClientNet] ChunkActivate payload too small (%zu)", msg.Payload.size());
 				break;
 			}
+			const auto* pl = reinterpret_cast<const ChunkActivatePayload*>(msg.Payload.data());
+
+			ConnectionInfo* ci = ConnectionMgr->FindConnection(msg.Connection);
+			if (!ci) break;
+			WorldBase* clientWorld = WorldMap[ci->OwnerID];
+			Registry* reg          = clientWorld ? clientWorld->GetRegistry() : nullptr;
+			if (!reg) break;
+
+			const int64_t assetIDRaw     = pl->AssetID;
+			const uint16_t instanceIndex = pl->InstanceIndex;
+
+			clientWorld->PostAndWait([reg, assetIDRaw, instanceIndex](uint32_t)
+			{
+				auto slabs = EntityBuilder::ActivateStreamedChunk(reg, assetIDRaw, instanceIndex);
+				LOG_ENG_INFO_F("[ClientNet] ChunkActivate: activated %zu entities (assetID=%ld, inst=%u)",
+					slabs.size(), assetIDRaw, static_cast<unsigned>(instanceIndex));
+#ifdef TNX_ENABLE_ROLLBACK
+				if (!slabs.empty())
+				{
+					auto slabsCopy = std::make_shared<std::vector<uint32_t>>(std::move(slabs));
+					reg->PushAppliedServerEvent([reg, slabsCopy]()
+					{
+						ComponentCacheBase* cache  = reg->GetTemporalCache();
+						TemporalFrameHeader* hdr   = cache->GetFrameHeader(cache->GetActiveWriteFrame());
+						const ComponentTypeID slot = CacheSlotMeta<>::StaticTemporalIndex();
+						auto* flags                = static_cast<int32_t*>(cache->GetFieldData(hdr, slot, 0));
+						if (!flags) return;
+						constexpr int32_t mask = static_cast<int32_t>(
+							static_cast<uint32_t>(TemporalFlagBits::Active) | static_cast<uint32_t>(TemporalFlagBits::Dirty) | static_cast<uint32_t>(TemporalFlagBits::DirtiedFrame));
+						for (uint32_t idx : *slabsCopy)
+							flags[idx] |= mask;
+					});
+				}
+#endif
+			});
+			break;
+		}
 
 		default:
 			LOG_ENG_WARN_F("[ClientNet] Unhandled message type %u", msg.Header.Type);
@@ -1366,7 +1375,8 @@ void OwnerNet::FlushDeferredEntitySpawns()
 
 		clientWorld->SpawnAndWait([spawnReg, batch, count, spawnFrame](uint32_t)
 		{
-			for (size_t k = 0; k < count; ++k) HandleEntitySpawn(spawnReg, batch[k], spawnFrame);
+			for (size_t k = 0; k < count; ++k)
+				HandleEntitySpawn(spawnReg, batch[k], spawnFrame);
 		});
 
 		// Request a rollback to the entity's server spawn frame so the entities are inserted
@@ -1397,7 +1407,7 @@ void OwnerNet::TickReplication()
 		if (!flow) continue;
 
 		LOG_ENG_WARN_F("[ClientNet] PlayerBeginRequest retry (ownerID=%u, %.0fms since last send)",
-					   ci.OwnerID, static_cast<float>(now - ci.PlayerBeginSentAt));
+			ci.OwnerID, static_cast<float>(now - ci.PlayerBeginSentAt));
 
 		ConnectionInfo* mci = ConnectionMgr->FindConnection(ci.Handle);
 		if (!mci) continue;
@@ -1414,8 +1424,10 @@ void OwnerNet::TickReplication()
 	auto it = DeferredConstructSpawns.begin();
 	while (it != DeferredConstructSpawns.end())
 	{
-		if (TrySpawnDeferred(*it)) it = DeferredConstructSpawns.erase(it);
-		else ++it;
+		if (TrySpawnDeferred(*it))
+			it = DeferredConstructSpawns.erase(it);
+		else
+			++it;
 	}
 }
 
@@ -1428,8 +1440,10 @@ void OwnerNet::TickInputSend()
 	if (SendCounter.Value.load(std::memory_order_acquire) != 0) return;
 
 	OwnerNet* self = this;
-	TrinyxJobs::Dispatch([self](uint32_t) { self->ExecuteInputSend(); },
-						 &SendCounter, TrinyxJobs::Queue::General);
+	TrinyxJobs::Dispatch([self](uint32_t)
+	{
+		self->ExecuteInputSend();
+	}, &SendCounter, TrinyxJobs::Queue::General);
 }
 
 void OwnerNet::ExecuteInputSend()
@@ -1471,7 +1485,7 @@ void OwnerNet::ExecuteInputSend()
 			if (consumer->TryPeekAt(consumer->Size() - 1, tail) && tail.Frame >= MaxWindowFrames) windowBackstop = tail.Frame - MaxWindowFrames;
 		}
 
-		const uint32_t dropFloor = std::max({ci->LastServerAckedFrame, preHandshakeFloor, windowBackstop});
+		const uint32_t dropFloor = std::max({ ci->LastServerAckedFrame, preHandshakeFloor, windowBackstop });
 
 		size_t dropCount = 0;
 		while (dropCount < consumer->Size())
@@ -1492,68 +1506,18 @@ void OwnerNet::ExecuteInputSend()
 		NetInputFrame base;
 		if (!consumer->TryPeekAt(0, base)) continue;
 
-		// Delta-encode into a stack buffer.
-		// Max per delta: Frame(4)+Flags(1)+KeyState(64)+MouseDX(4)+MouseDY(4)+MouseButtons(1)+EventCount(1)+Events(64)
-		static constexpr size_t kMaxDeltaFrame =
-			4 + 1 + 64 + 4 + 4 + 1 + 1 + 8 * sizeof(NetInputEvent);
-		static constexpr size_t kMaxPayload =
-			sizeof(InputDeltaPacketHeader) + sizeof(NetInputFrame) + (MaxWindowFrames - 1) * kMaxDeltaFrame;
-		uint8_t encodedBuf[kMaxPayload];
-		uint8_t* p = encodedBuf;
-
-		auto* deltaHdr       = reinterpret_cast<InputDeltaPacketHeader*>(p);
-		deltaHdr->FirstFrame = base.Frame;
-		deltaHdr->FrameCount = frameCount;
-		p += sizeof(InputDeltaPacketHeader);
-
-		// Base frame — always full.
-		std::memcpy(p, &base, sizeof(NetInputFrame));
-		p += sizeof(NetInputFrame);
-
-		// Delta frames — peek two adjacent entries at a time to avoid storing the whole window.
-		NetInputFrame prev = base;
-		uint32_t actualCount = 1;
+		// Delta-encode into a stack buffer, peeking one entry at a time.
+		uint8_t encodedBuf[InputWindowCodec::MaxPayloadBytes];
+		InputWindowWriter writer(encodedBuf, base);
 		for (uint32_t i = 1; i < frameCount; ++i)
 		{
 			NetInputFrame cur;
 			if (!consumer->TryPeekAt(i, cur)) break;
-
-			const bool hasKeyState = (std::memcmp(cur.State.KeyState, prev.State.KeyState, 64) != 0);
-			const bool hasDX       = (cur.State.MouseDX != SimFloat(0.f));
-			const bool hasDY       = (cur.State.MouseDY != SimFloat(0.f));
-			const bool hasButtons  = (cur.State.MouseButtons != prev.State.MouseButtons);
-			const bool hasEvents   = (cur.EventCount > 0);
-
-			uint8_t flags = 0;
-			if (hasKeyState) flags |= InputDeltaFlags::HasKeyState;
-			if (hasDX)       flags |= InputDeltaFlags::HasMouseDX;
-			if (hasDY)       flags |= InputDeltaFlags::HasMouseDY;
-			if (hasButtons)  flags |= InputDeltaFlags::HasMouseButtons;
-			if (hasEvents)   flags |= InputDeltaFlags::HasEvents;
-
-			std::memcpy(p, &cur.Frame, 4); p += 4;
-			*p++ = flags;
-
-			if (hasKeyState) { std::memcpy(p, cur.State.KeyState, 64);    p += 64; }
-			if (hasDX)       { std::memcpy(p, &cur.State.MouseDX, 4);     p += 4;  }
-			if (hasDY)       { std::memcpy(p, &cur.State.MouseDY, 4);     p += 4;  }
-			if (hasButtons)  { *p++ = cur.State.MouseButtons; }
-			if (hasEvents)
-			{
-				*p++ = cur.EventCount;
-				std::memcpy(p, cur.Events, cur.EventCount * sizeof(NetInputEvent));
-				p += cur.EventCount * sizeof(NetInputEvent);
-			}
-
-			prev = cur;
-			++actualCount;
+			writer.Append(cur);
 		}
 
-		// Patch FrameCount in case TryPeekAt terminated early.
-		deltaHdr->FrameCount = actualCount;
-
-		const auto encodedSize     = static_cast<uint16_t>(p - encodedBuf);
-		const uint32_t lastClientFrame = prev.Frame;
+		const auto encodedSize         = static_cast<uint16_t>(writer.Finish());
+		const uint32_t lastClientFrame = writer.GetLastFrame();
 
 		PacketHeader header{};
 		header.Type        = static_cast<uint8_t>(NetMessageType::InputFrameDelta);

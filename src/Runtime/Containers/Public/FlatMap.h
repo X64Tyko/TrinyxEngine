@@ -29,7 +29,7 @@ public:
 			it->second = value; // Update existing
 			return it;
 		}
-		return m_entries.insert(it, {key, value}); // Insert new
+		return m_entries.insert(it, { key, value }); // Insert new
 	}
 
 	// Find - returns nullptr if not found
@@ -52,7 +52,7 @@ public:
 	{
 		auto it = lower_bound(key);
 		if (it != m_entries.end() && it->first == key) return it->second;
-		return m_entries.insert(it, {key, TValue{}})->second;
+		return m_entries.insert(it, { key, TValue{} })->second;
 	}
 
 	// Find or insert a default-constructed value — returns reference to existing or new entry
@@ -60,7 +60,7 @@ public:
 	{
 		auto it = lower_bound(key);
 		if (it != m_entries.end() && it->first == key) return it->second;
-		return m_entries.insert(it, {key, TValue{}})->second;
+		return m_entries.insert(it, { key, TValue{} })->second;
 	}
 
 	// Check existence
@@ -105,13 +105,19 @@ private:
 	FORCE_INLINE Iterator lower_bound(const TKey& key)
 	{
 		return std::lower_bound(m_entries.begin(), m_entries.end(), key,
-								[](const Entry& e, const TKey& k) { return e.first < k; });
+			[](const Entry& e, const TKey& k)
+		{
+			return e.first < k;
+		});
 	}
 
 	FORCE_INLINE ConstIterator lower_bound(const TKey& key) const
 	{
 		return std::lower_bound(m_entries.begin(), m_entries.end(), key,
-								[](const Entry& e, const TKey& k) { return e.first < k; });
+			[](const Entry& e, const TKey& k)
+		{
+			return e.first < k;
+		});
 	}
 
 private:

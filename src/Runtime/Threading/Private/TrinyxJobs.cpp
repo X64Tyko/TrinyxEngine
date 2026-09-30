@@ -13,300 +13,301 @@ struct EngineConfig;
 
 namespace TrinyxJobs
 {
-	// ---- Internal state --------------------------------------------------
+// ---- Internal state --------------------------------------------------
 
-	static constexpr uint32_t QueueCount     = static_cast<uint32_t>(Queue::COUNT);
-	static constexpr uint32_t MaxWorldQueues = 16;
+static constexpr uint32_t QueueCount     = static_cast<uint32_t>(Queue::COUNT);
+static constexpr uint32_t MaxWorldQueues = 16;
 
-	// One ring buffer per global queue
-	static TrinyxMPMCRing<Job> s_Queues[QueueCount];
+// One ring buffer per global queue
+static TrinyxMPMCRing<Job> s_Queues[QueueCount];
 
-	// Per-world queue pool — only the owning LogicThread drains these
-	struct WorldQueueSlot
+// Per-world queue pool — only the owning LogicThread drains these
+struct WorldQueueSlot
+{
+	TrinyxMPMCRing<Job> Ring;
+	std::atomic<bool> Active{ false };
+};
+
+static WorldQueueSlot s_WorldQueues[MaxWorldQueues];
+
+// Worker threads
+static std::vector<std::thread> s_Workers;
+static std::atomic<bool> s_Running{ false };
+static uint32_t s_WorkerCount = 0;
+
+// Thread-local identity (1-based for workers, 0 = coordinator/non-worker)
+static thread_local uint32_t t_ThreadIndex = 0;
+
+// Wake signal — incremented on every SubmitJob, workers wait() on it.
+// Uses std::atomic::wait/notify (C++20): futex on Linux, WaitOnAddress on Windows.
+// Workers block until the value changes, meaning zero CPU when idle.
+static std::atomic<uint32_t> s_WakeSignal{ 0 };
+
+// TODO: make this configurable through ini
+static uint64_t s_MaxSpins = 4000;
+
+// ---- Internal helpers ------------------------------------------------
+
+/// Try to pop and execute one job from any queue.
+/// Returns true if work was found. Used by workers and WaitForCounter.
+static bool StealAndExecute(const std::vector<uint8_t>& queues)
+{
+	// Priority order: Logic > Render > Physics > General
+	// This ensures the tightest-budget work (512Hz logic) drains first.
+	Job job;
+	for (auto& queueID : queues)
 	{
-		TrinyxMPMCRing<Job> Ring;
-		std::atomic<bool> Active{false};
-	};
-
-	static WorldQueueSlot s_WorldQueues[MaxWorldQueues];
-
-	// Worker threads
-	static std::vector<std::thread> s_Workers;
-	static std::atomic<bool> s_Running{false};
-	static uint32_t s_WorkerCount = 0;
-
-	// Thread-local identity (1-based for workers, 0 = coordinator/non-worker)
-	static thread_local uint32_t t_ThreadIndex = 0;
-
-	// Wake signal — incremented on every SubmitJob, workers wait() on it.
-	// Uses std::atomic::wait/notify (C++20): futex on Linux, WaitOnAddress on Windows.
-	// Workers block until the value changes, meaning zero CPU when idle.
-	static std::atomic<uint32_t> s_WakeSignal{0};
-	
-	// TODO: make this configurable through ini
-	static uint64_t s_MaxSpins = 4000;
-
-	// ---- Internal helpers ------------------------------------------------
-
-	/// Try to pop and execute one job from any queue.
-	/// Returns true if work was found. Used by workers and WaitForCounter.
-	static bool StealAndExecute(const std::vector<uint8_t>& queues)
-	{
-		// Priority order: Logic > Render > Physics > General
-		// This ensures the tightest-budget work (512Hz logic) drains first.
-		Job job;
-		for (auto& queueID : queues)
-		{
-			if (s_Queues[queueID].TryPop(job))
-			{
-				job.EntryPoint(job.Payload, t_ThreadIndex);
-				if (job.Counter)
-				{
-					job.Counter->fetch_sub(1, std::memory_order_release);
-					job.Counter->notify_one();
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-
-	/// Worker thread entry point.
-	static void WorkerMain(uint32_t workerIndex, Queue affinity)
-	{
-		// create queue indices for worker affinity
-		std::vector<uint8_t> queues;
-		for (uint8_t id = 0; id < QueueCount; ++id)
-		{
-			if ((static_cast<uint8_t>(affinity) & (1 << id)) == (1 << id)) queues.push_back(id);
-		}
-
-		t_ThreadIndex = workerIndex;
-
-		uint64_t spinCount = 0;
-		while (s_Running.load(std::memory_order_relaxed))
-		{
-			TNX_ZONE_FINE_NC("Worker_Tick", TNX_COLOR_WORKER);
-
-			if (StealAndExecute(queues))
-			{
-				spinCount = 0;
-				continue;
-			} // Got work — immediately try again, no delay.
-
-			if (++spinCount < s_MaxSpins)
-			{
-				_mm_pause();
-				continue;
-			} // Spin for a bit to see if a job comes in.
-
-			// No work available. Snapshot the wake signal, then check queues
-			// one more time before blocking (avoids missed-wake race).
-			uint32_t snapshot = s_WakeSignal.load(std::memory_order_acquire);
-
-			if (StealAndExecute(queues)) continue; // Work arrived between the first check and snapshot.
-
-			// Block until SubmitJob bumps the signal (futex / WaitOnAddress).
-			// Wakes in ~1-2μs on Linux, near-zero CPU while idle.
-			if (s_Running.load(std::memory_order_relaxed)) s_WakeSignal.wait(snapshot, std::memory_order_relaxed);
-		}
-
-		// Drain remaining jobs before exiting
-		while (StealAndExecute(queues))
-		{
-		}
-	}
-
-	// ---- Public API ------------------------------------------------------
-
-	bool Initialize(const EngineConfig* config)
-	{
-		assert(config);
-
-		const size_t queueCapacity = static_cast<size_t>(config->JobCacheSize);
-
-		for (uint32_t q = 0; q < QueueCount; ++q)
-		{
-			if (!s_Queues[q].Initialize(queueCapacity))
-			{
-				LOG_ENG_ERROR("[Jobs] Failed to allocate queue");
-				return false;
-			}
-		}
-
-		s_WakeSignal.store(0, std::memory_order_relaxed);
-
-		// Spawn workers — count determined by ThreadPinning topology scan.
-		// On constrained environments (CI VMs with ≤ ReservedCores logical cores),
-		// clamp to 1 worker rather than failing — all threads share cores anyway,
-		// and the Brain/Encoder coordinator model means workers still add throughput.
-		s_WorkerCount = TrinyxThreading::GetWorkerThreadCapacity();
-		if (s_WorkerCount == 0)
-		{
-			s_WorkerCount = 1;
-			LOG_ENG_INFO("[Jobs] Core count ≤ reserved threshold — running with 1 oversubscribed worker");
-		}
-
-		s_Running.store(true, std::memory_order_release);
-		s_Workers.reserve(s_WorkerCount);
-
-		uint8_t PhysicsDedicated = s_WorkerCount * 0.25;
-		for (uint32_t i = 0; i < s_WorkerCount; ++i)
-		{
-			// Worker indices are 1-based (0 = coordinator/non-worker)
-			s_Workers.emplace_back(WorkerMain, i + 1, i < PhysicsDedicated ? Queue::Physics : Queue::All);
-			TrinyxThreading::PinThread(s_Workers.back());
-		}
-
-		LOG_ENG_INFO_F("[Jobs] Initialized: %u workers, %zu-slot queues (Phys/Rend/Genl)",
-					   s_WorkerCount, queueCapacity);
-		return true;
-	}
-
-	void Shutdown()
-	{
-		if (!s_Running.load(std::memory_order_relaxed)) return;
-
-		s_Running.store(false, std::memory_order_release);
-
-		// Wake all workers so they see s_Running == false and exit
-		s_WakeSignal.fetch_add(1, std::memory_order_release);
-		s_WakeSignal.notify_all();
-
-		for (auto& w : s_Workers)
-		{
-			if (w.joinable()) w.join();
-		}
-		s_Workers.clear();
-		s_WorkerCount = 0;
-
-		for (uint32_t q = 0; q < QueueCount; ++q) s_Queues[q].Shutdown();
-
-		LOG_ENG_INFO("[Jobs] Shutdown complete");
-	}
-
-	bool IsRunning()
-	{
-		return s_Running.load(std::memory_order_acquire);
-	}
-
-	void SubmitJob(const Job& job, Queue queue)
-	{
-		uint32_t idx = std::countr_zero(static_cast<uint32_t>(queue));
-		assert(idx < QueueCount);
-
-		bool pushed = s_Queues[idx].TryPush(job);
-
-		// If the primary queue is full, spill to General.
-		// If General is also full, we've exceeded JobCacheSize — assert.
-		if (!pushed && queue != Queue::General)
-		{
-			pushed = s_Queues[std::countr_zero(static_cast<uint8_t>(Queue::General))].TryPush(job);
-			LOG_ENG_ERROR("[Jobs] Queue full");
-		}
-
-		assert(pushed && "Job queues full — increase JobCacheSize in config");
-		(void)pushed;
-
-		// Wake one sleeping worker
-		s_WakeSignal.fetch_add(1, std::memory_order_release);
-		s_WakeSignal.notify_one();
-	}
-
-	void WaitForCounter(JobCounter* counter, Queue affinity)
-	{
-		// create queue indices for worker affinity
-		std::vector<uint8_t> queues;
-		for (uint8_t id = 0; id < QueueCount; ++id)
-		{
-			if ((static_cast<uint8_t>(affinity) & (1 << id)) == (1 << id)) queues.push_back(id);
-		}
-
-		TNX_ZONE_N("Jobs_WaitForCounter");
-
-		// The calling thread becomes a worker while waiting.
-		// This is how coordinators (Brain/Encoder) contribute to throughput
-		// instead of sitting idle.
-		while (counter->Value.load(std::memory_order_acquire) > 0)
-		{
-			if (StealAndExecute(queues)) continue;
-
-			// No work to steal — wait for a signal rather than spin.
-			// Short-lived: the jobs we're waiting on will wake us when they
-			// complete and produce follow-up work, or when new jobs arrive.
-			uint32_t snapshot = counter->Value.load(std::memory_order_acquire);
-
-			// Double-check after snapshot to avoid missed wake
-			if (counter->Value.load(std::memory_order_acquire) == 0) break;
-			if (StealAndExecute(queues)) continue;
-
-			counter->Value.wait(snapshot, std::memory_order_relaxed);
-		}
-	}
-
-	uint32_t GetWorkerCount()
-	{
-		return s_WorkerCount;
-	}
-
-	uint32_t GetCurrentThreadIndex()
-	{
-		return t_ThreadIndex;
-	}
-
-	// ---- World queue API -------------------------------------------------
-
-	WorldQueueHandle CreateWorldQueue(size_t capacity)
-	{
-		for (uint32_t i = 0; i < MaxWorldQueues; ++i)
-		{
-			bool expected = false;
-			if (s_WorldQueues[i].Active.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-			{
-				if (!s_WorldQueues[i].Ring.Initialize(capacity))
-				{
-					s_WorldQueues[i].Active.store(false, std::memory_order_release);
-					LOG_ENG_ERROR("[Jobs] WorldQueue ring allocation failed");
-					return InvalidWorldQueue;
-				}
-				LOG_ENG_INFO_F("[Jobs] WorldQueue %u created (%zu slots)", i, capacity);
-				return i;
-			}
-		}
-		LOG_ENG_ERROR("[Jobs] WorldQueue pool exhausted — increase MaxWorldQueues");
-		return InvalidWorldQueue;
-	}
-
-	void DestroyWorldQueue(WorldQueueHandle handle)
-	{
-		assert(handle < MaxWorldQueues && "Invalid WorldQueueHandle");
-		assert(s_WorldQueues[handle].Active.load(std::memory_order_acquire) && "WorldQueue not active");
-		s_WorldQueues[handle].Ring.Shutdown();
-		s_WorldQueues[handle].Active.store(false, std::memory_order_release);
-		LOG_ENG_INFO_F("[Jobs] WorldQueue %u destroyed", handle);
-	}
-
-	void DrainWorldQueue(WorldQueueHandle handle)
-	{
-		assert(handle < MaxWorldQueues && "Invalid WorldQueueHandle");
-		Job job;
-		while (s_WorldQueues[handle].Ring.TryPop(job))
+		if (s_Queues[queueID].TryPop(job))
 		{
 			job.EntryPoint(job.Payload, t_ThreadIndex);
 			if (job.Counter)
 			{
 				job.Counter->fetch_sub(1, std::memory_order_release);
 				job.Counter->notify_one();
+				return true;
 			}
 		}
 	}
+	return false;
+}
 
-	void SubmitWorldJob(const Job& job, WorldQueueHandle handle)
+/// Worker thread entry point.
+static void WorkerMain(uint32_t workerIndex, Queue affinity)
+{
+	// create queue indices for worker affinity
+	std::vector<uint8_t> queues;
+	for (uint8_t id = 0; id < QueueCount; ++id)
 	{
-		assert(handle < MaxWorldQueues && "Invalid WorldQueueHandle");
-		assert(s_WorldQueues[handle].Active.load(std::memory_order_acquire) && "WorldQueue not active");
+		if ((static_cast<uint8_t>(affinity) & (1 << id)) == (1 << id)) queues.push_back(id);
+	}
 
-		[[maybe_unused]] bool pushed = s_WorldQueues[handle].Ring.TryPush(job);
-		assert(pushed && "WorldQueue full — increase CreateWorldQueue capacity");
+	t_ThreadIndex = workerIndex;
+
+	uint64_t spinCount = 0;
+	while (s_Running.load(std::memory_order_relaxed))
+	{
+		TNX_ZONE_FINE_NC("Worker_Tick", TNX_COLOR_WORKER);
+
+		if (StealAndExecute(queues))
+		{
+			spinCount = 0;
+			continue;
+		} // Got work — immediately try again, no delay.
+
+		if (++spinCount < s_MaxSpins)
+		{
+			_mm_pause();
+			continue;
+		} // Spin for a bit to see if a job comes in.
+
+		// No work available. Snapshot the wake signal, then check queues
+		// one more time before blocking (avoids missed-wake race).
+		uint32_t snapshot = s_WakeSignal.load(std::memory_order_acquire);
+
+		if (StealAndExecute(queues)) continue; // Work arrived between the first check and snapshot.
+
+		// Block until SubmitJob bumps the signal (futex / WaitOnAddress).
+		// Wakes in ~1-2μs on Linux, near-zero CPU while idle.
+		if (s_Running.load(std::memory_order_relaxed)) s_WakeSignal.wait(snapshot, std::memory_order_relaxed);
+	}
+
+	// Drain remaining jobs before exiting
+	while (StealAndExecute(queues))
+	{
 	}
 }
+
+// ---- Public API ------------------------------------------------------
+
+bool Initialize(const EngineConfig* config)
+{
+	assert(config);
+
+	const size_t queueCapacity = static_cast<size_t>(config->JobCacheSize);
+
+	for (uint32_t q = 0; q < QueueCount; ++q)
+	{
+		if (!s_Queues[q].Initialize(queueCapacity))
+		{
+			LOG_ENG_ERROR("[Jobs] Failed to allocate queue");
+			return false;
+		}
+	}
+
+	s_WakeSignal.store(0, std::memory_order_relaxed);
+
+	// Spawn workers — count determined by ThreadPinning topology scan.
+	// On constrained environments (CI VMs with ≤ ReservedCores logical cores),
+	// clamp to 1 worker rather than failing — all threads share cores anyway,
+	// and the Brain/Encoder coordinator model means workers still add throughput.
+	s_WorkerCount = TrinyxThreading::GetWorkerThreadCapacity();
+	if (s_WorkerCount == 0)
+	{
+		s_WorkerCount = 1;
+		LOG_ENG_INFO("[Jobs] Core count ≤ reserved threshold — running with 1 oversubscribed worker");
+	}
+
+	s_Running.store(true, std::memory_order_release);
+	s_Workers.reserve(s_WorkerCount);
+
+	uint8_t PhysicsDedicated = s_WorkerCount * 0.25;
+	for (uint32_t i = 0; i < s_WorkerCount; ++i)
+	{
+		// Worker indices are 1-based (0 = coordinator/non-worker)
+		s_Workers.emplace_back(WorkerMain, i + 1, i < PhysicsDedicated ? Queue::Physics : Queue::All);
+		TrinyxThreading::PinThread(s_Workers.back());
+	}
+
+	LOG_ENG_INFO_F("[Jobs] Initialized: %u workers, %zu-slot queues (Phys/Rend/Genl)",
+		s_WorkerCount, queueCapacity);
+	return true;
+}
+
+void Shutdown()
+{
+	if (!s_Running.load(std::memory_order_relaxed)) return;
+
+	s_Running.store(false, std::memory_order_release);
+
+	// Wake all workers so they see s_Running == false and exit
+	s_WakeSignal.fetch_add(1, std::memory_order_release);
+	s_WakeSignal.notify_all();
+
+	for (auto& w : s_Workers)
+	{
+		if (w.joinable()) w.join();
+	}
+	s_Workers.clear();
+	s_WorkerCount = 0;
+
+	for (uint32_t q = 0; q < QueueCount; ++q)
+		s_Queues[q].Shutdown();
+
+	LOG_ENG_INFO("[Jobs] Shutdown complete");
+}
+
+bool IsRunning()
+{
+	return s_Running.load(std::memory_order_acquire);
+}
+
+void SubmitJob(const Job& job, Queue queue)
+{
+	uint32_t idx = std::countr_zero(static_cast<uint32_t>(queue));
+	assert(idx < QueueCount);
+
+	bool pushed = s_Queues[idx].TryPush(job);
+
+	// If the primary queue is full, spill to General.
+	// If General is also full, we've exceeded JobCacheSize — assert.
+	if (!pushed && queue != Queue::General)
+	{
+		pushed = s_Queues[std::countr_zero(static_cast<uint8_t>(Queue::General))].TryPush(job);
+		LOG_ENG_ERROR("[Jobs] Queue full");
+	}
+
+	assert(pushed && "Job queues full — increase JobCacheSize in config");
+	(void)pushed;
+
+	// Wake one sleeping worker
+	s_WakeSignal.fetch_add(1, std::memory_order_release);
+	s_WakeSignal.notify_one();
+}
+
+void WaitForCounter(JobCounter* counter, Queue affinity)
+{
+	// create queue indices for worker affinity
+	std::vector<uint8_t> queues;
+	for (uint8_t id = 0; id < QueueCount; ++id)
+	{
+		if ((static_cast<uint8_t>(affinity) & (1 << id)) == (1 << id)) queues.push_back(id);
+	}
+
+	TNX_ZONE_N("Jobs_WaitForCounter");
+
+	// The calling thread becomes a worker while waiting.
+	// This is how coordinators (Brain/Encoder) contribute to throughput
+	// instead of sitting idle.
+	while (counter->Value.load(std::memory_order_acquire) > 0)
+	{
+		if (StealAndExecute(queues)) continue;
+
+		// No work to steal — wait for a signal rather than spin.
+		// Short-lived: the jobs we're waiting on will wake us when they
+		// complete and produce follow-up work, or when new jobs arrive.
+		uint32_t snapshot = counter->Value.load(std::memory_order_acquire);
+
+		// Double-check after snapshot to avoid missed wake
+		if (counter->Value.load(std::memory_order_acquire) == 0) break;
+		if (StealAndExecute(queues)) continue;
+
+		counter->Value.wait(snapshot, std::memory_order_relaxed);
+	}
+}
+
+uint32_t GetWorkerCount()
+{
+	return s_WorkerCount;
+}
+
+uint32_t GetCurrentThreadIndex()
+{
+	return t_ThreadIndex;
+}
+
+// ---- World queue API -------------------------------------------------
+
+WorldQueueHandle CreateWorldQueue(size_t capacity)
+{
+	for (uint32_t i = 0; i < MaxWorldQueues; ++i)
+	{
+		bool expected = false;
+		if (s_WorldQueues[i].Active.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+		{
+			if (!s_WorldQueues[i].Ring.Initialize(capacity))
+			{
+				s_WorldQueues[i].Active.store(false, std::memory_order_release);
+				LOG_ENG_ERROR("[Jobs] WorldQueue ring allocation failed");
+				return InvalidWorldQueue;
+			}
+			LOG_ENG_INFO_F("[Jobs] WorldQueue %u created (%zu slots)", i, capacity);
+			return i;
+		}
+	}
+	LOG_ENG_ERROR("[Jobs] WorldQueue pool exhausted — increase MaxWorldQueues");
+	return InvalidWorldQueue;
+}
+
+void DestroyWorldQueue(WorldQueueHandle handle)
+{
+	assert(handle < MaxWorldQueues && "Invalid WorldQueueHandle");
+	assert(s_WorldQueues[handle].Active.load(std::memory_order_acquire) && "WorldQueue not active");
+	s_WorldQueues[handle].Ring.Shutdown();
+	s_WorldQueues[handle].Active.store(false, std::memory_order_release);
+	LOG_ENG_INFO_F("[Jobs] WorldQueue %u destroyed", handle);
+}
+
+void DrainWorldQueue(WorldQueueHandle handle)
+{
+	assert(handle < MaxWorldQueues && "Invalid WorldQueueHandle");
+	Job job;
+	while (s_WorldQueues[handle].Ring.TryPop(job))
+	{
+		job.EntryPoint(job.Payload, t_ThreadIndex);
+		if (job.Counter)
+		{
+			job.Counter->fetch_sub(1, std::memory_order_release);
+			job.Counter->notify_one();
+		}
+	}
+}
+
+void SubmitWorldJob(const Job& job, WorldQueueHandle handle)
+{
+	assert(handle < MaxWorldQueues && "Invalid WorldQueueHandle");
+	assert(s_WorldQueues[handle].Active.load(std::memory_order_acquire) && "WorldQueue not active");
+
+	[[maybe_unused]] bool pushed = s_WorldQueues[handle].Ring.TryPush(job);
+	assert(pushed && "WorldQueue full — increase CreateWorldQueue capacity");
+}
+} // namespace TrinyxJobs

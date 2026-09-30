@@ -24,7 +24,8 @@ TEST(FieldProxy_WideMaskStore)
 
 		proxy = SimFloat(9.9f);
 
-		for (int i = 0; i < 5; ++i) ASSERT_EQ(data[i], SimFloat(9.9f));
+		for (int i = 0; i < 5; ++i)
+			ASSERT_EQ(data[i], SimFloat(9.9f));
 
 		for (int i = 5; i < kSIMDWide32Lanes; ++i)
 			ASSERT_EQ(data[i], SimFloat(0.0f)); // untouched — key invariant
@@ -33,7 +34,8 @@ TEST(FieldProxy_WideMaskStore)
 	// --- Full-lane masked store behaves like Wide ---
 	{
 		alignas(FIELD_ARRAY_ALIGNMENT) SimFloat full[kSIMDWide32Lanes] = {};
-		for (int i = 0; i < kSIMDWide32Lanes; ++i) full[i] = static_cast<SimFloat>(i + 1);
+		for (int i = 0; i < kSIMDWide32Lanes; ++i)
+			full[i] = static_cast<SimFloat>(i + 1);
 		FieldProxy<SimFloat, FieldWidth::WideMask> proxy;
 		proxy.Bind(full, flags, 0, kSIMDWide32Lanes);
 
@@ -46,7 +48,8 @@ TEST(FieldProxy_WideMaskStore)
 	// --- 1-active-lane: only the first element written ---
 	{
 		alignas(FIELD_ARRAY_ALIGNMENT) SimFloat single[kSIMDWide32Lanes] = {};
-		for (int i = 0; i < kSIMDWide32Lanes; ++i) single[i] = static_cast<SimFloat>(i);
+		for (int i = 0; i < kSIMDWide32Lanes; ++i)
+			single[i] = static_cast<SimFloat>(i);
 		FieldProxy<SimFloat, FieldWidth::WideMask> proxy;
 		proxy.Bind(single, flags, 0, 1);
 
@@ -60,7 +63,8 @@ TEST(FieldProxy_WideMaskStore)
 	// --- Masked += ---
 	{
 		alignas(FIELD_ARRAY_ALIGNMENT) SimFloat addData[kSIMDWide32Lanes] = {};
-		for (int i = 0; i < kSIMDWide32Lanes; ++i) addData[i] = SimFloat(10.0f);
+		for (int i = 0; i < kSIMDWide32Lanes; ++i)
+			addData[i] = SimFloat(10.0f);
 		FieldProxy<SimFloat, FieldWidth::WideMask> proxy;
 		proxy.Bind(addData, flags, 0, 3); // 3 active lanes
 

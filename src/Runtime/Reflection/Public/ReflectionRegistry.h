@@ -22,10 +22,10 @@ union EntityHandle;
 
 // Forward declarations for RPC dispatch table.
 // Full definitions live in RPC.h / NetTypes.h — included by ReflectionRegistry.cpp.
-class  Soul;
+class Soul;
 struct RPCContext;
 struct RPCHeader;
-using  SoulRPCHandler = void(*)(Soul*, const RPCContext&, const uint8_t*);
+using SoulRPCHandler = void (*)(Soul*, const RPCContext&, const uint8_t*);
 
 /// @brief Singleton registry for all type metadata. The single source of truth.
 ///
@@ -51,10 +51,10 @@ public:
 
 	// ===== Entity metadata (from MetaRegistry) =====
 
-	std::unordered_map<ClassID, ComponentSignature>           ClassToArchetype;
+	std::unordered_map<ClassID, ComponentSignature> ClassToArchetype;
 	std::unordered_map<ClassID, std::vector<ComponentTypeID>> ClassToComponentList;
-	std::unordered_map<Signature, std::vector<ClassID>>       ArchetypeToClass;
-	std::unordered_map<ClassID, SystemID>                     ClassSystemID;
+	std::unordered_map<Signature, std::vector<ClassID>> ArchetypeToClass;
+	std::unordered_map<ClassID, SystemID> ClassSystemID;
 	EntityMeta EntityGetters[4096]; // NOT serializable (function pointers)
 
 	// ===== Component metadata (from ComponentFieldRegistry) =====
@@ -63,7 +63,7 @@ public:
 
 	// ===== Name reverse lookups (std::string — safe for baked data) =====
 
-	std::unordered_map<std::string, ClassID>         NameToClassID;
+	std::unordered_map<std::string, ClassID> NameToClassID;
 	std::unordered_map<std::string, ComponentTypeID> NameToComponentID;
 
 	// ===== FlowState / GameMode factories =====
@@ -86,7 +86,7 @@ public:
 	};
 
 	std::vector<StateEntry> RegisteredStates;
-	std::vector<ModeEntry>  RegisteredModes;
+	std::vector<ModeEntry> RegisteredModes;
 
 	std::unordered_map<int64_t, size_t> StateUUIDIndex; // UUID → RegisteredStates index
 	std::unordered_map<int64_t, size_t> ModeUUIDIndex;  // UUID → RegisteredModes index
@@ -101,8 +101,8 @@ public:
 
 		if constexpr (requires { T::EntityTypeName; })
 		{
-			EntityGetters[ID].Name             = T::EntityTypeName;
-			NameToClassID[T::EntityTypeName]   = ID;
+			EntityGetters[ID].Name           = T::EntityTypeName;
+			NameToClassID[T::EntityTypeName] = ID;
 		}
 
 		EntityGetters[ID].Initialize = InvokeInitializeImpl<T>;
@@ -149,7 +149,7 @@ public:
 	// ===== Component field registration (called at static init) =====
 
 	void RegisterFields(ComponentTypeID typeID, const char* name,
-						std::vector<FieldMeta>&& fields, CacheTier tier, uint8_t slot);
+		std::vector<FieldMeta>&& fields, CacheTier tier, uint8_t slot);
 
 	// ===== Entity accessors =====
 
@@ -222,8 +222,8 @@ public:
 
 	struct RPCEntry
 	{
-		uint16_t       ParamSize = 0;
-		SoulRPCHandler Handler   = nullptr;
+		uint16_t ParamSize     = 0;
+		SoulRPCHandler Handler = nullptr;
 	};
 
 	void RegisterServerRPC(uint16_t methodID, uint16_t paramSize, SoulRPCHandler handler);
@@ -249,7 +249,7 @@ public:
 	// HandleConstructSpawn calls FindConstructClientFactory(typeHash) to get the
 	// client-side factory for the type identified by ConstructNetManifest::PrefabIndex.
 
-	using ConstructClientFactory = void*(*)(ConstructRegistry*, WorldBase*, EntityHandle*, uint8_t viewCount, Soul* ownerSoul);
+	using ConstructClientFactory = void* (*)(ConstructRegistry*, WorldBase*, EntityHandle*, uint8_t viewCount, Soul* ownerSoul);
 
 	struct ConstructEntry
 	{

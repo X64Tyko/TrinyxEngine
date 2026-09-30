@@ -552,7 +552,7 @@ Cell-relative fixed-point (int32):
 Cell world origin (float64 or int64):
   Absolute world position of each cell's origin
   Stored in Registry/World, never in entity SoA
-  
+
   stored as a single int64, 20 bits for value + 1 bit for sign
   gives us a total world size of ~45M Km at 0.1mm precision.
 

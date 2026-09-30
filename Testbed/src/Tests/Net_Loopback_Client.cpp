@@ -51,7 +51,7 @@ TEST(Net_Loopback_Client)
 	clientThread->Initialize(&gns, &config);
 
 	// Spin a local poll thread to drive PumpMessages — mirrors Sentinel in production.
-	std::atomic<bool> pollRunning{true};
+	std::atomic<bool> pollRunning{ true };
 	std::thread pollThread([&]()
 	{
 		while (pollRunning.load(std::memory_order_acquire))
@@ -72,7 +72,7 @@ TEST(Net_Loopback_Client)
 			Running.store(false, std::memory_order_release);
 			Thread.join();
 		}
-	} stopper{pollRunning, pollThread};
+	} stopper{ pollRunning, pollThread };
 
 	constexpr uint16_t kPort       = 27020;
 	HSteamNetConnection serverConn = clientThread->GetConnectionManager()->Connect("127.0.0.1", kPort);
@@ -91,7 +91,7 @@ TEST(Net_Loopback_Client)
 	}
 
 	const uint8_t ownerID = clientThread->GetConnectionManager()->GetLocalOwnerID();
-	ASSERT(ownerID != 0);       // Handshake timed out — OwnerID never assigned by server
+	ASSERT(ownerID != 0);          // Handshake timed out — OwnerID never assigned by server
 	ASSERT(ownerID < MaxOwnerIDs); // OwnerID out of valid range
 	LOG_ENG_ALWAYS_F("[Net_Loopback_Client] Handshake complete — assigned OwnerID=%u", ownerID);
 

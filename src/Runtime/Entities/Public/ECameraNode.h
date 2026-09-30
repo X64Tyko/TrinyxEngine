@@ -13,7 +13,7 @@ class ECameraNode : public EntityView<ECameraNode, WIDTH>
 
 public:
 	CNodeTransform<WIDTH> NodeTransform;
-	CCameraLayer<WIDTH>   CameraLayer;
+	CCameraLayer<WIDTH> CameraLayer;
 
 	FORCE_INLINE void PrePhysics([[maybe_unused]] SimFloat dt) {}
 };

@@ -44,7 +44,9 @@
         "type": "equals",
         "lhs": "${hostSystemName}",
         "rhs": "Windows"
-      }
+      },
+      "binaryDir": "C:/TrinyxBuild/${presetName}",
+      "description": "Windows build trees live on the Windows system drive (NTFS), not the shared checkout."
     },
     {
       "name": "debug-linux",
@@ -125,9 +127,231 @@
         "TNX_DETERMINISM": "ON",
         "ENABLE_TRACY": "OFF"
       }
+    },
+    {
+      "name": "presubmit",
+      "hidden": true,
+      "description": "Mirrors the CI 'rollback' job. Used by scripts/presubmit.py before pushing.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "TNX_HEADLESS": "ON",
+        "ENABLE_AVX2": "ON",
+        "USE_AVX2": "OFF",
+        "TNX_ENABLE_ROLLBACK": "ON",
+        "TNX_ENABLE_NETWORK": "OFF",
+        "ENABLE_TRACY": "OFF",
+        "TNX_ALIGN_64": "OFF"
+      }
+    },
+    {
+      "name": "presubmit-linux",
+      "displayName": "Presubmit | Headless Testbed | Linux",
+      "inherits": [
+        "presubmit",
+        "linux"
+      ]
+    },
+    {
+      "name": "presubmit-windows",
+      "displayName": "Presubmit | Headless Testbed | Windows",
+      "inherits": [
+        "presubmit",
+        "windows"
+      ]
+    },
+    {
+      "name": "tidy",
+      "hidden": true,
+      "description": "Configure-only tree that exports compile_commands.json for clang-tidy. Enables as many sources as possible.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
+        "TNX_HEADLESS": "OFF",
+        "TNX_ENABLE_EDITOR": "ON",
+        "TNX_ENABLE_NETWORK": "ON",
+        "TNX_ENABLE_ROLLBACK": "ON",
+        "TNX_GPU_PICKING": "ON",
+        "TNX_TESTING": "ON",
+        "ENABLE_TRACY": "ON"
+      }
+    },
+    {
+      "name": "tidy-linux",
+      "displayName": "clang-tidy compile database | Linux",
+      "inherits": [
+        "tidy",
+        "linux"
+      ]
+    },
+    {
+      "name": "tidy-windows",
+      "displayName": "clang-tidy compile database | Windows (Ninja, run from a VS developer environment)",
+      "inherits": [
+        "tidy",
+        "windows"
+      ],
+      "generator": "Ninja"
+    },
+    {
+      "name": "presubmit-net-norollback",
+      "hidden": true,
+      "description": "Headless, networked, rollback off. Used by scripts/presubmit.py.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "TNX_HEADLESS": "ON",
+        "ENABLE_AVX2": "ON",
+        "USE_AVX2": "OFF",
+        "TNX_ENABLE_ROLLBACK": "OFF",
+        "TNX_ENABLE_NETWORK": "ON",
+        "ENABLE_TRACY": "OFF"
+      }
+    },
+    {
+      "name": "presubmit-windowed",
+      "hidden": true,
+      "description": "Windowed Debug build with networking and rollback — catches asserts. Used by scripts/presubmit.py.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "TNX_HEADLESS": "OFF",
+        "ENABLE_AVX2": "ON",
+        "USE_AVX2": "OFF",
+        "TNX_ENABLE_ROLLBACK": "ON",
+        "TNX_ENABLE_NETWORK": "ON",
+        "ENABLE_TRACY": "OFF"
+      }
+    },
+    {
+      "name": "presubmit-editor",
+      "hidden": true,
+      "description": "Editor build (compile/link check). Used by scripts/presubmit.py.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "TNX_ENABLE_EDITOR": "ON",
+        "TNX_ENABLE_NETWORK": "ON",
+        "TNX_ENABLE_ROLLBACK": "ON",
+        "TNX_HEADLESS": "OFF",
+        "ENABLE_TRACY": "OFF"
+      }
+    },
+    {
+      "name": "presubmit-net-norollback-linux",
+      "displayName": "Presubmit | Headless Net, No Rollback | Linux",
+      "inherits": [
+        "presubmit-net-norollback",
+        "linux"
+      ]
+    },
+    {
+      "name": "presubmit-net-norollback-windows",
+      "displayName": "Presubmit | Headless Net, No Rollback | Windows",
+      "inherits": [
+        "presubmit-net-norollback",
+        "windows"
+      ]
+    },
+    {
+      "name": "presubmit-windowed-linux",
+      "displayName": "Presubmit | Windowed Debug Testbed | Linux",
+      "inherits": [
+        "presubmit-windowed",
+        "linux"
+      ]
+    },
+    {
+      "name": "presubmit-windowed-windows",
+      "displayName": "Presubmit | Windowed Debug Testbed | Windows",
+      "inherits": [
+        "presubmit-windowed",
+        "windows"
+      ]
+    },
+    {
+      "name": "presubmit-editor-linux",
+      "displayName": "Presubmit | Editor Playground | Linux",
+      "inherits": [
+        "presubmit-editor",
+        "linux"
+      ]
+    },
+    {
+      "name": "presubmit-editor-windows",
+      "displayName": "Presubmit | Editor Playground | Windows",
+      "inherits": [
+        "presubmit-editor",
+        "windows"
+      ]
     }
   ],
   "buildPresets": [
+    {
+      "name": "presubmit-linux",
+      "displayName": "Presubmit | Testbed | Linux",
+      "configurePreset": "presubmit-linux",
+      "targets": [
+        "Testbed"
+      ]
+    },
+    {
+      "name": "presubmit-windows",
+      "displayName": "Presubmit | Testbed | Windows",
+      "configurePreset": "presubmit-windows",
+      "configuration": "Release",
+      "targets": [
+        "Testbed"
+      ]
+    },
+    {
+      "name": "presubmit-editor-windows",
+      "displayName": "Presubmit | Playground (Editor) | Windows",
+      "configurePreset": "presubmit-editor-windows",
+      "targets": [
+        "Playground"
+      ],
+      "configuration": "Debug"
+    },
+    {
+      "name": "presubmit-editor-linux",
+      "displayName": "Presubmit | Playground (Editor) | Linux",
+      "configurePreset": "presubmit-editor-linux",
+      "targets": [
+        "Playground"
+      ]
+    },
+    {
+      "name": "presubmit-windowed-windows",
+      "displayName": "Presubmit | Testbed (Windowed Debug) | Windows",
+      "configurePreset": "presubmit-windowed-windows",
+      "targets": [
+        "Testbed"
+      ],
+      "configuration": "Debug"
+    },
+    {
+      "name": "presubmit-windowed-linux",
+      "displayName": "Presubmit | Testbed (Windowed Debug) | Linux",
+      "configurePreset": "presubmit-windowed-linux",
+      "targets": [
+        "Testbed"
+      ]
+    },
+    {
+      "name": "presubmit-net-norollback-windows",
+      "displayName": "Presubmit | Testbed (Headless Net, No Rollback) | Windows",
+      "configurePreset": "presubmit-net-norollback-windows",
+      "targets": [
+        "Testbed"
+      ],
+      "configuration": "Release"
+    },
+    {
+      "name": "presubmit-net-norollback-linux",
+      "displayName": "Presubmit | Testbed (Headless Net, No Rollback) | Linux",
+      "configurePreset": "presubmit-net-norollback-linux",
+      "targets": [
+        "Testbed"
+      ]
+    },
     {
       "name": "debug-testbed-linux",
       "displayName": "Debug | Testbed | Linux",

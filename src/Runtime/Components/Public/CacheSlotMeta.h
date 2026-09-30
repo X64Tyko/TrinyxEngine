@@ -20,16 +20,20 @@ struct CacheSlotMeta : ComponentView<CacheSlotMeta, WIDTH>
 
 	FORCE_INLINE CacheSlotMeta& operator&=(TemporalFlagBits flag)
 	{
-		if constexpr (WIDTH == FieldWidth::Scalar) Flags = Flags.Value() & static_cast<int32_t>(flag);
-		else Flags                                       = _mm256_and_si256(Flags, _mm256_set1_epi32(static_cast<int32_t>(flag)));
+		if constexpr (WIDTH == FieldWidth::Scalar)
+			Flags = Flags.Value() & static_cast<int32_t>(flag);
+		else
+			Flags = _mm256_and_si256(Flags, _mm256_set1_epi32(static_cast<int32_t>(flag)));
 
 		return *this;
 	}
 
 	FORCE_INLINE CacheSlotMeta& operator|=(TemporalFlagBits flag)
 	{
-		if constexpr (WIDTH == FieldWidth::Scalar) Flags = Flags.Value() | static_cast<int32_t>(flag);
-		else Flags                                       = _mm256_or_si256(Flags, _mm256_set1_epi32(static_cast<int32_t>(flag)));
+		if constexpr (WIDTH == FieldWidth::Scalar)
+			Flags = Flags.Value() | static_cast<int32_t>(flag);
+		else
+			Flags = _mm256_or_si256(Flags, _mm256_set1_epi32(static_cast<int32_t>(flag)));
 
 		return *this;
 	}

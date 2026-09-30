@@ -5,14 +5,15 @@
 
 #include <functional>
 
-namespace TnxPalette {
+namespace TnxPalette
+{
 
 struct Command
 {
 	const char* title;
-	const char* subtitle  = nullptr;
-	const char* icon      = nullptr;
-	const char* keybind   = nullptr;
+	const char* subtitle = nullptr;
+	const char* icon     = nullptr;
+	const char* keybind  = nullptr;
 	std::function<void()> exec;
 };
 

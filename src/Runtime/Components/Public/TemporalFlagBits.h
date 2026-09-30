@@ -25,7 +25,7 @@ enum class TemporalFlagBits : int32_t
 	PostPhysSkip = static_cast<int32_t>(1u << 19), ///< if 1 Disable PostPhysics sweep
 	ScalarSkip   = static_cast<int32_t>(1u << 18), ///< if 1 Disable ScalarUpdate sweep
 	ASleep       = static_cast<int32_t>(1u << 17), ///< if 1 Disable in Jolt
-	// Bits 15..0 available for game-layer flags
+												   // Bits 15..0 available for game-layer flags
 };
 
 FORCE_INLINE TemporalFlagBits operator|(TemporalFlagBits lhs, TemporalFlagBits rhs)

@@ -104,14 +104,14 @@ void VulkanContext::Shutdown()
 	// Destroy owned objects in strict dependency order.
 	// raii move-assign from nullptr triggers the underlying vkDestroy* call.
 	DestroySwapchain();
-	TransferCommandPool = vk::raii::CommandPool{nullptr};
-	ComputeCommandPool  = vk::raii::CommandPool{nullptr};
-	GraphicsCommandPool = vk::raii::CommandPool{nullptr};
-	Device              = vk::raii::Device{nullptr};
-	PhysicalDevice      = vk::raii::PhysicalDevice{nullptr};
-	Surface             = vk::raii::SurfaceKHR{nullptr};
-	DebugMessenger      = vk::raii::DebugUtilsMessengerEXT{nullptr};
-	Instance            = vk::raii::Instance{nullptr};
+	TransferCommandPool = vk::raii::CommandPool{ nullptr };
+	ComputeCommandPool  = vk::raii::CommandPool{ nullptr };
+	GraphicsCommandPool = vk::raii::CommandPool{ nullptr };
+	Device              = vk::raii::Device{ nullptr };
+	PhysicalDevice      = vk::raii::PhysicalDevice{ nullptr };
+	Surface             = vk::raii::SurfaceKHR{ nullptr };
+	DebugMessenger      = vk::raii::DebugUtilsMessengerEXT{ nullptr };
+	Instance            = vk::raii::Instance{ nullptr };
 
 #ifdef TNX_ENABLE_AFTERMATH
 	Aftermath::Shutdown();
@@ -161,8 +161,10 @@ bool VulkanContext::CreateInstance(SDL_Window* /*window*/, bool enableValidation
 					found = true;
 					break;
 				}
-			if (found) layers.push_back(ValidationLayer);
-			else LOG_ENG_WARN("[VulkanContext] Validation layer requested but not available");
+			if (found)
+				layers.push_back(ValidationLayer);
+			else
+				LOG_ENG_WARN("[VulkanContext] Validation layer requested but not available");
 		}
 
 		vk::ApplicationInfo appInfo{};
@@ -197,11 +199,8 @@ bool VulkanContext::SetupDebugMessenger()
 	// The resulting handle is wrapped in raii::DebugUtilsMessengerEXT for auto-cleanup.
 	VkDebugUtilsMessengerCreateInfoEXT createInfo{};
 	createInfo.sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-	createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-		VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-	createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-		VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-		VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+	createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+	createInfo.messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
 	createInfo.pfnUserCallback = DebugCallback;
 
 	VkDebugUtilsMessengerEXT rawMessenger = VK_NULL_HANDLE;
@@ -211,7 +210,7 @@ bool VulkanContext::SetupDebugMessenger()
 		LOG_ENG_WARN_F("[VulkanContext] vkCreateDebugUtilsMessengerEXT failed: %d", result);
 		return false;
 	}
-	DebugMessenger = vk::raii::DebugUtilsMessengerEXT{Instance, rawMessenger};
+	DebugMessenger = vk::raii::DebugUtilsMessengerEXT{ Instance, rawMessenger };
 	return true;
 }
 
@@ -225,7 +224,7 @@ bool VulkanContext::CreateSurface(SDL_Window* window)
 		return false;
 	}
 	// Wrap the SDL-provided C handle in a raii::SurfaceKHR (takes ownership of destruction).
-	Surface = vk::raii::SurfaceKHR{Instance, rawSurface};
+	Surface = vk::raii::SurfaceKHR{ Instance, rawSurface };
 	return true;
 }
 
@@ -319,8 +318,7 @@ bool VulkanContext::SelectPhysicalDevice()
 			for (uint32_t j = 0; j < memProps.memoryTypeCount; ++j)
 			{
 				if (memProps.memoryTypes[j].heapIndex != i) continue;
-				constexpr auto ReBarFlags = vk::MemoryPropertyFlagBits::eDeviceLocal |
-					vk::MemoryPropertyFlagBits::eHostVisible;
+				constexpr auto ReBarFlags = vk::MemoryPropertyFlagBits::eDeviceLocal | vk::MemoryPropertyFlagBits::eHostVisible;
 				if ((memProps.memoryTypes[j].propertyFlags & ReBarFlags) == ReBarFlags)
 				{
 					if (memProps.memoryHeaps[i].size >= 256ull * 1024 * 1024)
@@ -328,9 +326,8 @@ bool VulkanContext::SelectPhysicalDevice()
 						bHasReBAR      = true;
 						ReBarHeapIndex = j;
 						LOG_ENG_INFO_F("[VulkanContext] ReBAR detected: heap %u, memory type %u (%.0f GB)",
-									   i, j,
-								   static_cast<double>(memProps.memoryHeaps[i].size) /
-								   (1024.0 * 1024.0 * 1024.0));
+							i, j,
+							static_cast<double>(memProps.memoryHeaps[i].size) / (1024.0 * 1024.0 * 1024.0));
 					}
 				}
 			}
@@ -342,7 +339,7 @@ bool VulkanContext::SelectPhysicalDevice()
 		LOG_ENG_INFO_F("[VulkanContext] Host image copy:       %s", bSupportsHostImageCopy ? "YES" : "NO");
 		LOG_ENG_INFO_F("[VulkanContext] Push descriptors:      %s", bSupportsPushDescriptors ? "YES" : "NO");
 		LOG_ENG_INFO_F("[VulkanContext] Shader objects:        %s",
-					   bSupportsShaderObject ? "YES" : "NO (will use traditional pipelines)");
+			bSupportsShaderObject ? "YES" : "NO (will use traditional pipelines)");
 
 		return true;
 	}
@@ -365,23 +362,17 @@ bool VulkanContext::CreateLogicalDevice()
 		{
 			bool presentSupport = PhysicalDevice.getSurfaceSupportKHR(i, *Surface);
 
-			if ((families[i].queueFlags & vk::QueueFlagBits::eGraphics) && presentSupport &&
-				Queues.GraphicsFamily == UINT32_MAX)
+			if ((families[i].queueFlags & vk::QueueFlagBits::eGraphics) && presentSupport && Queues.GraphicsFamily == UINT32_MAX)
 			{
 				Queues.GraphicsFamily = i;
 			}
 
-			if ((families[i].queueFlags & vk::QueueFlagBits::eCompute) &&
-				!(families[i].queueFlags & vk::QueueFlagBits::eGraphics) &&
-				Queues.ComputeFamily == UINT32_MAX)
+			if ((families[i].queueFlags & vk::QueueFlagBits::eCompute) && !(families[i].queueFlags & vk::QueueFlagBits::eGraphics) && Queues.ComputeFamily == UINT32_MAX)
 			{
 				Queues.ComputeFamily = i;
 			}
 
-			if ((families[i].queueFlags & vk::QueueFlagBits::eTransfer) &&
-				!(families[i].queueFlags & vk::QueueFlagBits::eGraphics) &&
-				!(families[i].queueFlags & vk::QueueFlagBits::eCompute) &&
-				Queues.TransferFamily == UINT32_MAX)
+			if ((families[i].queueFlags & vk::QueueFlagBits::eTransfer) && !(families[i].queueFlags & vk::QueueFlagBits::eGraphics) && !(families[i].queueFlags & vk::QueueFlagBits::eCompute) && Queues.TransferFamily == UINT32_MAX)
 			{
 				Queues.TransferFamily = i;
 			}
@@ -411,7 +402,7 @@ bool VulkanContext::CreateLogicalDevice()
 		}
 
 		// Device extensions: only swapchain required — everything else is core in 1.4.
-		std::vector<const char*> deviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+		std::vector<const char*> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 		if (bSupportsShaderObject) deviceExtensions.push_back(VK_EXT_SHADER_OBJECT_EXTENSION_NAME);
 
 #ifdef TNX_ENABLE_AFTERMATH
@@ -439,31 +430,31 @@ bool VulkanContext::CreateLogicalDevice()
 			vk::PhysicalDeviceVulkan11Features>{};
 
 		featureChain.get<vk::PhysicalDeviceFeatures2>()
-					.features.setSamplerAnisotropy(true)
-					.setMultiDrawIndirect(true)
-					.setDrawIndirectFirstInstance(true)
-					.setShaderInt64(true)
-					.setIndependentBlend(true); // pick pipeline uses different write masks per attachment
+			.features.setSamplerAnisotropy(true)
+			.setMultiDrawIndirect(true)
+			.setDrawIndirectFirstInstance(true)
+			.setShaderInt64(true)
+			.setIndependentBlend(true); // pick pipeline uses different write masks per attachment
 
 		featureChain.get<vk::PhysicalDeviceVulkan11Features>()
-					.setShaderDrawParameters(true);
+			.setShaderDrawParameters(true);
 
 		featureChain.get<vk::PhysicalDeviceVulkan13Features>()
-					.setDynamicRendering(true)
-					.setSynchronization2(true);
+			.setDynamicRendering(true)
+			.setSynchronization2(true);
 
 		featureChain.get<vk::PhysicalDeviceVulkan12Features>()
-					.setBufferDeviceAddress(bSupportsBufferDeviceAddress)
-					.setTimelineSemaphore(true)
-					.setDescriptorIndexing(true)
-					.setShaderSampledImageArrayNonUniformIndexing(true)
-					.setDescriptorBindingVariableDescriptorCount(true);
+			.setBufferDeviceAddress(bSupportsBufferDeviceAddress)
+			.setTimelineSemaphore(true)
+			.setDescriptorIndexing(true)
+			.setShaderSampledImageArrayNonUniformIndexing(true)
+			.setDescriptorBindingVariableDescriptorCount(true);
 
 		// Enable supported Vulkan 1.4 features.
 		featureChain.get<vk::PhysicalDeviceVulkan14Features>()
-					.setHostImageCopy(bSupportsHostImageCopy)
-					.setPushDescriptor(bSupportsPushDescriptors)
-					.setIndexTypeUint8(bSupportsIndexTypeUint8);
+			.setHostImageCopy(bSupportsHostImageCopy)
+			.setPushDescriptor(bSupportsPushDescriptors)
+			.setIndexTypeUint8(bSupportsIndexTypeUint8);
 
 		vk::DeviceCreateInfo deviceCreateInfo{};
 		const void* pNextHead = &featureChain.get<vk::PhysicalDeviceFeatures2>();
@@ -486,14 +477,14 @@ bool VulkanContext::CreateLogicalDevice()
 		{
 			VkQueue q = VK_NULL_HANDLE;
 			vkGetDeviceQueue(*Device, family, 0, &q);
-			return vk::Queue{q};
+			return vk::Queue{ q };
 		};
 		Queues.Graphics = getQ(Queues.GraphicsFamily);
 		Queues.Compute  = getQ(Queues.ComputeFamily);
 		Queues.Transfer = getQ(Queues.TransferFamily);
 
 		LOG_ENG_INFO_F("[VulkanContext] Logical device created (Graphics=%u, Compute=%u, Transfer=%u)",
-					   Queues.GraphicsFamily, Queues.ComputeFamily, Queues.TransferFamily);
+			Queues.GraphicsFamily, Queues.ComputeFamily, Queues.TransferFamily);
 		return true;
 	}
 	catch (const vk::SystemError& e)
@@ -552,9 +543,9 @@ bool VulkanContext::CreateSwapchain(SDL_Window* window)
 		createInfo.imageExtent      = extent;
 		createInfo.imageArrayLayers = 1;
 		createInfo.imageUsage       = vk::ImageUsageFlagBits::eColorAttachment
-			| vk::ImageUsageFlagBits::eTransferDst;
+									  | vk::ImageUsageFlagBits::eTransferDst;
 
-		uint32_t indices[] = {Queues.GraphicsFamily, Queues.ComputeFamily};
+		uint32_t indices[] = { Queues.GraphicsFamily, Queues.ComputeFamily };
 		if (Queues.GraphicsFamily != Queues.ComputeFamily)
 		{
 			createInfo.imageSharingMode      = vk::SharingMode::eConcurrent;
@@ -585,13 +576,13 @@ bool VulkanContext::CreateSwapchain(SDL_Window* window)
 			viewInfo.image            = img;
 			viewInfo.viewType         = vk::ImageViewType::e2D;
 			viewInfo.format           = surfaceFormat.format;
-			viewInfo.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+			viewInfo.subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 };
 			Swapchain.ImageViews.push_back(Device.createImageView(viewInfo));
 		}
 
 		LOG_ENG_INFO_F("[VulkanContext] Swapchain created: %ux%u, %zu images, format %d",
-					   extent.width, extent.height, images.size(),
-				   static_cast<int>(surfaceFormat.format));
+			extent.width, extent.height, images.size(),
+			static_cast<int>(surfaceFormat.format));
 		return true;
 	}
 	catch (const vk::SystemError& e)
@@ -605,7 +596,7 @@ void VulkanContext::DestroySwapchain()
 {
 	Swapchain.ImageViews.clear(); // each raii::ImageView destructs → vkDestroyImageView
 	Swapchain.Images.clear();
-	Swapchain.Handle = vk::raii::SwapchainKHR{nullptr}; // raii destructs → vkDestroySwapchainKHR
+	Swapchain.Handle = vk::raii::SwapchainKHR{ nullptr }; // raii destructs → vkDestroySwapchainKHR
 }
 
 // Helpers
@@ -613,8 +604,7 @@ vk::SurfaceFormatKHR VulkanContext::ChooseSurfaceFormat(
 	const std::vector<vk::SurfaceFormatKHR>& available) const
 {
 	for (const auto& fmt : available)
-		if (fmt.format == vk::Format::eB8G8R8A8Srgb &&
-			fmt.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear)
+		if (fmt.format == vk::Format::eB8G8R8A8Srgb && fmt.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear)
 			return fmt;
 	return available[0];
 }
@@ -623,12 +613,13 @@ vk::PresentModeKHR VulkanContext::ChoosePresentMode(
 	const std::vector<vk::PresentModeKHR>& available) const
 {
 	// Prefer mailbox (triple-buffered, tear-free, no VSync stall)
-	for (auto mode : available) if (mode == vk::PresentModeKHR::eMailbox) return mode;
+	for (auto mode : available)
+		if (mode == vk::PresentModeKHR::eMailbox) return mode;
 	return vk::PresentModeKHR::eFifo; // always available
 }
 
 vk::Extent2D VulkanContext::ChooseExtent(const vk::SurfaceCapabilitiesKHR& caps,
-										 SDL_Window* window) const
+	SDL_Window* window) const
 {
 	if (caps.currentExtent.width != UINT32_MAX) return caps.currentExtent;
 
@@ -636,10 +627,10 @@ vk::Extent2D VulkanContext::ChooseExtent(const vk::SurfaceCapabilitiesKHR& caps,
 	SDL_GetWindowSizeInPixels(window, &w, &h);
 
 	vk::Extent2D extent{};
-	extent.width = std::clamp(static_cast<uint32_t>(w),
-							  caps.minImageExtent.width, caps.maxImageExtent.width);
+	extent.width  = std::clamp(static_cast<uint32_t>(w),
+		caps.minImageExtent.width, caps.maxImageExtent.width);
 	extent.height = std::clamp(static_cast<uint32_t>(h),
-							   caps.minImageExtent.height, caps.maxImageExtent.height);
+		caps.minImageExtent.height, caps.maxImageExtent.height);
 	return extent;
 }
 
@@ -672,18 +663,16 @@ void VulkanContext::NameCoreObjects()
 }
 
 VkFormat VulkanContext::FindSupportedFormat(const std::vector<VkFormat>& candidates,
-											VkImageTiling tiling,
-											VkFormatFeatureFlags features) const
+	VkImageTiling tiling,
+	VkFormatFeatureFlags features) const
 {
 	for (VkFormat fmt : candidates)
 	{
 		auto props = PhysicalDevice.getFormatProperties(static_cast<vk::Format>(fmt));
 
-		if (tiling == VK_IMAGE_TILING_LINEAR &&
-			(static_cast<VkFormatFeatureFlags>(props.linearTilingFeatures) & features) == features)
+		if (tiling == VK_IMAGE_TILING_LINEAR && (static_cast<VkFormatFeatureFlags>(props.linearTilingFeatures) & features) == features)
 			return fmt;
-		if (tiling == VK_IMAGE_TILING_OPTIMAL &&
-			(static_cast<VkFormatFeatureFlags>(props.optimalTilingFeatures) & features) == features)
+		if (tiling == VK_IMAGE_TILING_OPTIMAL && (static_cast<VkFormatFeatureFlags>(props.optimalTilingFeatures) & features) == features)
 			return fmt;
 	}
 	return VK_FORMAT_UNDEFINED;

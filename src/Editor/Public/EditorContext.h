@@ -112,13 +112,13 @@ private:
 	void BuildMenuBar();
 	void ApplyDefaultLayout(unsigned int dockspaceID);
 
-	TrinyxEngine* EnginePtr = nullptr;
-	LogicThreadBase* LogicPtr   = nullptr;
+	TrinyxEngine* EnginePtr                   = nullptr;
+	LogicThreadBase* LogicPtr                 = nullptr;
 	ConstructEditorWindow* ConstructEditorPtr = nullptr;
-	EntityEditorWindow*    EntityEditorPtr    = nullptr;
-	PrefabEditorWindow*    PrefabEditorPtr    = nullptr;
-	EditorPanel*           OutlinerPanelPtr   = nullptr;
-	EditorPanel*           DetailsPanelPtr    = nullptr;
+	EntityEditorWindow* EntityEditorPtr       = nullptr;
+	PrefabEditorWindow* PrefabEditorPtr       = nullptr;
+	EditorPanel* OutlinerPanelPtr             = nullptr;
+	EditorPanel* DetailsPanelPtr              = nullptr;
 
 	EditorState State;
 	AssetDatabase AssetDB;
@@ -137,12 +137,12 @@ private:
 
 	struct AssetIssue
 	{
-		AssetID     ID;
+		AssetID ID;
 		std::string Name;
 		std::string RegisteredPath;
 		std::string SuggestedSourcePath; // pre-filled reimport path, user-editable
-		char        ReimportBuf[512]  = {};
-		bool        ShowReimportInput = false;
+		char ReimportBuf[512]  = {};
+		bool ShowReimportInput = false;
 	};
 	std::vector<AssetIssue> AssetIssues;
 	bool bShowAssetIssuesDialog = false;
@@ -180,7 +180,7 @@ private:
 
 	// --- PIE local (single solo world, fullscreen) ---
 	std::unique_ptr<FlowManagerBase> LocalPIEFlow;
-	std::unique_ptr<WorldViewport>   LocalPIEViewport;
+	std::unique_ptr<WorldViewport> LocalPIEViewport;
 	EngineConfig LocalPIEConfig;
 	bool bPIELocalMode = false;
 
@@ -204,28 +204,51 @@ private:
 	bool bPIEActive          = false;
 	bool bPIEPaused          = false;
 	bool bPrePIESimWasPaused = true; // Editor sim paused state before PIE — restored on StopPIE
-	enum class PIEMode : uint8_t { Local, ListenServer, HeadlessServer };
+	enum class PIEMode : uint8_t
+	{
+		Local,
+		ListenServer,
+		HeadlessServer
+	};
 	PIEMode CurrentPIEMode = PIEMode::Local;
-	bool bServerVisible = true; // derived from CurrentPIEMode before StartPIE()
-	int PIEClientCount  = 1;    // Number of client worlds to spawn in PIE
+	bool bServerVisible    = true; // derived from CurrentPIEMode before StartPIE()
+	int PIEClientCount     = 1;    // Number of client worlds to spawn in PIE
 
 	void DrawEditorViewportPanel();
 	void DrawEditorGrid();
 	void DrawViewportPanel(const char* title, WorldViewport& vp);
 
-	enum class PendingActionType : uint8_t { None, OpenScene };
+	enum class PendingActionType : uint8_t
+	{
+		None,
+		OpenScene
+	};
 
 	// --- Workspace switcher ---
-	enum class Workspace : uint8_t { Layout, Logic, Simulate, Network, Profile, Asset, COUNT };
-	Workspace CurrentWorkspace     = Workspace::Layout;
-	Workspace LastAppliedWorkspace = Workspace::COUNT; // sentinel: COUNT means "nothing applied yet"
+	enum class Workspace : uint8_t
+	{
+		Layout,
+		Logic,
+		Simulate,
+		Network,
+		Profile,
+		Asset,
+		COUNT
+	};
+	Workspace CurrentWorkspace                                     = Workspace::Layout;
+	Workspace LastAppliedWorkspace                                 = Workspace::COUNT; // sentinel: COUNT means "nothing applied yet"
 	bool bWorkspaceLayoutBuilt[static_cast<int>(Workspace::COUNT)] = {};
 	void ApplyWorkspaceLayout(unsigned int dockspaceID, Workspace ws);
+	bool IsInWorkspace(const char* windowName) const;
+	std::vector<std::string> WorkspaceWindows; ///< Windows the current workspace docks.
+	unsigned int WorkspaceMainNode = 0;        ///< Dock node holding the Viewport; fallback for other windows.
 
 	// --- Frame budget overlay (bottom-right corner, always visible) ---
 	void DrawFrameBudgetOverlay();
+	void UpdateEditorCamera(bool engineGetsInput);
 
 	bool bMouseReleasedDuringPlay = false;
+	bool bEditorCameraFlying      = false; ///< RMB fly on the edit viewport's own camera.
 	bool bShowDemoWindow          = false;
 	bool bShowMetrics             = false;
 	bool bFirstFrame              = true;
@@ -234,13 +257,11 @@ private:
 	bool bShowUnsavedWarning      = false;
 	bool bShowImportDialog        = false;
 	void DrawPrefabSaveDialog();
-	bool bShowPrefabSaveDialog = false;
+	bool bShowPrefabSaveDialog      = false;
 	bool ViewportPanelHovered       = false;
-	ImVec2 ViewportPanelPos         = {0, 0};
-	ImVec2 ViewportPanelSize        = {0, 0};
+	ImVec2 ViewportPanelPos         = { 0, 0 };
+	ImVec2 ViewportPanelSize        = { 0, 0 };
 	PendingActionType PendingAction = PendingActionType::None;
 	std::string FileDialogPath;
 	std::string ImportDialogPath;
-
 };
-

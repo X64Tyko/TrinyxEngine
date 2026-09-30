@@ -7,7 +7,7 @@
 // the engine's spawn contract is broken and all spawning code is unreliable.
 RUNTIME_TEST(Jobs_DispatchVerified)
 {
-	static std::atomic<int> counter{0};
+	static std::atomic<int> counter{ 0 };
 	counter.store(0, std::memory_order_relaxed);
 
 	Engine.Spawn([](uint32_t)

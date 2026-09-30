@@ -209,3 +209,22 @@ When rolling back to frame N: snap to the nearest Jolt execution frame at or bef
 Determinism status (2026-03-29): byte-perfect across 5-12 frame rollbacks with 100k entities + 56 physics bodies.
 
 See [Rollback Netcode](../networking/Rollback-Netcode.md) for the full rollback architecture.
+
+---
+
+## Networked Physics Without Rollback
+
+With rollback disabled, server corrections to physics-driven entities are applied as Jolt teleport overrides, with no
+prediction replay. Physics-driven entities an Owner controls will jitter as corrections fight the solver. This is a
+known limitation, not a bug to patch around Jolt — see
+[Networking Without Rollback](../networking/Overview.md#networking-without-rollback--current-state-and-direction).
+
+---
+
+## Long-Term: Trinyx Physics Solver
+
+Jolt is a temporary backend. The long-term direction is a Trinyx physics solver built on the engine's own data layout:
+solver state lives in slab fields rather than a separate physics world, so snapshot, rollback, partial re-simulation of
+predicted entities, and GPU upload all work on the same data. Full client-side prediction for physics-driven entities
+waits on this solver. The constraint system (`ConstraintEntity`) is already designed to be solver-agnostic so it carries
+over unchanged.

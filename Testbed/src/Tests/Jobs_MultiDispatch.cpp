@@ -6,7 +6,7 @@
 // Catches lambda payload corruption or double-execution bugs in the job queue.
 RUNTIME_TEST(Jobs_MultiDispatch)
 {
-	static std::atomic<int> total{0};
+	static std::atomic<int> total{ 0 };
 	total.store(0, std::memory_order_relaxed);
 
 	constexpr int Rounds = 5;
