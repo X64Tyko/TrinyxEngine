@@ -1,5 +1,7 @@
 # TrinyxEngine
 
+![Status](https://img.shields.io/badge/status-hiatus-lightgrey)
+
 [![CI (main)](https://github.com/X64Tyko/TrinyxEngine/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/X64Tyko/TrinyxEngine/actions/workflows/ci.yml?query=branch%3Amain)
 [![CI (Dev-Main)](https://github.com/X64Tyko/TrinyxEngine/actions/workflows/ci.yml/badge.svg?branch=Dev-Main)](https://github.com/X64Tyko/TrinyxEngine/actions/workflows/ci.yml?query=branch%3ADev-Main)
 [![Docs](https://github.com/X64Tyko/TrinyxEngine/actions/workflows/docs.yml/badge.svg?branch=main)](https://x64tyko.github.io/TrinyxEngine/)
@@ -11,6 +13,9 @@
 > experiments, and work-in-progress features — check `Dev-Main` instead.
 
 ---
+
+## Hiatus
+Development paused after proving core concepts. Not maintained while I’m employed at Epic.
 
 ## Executive Summary
 

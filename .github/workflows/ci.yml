@@ -193,13 +193,25 @@ jobs:
         run: sudo apt-get install -y libssl-dev
 
       # -----------------------------------------------------------------------
-      # Windows: Visual Studio 17 2022 is pre-installed on windows-latest.
+      # Windows: Ninja inside the MSVC developer environment, so the build uses
+      # whichever Visual Studio the runner image ships instead of pinning a
+      # version (windows-latest dropped VS 2022). Ninja also honours the sccache
+      # compiler launcher, which the Visual Studio generator ignores.
       # BCrypt (Windows SDK) replaces OpenSSL for GNS — no extra install needed.
-      # sccache provides build caching on Windows.
       # -----------------------------------------------------------------------
       - name: Install sccache (Windows)
         if: matrix.os == 'windows-latest'
         uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Ninja (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      - name: MSVC developer environment (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       # -----------------------------------------------------------------------
       # Build caching — ccache (Linux) / sccache (Windows)
@@ -237,7 +249,7 @@ jobs:
         shell: pwsh
         run: |
           cmake -B cmake-build-ci `
-            -G "Visual Studio 17 2022" -A x64 `
+            -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_C_COMPILER_LAUNCHER=sccache `
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
@@ -254,7 +266,14 @@ jobs:
 
       # -----------------------------------------------------------------------
       # Test
+      # Testbed's local config keeps a 128-frame temporal ring over 500k entities
+      # (~22 GB with rollback). Hosted runners have 16 GB, so CI runs a 32-frame
+      # ring — the engine default, and far more than the rollback tests need.
       # -----------------------------------------------------------------------
+      - name: Size temporal ring for hosted runners
+        shell: bash
+        run: sed -i 's/^TemporalFrameCount = .*/TemporalFrameCount = 32/' Testbed/TestbedDefaults.ini
+
       - name: Test (Linux)
         if: matrix.os == 'ubuntu-24.04'
         run: ./cmake-build-ci/bin/Testbed --headless --max-frames 120

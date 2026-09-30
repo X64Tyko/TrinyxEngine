@@ -279,17 +279,21 @@ bool TrinyxEngine::Initialize(const char* title, int width, int height, const ch
 #endif
 
 #ifndef TNX_HEADLESS
-	Pacer.Initialize(GpuDevice);
-
 	// ---- Renderer --------------------------------------------------------
-	Render = std::make_unique<RendererType>();
+	// --headless skipped window and Vulkan setup above, so there is nothing to render with; every
+	// Render use is null-checked. (A TNX_HEADLESS build compiles the renderer out instead.)
+	if (!Config.Headless)
+	{
+		Pacer.Initialize(GpuDevice);
 
-	Render->Initialize(DefaultWorld->GetRegistry(), DefaultWorld->GetLogicThread(),
-		&Config, &VkCtx, &VkMem, EngineWindow, DefaultWorld->GetVizInput());
+		Render = std::make_unique<RendererType>();
+		Render->Initialize(DefaultWorld->GetRegistry(), DefaultWorld->GetLogicThread(),
+			&Config, &VkCtx, &VkMem, EngineWindow, DefaultWorld->GetVizInput());
 #if TNX_ENABLE_EDITOR
-	DefaultWorld->GetLogicThread()->SetSimPaused(true); // Editor starts paused
-	Render->SetEngine(this);
+		DefaultWorld->GetLogicThread()->SetSimPaused(true); // Editor starts paused
+		Render->SetEngine(this);
 #endif
+	}
 
 	// ---- Audio -----------------------------------------------------------
 	Audio = std::make_unique<AudioManager>();
